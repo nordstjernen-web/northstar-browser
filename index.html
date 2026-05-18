@@ -6,9 +6,9 @@
 <title>nordstjernen.org</title>
 <meta name="description" content="Nordstjernen - an independent web browser written in C. No telemetry, no JIT.">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
 <style type="text/css">
   html, body {
+    margin: 0; padding: 0;
     background: #ffffff;
     color: #000000;
     font-family: Verdana, Arial, Helvetica, sans-serif;
@@ -31,11 +31,10 @@
     background: #cc0000;
     color: #ffffff;
     border-bottom: 3px solid #000000;
-    display: flex; align-items: center;
   }
-  .header .logo {
-    padding: 8px 12px;
-  }
+  .header table { width: 100%; border-collapse: collapse; }
+  .header td { vertical-align: middle; }
+  .header .logo { padding: 8px 12px; }
   .header .logo img { width: 48px; height: 48px; display: block; }
   .header .titlecell { padding: 6px 14px; }
   .header .title {
@@ -49,9 +48,11 @@
   }
 
   /* ===== LAYOUT ===== */
-  .body-row { margin: 0; }
+  .layout { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .layout > tbody > tr > td { vertical-align: top; }
 
   .sidebar {
+    width: 13%;
     padding: 14px 12px;
     border-right: 3px solid #000000;
     font-size: 13px;
@@ -89,7 +90,7 @@
   .content p { margin: 0 0 10px 0; }
 
   .shot { margin: 6px 0 20px 0; max-width: 900px; }
-  .shot img { display: block; width: 100%; height: auto; }
+  .shot img { display: block; width: 100%; height: auto; max-width: 900px; }
   .shot .cap {
     font-size: 13px; color: #666666;
     text-align: center; margin-top: 6px;
@@ -120,19 +121,11 @@
     text-align: center;
   }
 
-  /* slightly narrower sidebar on large screens */
-  @media (min-width: 992px) {
-    .body-row > .sidebar { flex: 0 0 13%; max-width: 13%; }
-    .body-row > .content { flex: 0 0 87%; max-width: 87%; }
-  }
-  @media (min-width: 768px) and (max-width: 991.98px) {
-    .body-row > .sidebar { flex: 0 0 22%; max-width: 22%; }
-    .body-row > .content { flex: 0 0 78%; max-width: 78%; }
-  }
-
   /* ===== RESPONSIVE ===== */
-  @media (max-width: 767.98px) {
+  @media (max-width: 767px) {
+    .layout, .layout tbody, .layout tr, .layout td { display: block; width: 100%; }
     .sidebar {
+      width: auto;
       border-right: 0;
       border-bottom: 3px solid #000000;
       padding: 6px 12px;
@@ -141,29 +134,22 @@
     }
     .sidebar h3 { display: none; }
     .sidebar ul {
-      display: flex;
-      flex-wrap: wrap;
       margin: 0;
       padding: 0;
-    }
-    .sidebar ul + h3 + ul,
-    .sidebar ul:not(:last-of-type)::after {
-      content: "";
+      overflow: hidden;
     }
     .sidebar ul li {
+      float: left;
       padding: 2px 0;
       margin-right: 12px;
     }
-    .sidebar ul li:last-child { margin-right: 0; }
     .sidebar ul:first-of-type li:last-child {
       margin-right: 12px;
       padding-right: 12px;
       border-right: 1px solid #999999;
     }
-    .sidebar .counter {
-      margin-top: 6px;
-    }
-    .sidebar .counter img { height: 22px; width: auto; }
+    .sidebar .counter { clear: both; padding-top: 4px; }
+    .sidebar .counter img { height: 20px; width: auto; }
     .header .title { font-size: 22px; }
     .header .tag { font-size: 12px; }
     .header .logo img { width: 40px; height: 40px; }
@@ -178,57 +164,58 @@
 <div class="frame">
 
   <div class="header">
-    <div class="logo">
-      <a href="."><img src="assets/nordstjernen.svg" alt="*"></a>
-    </div>
-    <div class="titlecell">
-      <div class="title"><a href=".">nordstjernen.org</a></div>
-      <div class="tag">the small, steady web browser &middot; version 0.6.0</div>
-    </div>
+    <table cellpadding="0" cellspacing="0">
+      <tr>
+        <td class="logo"><a href="."><img src="assets/nordstjernen.svg" alt="*"></a></td>
+        <td class="titlecell">
+          <div class="title"><a href=".">nordstjernen.org</a></div>
+          <div class="tag">the small, steady web browser &middot; version 0.6.0</div>
+        </td>
+      </tr>
+    </table>
   </div>
 
-  <div class="row body-row g-0">
+  <table class="layout" cellpadding="0" cellspacing="0">
+    <tr>
+      <td class="sidebar">
+        <h3>browser</h3>
+        <ul>
+          <li><a href="#about">about</a></li>
+          <li><a href="#news">news</a></li>
+          <li><a href="#specs">specifications</a></li>
+          <li><a href="#download">download</a></li>
+        </ul>
+        <h3>source</h3>
+        <ul>
+          <li><a href="https://github.com/nordstjernen-web/nordstjernen">github</a></li>
+          <li><a href="https://github.com/nordstjernen-web/nordstjernen/releases">releases</a></li>
+          <li><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">license</a></li>
+        </ul>
+        <h3>visitors</h3>
+        <div class="counter"><img src="counter.php" alt="visitor count"></div>
+      </td>
 
-    <aside class="col-12 col-md-3 col-lg-2 sidebar">
-      <h3>browser</h3>
-      <ul>
-        <li><a href="#about">about</a></li>
-        <li><a href="#news">news</a></li>
-        <li><a href="#specs">specifications</a></li>
-        <li><a href="#download">download</a></li>
-      </ul>
-      <h3>source</h3>
-      <ul>
-        <li><a href="https://github.com/nordstjernen-web/nordstjernen">github</a></li>
-        <li><a href="https://github.com/nordstjernen-web/nordstjernen/releases">releases</a></li>
-        <li><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">license</a></li>
-      </ul>
-      <h3>visitors</h3>
-      <div class="counter"><img src="counter.php" alt="visitor count"></div>
-    </aside>
+      <td class="content">
 
-    <main class="col-12 col-md-9 col-lg-10 content">
+        <a id="about"></a>
+        <h1>nordstjernen</h1>
+        <p>An independent web browser written in C. Around <b>40,000 lines</b>,
+        small enough for one person to read in a long afternoon. No Blink,
+        no Gecko, no WebKit, no JIT. No telemetry, ever.</p>
 
-      <a id="about"></a>
-      <h1>nordstjernen</h1>
-      <p>An independent web browser written in C. Around <b>40,000 lines</b>,
-      small enough for one person to read in a long afternoon. No Blink,
-      no Gecko, no WebKit, no JIT. No telemetry, ever.</p>
+        <div class="shot">
+          <a href="assets/screenshot.png"><img src="assets/screenshot.png" alt="Nordstjernen screenshot"></a>
+          <div class="cap">Nordstjernen 0.6.0 on Linux / GTK 4.</div>
+        </div>
 
-      <div class="shot">
-        <a href="assets/screenshot.png"><img src="assets/screenshot.png" alt="Nordstjernen screenshot" class="img-fluid"></a>
-        <div class="cap">Nordstjernen 0.6.0 on Linux / GTK 4.</div>
-      </div>
+        <a id="news"></a>
+        <h2>news</h2>
+        <p><span class="date">18&nbsp;MAY&nbsp;2026</span> &middot;
+        Nordstjernen <b>0.6.0</b> released.
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Release notes &raquo;</a></p>
 
-      <a id="news"></a>
-      <h2>news</h2>
-      <p><span class="date">18&nbsp;MAY&nbsp;2026</span> &middot;
-      Nordstjernen <b>0.6.0</b> released.
-      <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Release notes &raquo;</a></p>
-
-      <a id="specs"></a>
-      <h2>specifications</h2>
-      <div class="table-responsive">
+        <a id="specs"></a>
+        <h2>specifications</h2>
         <table class="spec">
           <tr><th>language</th><td>C</td></tr>
           <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a></td></tr>
@@ -239,21 +226,21 @@
           <tr><th>platforms</th><td>linux &middot; windows &middot; macos</td></tr>
           <tr><th>license</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years</td></tr>
         </table>
-      </div>
 
-      <a id="download"></a>
-      <h2>download</h2>
-      <p>&raquo; <a href="https://github.com/nordstjernen-web/nordstjernen/releases"><b>Nordstjernen 0.6.0</b></a>
-         &middot; <a href="https://github.com/nordstjernen-web/nordstjernen">source</a></p>
+        <a id="download"></a>
+        <h2>download</h2>
+        <p>&raquo; <a href="https://github.com/nordstjernen-web/nordstjernen/releases"><b>Nordstjernen 0.6.0</b></a>
+           &middot; <a href="https://github.com/nordstjernen-web/nordstjernen">source</a></p>
 
-      <p class="mt-3">
-        <a href="https://github.com/nordstjernen-web/nordstjernen">
-          <img src="assets/best-viewed-in-nordstjernen.png" width="180" height="63" alt="Best viewed in Nordstjernen">
-        </a>
-      </p>
+        <p style="margin-top:14px;">
+          <a href="https://github.com/nordstjernen-web/nordstjernen">
+            <img src="assets/best-viewed-in-nordstjernen.png" width="180" height="63" alt="Best viewed in Nordstjernen">
+          </a>
+        </p>
 
-    </main>
-  </div>
+      </td>
+    </tr>
+  </table>
 
   <div class="footer">
     Copyright &copy; 1997 the Nordstjernen project &middot;
@@ -263,6 +250,17 @@
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script type="text/javascript">
+$(function () {
+  $('a').on('mouseenter', function () {
+    window.status = $(this).attr('href') || '';
+  }).on('mouseleave', function () {
+    window.status = 'nordstjernen.org';
+  });
+  window.status = 'nordstjernen.org';
+});
+</script>
+
 </body>
 </html>
