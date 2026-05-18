@@ -1,553 +1,115 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>Nordstjernen - The Small, Steady Web Browser</title>
-<meta name="description" content="Nordstjernen - independent web browser written in C. No telemetry, no JIT, ~40,000 lines.">
-<meta name="generator" content="vi">
+<title>Nordstjernen</title>
+<meta name="description" content="Nordstjernen - a small, steady web browser written in C. No telemetry, no JIT.">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
 <style type="text/css">
   html, body {
     margin: 0; padding: 0;
     background: #ffffff;
     color: #000000;
-    font-family: Verdana, Geneva, Arial, Helvetica, sans-serif;
+    font-family: Verdana, Geneva, Arial, sans-serif;
     font-size: 11px;
-    line-height: 1.45;
+    line-height: 1.5;
     -webkit-font-smoothing: none;
-    -moz-osx-font-smoothing: none;
-    image-rendering: pixelated;
   }
   img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; }
   a:link    { color: #0000cc; }
   a:visited { color: #660099; }
-  a:active  { color: #ff0000; }
-  a:hover   { text-decoration: underline; }
+  a:hover   { text-decoration: underline; color: #cc0000; }
 
-  /* ===== TOP BLUE BANNER ===== */
   .banner {
     background: #000066;
-    background-image: linear-gradient(180deg, #00009c 0%, #000066 50%, #00003a 100%);
     color: #ffffff;
     border-bottom: 2px solid #000000;
-    padding: 0;
+    padding: 10px 16px;
   }
-  .banner table { width: 100%; }
   .banner .brand {
-    color: #ffffff; font-family: Arial, Helvetica, sans-serif;
-    font-size: 22px; font-weight: bold; letter-spacing: 1px;
-    padding: 8px 10px;
-  }
-  .banner .brand .star { color: #ffcc00; }
-  .banner .brand .tag {
-    font-weight: normal; font-size: 10px; color: #aab8ff;
-    letter-spacing: 0; margin-left: 6px;
-  }
-  .banner .toolbar {
-    text-align: right; padding: 8px 10px;
-    font-size: 10px; color: #ffffff;
-  }
-  .banner .toolbar a { color: #ffcc00; text-decoration: none; }
-  .banner .toolbar a:hover { color: #ffffff; text-decoration: underline; }
-
-  /* ===== TAB STRIP (under banner) ===== */
-  .tabs {
-    background: #cccccc;
-    border-bottom: 1px solid #666666;
-    padding: 0;
-    font-size: 10px;
-    font-weight: bold;
-    font-family: Arial, Helvetica, sans-serif;
-  }
-  .tabs a {
-    display: inline-block;
-    padding: 4px 12px 3px;
-    color: #000000;
-    text-decoration: none;
-    border-right: 1px solid #888888;
-  }
-  .tabs a:hover { background: #ffffff; color: #cc0000; }
-  .tabs a.active { background: #ffffff; color: #cc0000; border-top: 2px solid #cc0000; padding-top: 2px; }
-
-  /* ===== LAYOUT ===== */
-  .layout { width: 100%; border-collapse: collapse; }
-  .layout > tbody > tr > td { vertical-align: top; }
-  .sidebar {
-    width: 150px;
-    background: #e0e0e0;
-    border-right: 1px solid #999999;
-    padding: 10px 8px;
-  }
-  .main { padding: 14px 18px; background: #ffffff; }
-  .right {
-    width: 175px;
-    background: #f4f4f4;
-    border-left: 1px solid #999999;
-    padding: 10px 8px;
-  }
-
-  /* ===== SIDEBAR BOXES ===== */
-  .sb-title {
-    background: #000066;
-    color: #ffffff;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 10px;
-    font-weight: bold;
-    padding: 2px 6px;
+    font-family: Arial, sans-serif;
+    font-size: 20px; font-weight: bold;
     letter-spacing: 1px;
-    margin-bottom: 6px;
-    border: 1px solid #000000;
   }
-  .sb-title.alt { background: #cc0000; }
-  .sidebar ul, .right ul {
-    list-style: none; padding: 0; margin: 0 0 14px 0;
-  }
-  .sidebar li, .right li {
-    padding: 1px 0 1px 12px;
-    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><rect x='2' y='2' width='2' height='2' fill='%23000066'/><rect x='4' y='4' width='2' height='2' fill='%23ffcc00'/></svg>") no-repeat 0 5px;
-    font-size: 11px;
-  }
-  .sidebar a, .right a { color: #0000cc; text-decoration: none; }
-  .sidebar a:hover, .right a:hover { text-decoration: underline; color: #cc0000; }
+  .banner .brand img { vertical-align: middle; margin-right: 8px; }
+  .banner .brand .star { color: #ffcc00; }
 
-  /* ===== HEADINGS ===== */
+  .wrap { max-width: 640px; margin: 0 auto; padding: 28px 20px; }
+
   h1 {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 18px;
+    font-family: Arial, sans-serif;
+    font-size: 22px;
     color: #cc0000;
     margin: 0 0 4px 0;
-    border-bottom: 2px solid #cc0000;
-    padding-bottom: 3px;
   }
-  h2 {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 13px;
-    color: #ffffff;
-    background: #000066;
-    padding: 3px 6px;
-    margin: 18px 0 8px 0;
-    border: 1px solid #000000;
-  }
-  h3 {
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 11px;
-    color: #cc0000;
-    margin: 14px 0 4px 0;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-  p { margin: 0 0 9px 0; }
+  .tag { color: #555555; font-style: italic; margin-bottom: 22px; }
 
-  /* ===== PIXEL LOGO BLOCK ===== */
-  .hero {
-    background: #f8f8f8;
-    border: 1px solid #999999;
-    padding: 0;
-    margin-bottom: 14px;
-  }
-  .hero table { width: 100%; border-collapse: collapse; }
-  .hero td { vertical-align: middle; padding: 10px; }
-  .hero .logo { width: 96px; text-align: center; background: #000033; border-right: 1px solid #000000; }
-  .hero .logo img { width: 80px; height: 80px; }
-  .hero .pitch h1 { margin-top: 0; }
-  .hero .pitch .poem {
-    color: #555555; font-style: italic; font-size: 11px;
-    margin-top: 4px;
-  }
-  .hero .v {
-    background: #ffcc00; color: #000000;
-    font-family: "Courier New", monospace;
-    font-size: 10px; font-weight: bold;
-    padding: 1px 5px; border: 1px solid #886600;
-    display: inline-block;
-  }
+  p { margin: 0 0 12px 0; }
 
-  /* ===== NEWS / FEATURE BOXES ===== */
-  .news {
-    border: 1px solid #999999;
-    margin: 0 0 12px 0;
-    background: #ffffff;
-  }
-  .news-hd {
-    background: #ddddee;
-    border-bottom: 1px solid #999999;
-    padding: 3px 6px;
-    font-weight: bold;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 11px;
-    color: #000066;
-  }
-  .news-bd { padding: 6px 8px; font-size: 11px; }
-  .news-bd .date { color: #888888; font-size: 10px; font-family: "Courier New", monospace; }
+  table.spec { border-collapse: collapse; width: 100%; margin: 14px 0 22px 0; }
+  table.spec th, table.spec td { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; }
+  table.spec th { color: #555555; font-weight: normal; white-space: nowrap; width: 110px; }
+  table.spec td { font-family: "Courier New", monospace; }
+  table.spec tr { border-bottom: 1px dotted #cccccc; }
 
-  /* ===== SPEC TABLE ===== */
-  table.spec { border-collapse: collapse; width: 100%; font-size: 11px; }
-  table.spec th, table.spec td { text-align: left; padding: 2px 8px 2px 0; vertical-align: top; }
-  table.spec th { color: #555555; font-weight: normal; white-space: nowrap; width: 130px; border-bottom: 1px dotted #cccccc; }
-  table.spec td { font-family: "Courier New", Courier, monospace; border-bottom: 1px dotted #cccccc; }
-
-  /* ===== PIXEL BULLETS ===== */
-  ul.px { list-style: none; padding: 0; margin: 0 0 9px 0; }
-  ul.px li {
-    padding: 1px 0 1px 14px;
-    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' shape-rendering='crispEdges'><rect x='1' y='4' width='2' height='2' fill='%23cc0000'/><rect x='3' y='2' width='2' height='6' fill='%23ffcc00'/><rect x='5' y='4' width='2' height='2' fill='%23cc0000'/><rect x='3' y='4' width='2' height='2' fill='%23ffffff'/></svg>") no-repeat 0 4px;
-  }
-
-  /* ===== BUTTONS ===== */
-  .btn {
-    display: inline-block;
-    background: #dddddd;
-    border-top: 1px solid #ffffff;
-    border-left: 1px solid #ffffff;
-    border-right: 1px solid #555555;
-    border-bottom: 1px solid #555555;
-    padding: 2px 10px;
-    color: #000000;
-    text-decoration: none;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 11px;
-    font-weight: bold;
-  }
-  .btn:active {
-    border-top: 1px solid #555555;
-    border-left: 1px solid #555555;
-    border-right: 1px solid #ffffff;
-    border-bottom: 1px solid #ffffff;
-  }
-  .btn-go { background: #cc0000; color: #ffffff; border-color: #ff4444 #660000 #660000 #ff4444; }
-
-  /* ===== FOOTER ===== */
   .footer {
     background: #000066;
     color: #aab8ff;
     font-size: 10px;
-    padding: 8px 12px;
-    border-top: 2px solid #000000;
+    padding: 10px 16px;
     text-align: center;
+    border-top: 2px solid #000000;
+    margin-top: 28px;
   }
   .footer a { color: #ffcc00; text-decoration: none; }
   .footer a:hover { text-decoration: underline; color: #ffffff; }
 
-  /* ===== STATUS / TICKER ===== */
-  .ticker {
-    background: #000000;
-    color: #00ff00;
-    font-family: "Courier New", monospace;
-    font-size: 11px;
-    padding: 2px 0;
-    border-top: 1px solid #003300;
-    border-bottom: 1px solid #003300;
-  }
-  code { background: #f0f0f0; border: 1px solid #cccccc; padding: 0 3px; font-family: "Courier New", monospace; }
-
-  /* Pixel badge */
-  .badge88 {
-    display: inline-block; width: 88px; height: 31px;
-    background: #000066; color: #ffcc00;
-    font-family: Arial, sans-serif; font-size: 9px; font-weight: bold;
-    text-align: center; line-height: 1.1;
-    border: 1px solid #000000; padding: 3px 0;
-    margin: 2px 0;
-  }
-  .badge88 b { color: #ffffff; font-size: 11px; }
+  code { font-family: "Courier New", monospace; }
 </style>
 </head>
 <body>
 
-<!-- ============ TOP BANNER ============ -->
 <div class="banner">
-  <table cellpadding="0" cellspacing="0">
-    <tr>
-      <td class="brand">
-        <img src="assets/nordstjernen.svg" width="32" height="32" align="absmiddle" alt="*" style="vertical-align:middle;margin-right:6px;">
-        <span style="vertical-align:middle;">Nord<span class="star">stjernen</span></span>
-        <span class="tag">// the small, steady web browser</span>
-      </td>
-      <td class="toolbar">
-        <a href="#about">About</a> &nbsp;|&nbsp;
-        <a href="#download">Download</a> &nbsp;|&nbsp;
-        <a href="#docs">Docs</a> &nbsp;|&nbsp;
-        <a href="https://github.com/nordstjernen-web/nordstjernen">Source</a>
-      </td>
-    </tr>
-  </table>
+  <span class="brand">
+    <img src="assets/nordstjernen.svg" width="28" height="28" alt="*">
+    Nord<span class="star">stjernen</span>
+  </span>
 </div>
 
-<!-- ============ TAB STRIP ============ -->
-<div class="tabs">
-  <a href="#" class="active">Home</a><a href="#features">Features</a><a href="#security">Security</a><a href="#specs">Specs</a><a href="#download">Download</a><a href="#credits">Credits</a><a href="https://github.com/nordstjernen-web/nordstjernen">GitHub</a>
-</div>
+<div class="wrap">
 
-<!-- ============ TICKER ============ -->
-<div class="ticker">
-  <marquee scrollamount="3">&nbsp;&gt;&gt;  NORDSTJERNEN 0.6.0 RELEASED  &middot;  NO TELEMETRY, EVER  &middot;  ~40,000 LINES OF C  &middot;  NO BLINK, NO GECKO, NO WEBKIT, NO JIT  &middot;  SOURCE-AVAILABLE UNDER NSL-1.0 &mdash; CONVERTS TO MIT AFTER 10 YEARS  &middot;  BUILDS ON LINUX / WINDOWS / MACOS  &lt;&lt;</marquee>
-</div>
+  <h1>The small, steady web browser.</h1>
+  <div class="tag">Version 0.6.0 &middot; written in C &middot; by Andreas R&oslash;sdal</div>
 
-<!-- ============ MAIN LAYOUT ============ -->
-<table class="layout" cellpadding="0" cellspacing="0">
-<tr>
-
-<!-- ===== LEFT SIDEBAR ===== -->
-<td class="sidebar">
-
-  <div class="sb-title">NAVIGATE</div>
-  <ul>
-    <li><a href="#about">About Nordstjernen</a></li>
-    <li><a href="#features">Features</a></li>
-    <li><a href="#security">Security model</a></li>
-    <li><a href="#specs">Specifications</a></li>
-    <li><a href="#excluded">Not included</a></li>
-    <li><a href="#download">Download</a></li>
-    <li><a href="#credits">Credits</a></li>
-  </ul>
-
-  <div class="sb-title alt">DEVELOPERS</div>
-  <ul>
-    <li><a href="https://github.com/nordstjernen-web/nordstjernen">Source code</a></li>
-    <li><a href="https://github.com/nordstjernen-web/nordstjernen/issues">Bug tracker</a></li>
-    <li><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/README.md">Build guide</a></li>
-    <li><a href="https://github.com/nordstjernen-web/nordstjernen/releases">Release notes</a></li>
-  </ul>
-
-  <div class="sb-title">PLATFORMS</div>
-  <ul>
-    <li>Linux (GTK 4)</li>
-    <li>Windows (MSYS2)</li>
-    <li>macOS (arm64/x64)</li>
-  </ul>
-
-  <div style="margin-top:14px; text-align:center;">
-    <span class="badge88"><b>NO JIT</b><br>SAFER BY DESIGN</span><br>
-    <span class="badge88" style="background:#cc0000;color:#ffffff;"><b>0% TRACKING</b><br>NO TELEMETRY</span>
-  </div>
-
-</td>
-
-<!-- ===== MAIN ===== -->
-<td class="main">
-
-  <!-- Hero block -->
-  <a name="about"></a>
-  <div class="hero">
-    <table cellpadding="0" cellspacing="0">
-      <tr>
-        <td class="logo"><img src="assets/nordstjernen.svg" alt="Nordstjernen"></td>
-        <td class="pitch">
-          <h1>The small, steady web browser.</h1>
-          <span class="v">v0.6.0</span>
-          &nbsp;<span style="color:#666;font-size:10px;">released 18 May 2026</span>
-          <div class="poem">
-            "A north star, small and faithful &mdash; light enough to read by,<br>
-            slow enough to think with; built one line at a time."
-          </div>
-          <p style="margin-top:8px;">
-            <a class="btn btn-go" href="https://github.com/nordstjernen-web/nordstjernen/releases">Download &raquo;</a>
-            &nbsp;
-            <a class="btn" href="https://github.com/nordstjernen-web/nordstjernen">View Source</a>
-          </p>
-        </td>
-      </tr>
-    </table>
-  </div>
-
-  <!-- About -->
-  <p><b>Nordstjernen</b> is a web browser for people who want to <i>read</i> the
-  web &mdash; Wikipedia, news, documentation, search results, light forms &mdash;
+  <p><b>Nordstjernen</b> is a web browser for people who want to read the web
   without donating a few hundred million lines of someone else's engine and a
   few hundred kilobytes of telemetry to the experience.</p>
 
-  <p>It is around <b>40,000 lines of C</b>, small enough that a single human can
-  read the whole thing in a long afternoon. It uses <b>GTK&nbsp;4</b> for the
-  user interface and <b>libcurl</b> for networking; the HTML / CSS parsers,
-  layout, paint, and JavaScript bindings are written from scratch &mdash;
-  <b>no Blink, no Gecko, no WebKit, no JIT.</b></p>
+  <p>It is around 40,000 lines of C &mdash; small enough that a single human can
+  read the whole thing in a long afternoon. No Blink, no Gecko, no WebKit, no JIT.</p>
 
-  <!-- Features -->
-  <a name="features"></a>
-  <h2>&#9733; What you get</h2>
-  <table cellpadding="0" cellspacing="0" width="100%"><tr>
-    <td width="50%" valign="top" style="padding-right:10px;">
-      <h3>Auditability</h3>
-      <ul class="px">
-        <li>One person can read the engine end-to-end.</li>
-        <li>~40,000 lines of C, no hidden vendoring.</li>
-        <li>Clean-room: no Blink, Gecko, or WebKit.</li>
-      </ul>
-      <h3>Privacy by construction</h3>
-      <ul class="px">
-        <li>No telemetry, ever. No phone-home.</li>
-        <li>No update pinger, no crash reporter, no "studies".</li>
-        <li>DuckDuckGo Lite as default search.</li>
-        <li>Cache &amp; connections partitioned per top-level site.</li>
-        <li>Third-party cookies off by default.</li>
-      </ul>
-    </td>
-    <td width="50%" valign="top" style="padding-left:10px;border-left:1px dotted #999999;">
-      <h3>Smaller attack surface</h3>
-      <ul class="px">
-        <li>No WebGL, no WebGPU, no WebRTC.</li>
-        <li>No service workers, no MSE, no DRM.</li>
-        <li>No extensions, no plugins.</li>
-        <li>JavaScript via <b>QuickJS</b> &mdash; an interpreter, no JIT, W^X process-wide.</li>
-      </ul>
-      <h3>Conservative network</h3>
-      <ul class="px">
-        <li>TLS verification on; HTTP/HTTPS only.</li>
-        <li>Built-in HSTS preload list.</li>
-        <li>Max 10 redirects, 60s per request, 60s per JS slice.</li>
-        <li>gzip / brotli / zstd via libcurl.</li>
-      </ul>
-    </td>
-  </tr></table>
-
-  <!-- Security -->
-  <a name="security"></a>
-  <h2>&#9733; Hardening &amp; sandbox</h2>
-  <p>On Linux the renderer runs under a <b>Landlock</b> sandbox that removes
-  read access to <code>~/.ssh</code>, <code>~/.gnupg</code>, other browsers'
-  profiles, and arbitrary dotfiles; only the nordstjernen-specific subdirs
-  under <code>$XDG_*_HOME</code> are writable. The browser refuses to run as
-  root on Linux / macOS or as Administrator on Windows.</p>
-  <p>The binary is compiled with <b>PIE</b>, <b>full RELRO</b>,
-  <b>stack-protector-strong</b>, <b>stack-clash protection</b>,
-  <b>Intel CET</b>, <code>_FORTIFY_SOURCE=2</code>, and a <b>no-exec stack</b>.</p>
-
-  <p style="background:#fffae0;border:1px solid #ddcc66;padding:6px 8px;">
-    <b>Note.</b> This is not a Chromium-grade adversary-resistant browser and
-    it does not pretend to be. The threat model is <i>sloppy or mildly hostile
-    websites running on top of a trusted operating-system user</i>, and the
-    design is kept small enough to defend honestly.
-  </p>
-
-  <!-- Specs -->
-  <a name="specs"></a>
-  <h2>&#9733; Specifications</h2>
   <table class="spec">
-    <tr><th>Language</th><td>C &middot; 98.2% of codebase</td></tr>
-    <tr><th>HTML / CSS parser</th><td>lexbor</td></tr>
+    <tr><th>Language</th><td>C</td></tr>
+    <tr><th>HTML / CSS</th><td>lexbor</td></tr>
     <tr><th>JavaScript</th><td>quickjs-ng (interpreter)</td></tr>
-    <tr><th>Image codecs</th><td>Wuffs &mdash; PNG, GIF, BMP, JPEG</td></tr>
-    <tr><th>Video</th><td>WebM / VP9 (libvpx, optional)</td></tr>
-    <tr><th>UI toolkit</th><td>GTK 4</td></tr>
-    <tr><th>Networking</th><td>libcurl + HSTS preload</td></tr>
-    <tr><th>Build system</th><td>Meson + Ninja</td></tr>
-    <tr><th>Platforms</th><td>Linux, Windows (MSYS2), macOS (arm64/x64)</td></tr>
+    <tr><th>Images</th><td>Wuffs</td></tr>
+    <tr><th>UI</th><td>GTK 4</td></tr>
+    <tr><th>Network</th><td>libcurl</td></tr>
+    <tr><th>Platforms</th><td>Linux &middot; Windows &middot; macOS</td></tr>
     <tr><th>License</th><td>NSL-1.0 &rarr; MIT after 10 years</td></tr>
   </table>
 
-  <a name="excluded"></a>
-  <h3>Deliberately not included</h3>
-  <p>WebGL &middot; WebGPU &middot; WebRTC &middot; service workers &middot;
-  MSE &middot; DRM (EME) &middot; extensions &middot; plugins &middot;
-  persistent history &middot; sync &middot; accounts &middot; JIT.</p>
-
-  <!-- Download -->
-  <a name="download"></a>
-  <h2>&#9733; Download &amp; license</h2>
-  <p>Source-available under the <b>Nordstjernen Source License v1.0</b>
-  (<code>NSL-1.0</code>): free for any non-competing use, and each release
-  converts to the <b>MIT license</b> ten years after publication.
-  Separate commercial licenses available by written agreement.</p>
   <p>
-    <a class="btn btn-go" href="https://github.com/nordstjernen-web/nordstjernen/releases">Get v0.6.0</a>
-    &nbsp;
-    <a class="btn" href="https://github.com/nordstjernen-web/nordstjernen">Browse source</a>
-    &nbsp;
-    <a class="btn" href="https://github.com/nordstjernen-web/nordstjernen/blob/main/README.md">Build from source</a>
+    <a href="https://github.com/nordstjernen-web/nordstjernen">Source on GitHub</a> &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Releases</a>
   </p>
 
-  <!-- Credits -->
-  <a name="credits"></a>
-  <h2>&#9733; Credits &amp; third-party software</h2>
-  <table class="spec">
-    <tr><th>lexbor</th><td>HTML / CSS / URL parser &mdash; Apache-2.0</td></tr>
-    <tr><th>Wuffs</th><td>memory-safe image decoders &mdash; Apache-2.0</td></tr>
-    <tr><th>quickjs-ng</th><td>JavaScript engine &mdash; MIT</td></tr>
-    <tr><th>libcurl</th><td>HTTP / TLS client &mdash; curl license</td></tr>
-    <tr><th>libuchardet</th><td>charset detection &mdash; MPL / LGPL</td></tr>
-    <tr><th>libvpx</th><td>VP8 / VP9 decoder &mdash; BSD-3-Clause</td></tr>
-    <tr><th>GTK 4 / GLib / Pango</th><td>UI &amp; text shaping &mdash; LGPL</td></tr>
-    <tr><th>Cairo / gdk-pixbuf / librsvg</th><td>drawing, images, SVG &mdash; LGPL / MPL</td></tr>
-  </table>
-
-</td>
-
-<!-- ===== RIGHT COLUMN ===== -->
-<td class="right">
-
-  <div class="news">
-    <div class="news-hd">What's New</div>
-    <div class="news-bd">
-      <div class="date">2026-05-18</div>
-      <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Nordstjernen 0.6.0</a> released.
-      <hr style="border:0;border-top:1px dotted #cccccc;">
-      <div class="date">2026-04-30</div>
-      Landlock sandbox tightened; <code>~/.ssh</code> &amp; <code>~/.gnupg</code> now unreadable from the renderer.
-      <hr style="border:0;border-top:1px dotted #cccccc;">
-      <div class="date">2026-04-12</div>
-      AVIF decoding via Wuffs &mdash; PNG/GIF/JPEG path memory-safe end-to-end.
-    </div>
-  </div>
-
-  <div class="news">
-    <div class="news-hd">By the numbers</div>
-    <div class="news-bd">
-      <table class="spec" style="width:100%;">
-        <tr><th>LOC</th><td>~40,000</td></tr>
-        <tr><th>Lang</th><td>C 98.2%</td></tr>
-        <tr><th>JIT</th><td>none</td></tr>
-        <tr><th>Trackers</th><td>0</td></tr>
-        <tr><th>Cold start</th><td>~11 ms</td></tr>
-      </table>
-    </div>
-  </div>
-
-  <div class="news">
-    <div class="news-hd">Made by</div>
-    <div class="news-bd">
-      Andreas R&oslash;sdal<br>
-      <span style="color:#888;">Copyright &copy; 2026</span>
-    </div>
-  </div>
-
-  <div style="text-align:center;margin-top:10px;">
-    <a href="https://github.com/nordstjernen-web/nordstjernen">
-      <img src="assets/nordstjernen.gif" width="80" height="80" alt="Nordstjernen" border="0">
-    </a>
-    <div style="font-size:9px;color:#666;margin-top:4px;">
-      <i>Best viewed in<br>Nordstjernen 0.6+</i>
-    </div>
-  </div>
-
-</td>
-
-</tr>
-</table>
-
-<!-- ============ FOOTER ============ -->
-<div class="footer">
-  <a href="#about">About</a> &middot;
-  <a href="#features">Features</a> &middot;
-  <a href="#security">Security</a> &middot;
-  <a href="#specs">Specs</a> &middot;
-  <a href="#download">Download</a> &middot;
-  <a href="https://github.com/nordstjernen-web/nordstjernen">GitHub</a>
-  <br><br>
-  Copyright &copy; 2026 Andreas R&oslash;sdal. &nbsp;
-  Source-available under <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/LICENSE">NSL-1.0</a>. &nbsp;
-  <a href="mailto:webmaster@nordstjernen.org">webmaster@nordstjernen.org</a>
 </div>
 
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script type="text/javascript">
-$(function () {
-  $('a').on('mouseenter', function () {
-    window.status = ($(this).attr('href') || '');
-  }).on('mouseleave', function () {
-    window.status = 'Nordstjernen - the small, steady web browser.';
-  });
-  window.status = 'Nordstjernen - the small, steady web browser.';
-});
-</script>
+<div class="footer">
+  Copyright &copy; 2026 Andreas R&oslash;sdal &middot;
+  <a href="https://github.com/nordstjernen-web/nordstjernen">github</a> &middot;
+  <a href="mailto:webmaster@nordstjernen.org">webmaster@nordstjernen.org</a>
+</div>
 
 </body>
 </html>
