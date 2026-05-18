@@ -18,20 +18,34 @@
   a:visited { color: #666699; }
   a:hover   { color: #cc0000; }
 
+  /* ===== FRAME ===== */
+  .frame {
+    margin: 10px;
+    border: 1px solid #000000;
+    background: #ffffff;
+  }
+
   /* ===== HEADER ===== */
   .header {
     background: #cc0000;
     color: #ffffff;
-    padding: 6px 14px;
     border-bottom: 1px solid #000000;
   }
+  .header table { width: 100%; border-collapse: collapse; }
+  .header td { vertical-align: middle; }
+  .header .logo {
+    width: 72px; padding: 6px 10px;
+    background: #cc0000;
+    border-right: 1px solid #000000;
+    text-align: center;
+  }
+  .header .logo img { width: 48px; height: 48px; display: block; margin: 0 auto; }
+  .header .titlecell { padding: 6px 14px; }
   .header .title {
     font-family: Arial, Helvetica, sans-serif;
     font-size: 22px; font-weight: bold;
-    letter-spacing: 0;
   }
   .header .title a { color: #ffffff; text-decoration: none; }
-  .header .title img { vertical-align: middle; margin-right: 6px; }
   .header .tag {
     font-size: 11px; color: #ffdddd;
     margin-top: 2px;
@@ -44,7 +58,7 @@
   .sidebar {
     width: 140px;
     padding: 16px 14px;
-    border-right: 1px solid #cccccc;
+    border-right: 1px solid #000000;
     font-size: 11px;
   }
   .sidebar h3 {
@@ -107,8 +121,9 @@
 
   /* ===== FOOTER ===== */
   .footer {
-    border-top: 1px solid #cccccc;
-    padding: 10px 16px;
+    border-top: 1px solid #000000;
+    background: #f4f4f4;
+    padding: 8px 16px;
     font-size: 10px;
     color: #666666;
     text-align: center;
@@ -117,11 +132,18 @@
 </head>
 <body>
 
+<div class="frame">
+
 <div class="header">
-  <div class="title">
-    <a href=".">nordstjernen.org</a>
-  </div>
-  <div class="tag">the small, steady web browser &middot; version 0.6.0</div>
+  <table cellpadding="0" cellspacing="0">
+    <tr>
+      <td class="logo"><a href="."><img src="assets/nordstjernen.svg" alt="*"></a></td>
+      <td class="titlecell">
+        <div class="title"><a href=".">nordstjernen.org</a></div>
+        <div class="tag">the small, steady web browser &middot; version 0.6.0</div>
+      </td>
+    </tr>
+  </table>
 </div>
 
 <table class="layout" cellpadding="0" cellspacing="0">
@@ -194,6 +216,8 @@
   Copyright &copy; 2026 Andreas R&oslash;sdal &middot;
   <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
   <a href="mailto:webmaster@nordstjernen.org">webmaster@nordstjernen.org</a>
+</div>
+
 </div>
 
 </body>
