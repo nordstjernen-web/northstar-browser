@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nordstjernen — a small, steady web browser</title>
+  <meta name="description" content="Nordstjernen is an independent, minimalist web browser written in C. No telemetry, no JIT, no nonsense.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <style>
+    :root {
+      --ink: #0b0d12;
+      --paper: #fafaf7;
+      --muted: #5b6270;
+      --line: #e7e6df;
+      --star: #d9b441;
+    }
+    html, body { background: var(--paper); color: var(--ink); }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+      font-feature-settings: "ss01", "cv11";
+    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .star {
+      display: inline-block; color: var(--star);
+      text-shadow: 0 0 16px rgba(217,180,65,.35);
+    }
+    .nav-link, .navbar-brand { color: var(--ink) !important; }
+    .navbar-brand { font-weight: 600; letter-spacing: -0.01em; }
+    .hero {
+      padding: 7rem 0 5rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .hero h1 {
+      font-size: clamp(2.4rem, 5vw, 4.25rem);
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+    }
+    .lead-quote {
+      color: var(--muted);
+      font-size: 1.125rem;
+      max-width: 38rem;
+      border-left: 2px solid var(--line);
+      padding-left: 1rem;
+    }
+    section { padding: 4.5rem 0; border-bottom: 1px solid var(--line); }
+    section h2 {
+      font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.18em;
+      color: var(--muted); font-weight: 600; margin-bottom: 2rem;
+    }
+    .feature h3 {
+      font-size: 1.05rem; font-weight: 600; margin-bottom: .35rem;
+    }
+    .feature p { color: var(--muted); font-size: .95rem; margin: 0; }
+    .spec-row {
+      display: flex; justify-content: space-between;
+      padding: .85rem 0; border-bottom: 1px dashed var(--line);
+      font-size: .95rem;
+    }
+    .spec-row:last-child { border-bottom: none; }
+    .spec-row .k { color: var(--muted); }
+    .spec-row .v { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .btn-ink {
+      background: var(--ink); color: var(--paper);
+      border-radius: 999px; padding: .55rem 1.25rem;
+      border: 1px solid var(--ink);
+    }
+    .btn-ink:hover { background: #1c1f28; color: var(--paper); }
+    .btn-ghost {
+      background: transparent; color: var(--ink);
+      border-radius: 999px; padding: .55rem 1.25rem;
+      border: 1px solid var(--line);
+    }
+    .btn-ghost:hover { border-color: var(--ink); }
+    .terminal {
+      background: var(--ink); color: #e7e6df;
+      border-radius: 10px; padding: 1.25rem 1.5rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .9rem; line-height: 1.7;
+    }
+    .terminal .prompt { color: var(--star); }
+    .terminal .dim { color: #8c8d85; }
+    .excluded li { color: var(--muted); }
+    .excluded li::marker { color: var(--star); }
+    footer { padding: 3rem 0; color: var(--muted); font-size: .9rem; }
+    footer a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
+    footer a:hover { color: var(--ink); }
+    .pill {
+      display: inline-block; padding: .15rem .55rem;
+      border: 1px solid var(--line); border-radius: 999px;
+      font-size: .75rem; color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-md py-3">
+  <div class="container">
+    <a class="navbar-brand" href="#"><span class="star">★</span> Nordstjernen</a>
+    <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse justify-content-end" id="nav">
+      <ul class="navbar-nav gap-md-3">
+        <li class="nav-item"><a class="nav-link" href="#features">Features</a></li>
+        <li class="nav-item"><a class="nav-link" href="#specs">Specs</a></li>
+        <li class="nav-item"><a class="nav-link" href="#excluded">Excluded</a></li>
+        <li class="nav-item"><a class="nav-link" href="https://github.com/nordstjernen-web/nordstjernen" target="_blank" rel="noopener">GitHub</a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container">
+    <div class="row align-items-center g-5">
+      <div class="col-lg-7">
+        <span class="pill mb-4">v0.6.0 · written in C</span>
+        <h1 class="mt-3">A small, steady<br>web browser.</h1>
+        <p class="lead-quote mt-4">
+          The North Star is the fixed point in the Norwegian night sky; Nordstjernen
+          tries to be the same kind of thing on the web — small, steady,
+          and pointed in one direction.
+        </p>
+        <div class="mt-4 d-flex flex-wrap gap-2">
+          <a class="btn btn-ink" href="https://github.com/nordstjernen-web/nordstjernen" target="_blank" rel="noopener">Get the source</a>
+          <a class="btn btn-ghost" href="#features">What it does</a>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="terminal" id="term">
+          <div><span class="dim">$</span> <span id="t1"></span></div>
+          <div><span class="dim">→</span> <span id="t2"></span></div>
+          <div><span class="dim">→</span> <span id="t3"></span></div>
+          <div><span class="prompt">★</span> <span id="t4"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="container">
+    <h2>What it is</h2>
+    <div class="row g-4 g-md-5">
+      <div class="col-md-6 col-lg-4 feature">
+        <h3>Independent engine</h3>
+        <p>~40,000 lines of C. Not Blink, not WebKit, not Gecko. A clean-room implementation.</p>
+      </div>
+      <div class="col-md-6 col-lg-4 feature">
+        <h3>No telemetry, ever</h3>
+        <p>No phone-home, no update pinger, no Safe Browsing. The browser does not talk about you.</p>
+      </div>
+      <div class="col-md-6 col-lg-4 feature">
+        <h3>No JIT</h3>
+        <p>JavaScript runs on QuickJS, an interpreter. W^X holds process-wide. A smaller attack surface.</p>
+      </div>
+      <div class="col-md-6 col-lg-4 feature">
+        <h3>Sandboxed</h3>
+        <p>Landlock + seccomp, PIE, full RELRO, stack protector. Defence in depth, by default.</p>
+      </div>
+      <div class="col-md-6 col-lg-4 feature">
+        <h3>Modern enough</h3>
+        <p>HTML5 via lexbor. Flexbox, grid, custom properties, animations, sticky positioning. WebP, AVIF, SVG, WebM/VP9.</p>
+      </div>
+      <div class="col-md-6 col-lg-4 feature">
+        <h3>Any script</h3>
+        <p>Latin, Arabic, CJK — anything with a system font. RTL via FriBidi and HarfBuzz.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="specs">
+  <div class="container">
+    <div class="row g-5">
+      <div class="col-lg-6">
+        <h2>Specs</h2>
+        <div class="spec-row"><span class="k">Language</span><span class="v">C · 98.2%</span></div>
+        <div class="spec-row"><span class="k">HTML parser</span><span class="v">lexbor 3.0.0</span></div>
+        <div class="spec-row"><span class="k">JavaScript</span><span class="v">QuickJS v0.14.0</span></div>
+        <div class="spec-row"><span class="k">Images</span><span class="v">Wuffs v0.4</span></div>
+        <div class="spec-row"><span class="k">UI</span><span class="v">GTK 4 (Linux)</span></div>
+        <div class="spec-row"><span class="k">Networking</span><span class="v">libcurl · gzip / br / zstd</span></div>
+        <div class="spec-row"><span class="k">Build</span><span class="v">Meson + Ninja</span></div>
+        <div class="spec-row"><span class="k">Platforms</span><span class="v">Linux · Windows · macOS</span></div>
+      </div>
+      <div class="col-lg-6" id="excluded">
+        <h2>Deliberately excluded</h2>
+        <ul class="excluded ps-3">
+          <li>WebGL, WebGPU</li>
+          <li>WebRTC</li>
+          <li>Service workers</li>
+          <li>DRM (EME)</li>
+          <li>Extensions</li>
+          <li>Persistent history</li>
+          <li>Sync</li>
+        </ul>
+        <p class="text-muted small mt-4 mb-0">
+          A browser is a tool. Smaller surface, fewer surprises.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>License</h2>
+    <p class="mb-0" style="max-width: 44rem;">
+      Nordstjernen Source License v1.0. The source is readable today and
+      converts to <span class="mono">MIT</span> ten years after release.
+      Commercial licensing is available.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="container d-flex flex-wrap justify-content-between gap-3">
+    <div>
+      <span class="star">★</span> Nordstjernen — by Andreas Røsdal, 2026
+    </div>
+    <div class="d-flex gap-4">
+      <a href="https://github.com/nordstjernen-web/nordstjernen" target="_blank" rel="noopener">github</a>
+      <a href="https://nordstjernen.org">nordstjernen.org</a>
+    </div>
+  </div>
+</footer>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  $(function () {
+    var lines = [
+      { el: '#t1', text: 'nordstjernen https://example.org' },
+      { el: '#t2', text: 'parse · lexbor      [ok]' },
+      { el: '#t3', text: 'eval  · quickjs     [ok]' },
+      { el: '#t4', text: 'ready in 11 ms.' }
+    ];
+    function type(i) {
+      if (i >= lines.length) return;
+      var line = lines[i], j = 0;
+      var iv = setInterval(function () {
+        $(line.el).text(line.text.substring(0, ++j));
+        if (j >= line.text.length) { clearInterval(iv); setTimeout(function(){ type(i+1); }, 180); }
+      }, 22);
+    }
+    type(0);
+
+    $('a[href^="#"]').on('click', function (e) {
+      var t = $(this.getAttribute('href'));
+      if (t.length) { e.preventDefault(); $('html,body').animate({ scrollTop: t.offset().top - 20 }, 350); }
+    });
+  });
+</script>
+</body>
+</html>
