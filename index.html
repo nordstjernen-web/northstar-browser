@@ -123,9 +123,34 @@
     .sidebar {
       border-right: 0;
       border-bottom: 3px solid #000000;
+      padding: 6px 12px;
+      font-size: 13px;
+      background: #f4f4f4;
+    }
+    .sidebar h3 { display: none; }
+    .sidebar ul {
+      display: flex;
+      flex-wrap: wrap;
+      margin: 0;
+      padding: 0;
+    }
+    .sidebar ul + h3 + ul,
+    .sidebar ul:not(:last-of-type)::after {
+      content: "";
+    }
+    .sidebar ul li {
+      padding: 2px 0;
+      margin-right: 12px;
+    }
+    .sidebar ul li:last-child { margin-right: 0; }
+    .sidebar ul:first-of-type li:last-child {
+      margin-right: 12px;
+      padding-right: 12px;
+      border-right: 1px solid #999999;
     }
     .header .title { font-size: 22px; }
     .header .tag { font-size: 12px; }
+    .header .logo img { width: 40px; height: 40px; }
     .content { padding: 14px 16px 24px; }
     .content h1 { font-size: 20px; }
     .content h2 { font-size: 16px; }
