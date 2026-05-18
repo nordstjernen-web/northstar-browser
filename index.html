@@ -18,16 +18,22 @@
   a:visited { color: #666699; }
   a:hover   { color: #cc0000; }
 
+  .frame {
+    margin: 12px;
+    border: 2px solid #000000;
+    background: #ffffff;
+  }
+
   .header {
     background: #000000; color: #ffffff;
-    border-bottom: 4px solid #cc0000;
+    border-bottom: 2px solid #000000;
   }
   .header table { width: 100%; border-collapse: collapse; }
   .header td { vertical-align: middle; }
   .header .logo {
     width: 80px; padding: 6px 10px;
     background: #cc0000; text-align: center;
-    border-right: 4px solid #000000;
+    border-right: 2px solid #000000;
   }
   .header .logo img { width: 56px; height: 56px; }
   .header .name {
@@ -44,19 +50,22 @@
   }
 
   .layout { width: 100%; border-collapse: collapse; }
-  .layout > tbody > tr > td { vertical-align: top; }
+  .layout > tbody > tr > td {
+    vertical-align: top;
+    background: #ffffff;
+  }
 
   .sidebar {
     width: 140px;
-    background: #f0f0f0;
-    border-right: 1px solid #cccccc;
+    border-right: 2px solid #000000;
     padding: 12px 10px;
   }
   .sidebar h3 {
     font-size: 11px;
-    color: #cc0000;
-    margin: 0 0 4px 0;
-    border-bottom: 1px solid #cc0000;
+    color: #ffffff;
+    background: #000000;
+    margin: 0 0 6px 0;
+    padding: 2px 6px;
     text-transform: uppercase;
     letter-spacing: 1px;
   }
@@ -64,41 +73,53 @@
   .sidebar li { padding: 1px 0; }
   .sidebar a { color: #003366; text-decoration: none; }
   .sidebar a:hover { text-decoration: underline; color: #cc0000; }
+  .sidebar .badge { border: 1px solid #000000; display: inline-block; }
 
   .content { padding: 16px 22px 28px; max-width: 540px; }
   .content h1 {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 18px; margin: 0 0 6px 0;
-    border-bottom: 1px solid #cccccc;
-    padding-bottom: 4px;
+    font-size: 18px; margin: 0 0 8px 0;
+    color: #ffffff; background: #cc0000;
+    padding: 3px 8px;
+    border: 2px solid #000000;
   }
   .content h2 {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 13px;
-    color: #cc0000;
-    margin: 22px 0 6px 0;
+    font-size: 12px;
+    color: #ffffff; background: #000000;
+    margin: 22px 0 8px 0;
+    padding: 2px 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
   }
   .content p { margin: 0 0 10px 0; }
   blockquote {
-    margin: 8px 0 14px 0; padding: 4px 12px;
-    border-left: 3px solid #cc0000;
+    margin: 10px 0 14px 0; padding: 6px 10px;
+    border: 1px solid #000000;
+    background: #f4f4f4;
     color: #444444; font-style: italic;
   }
 
+  .news {
+    border: 1px solid #000000;
+    padding: 8px 10px;
+  }
   .news .date {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 10px; color: #666666;
+    font-size: 10px; color: #cc0000;
     font-weight: bold; letter-spacing: 1px;
   }
-  .news p { margin-bottom: 12px; }
+  .news p { margin-bottom: 10px; }
+  .news p:last-child { margin-bottom: 0; }
 
-  table.spec { border-collapse: collapse; font-size: 11px; }
-  table.spec th, table.spec td { text-align: left; padding: 2px 14px 2px 0; vertical-align: top; }
-  table.spec th { color: #666666; font-weight: normal; white-space: nowrap; }
+  table.spec { border-collapse: collapse; font-size: 11px; border: 1px solid #000000; }
+  table.spec th, table.spec td { text-align: left; padding: 3px 10px; vertical-align: top; border-bottom: 1px solid #cccccc; }
+  table.spec tr:last-child th, table.spec tr:last-child td { border-bottom: 0; }
+  table.spec th { color: #000000; font-weight: normal; white-space: nowrap; background: #f4f4f4; border-right: 1px solid #000000; }
   code { font-family: "Courier New", monospace; background: #f4f4f4; padding: 0 2px; }
 
   .footer {
-    border-top: 4px solid #cc0000;
+    border-top: 2px solid #000000;
     background: #000000; color: #cccccc;
     padding: 8px 14px; font-size: 10px; text-align: center;
   }
@@ -107,6 +128,8 @@
 </style>
 </head>
 <body>
+
+<div class="frame">
 
 <div class="header">
   <table cellpadding="0" cellspacing="0">
@@ -163,13 +186,6 @@
       <p><span class="date">18&nbsp;MAY&nbsp;2026</span> &middot;
       Nordstjernen <b>0.6.0</b> released.
       <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Release notes &raquo;</a></p>
-
-      <p><span class="date">30&nbsp;APR&nbsp;2026</span> &middot;
-      Landlock sandbox tightened &mdash; the renderer can no longer read
-      <code>~/.ssh</code>, <code>~/.gnupg</code>, or other browsers' profiles.</p>
-
-      <p><span class="date">02&nbsp;APR&nbsp;2026</span> &middot;
-      Project home opens at <a href="https://nordstjernen.org">nordstjernen.org</a>.</p>
     </div>
 
     <a name="specs"></a>
@@ -198,6 +214,8 @@
   Copyright &copy; 2026 Andreas R&oslash;sdal &middot;
   <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/LICENSE">NSL-1.0</a> &middot;
   <a href="mailto:webmaster@nordstjernen.org">webmaster@nordstjernen.org</a>
+</div>
+
 </div>
 
 </body>
