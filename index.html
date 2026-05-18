@@ -13,133 +13,115 @@
     font-size: 11px;
     line-height: 1.55;
   }
-  img { border: 0; image-rendering: pixelated; image-rendering: -moz-crisp-edges; }
+  img { border: 0; }
   a:link    { color: #003366; }
   a:visited { color: #666699; }
   a:hover   { color: #cc0000; }
 
-  .frame {
-    margin: 12px;
-    border: 2px solid #000000;
-    background: #ffffff;
-  }
-
+  /* ===== HEADER ===== */
   .header {
-    background: #000000; color: #ffffff;
-    border-bottom: 2px solid #000000;
-  }
-  .header table { width: 100%; border-collapse: collapse; }
-  .header td { vertical-align: middle; }
-  .header .logo {
-    width: 80px; padding: 6px 10px;
-    background: #cc0000; text-align: center;
-    border-right: 2px solid #000000;
-  }
-  .header .logo img { width: 56px; height: 56px; }
-  .header .name {
+    background: #cc0000;
+    color: #ffffff;
     padding: 6px 14px;
+    border-bottom: 1px solid #000000;
+  }
+  .header .title {
     font-family: Arial, Helvetica, sans-serif;
     font-size: 22px; font-weight: bold;
+    letter-spacing: 0;
   }
-  .header .name a { color: #ffffff; text-decoration: none; }
-  .header .name .tag {
-    display: block;
-    font-size: 11px; font-weight: normal;
-    color: #cccccc; margin-top: 2px;
-    font-family: Verdana, sans-serif;
+  .header .title a { color: #ffffff; text-decoration: none; }
+  .header .title img { vertical-align: middle; margin-right: 6px; }
+  .header .tag {
+    font-size: 11px; color: #ffdddd;
+    margin-top: 2px;
   }
 
-  .layout { width: 100%; border-collapse: collapse; }
-  .layout > tbody > tr > td {
-    vertical-align: top;
-    background: #ffffff;
-  }
+  /* ===== LAYOUT ===== */
+  .layout { width: 100%; border-collapse: collapse; margin-top: 0; }
+  .layout > tbody > tr > td { vertical-align: top; }
 
   .sidebar {
     width: 140px;
-    border-right: 2px solid #000000;
-    padding: 12px 10px;
+    padding: 16px 14px;
+    border-right: 1px solid #cccccc;
+    font-size: 11px;
   }
   .sidebar h3 {
+    font-family: Arial, Helvetica, sans-serif;
     font-size: 11px;
-    color: #ffffff;
-    background: #000000;
-    margin: 0 0 6px 0;
-    padding: 2px 6px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    color: #cc0000;
+    margin: 0 0 4px 0;
+    font-weight: bold;
   }
-  .sidebar ul { list-style: none; padding: 0; margin: 0 0 14px 0; }
+  .sidebar ul { list-style: none; padding: 0; margin: 0 0 16px 0; }
   .sidebar li { padding: 1px 0; }
   .sidebar a { color: #003366; text-decoration: none; }
   .sidebar a:hover { text-decoration: underline; color: #cc0000; }
 
-  .content { padding: 16px 22px 28px; max-width: 540px; }
+  /* ===== CONTENT ===== */
+  .content { padding: 16px 22px 32px; }
   .content h1 {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 18px; margin: 0 0 8px 0;
-    color: #ffffff; background: #cc0000;
-    padding: 3px 8px;
-    border: 2px solid #000000;
+    font-size: 18px;
+    color: #cc0000;
+    margin: 0 0 6px 0;
+    font-weight: bold;
   }
   .content h2 {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 12px;
-    color: #ffffff; background: #000000;
-    margin: 22px 0 8px 0;
-    padding: 2px 8px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    font-size: 13px;
+    color: #cc0000;
+    margin: 22px 0 6px 0;
+    font-weight: bold;
   }
   .content p { margin: 0 0 10px 0; }
-  blockquote {
-    margin: 10px 0 14px 0; padding: 6px 10px;
-    border: 1px solid #000000;
+
+  .shot {
+    margin: 4px 0 18px 0;
+    border: 1px solid #999999;
+    padding: 4px;
     background: #f4f4f4;
-    color: #444444; font-style: italic;
+    display: inline-block;
+  }
+  .shot img { display: block; width: 540px; height: auto; }
+  .shot .cap {
+    font-size: 10px; color: #666666;
+    text-align: center; margin-top: 4px;
+    font-style: italic;
   }
 
-  .news {
-    border: 1px solid #000000;
-    padding: 8px 10px;
-  }
   .news .date {
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 10px; color: #cc0000;
-    font-weight: bold; letter-spacing: 1px;
+    font-size: 10px;
+    color: #cc0000;
+    font-weight: bold;
+    letter-spacing: 1px;
   }
-  .news p { margin-bottom: 10px; }
-  .news p:last-child { margin-bottom: 0; }
 
-  table.spec { border-collapse: collapse; font-size: 11px; border: 1px solid #000000; }
-  table.spec th, table.spec td { text-align: left; padding: 3px 10px; vertical-align: top; border-bottom: 1px solid #cccccc; }
-  table.spec tr:last-child th, table.spec tr:last-child td { border-bottom: 0; }
-  table.spec th { color: #000000; font-weight: normal; white-space: nowrap; background: #f4f4f4; border-right: 1px solid #000000; }
+  table.spec { border-collapse: collapse; font-size: 11px; }
+  table.spec th, table.spec td { text-align: left; padding: 2px 14px 2px 0; vertical-align: top; }
+  table.spec th { color: #666666; font-weight: normal; white-space: nowrap; }
+
   code { font-family: "Courier New", monospace; background: #f4f4f4; padding: 0 2px; }
 
+  /* ===== FOOTER ===== */
   .footer {
-    border-top: 2px solid #000000;
-    background: #000000; color: #cccccc;
-    padding: 8px 14px; font-size: 10px; text-align: center;
+    border-top: 1px solid #cccccc;
+    padding: 10px 16px;
+    font-size: 10px;
+    color: #666666;
+    text-align: center;
   }
-  .footer a { color: #ffcc66; text-decoration: none; }
-  .footer a:hover { color: #ffffff; text-decoration: underline; }
 </style>
 </head>
 <body>
 
-<div class="frame">
-
 <div class="header">
-  <table cellpadding="0" cellspacing="0">
-    <tr>
-      <td class="logo"><a href="."><img src="assets/nordstjernen.svg" alt="*"></a></td>
-      <td class="name">
-        <a href=".">nordstjernen.org</a>
-        <span class="tag">the small, steady web browser &middot; version 0.6.0</span>
-      </td>
-    </tr>
-  </table>
+  <div class="title">
+    <a href=".">nordstjernen.org</a>
+  </div>
+  <div class="tag">the small, steady web browser &middot; version 0.6.0</div>
 </div>
 
 <table class="layout" cellpadding="0" cellspacing="0">
@@ -157,7 +139,7 @@
     <ul>
       <li><a href="https://github.com/nordstjernen-web/nordstjernen">github</a></li>
       <li><a href="https://github.com/nordstjernen-web/nordstjernen/releases">releases</a></li>
-      <li><a href="https://github.com/nordstjernen-web/nordstjernen/issues">bugs</a></li>
+      <li><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">license</a></li>
     </ul>
   </td>
 
@@ -165,24 +147,20 @@
 
     <a name="about"></a>
     <h1>nordstjernen</h1>
+    <p>An independent web browser written in C. Around <b>40,000 lines</b>,
+    small enough for one person to read in a long afternoon. No Blink,
+    no Gecko, no WebKit, no JIT. No telemetry, ever.</p>
 
-    <blockquote>
-      A north star, small and faithful &mdash; light enough to read by,
-      slow enough to think with; built one line at a time.
-    </blockquote>
-
-    <p>Nordstjernen is an independent web browser written in C. Around
-    <b>40,000 lines</b>, small enough for one person to read in a long
-    afternoon. No Blink, no Gecko, no WebKit, no JIT.
-    No telemetry, ever.</p>
+    <div class="shot">
+      <a href="assets/screenshot.png"><img src="assets/screenshot.png" alt="Nordstjernen screenshot"></a>
+      <div class="cap">Nordstjernen 0.6.0 on Linux / GTK 4.</div>
+    </div>
 
     <a name="news"></a>
     <h2>news</h2>
-    <div class="news">
-      <p><span class="date">18&nbsp;MAY&nbsp;2026</span> &middot;
-      Nordstjernen <b>0.6.0</b> released.
-      <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Release notes &raquo;</a></p>
-    </div>
+    <p><span class="date">18&nbsp;MAY&nbsp;2026</span> &middot;
+    Nordstjernen <b>0.6.0</b> released.
+    <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Release notes &raquo;</a></p>
 
     <a name="specs"></a>
     <h2>specifications</h2>
@@ -202,7 +180,7 @@
     <p>&raquo; <a href="https://github.com/nordstjernen-web/nordstjernen/releases"><b>Nordstjernen 0.6.0</b></a>
        &middot; <a href="https://github.com/nordstjernen-web/nordstjernen">source</a></p>
 
-    <p style="margin-top:18px;">
+    <p style="margin-top:14px;">
       <a href="https://github.com/nordstjernen-web/nordstjernen">
         <img src="assets/best-viewed-in-nordstjernen.png" width="180" height="63" alt="Best viewed in Nordstjernen">
       </a>
@@ -216,8 +194,6 @@
   Copyright &copy; 2026 Andreas R&oslash;sdal &middot;
   <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
   <a href="mailto:webmaster@nordstjernen.org">webmaster@nordstjernen.org</a>
-</div>
-
 </div>
 
 </body>
