@@ -67,6 +67,8 @@
   .sidebar li { padding: 1px 0; }
   .sidebar a { color: #003366; text-decoration: none; }
   .sidebar a:hover { text-decoration: underline; color: #cc0000; }
+  .sidebar .counter { margin-top: 2px; }
+  .sidebar .counter img { display: block; }
 
   /* ===== CONTENT ===== */
   .content { padding: 16px 22px 32px; }
@@ -148,6 +150,10 @@
       padding-right: 12px;
       border-right: 1px solid #999999;
     }
+    .sidebar .counter {
+      margin-top: 6px;
+    }
+    .sidebar .counter img { height: 22px; width: auto; }
     .header .title { font-size: 22px; }
     .header .tag { font-size: 12px; }
     .header .logo img { width: 40px; height: 40px; }
@@ -187,6 +193,8 @@
         <li><a href="https://github.com/nordstjernen-web/nordstjernen/releases">releases</a></li>
         <li><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">license</a></li>
       </ul>
+      <h3>visitors</h3>
+      <div class="counter"><img src="counter.php" alt="visitor count"></div>
     </aside>
 
     <main class="col-12 col-md-9 col-lg-10 content">
