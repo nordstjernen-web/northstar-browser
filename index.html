@@ -1,114 +1,407 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
 <html>
 <head>
-<title>Nordstjernen</title>
-<meta name="description" content="Nordstjernen - a small, steady web browser written in C. No telemetry, no JIT.">
+<title>Welcome to Nordstjernen</title>
+<meta name="description" content="Nordstjernen - the small, steady web browser. ~40,000 lines of C. No telemetry. No JIT.">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
 <style type="text/css">
   html, body {
     margin: 0; padding: 0;
-    background: #ffffff;
+    background: #c0c0c0;
     color: #000000;
-    font-family: Verdana, Geneva, Arial, sans-serif;
-    font-size: 11px;
-    line-height: 1.5;
+    font-family: "Times New Roman", Times, serif;
+    font-size: 12px;
     -webkit-font-smoothing: none;
   }
-  img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; }
-  a:link    { color: #0000cc; }
-  a:visited { color: #660099; }
-  a:hover   { text-decoration: underline; color: #cc0000; }
+  img { image-rendering: pixelated; image-rendering: -moz-crisp-edges; border: 0; }
+  a:link    { color: #0000ee; }
+  a:visited { color: #551a8b; }
+  a:active  { color: #ff0000; }
 
-  .banner {
-    background: #000066;
+  .page {
+    width: 760px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-left: 1px solid #808080;
+    border-right: 1px solid #808080;
+  }
+
+  /* ======= TOP BANNER ======= */
+  .top {
+    background: #000033;
+    background-image:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='90'><rect width='400' height='90' fill='%23000033'/><circle cx='12' cy='14' r='0.8' fill='%23ffffff'/><circle cx='80' cy='28' r='0.6' fill='%23ffffff'/><circle cx='150' cy='10' r='1' fill='%23ffffff'/><circle cx='200' cy='40' r='0.8' fill='%23ffffff'/><circle cx='260' cy='18' r='0.6' fill='%23ffffff'/><circle cx='320' cy='62' r='1' fill='%23ffffff'/><circle cx='360' cy='30' r='0.6' fill='%23ffffff'/><circle cx='40' cy='60' r='0.7' fill='%23ffffff'/><circle cx='110' cy='72' r='0.6' fill='%23ffffff'/><circle cx='240' cy='78' r='0.8' fill='%23ffffff'/><circle cx='180' cy='65' r='0.5' fill='%23ffffff'/><circle cx='300' cy='8' r='0.6' fill='%23ffffff'/></svg>");
     color: #ffffff;
+    padding: 0;
     border-bottom: 2px solid #000000;
-    padding: 10px 16px;
   }
-  .banner .brand {
-    font-family: Arial, sans-serif;
-    font-size: 20px; font-weight: bold;
+  .top td { vertical-align: middle; }
+  .logo-cell { width: 110px; padding: 8px 10px; text-align: center; }
+  .logo-cell img { width: 90px; height: 90px; }
+  .title-cell { padding: 4px 10px; }
+  .title-cell .pname {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 36px; font-weight: bold;
+    color: #ffffff; letter-spacing: 1px;
+    text-shadow: 1px 1px 0 #000000;
+  }
+  .title-cell .pname .y { color: #ffcc00; }
+  .title-cell .ptag {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px; color: #aab8ff;
+    font-style: italic; margin-top: 2px;
+  }
+  .top .ad-cell {
+    width: 180px; padding: 6px 10px; text-align: right;
+  }
+  .top .ad-cell img { border: 1px solid #888888; }
+
+  /* ======= DEPARTMENT BUTTONS (colored row) ======= */
+  .depts {
+    background: #999999;
+    padding: 0;
+    border-bottom: 1px solid #000000;
+  }
+  .depts table { width: 100%; border-collapse: collapse; }
+  .depts td {
+    text-align: center;
+    padding: 4px 0;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    font-weight: bold;
+    border-right: 1px solid #ffffff;
+    border-left: 1px solid #555555;
+  }
+  .depts td:first-child { border-left: 0; }
+  .depts td:last-child  { border-right: 0; }
+  .depts a { color: #ffffff; text-decoration: none; display: block; }
+  .depts a:hover { background: #000033; }
+  .d1 { background: #cc0033; }
+  .d2 { background: #ff6600; }
+  .d3 { background: #339933; }
+  .d4 { background: #0066cc; }
+  .d5 { background: #663399; }
+  .d6 { background: #336666; }
+
+  /* ======= DESTINATIONS NAV (yellow bar) ======= */
+  .dest {
+    background: #ffcc00;
+    border-bottom: 1px solid #000000;
+    padding: 3px 8px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    color: #000000;
+  }
+  .dest b { color: #cc0000; margin-right: 8px; }
+  .dest a {
+    color: #000099; text-decoration: none;
+    margin: 0 6px;
+  }
+  .dest a:hover { text-decoration: underline; color: #cc0000; }
+
+  /* ======= BODY LAYOUT ======= */
+  .body { padding: 0; }
+  .body > table { width: 100%; border-collapse: collapse; }
+  .body > table > tbody > tr > td { vertical-align: top; }
+
+  .leftcol {
+    width: 140px;
+    background: #e8e8e8;
+    border-right: 1px solid #999999;
+    padding: 10px 8px;
+    font-size: 11px;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .rightcol {
+    width: 160px;
+    background: #f4f4f4;
+    border-left: 1px solid #999999;
+    padding: 10px 8px;
+    font-size: 11px;
+  }
+  .center { padding: 14px 16px; font-size: 13px; }
+
+  .leftcol h4, .rightcol h4 {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    color: #ffffff;
+    background: #cc0000;
+    padding: 2px 6px;
+    margin: 0 0 6px 0;
     letter-spacing: 1px;
+    text-transform: uppercase;
   }
-  .banner .brand img { vertical-align: middle; margin-right: 8px; }
-  .banner .brand .star { color: #ffcc00; }
+  .leftcol h4.blu, .rightcol h4.blu { background: #000066; }
+  .leftcol h4.grn, .rightcol h4.grn { background: #339933; }
+  .leftcol ul, .rightcol ul { list-style: none; padding: 0; margin: 0 0 14px 0; }
+  .leftcol li, .rightcol li {
+    padding: 1px 0 1px 10px;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'><polygon points='1,1 7,4 1,7' fill='%23cc0000'/></svg>") no-repeat 0 5px;
+    line-height: 1.5;
+  }
 
-  .wrap { max-width: 640px; margin: 0 auto; padding: 28px 20px; }
-
-  h1 {
-    font-family: Arial, sans-serif;
+  /* ======= CENTER CONTENT ======= */
+  .center h1 {
+    font-family: Arial, Helvetica, sans-serif;
     font-size: 22px;
     color: #cc0000;
-    margin: 0 0 4px 0;
+    margin: 0 0 6px 0;
   }
-  .tag { color: #555555; font-style: italic; margin-bottom: 22px; }
+  .center .lead {
+    font-style: italic; color: #555555; font-size: 12px;
+    margin-bottom: 14px; border-left: 3px solid #ffcc00; padding-left: 8px;
+  }
+  .center p { margin: 0 0 10px 0; font-size: 12px; line-height: 1.55; }
 
-  p { margin: 0 0 12px 0; }
+  /* Feature boxes (What's New / What's Cool) */
+  .fbox {
+    border: 1px solid #999999;
+    margin-bottom: 12px;
+    background: #ffffff;
+  }
+  .fbox .hd {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px; font-weight: bold; color: #ffffff;
+    padding: 3px 6px; letter-spacing: 1px;
+  }
+  .fbox .hd.new  { background: #cc0000; }
+  .fbox .hd.cool { background: #ff6600; }
+  .fbox .hd.sec  { background: #339933; }
+  .fbox .bd { padding: 7px 9px; font-size: 11px; line-height: 1.5; }
+  .fbox .bd .date {
+    font-family: "Courier New", monospace; font-size: 10px;
+    color: #888888; margin-right: 4px;
+  }
+  .fbox .bd hr { border: 0; border-top: 1px dotted #cccccc; margin: 5px 0; }
 
-  table.spec { border-collapse: collapse; width: 100%; margin: 14px 0 22px 0; }
-  table.spec th, table.spec td { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; }
-  table.spec th { color: #555555; font-weight: normal; white-space: nowrap; width: 110px; }
+  table.spec { border-collapse: collapse; width: 100%; font-size: 11px; }
+  table.spec th, table.spec td { text-align: left; padding: 2px 6px 2px 0; vertical-align: top; }
+  table.spec th { color: #555555; font-weight: normal; width: 100px; }
   table.spec td { font-family: "Courier New", monospace; }
   table.spec tr { border-bottom: 1px dotted #cccccc; }
 
+  code { font-family: "Courier New", monospace; background: #f0f0f0; padding: 0 2px; }
+
+  /* ======= FOOTER ======= */
   .footer {
-    background: #000066;
-    color: #aab8ff;
+    background: #000033;
+    color: #ffffff;
+    font-family: Arial, Helvetica, sans-serif;
     font-size: 10px;
-    padding: 10px 16px;
+    padding: 8px 12px;
     text-align: center;
     border-top: 2px solid #000000;
-    margin-top: 28px;
   }
   .footer a { color: #ffcc00; text-decoration: none; }
-  .footer a:hover { text-decoration: underline; color: #ffffff; }
+  .footer a:hover { color: #ffffff; text-decoration: underline; }
 
-  code { font-family: "Courier New", monospace; }
+  .badge {
+    text-align: center; margin: 10px 0;
+  }
+  .badge img { border: 0; }
 </style>
 </head>
 <body>
 
-<div class="banner">
-  <span class="brand">
-    <img src="assets/nordstjernen.svg" width="28" height="28" alt="*">
-    Nord<span class="star">stjernen</span>
-  </span>
-</div>
+<div class="page">
 
-<div class="wrap">
-
-  <h1>The small, steady web browser.</h1>
-  <div class="tag">Version 0.6.0 &middot; written in C &middot; by Andreas R&oslash;sdal</div>
-
-  <p><b>Nordstjernen</b> is a web browser for people who want to read the web
-  without donating a few hundred million lines of someone else's engine and a
-  few hundred kilobytes of telemetry to the experience.</p>
-
-  <p>It is around 40,000 lines of C &mdash; small enough that a single human can
-  read the whole thing in a long afternoon. No Blink, no Gecko, no WebKit, no JIT.</p>
-
-  <table class="spec">
-    <tr><th>Language</th><td>C</td></tr>
-    <tr><th>HTML / CSS</th><td>lexbor</td></tr>
-    <tr><th>JavaScript</th><td>quickjs-ng (interpreter)</td></tr>
-    <tr><th>Images</th><td>Wuffs</td></tr>
-    <tr><th>UI</th><td>GTK 4</td></tr>
-    <tr><th>Network</th><td>libcurl</td></tr>
-    <tr><th>Platforms</th><td>Linux &middot; Windows &middot; macOS</td></tr>
-    <tr><th>License</th><td>NSL-1.0 &rarr; MIT after 10 years</td></tr>
+  <!-- ================ TOP BANNER ================ -->
+  <table class="top" cellpadding="0" cellspacing="0" width="100%">
+    <tr>
+      <td class="logo-cell"><img src="assets/nordstjernen.svg" alt="Nordstjernen"></td>
+      <td class="title-cell">
+        <div class="pname">Nord<span class="y">stjernen</span></div>
+        <div class="ptag">the small, steady web browser &nbsp;//&nbsp; version 0.6.0</div>
+      </td>
+      <td class="ad-cell">
+        <a href="https://github.com/nordstjernen-web/nordstjernen">
+          <img src="assets/best-viewed-in-nordstjernen.png" alt="Best viewed in Nordstjernen" width="180" height="63">
+        </a>
+      </td>
+    </tr>
   </table>
 
-  <p>
-    <a href="https://github.com/nordstjernen-web/nordstjernen">Source on GitHub</a> &middot;
+  <!-- ================ DEPARTMENT BUTTONS ================ -->
+  <div class="depts">
+    <table cellpadding="0" cellspacing="0">
+      <tr>
+        <td class="d1"><a href="#about">ABOUT</a></td>
+        <td class="d2"><a href="#features">FEATURES</a></td>
+        <td class="d3"><a href="#security">SECURITY</a></td>
+        <td class="d4"><a href="#specs">SPECS</a></td>
+        <td class="d5"><a href="#download">DOWNLOAD</a></td>
+        <td class="d6"><a href="https://github.com/nordstjernen-web/nordstjernen">SOURCE</a></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ================ DESTINATIONS BAR ================ -->
+  <div class="dest">
+    <b>DESTINATIONS:</b>
+    <a href="#whatsnew">What's New</a> |
+    <a href="#whatscool">What's Cool</a> |
+    <a href="#specs">Specifications</a> |
+    <a href="#download">Get Nordstjernen</a> |
+    <a href="https://github.com/nordstjernen-web/nordstjernen/issues">Bugs</a> |
     <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Releases</a>
-  </p>
+  </div>
 
-</div>
+  <!-- ================ MAIN LAYOUT ================ -->
+  <div class="body">
+  <table cellpadding="0" cellspacing="0">
+  <tr>
 
-<div class="footer">
-  Copyright &copy; 2026 Andreas R&oslash;sdal &middot;
-  <a href="https://github.com/nordstjernen-web/nordstjernen">github</a> &middot;
-  <a href="mailto:webmaster@nordstjernen.org">webmaster@nordstjernen.org</a>
+    <!-- LEFT COLUMN -->
+    <td class="leftcol">
+      <h4 class="blu">Browser</h4>
+      <ul>
+        <li><a href="#about">About</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#security">Security</a></li>
+        <li><a href="#specs">Specifications</a></li>
+        <li><a href="#download">Download</a></li>
+      </ul>
+
+      <h4 class="grn">Developers</h4>
+      <ul>
+        <li><a href="https://github.com/nordstjernen-web/nordstjernen">Source code</a></li>
+        <li><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/README.md">Build guide</a></li>
+        <li><a href="https://github.com/nordstjernen-web/nordstjernen/issues">Report a bug</a></li>
+        <li><a href="https://github.com/nordstjernen-web/nordstjernen/releases">Release notes</a></li>
+      </ul>
+
+      <h4>Platforms</h4>
+      <ul>
+        <li>Linux (GTK 4)</li>
+        <li>Windows (MSYS2)</li>
+        <li>macOS (arm/x64)</li>
+      </ul>
+    </td>
+
+    <!-- CENTER COLUMN -->
+    <td class="center">
+      <a name="about"></a>
+      <h1>Welcome to Nordstjernen.</h1>
+      <div class="lead">
+        "A north star, small and faithful &mdash; light enough to read by,<br>
+        slow enough to think with; built one line at a time."
+      </div>
+
+      <p><b>Nordstjernen</b> is a web browser for people who want to read the
+      web &mdash; Wikipedia, news, documentation, search results, light forms
+      &mdash; without donating a few hundred million lines of someone else's
+      engine and a few hundred kilobytes of telemetry to the experience.</p>
+
+      <p>It is around <b>40,000 lines of C</b>, small enough that a single
+      human can read the whole thing in a long afternoon. It uses GTK&nbsp;4
+      for the user interface and libcurl for networking; the HTML / CSS
+      parsers, layout, paint, and JavaScript bindings are written from scratch
+      &mdash; no Blink, no Gecko, no WebKit, no JIT.</p>
+
+      <a name="features"></a>
+      <a name="whatscool"></a>
+      <div class="fbox">
+        <div class="hd cool">&#9733; WHAT'S COOL</div>
+        <div class="bd">
+          <b>No telemetry, ever.</b> No phone-home, no update pinger, no crash
+          reporter, no "studies". DuckDuckGo Lite is the default search.
+          <hr>
+          <b>No JIT.</b> JavaScript runs on QuickJS &mdash; an interpreter.
+          The most prolific category of in-the-wild browser RCEs
+          (V8/SpiderMonkey JIT bugs) is foreclosed entirely.
+          <hr>
+          <b>Smaller attack surface.</b> No WebGL, no WebGPU, no WebRTC,
+          no service workers, no MSE, no DRM, no extensions, no plugins.
+        </div>
+      </div>
+
+      <a name="security"></a>
+      <div class="fbox">
+        <div class="hd sec">&#9733; SECURITY MODEL</div>
+        <div class="bd">
+          On Linux the renderer runs under a <b>Landlock</b> sandbox that
+          removes read access to <code>~/.ssh</code>, <code>~/.gnupg</code>,
+          and other browsers' profiles. The binary is compiled with PIE,
+          full RELRO, stack-protector-strong, stack-clash protection,
+          Intel CET, <code>_FORTIFY_SOURCE=2</code>, and a no-exec stack.
+          Refuses to run as root.
+          <hr>
+          Network defaults: TLS verification on, HTTP/HTTPS only,
+          built-in HSTS preload list, max 10 redirects, 60s per request,
+          60s per JS slice. Cache and connections partitioned per top-level site.
+        </div>
+      </div>
+
+      <a name="specs"></a>
+      <h4 style="font-family:Arial,sans-serif;font-size:11px;color:#fff;background:#000066;padding:3px 6px;letter-spacing:1px;margin:14px 0 6px;">SPECIFICATIONS</h4>
+      <table class="spec">
+        <tr><th>Language</th><td>C &middot; 98.2%</td></tr>
+        <tr><th>HTML / CSS</th><td>lexbor</td></tr>
+        <tr><th>JavaScript</th><td>quickjs-ng (interpreter)</td></tr>
+        <tr><th>Images</th><td>Wuffs (PNG, GIF, BMP, JPEG)</td></tr>
+        <tr><th>UI toolkit</th><td>GTK 4</td></tr>
+        <tr><th>Networking</th><td>libcurl + HSTS preload</td></tr>
+        <tr><th>Build</th><td>Meson + Ninja</td></tr>
+        <tr><th>License</th><td>NSL-1.0 &rarr; MIT after 10 years</td></tr>
+      </table>
+
+      <a name="download"></a>
+      <p style="margin-top:14px;">
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases"><b>Download Nordstjernen 0.6.0 &raquo;</b></a>
+        &nbsp;|&nbsp;
+        <a href="https://github.com/nordstjernen-web/nordstjernen">Browse the source</a>
+      </p>
+    </td>
+
+    <!-- RIGHT COLUMN -->
+    <td class="rightcol">
+
+      <a name="whatsnew"></a>
+      <div class="fbox">
+        <div class="hd new">&#9733; WHAT'S NEW</div>
+        <div class="bd">
+          <span class="date">05-18</span> Nordstjernen 0.6.0 released.
+          <hr>
+          <span class="date">04-30</span> Landlock sandbox tightened.
+          <hr>
+          <span class="date">04-12</span> AVIF support via Wuffs.
+        </div>
+      </div>
+
+      <div class="badge">
+        <a href="https://github.com/nordstjernen-web/nordstjernen">
+          <img src="assets/best-viewed-in-nordstjernen.png" width="150" height="52" alt="Best viewed in Nordstjernen">
+        </a>
+      </div>
+
+      <h4 class="blu">By the numbers</h4>
+      <table class="spec">
+        <tr><th>LOC</th><td>~40,000</td></tr>
+        <tr><th>JIT</th><td>none</td></tr>
+        <tr><th>Trackers</th><td>0</td></tr>
+        <tr><th>Cold start</th><td>~11 ms</td></tr>
+      </table>
+
+    </td>
+
+  </tr>
+  </table>
+  </div>
+
+  <!-- ================ FOOTER ================ -->
+  <div class="footer">
+    <a href="#about">About</a> &middot;
+    <a href="#features">Features</a> &middot;
+    <a href="#security">Security</a> &middot;
+    <a href="#specs">Specs</a> &middot;
+    <a href="#download">Download</a> &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen">Source</a>
+    <br>
+    Copyright &copy; 2026 Andreas R&oslash;sdal &middot;
+    Source-available under <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/LICENSE">NSL-1.0</a> &middot;
+    <a href="mailto:webmaster@nordstjernen.org">webmaster@nordstjernen.org</a>
+  </div>
+
 </div>
 
 </body>
