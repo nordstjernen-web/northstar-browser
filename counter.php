@@ -34,7 +34,7 @@ if ($fp !== false) {
     fclose($fp);
 }
 
-$digits = str_pad((string) $count, 7, '0', STR_PAD_LEFT);
+$digits = str_pad((string) $count, 9, '0', STR_PAD_LEFT);
 $charW  = 14;
 $pad    = 6;
 $h      = 28;
