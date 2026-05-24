@@ -181,7 +181,7 @@
         <td class="logo"><a href="."><img src="assets/nordstjernen.svg" alt="*"></a></td>
         <td class="titlecell">
           <div class="title"><a href=".">nordstjernen.org</a></div>
-          <div class="tag">the small, steady web browser &middot; version 0.6.0</div>
+          <div class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</div>
         </td>
       </tr>
     </table>
@@ -217,11 +217,12 @@
 
         <a id="about"></a>
         <h1>nordstjernen</h1>
-        <p>Nordstjernen is a web browser written in C. A simple web browser for using the Internet, aiming to support common HTML5, CSS and Javascript.</p>
+        <p>Nordstjernen is an independent, lightweight web browser built entirely from scratch in C. A hardened, zero-JIT HTML5 / CSS / JavaScript rendering engine with a clean-room engine &mdash; not Blink, not WebKit, not Gecko.</p>
+        <p>Cold-starts in milliseconds, idles at a few tens of MB, and ships <b>no telemetry of any kind</b> &mdash; no phone-home, no update pinger, no crash reports, no &ldquo;studies&rdquo;. Privacy is on by default: partitioned cookies, third-party cookies off, HSTS, CSP and mixed-content blocking. Built in Norway.</p>
 
         <div class="shot">
           <a href="assets/screenshot.png"><img src="assets/screenshot.png" alt="Nordstjernen screenshot"></a>
-          <div class="cap">Nordstjernen 0.6.0 on Linux / GTK 4.</div>
+          <div class="cap">Nordstjernen rendering the about:nordstjernen page on Linux / GTK 4.</div>
         </div>
 
         <a id="news"></a>
@@ -233,12 +234,14 @@
         <a id="specs"></a>
         <h2>specifications</h2>
         <table class="spec">
-          <tr><th>language</th><td>C</td></tr>
-          <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a></td></tr>
-          <tr><th>javascript</th><td>1: An AOT (Ahread-of-time) JavaScript to native code compiler. 2: <a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> (interpreter, no jit)</td></tr>
-          <tr><th>images</th><td><a href="https://github.com/google/wuffs">Wuffs</a></td></tr>
-          <tr><th>ui</th><td><a href="https://www.gtk.org">GTK 4</a></td></tr>
-          <tr><th>network</th><td><a href="https://curl.se">libcurl</a></td></tr>
+          <tr><th>language</th><td>C &middot; ~50 kLOC, fully auditable</td></tr>
+          <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> 3.0.0 (parser, WHATWG URL, selectors)</td></tr>
+          <tr><th>javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> v0.14.0 &mdash; bytecode interpreter, no JIT (W^X holds process-wide)</td></tr>
+          <tr><th>images</th><td><a href="https://github.com/google/wuffs">Wuffs</a> v0.4 (PNG / GIF / BMP / JPEG)</td></tr>
+          <tr><th>ui</th><td><a href="https://www.gtk.org">GTK 4</a> &middot; one window per page, no tab strip</td></tr>
+          <tr><th>network</th><td><a href="https://curl.se">libcurl</a> &middot; HTTP/2 &middot; gzip + brotli + zstd</td></tr>
+          <tr><th>hardening</th><td>Landlock + seccomp sandbox &middot; PIE &middot; full RELRO &middot; Intel CET &middot; no JIT</td></tr>
+          <tr><th>privacy</th><td>no telemetry &middot; partitioned cookies &middot; HSTS / CSP / mixed-content blocking</td></tr>
           <tr><th>platforms</th><td>linux &middot; windows &middot; macos</td></tr>
           <tr><th>license</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years</td></tr>
         </table>
