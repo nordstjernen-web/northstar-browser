@@ -7,6 +7,7 @@
 <meta name="description" content="Nordstjernen - an independent web browser written in C. No telemetry, no JIT.">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
 <style type="text/css">
+  *, *::before, *::after { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0;
     background: #ffffff;
@@ -14,8 +15,9 @@
     font-family: Verdana, Arial, Helvetica, sans-serif;
     font-size: 15px;
     line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
   }
-  img { border: 0; }
+  img { border: 0; max-width: 100%; }
   a:link    { color: #003366; }
   a:visited { color: #666699; }
   a:hover   { color: #cc0000; }
@@ -53,7 +55,7 @@
   .header .title a { color: #ffffff; text-decoration: none; }
   .header .tag {
     font-size: 14px; color: #c8d3ee;
-    margin-top: 6px;
+    margin: 6px 0 0 0;
   }
 
   /* ===== NAV ===== */
@@ -63,7 +65,7 @@
     text-align: center;
     padding: 8px 12px;
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 14px;
+    font-size: 16px;
   }
   .nav a {
     color: #003366;
@@ -108,9 +110,10 @@
     letter-spacing: 1px;
   }
 
-  table.spec { border-collapse: collapse; font-size: 15px; }
+  table.spec { border-collapse: collapse; font-size: 15px; width: 100%; }
   table.spec th, table.spec td { text-align: left; padding: 3px 18px 3px 0; vertical-align: top; }
   table.spec th { color: #666666; font-weight: normal; white-space: nowrap; }
+  table.spec td { overflow-wrap: anywhere; word-break: break-word; }
 
   code { font-family: "Courier New", monospace; background: #f4f4f4; padding: 0 2px; }
 
@@ -128,11 +131,11 @@
 
   /* ===== RESPONSIVE ===== */
   @media (max-width: 767px) {
-    .nav { font-size: 13px; line-height: 2; }
+    .nav { font-size: 15px; line-height: 2; }
     .header .bestviewed { display: none; }
     .header .title { font-size: 22px; }
     .header .tag { font-size: 12px; }
-    .header .logo img { width: 40px; height: 40px; }
+    .header .logo { width: 40px; height: 40px; }
     .content { padding: 16px 16px 24px; }
     .content h1 { font-size: 20px; }
     .content h2 { font-size: 16px; }
@@ -143,18 +146,18 @@
 
 <div class="frame">
 
-  <div class="header">
+  <header class="header">
     <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen">
       <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
     </a>
     <div class="brand">
-      <a href="."><img class="logo" src="assets/nordstjernen.svg" alt="*"></a>
+      <a href="."><img class="logo" src="assets/nordstjernen.svg" width="56" height="56" alt="Nordstjernen logo"></a>
       <span class="title"><a href=".">nordstjernen.org</a></span>
     </div>
-    <div class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</div>
-  </div>
+    <p class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</p>
+  </header>
 
-  <div class="nav">
+  <nav class="nav" aria-label="Primary">
     <a href="#about">about</a><span class="sep">&middot;</span>
     <a href="#news">news</a><span class="sep">&middot;</span>
     <a href="#specs">specifications</a><span class="sep">&middot;</span>
@@ -164,28 +167,26 @@
     <a href="https://github.com/nordstjernen-web/nordstjernen/releases">releases</a><span class="sep">&middot;</span>
     <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">license</a><span class="sep">&middot;</span>
     <a href="https://discord.gg/4W959nW5vF">discord</a>
-  </div>
+  </nav>
 
-  <div class="content">
+  <main class="content">
 
-        <a id="about"></a>
-        <h1>nordstjernen</h1>
+        <h1 id="about">nordstjernen</h1>
         <p>Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, Mac and Linux, with an Android port in progress. Nordstjernen is built in Norway.</p>
 
         <p>Nordstjernen Browser version 1.0.1 released! <a href="release-1-0-1.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.1">More info here</a>.</p>
 
-        <div class="shot">
-          <a href="screenshots/screenshot1.png"><img src="screenshots/screenshot1.png" alt="Nordstjernen screenshot"></a>
-          <div class="cap">Nordstjernen rendering a page. <a href="screenshots.html">more screenshots &raquo;</a></div>
-        </div>
+        <figure class="shot">
+          <a href="screenshots/screenshot1.png"><img src="screenshots/screenshot1.png" loading="lazy" alt="Nordstjernen rendering a web page"></a>
+          <figcaption class="cap">Nordstjernen rendering a page. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
+        </figure>
 
-        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser. See the standards table below and <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
-        <p><b>Secure.</b> Landlock + seccomp sandbox &middot; PIE &middot; full RELRO &middot; Intel CET &middot; no JIT.</p>
-        <p><b>Minimalism.</b> The whole engine is about 88,000 lines of C written by Claude and Codex (93 files in <code>src/</code>, excluding the vendored lexbor, QuickJS and Wuffs libraries) &mdash; small enough for one person to read and audit end-to-end.</p>
+        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 114 spec rows fully implemented, 49 partial, 4 absent as of June 2026. See <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p><b>Secure.</b> seccomp + Landlock sandbox on Linux &middot; a privilege-separated broker process &middot; no JIT.</p>
+        <p><b>Minimalism.</b> The whole engine is about 102,000 lines of C written by Claude and Codex (102 files in <code>src/</code>, excluding the vendored libraries) &mdash; small enough for one person to read and audit end-to-end.</p>
         <p>Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.</p>
 
-        <a id="news"></a>
-        <h2>news</h2>
+        <h2 id="news">news</h2>
         <p><span class="date">7&nbsp;JUN&nbsp;2026</span> &middot;
         Nordstjernen <b>1.0.1</b> released &mdash; a maintenance release.
         <a href="release-1-0-1.html">Announcement &raquo;</a> &middot;
@@ -208,23 +209,23 @@
         Nordstjernen <b>0.7.0</b> released.
         <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.7.0">Release notes &raquo;</a></p>
 
-        <a id="specs"></a>
-        <h2>specifications</h2>
+        <h2 id="specs">specifications</h2>
         <table class="spec">
-          <tr><th>language</th><td>C &middot; ~88 kLOC, fully auditable</td></tr>
-          <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> 3.0.0 (parser, WHATWG URL, selectors)</td></tr>
-          <tr><th>javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> v0.14.0 &mdash; bytecode interpreter, no JIT (W^X holds process-wide)</td></tr>
-          <tr><th>images</th><td><a href="https://github.com/google/wuffs">Wuffs</a> v0.4 (PNG / GIF / BMP / JPEG)</td></tr>
-          <tr><th>ui</th><td><a href="https://www.gtk.org">GTK 4</a> &middot; one window per page, no tab strip</td></tr>
-          <tr><th>network</th><td><a href="https://curl.se">libcurl</a> &middot; HTTP/2 &middot; gzip + brotli + zstd</td></tr>
-          <tr><th>hardening</th><td>Landlock + seccomp sandbox &middot; PIE &middot; full RELRO &middot; Intel CET &middot; no JIT</td></tr>
-          <tr><th>privacy</th><td>no telemetry &middot; partitioned cookies &middot; HSTS / CSP / mixed-content blocking</td></tr>
-          <tr><th>platforms</th><td>linux &middot; windows &middot; macos</td></tr>
+          <tr><th>language</th><td>C &middot; ~102 kLOC across 102 files in <code>src/</code>, fully auditable</td></tr>
+          <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> (parser, WHATWG URL, selectors)</td></tr>
+          <tr><th>javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> &mdash; bytecode interpreter, no JIT</td></tr>
+          <tr><th>webassembly</th><td><a href="https://github.com/bytecodealliance/wasm-micro-runtime">WAMR</a> &mdash; interpreter behind the <code>WebAssembly</code> JS API</td></tr>
+          <tr><th>images</th><td><a href="https://github.com/google/wuffs">Wuffs</a> v0.4 (PNG / GIF / BMP / JPEG / WebP lossless)</td></tr>
+          <tr><th>ui</th><td><a href="https://www.gtk.org">GTK 4</a> (&ge;&nbsp;4.22.1 on Windows, &ge;&nbsp;4.14 elsewhere) &middot; Pango text shaping &middot; one window per page, no tab strip</td></tr>
+          <tr><th>network</th><td><a href="https://curl.se">libcurl</a> &ge;&nbsp;7.85 &middot; HTTP/2</td></tr>
+          <tr><th>hardening</th><td>seccomp + Landlock sandbox on Linux &middot; privilege-separated broker process &middot; no JIT</td></tr>
+          <tr><th>privacy</th><td>no telemetry &middot; partitioned cookies &middot; HSTS &middot; CSP</td></tr>
+          <tr><th>standards</th><td>114 spec rows fully implemented, 49 partial, 4 absent (June 2026)</td></tr>
+          <tr><th>platforms</th><td>linux &middot; windows &middot; macos &middot; android (port in progress)</td></tr>
           <tr><th>license</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years</td></tr>
         </table>
 
-        <a id="download"></a>
-        <h2>download</h2>
+        <h2 id="download">download</h2>
         <p>Latest tagged release: Nordstjernen <b>1.0.1</b> &mdash; released 7 June 2026.
         <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.1">full release notes &raquo;</a></p>
 
@@ -280,14 +281,14 @@
           </tr>
         </table>
 
-  </div>
+  </main>
 
-  <div class="footer">
+  <footer class="footer">
     <div class="counter"><img src="counter.php" alt="visitor count"></div>
     Copyright &copy; 2026 the Nordstjernen project &middot;
     <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
     <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
-  </div>
+  </footer>
 
 </div>
 
