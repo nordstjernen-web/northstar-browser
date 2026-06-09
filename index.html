@@ -117,6 +117,8 @@
     font-style: italic;
   }
 
+  ul.news { list-style: none; margin: 0; padding: 0; }
+  ul.news li { margin: 0 0 10px 0; }
   .news .date {
     font-family: Arial, Helvetica, sans-serif;
     font-size: 13px;
@@ -129,6 +131,14 @@
   table.spec th, table.spec td { text-align: left; padding: 3px 18px 3px 0; vertical-align: top; }
   table.spec th { color: #666666; font-weight: normal; white-space: nowrap; }
   table.spec td { overflow-wrap: anywhere; word-break: break-word; }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
 
   code { font-family: "Courier New", monospace; background: #f4f4f4; padding: 0 2px; }
 
@@ -204,35 +214,38 @@
         <p>Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.</p>
 
         <h2 id="news">news</h2>
-        <p><span class="date">9&nbsp;JUN&nbsp;2026</span> &middot;
+        <ul class="news">
+        <li><time class="date" datetime="2026-06-09">9&nbsp;JUN&nbsp;2026</time> &middot;
         Nordstjernen <b>1.0.2</b> released &mdash; a maintenance release.
         <a href="release-1-0-2.html">Announcement &raquo;</a> &middot;
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.2">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.2">Release notes &raquo;</a></li>
 
-        <p><span class="date">7&nbsp;JUN&nbsp;2026</span> &middot;
+        <li><time class="date" datetime="2026-06-07">7&nbsp;JUN&nbsp;2026</time> &middot;
         Nordstjernen <b>1.0.1</b> released &mdash; a maintenance release.
         <a href="release-1-0-1.html">Announcement &raquo;</a> &middot;
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.1">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.1">Release notes &raquo;</a></li>
 
-        <p><span class="date">5&nbsp;JUN&nbsp;2026</span> &middot;
+        <li><time class="date" datetime="2026-06-05">5&nbsp;JUN&nbsp;2026</time> &middot;
         Nordstjernen <b>1.0.0</b> released &mdash; the first stable release.
         <a href="release-1-0-0.html">Announcement &raquo;</a> &middot;
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.0">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.0">Release notes &raquo;</a></li>
 
-        <p><span class="date">31&nbsp;MAY&nbsp;2026</span> &middot;
+        <li><time class="date" datetime="2026-05-31">31&nbsp;MAY&nbsp;2026</time> &middot;
         Nordstjernen <b>0.8.1</b> released.
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.8.1">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.8.1">Release notes &raquo;</a></li>
 
-        <p><span class="date">28&nbsp;MAY&nbsp;2026</span> &middot;
+        <li><time class="date" datetime="2026-05-28">28&nbsp;MAY&nbsp;2026</time> &middot;
         Nordstjernen <b>0.8.0</b> released.
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.8.0">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.8.0">Release notes &raquo;</a></li>
 
-        <p><span class="date">24&nbsp;MAY&nbsp;2026</span> &middot;
+        <li><time class="date" datetime="2026-05-24">24&nbsp;MAY&nbsp;2026</time> &middot;
         Nordstjernen <b>0.7.0</b> released.
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.7.0">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.7.0">Release notes &raquo;</a></li>
+        </ul>
 
         <h2 id="specs">specifications</h2>
         <table class="spec">
+          <caption class="sr-only">Nordstjernen technical specifications</caption>
           <tr><th scope="row">language</th><td>C &middot; ~102 kLOC across 108 files in <code>src/</code>, fully auditable</td></tr>
           <tr><th scope="row">html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> (parser, WHATWG URL, selectors)</td></tr>
           <tr><th scope="row">javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> &mdash; bytecode interpreter, no JIT</td></tr>
@@ -256,6 +269,7 @@
         edge, expect rough edges.</p>
 
         <table class="spec dl">
+          <caption class="sr-only">Nightly build downloads by platform</caption>
           <tr>
             <th scope="row">Windows</th>
             <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip">nordstjernen-windows-x86_64.zip</a></td>
