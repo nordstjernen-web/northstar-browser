@@ -8,10 +8,13 @@
 <link rel="canonical" href="https://www.nordstjernen.org/">
 <meta name="theme-color" content="#070d3a">
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="Nordstjernen">
+<meta property="og:locale" content="en">
 <meta property="og:title" content="Nordstjernen Web Browser">
 <meta property="og:description" content="An independent web browser written from scratch in C. No telemetry, no JIT.">
 <meta property="og:url" content="https://www.nordstjernen.org/">
 <meta property="og:image" content="https://www.nordstjernen.org/screenshots/screenshot.png">
+<meta property="og:image:alt" content="Nordstjernen rendering a web page">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
 <script type="application/ld+json">
@@ -28,8 +31,13 @@
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
 </script>
-<style type="text/css">
+<style>
   *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  :target { scroll-margin-top: 16px; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
   html, body {
     margin: 0; padding: 0;
     background: #ffffff;
