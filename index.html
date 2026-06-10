@@ -24,9 +24,9 @@
   "name": "Nordstjernen",
   "applicationCategory": "BrowserApplication",
   "operatingSystem": "Windows, macOS, Linux",
-  "softwareVersion": "1.0.2",
+  "softwareVersion": "1.0.3",
   "url": "https://www.nordstjernen.org/",
-  "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.2",
+  "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.3",
   "license": "https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
@@ -224,20 +224,25 @@
         <h1 id="about">Nordstjernen Web Browser</h1>
         <p>Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, Mac and Linux, with an Android port in progress. Nordstjernen is built in Norway.</p>
 
-        <p>Nordstjernen Browser version 1.0.2 released! <a href="release-1-0-2.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.2">More info here</a>.</p>
+        <p>Nordstjernen Browser version 1.0.3 released! <a href="release-1-0-3.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.3">More info here</a>.</p>
 
         <figure class="shot">
           <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1333" height="1000" loading="lazy" alt="Nordstjernen rendering a web page"></a>
           <figcaption class="cap">Nordstjernen rendering a page. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
         </figure>
 
-        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 114 spec rows fully implemented, 49 partial, 4 absent as of June 2026. See <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 123 spec rows fully implemented, 48 partial, 4 absent as of June 2026. See <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
         <p><b>Secure.</b> Process-per-tab design &mdash; each tab runs in its own sandboxed renderer process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
-        <p><b>Minimalism.</b> The whole engine is about 102,000 lines of C written by Claude and Codex (108 files in <code>src/</code>, excluding the vendored libraries) &mdash; small enough for one person to read and audit end-to-end.</p>
+        <p><b>Minimalism.</b> The whole engine is about 109,000 lines of C written by Claude and Codex (117 files in <code>src/</code>, excluding the vendored libraries) &mdash; small enough for one person to read and audit end-to-end.</p>
         <p>Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.</p>
 
         <h2 id="news">news</h2>
         <ul class="news">
+        <li><time class="date" datetime="2026-06-10">10&nbsp;JUN&nbsp;2026</time> &middot;
+        Nordstjernen <b>1.0.3</b> released &mdash; faster page loads and a UI translated into 40 languages.
+        <a href="release-1-0-3.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.3">Release notes &raquo;</a></li>
+
         <li><time class="date" datetime="2026-06-09">9&nbsp;JUN&nbsp;2026</time> &middot;
         Nordstjernen <b>1.0.2</b> released &mdash; a maintenance release.
         <a href="release-1-0-2.html">Announcement &raquo;</a> &middot;
@@ -269,7 +274,7 @@
         <h2 id="specs">specifications</h2>
         <table class="spec">
           <caption class="sr-only">Nordstjernen technical specifications</caption>
-          <tr><th scope="row">language</th><td>C &middot; ~102 kLOC across 108 files in <code>src/</code>, fully auditable</td></tr>
+          <tr><th scope="row">language</th><td>C &middot; ~109 kLOC across 117 files in <code>src/</code>, fully auditable</td></tr>
           <tr><th scope="row">html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> (parser, WHATWG URL, selectors)</td></tr>
           <tr><th scope="row">javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> &mdash; bytecode interpreter, no JIT</td></tr>
           <tr><th scope="row">webassembly</th><td><a href="https://github.com/bytecodealliance/wasm-micro-runtime">WAMR</a> &mdash; interpreter behind the <code>WebAssembly</code> JS API</td></tr>
@@ -278,14 +283,14 @@
           <tr><th scope="row">network</th><td><a href="https://curl.se">libcurl</a> &ge;&nbsp;7.85 &middot; HTTP/2</td></tr>
           <tr><th scope="row">hardening</th><td>process-per-tab &middot; seccomp + Landlock sandbox on Linux &middot; sandboxed renderer processes &middot; no JIT</td></tr>
           <tr><th scope="row">privacy</th><td>no telemetry &middot; partitioned cookies &middot; HSTS &middot; CSP</td></tr>
-          <tr><th scope="row">standards</th><td>114 spec rows fully implemented, 49 partial, 4 absent (June 2026)</td></tr>
+          <tr><th scope="row">standards</th><td>123 spec rows fully implemented, 48 partial, 4 absent (June 2026)</td></tr>
           <tr><th scope="row">platforms</th><td>linux &middot; windows &middot; macos &middot; android (port in progress)</td></tr>
           <tr><th scope="row">license</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years &middot; The Nordstjernen Source License is inspired by the <a href="https://fsl.software/">Functional Source License (FSL)</a>, a Fair Source license that converts to Apache 2.0 or MIT.</td></tr>
         </table>
 
         <h2 id="download">download</h2>
-        <p>Latest tagged release: Nordstjernen <b>1.0.2</b> &mdash; released 9 June 2026.
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.2">full release notes &raquo;</a></p>
+        <p>Latest tagged release: Nordstjernen <b>1.0.3</b> &mdash; released 10 June 2026.
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.3">full release notes &raquo;</a></p>
 
         <p><b>For platform-specific builds, use the nightly builds.</b> They are rebuilt
         from <code>main</code> each night and point at the latest code &mdash; bleeding
