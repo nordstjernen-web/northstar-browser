@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nordstjernen वेब ब्राउज़र - छोटा, स्थिर, स्वतंत्र। C में लिखा गया।</title>
+<meta name="description" content="Nordstjernen - C में शुरू से लिखा गया एक स्वतंत्र वेब ब्राउज़र। कोई टेलीमेट्री नहीं, कोई JIT नहीं।">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<style type="text/css">
+  html, body {
+    margin: 0; padding: 0;
+    background: #ffffff;
+    color: #000000;
+    font-family: Verdana, Arial, Helvetica, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  img { border: 0; max-width: 100%; height: auto; }
+  a:link    { color: #003366; }
+  a:visited { color: #666699; }
+  a:hover   { color: #cc0000; }
+
+  .frame {
+    margin: 10px;
+    border: 3px solid #000000;
+    background: #ffffff;
+  }
+
+  /* ===== HEADER ===== */
+  .header {
+    background: #070d3a;
+    background-image:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='110' shape-rendering='geometricPrecision'><defs><radialGradient id='halo' cx='50%25' cy='50%25' r='50%25'><stop offset='0%25' stop-color='%23fff7c2' stop-opacity='.95'/><stop offset='35%25' stop-color='%23fff2a0' stop-opacity='.35'/><stop offset='70%25' stop-color='%23fff2a0' stop-opacity='.05'/><stop offset='100%25' stop-color='%23fff2a0' stop-opacity='0'/></radialGradient><radialGradient id='star' cx='50%25' cy='40%25' r='65%25'><stop offset='0%25' stop-color='%23ffffff'/><stop offset='60%25' stop-color='%23f0f4ff'/><stop offset='100%25' stop-color='%23b9c4e8'/></radialGradient><radialGradient id='core' cx='50%25' cy='50%25' r='50%25'><stop offset='0%25' stop-color='%23ffffff'/><stop offset='40%25' stop-color='%23fff4b8'/><stop offset='100%25' stop-color='%23ffba2f'/></radialGradient></defs><g fill='%23ffffff'><circle cx='28' cy='62' r='1.2' opacity='.85'/><circle cx='78' cy='18' r='1' opacity='.8'/><circle cx='116' cy='90' r='1.3' opacity='.9'/><circle cx='154' cy='70' r='1.1' opacity='.85'/><circle cx='224' cy='22' r='1.4' opacity='.9'/><circle cx='280' cy='30' r='1.2' opacity='.85'/><circle cx='334' cy='46' r='1.3' opacity='.9'/><circle cx='372' cy='20' r='1' opacity='.8'/><circle cx='428' cy='34' r='1.2' opacity='.85'/><circle cx='468' cy='14' r='1.1' opacity='.85'/><circle cx='506' cy='90' r='1.3' opacity='.9'/><circle cx='564' cy='100' r='1' opacity='.8'/><circle cx='604' cy='80' r='1.4' opacity='.9'/><circle cx='680' cy='30' r='1.2' opacity='.85'/><circle cx='720' cy='12' r='1.1' opacity='.85'/><circle cx='758' cy='88' r='1' opacity='.8'/><circle cx='798' cy='62' r='1.3' opacity='.9'/><circle cx='858' cy='76' r='1' opacity='.8'/><circle cx='898' cy='54' r='1.4' opacity='.9'/><circle cx='938' cy='28' r='1.1' opacity='.85'/><circle cx='978' cy='100' r='1' opacity='.8'/><circle cx='1018' cy='82' r='1.2' opacity='.85'/><circle cx='1058' cy='60' r='1.3' opacity='.9'/><circle cx='1098' cy='32' r='0.9' opacity='.75'/><circle cx='1138' cy='14' r='1.4' opacity='.9'/><circle cx='1178' cy='90' r='1.1' opacity='.85'/><circle cx='1238' cy='100' r='1.3' opacity='.9'/><circle cx='1278' cy='80' r='1' opacity='.8'/><circle cx='1318' cy='58' r='1.4' opacity='.9'/><circle cx='1358' cy='30' r='1.1' opacity='.85'/><circle cx='1418' cy='50' r='1.2' opacity='.85'/><circle cx='1458' cy='24' r='1.3' opacity='.9'/><circle cx='1538' cy='78' r='1.1' opacity='.85'/><circle cx='1578' cy='56' r='1' opacity='.8'/></g><g><circle cx='402' cy='52' r='14' fill='url(%23halo)'/><polygon points='402,42 404,52 412,54 404,56 402,66 400,56 392,54 400,52' fill='url(%23star)' opacity='.6'/><circle cx='402' cy='52' r='2.4' fill='url(%23core)'/></g><g><circle cx='1052' cy='40' r='12' fill='url(%23halo)' opacity='.85'/><polygon points='1052,32 1054,40 1062,42 1054,44 1052,52 1050,44 1042,42 1050,40' fill='url(%23star)' opacity='.55'/><circle cx='1052' cy='40' r='1.8' fill='url(%23core)'/></g></svg>"),
+      radial-gradient(ellipse 60% 90% at 88% 50%, rgba(120,90,180,0.30) 0%, rgba(120,90,180,0) 60%),
+      radial-gradient(ellipse 50% 80% at 14% 50%, rgba(70,120,200,0.28) 0%, rgba(70,120,200,0) 65%),
+      radial-gradient(ellipse at 35% 45%, #1a2b6b 0%, #070d3a 55%, #01030f 100%);
+    background-repeat: repeat-x, no-repeat, no-repeat, no-repeat;
+    background-position: 0 0, center, center, center;
+    background-size: auto 100%, auto, auto, auto;
+    color: #ffffff;
+    border-bottom: 3px solid #000000;
+  }
+  .header { position: relative; text-align: center; padding: 16px 12px; }
+  .header .brand { display: inline-flex; align-items: center; gap: 14px; }
+  .header .logo { width: 56px; height: 56px; display: block; }
+  .header .title {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 34px; font-weight: bold; line-height: 1.1;
+    text-shadow: 0 1px 2px rgba(0,0,0,.6);
+  }
+  .header .title a { color: #ffffff; text-decoration: none; }
+  .header .tag { font-size: 14px; color: #c8d3ee; margin-top: 6px; }
+
+  /* ===== NAV ===== */
+  .nav {
+    border-bottom: 3px solid #000000;
+    background: #f4f4f4;
+    text-align: center;
+    padding: 8px 12px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 14px;
+  }
+  .nav a { color: #003366; text-decoration: none; padding: 0 10px; white-space: nowrap; }
+  .nav a:hover { color: #cc0000; text-decoration: underline; }
+  .nav .sep { color: #999999; padding: 0 2px; }
+
+  /* ===== CONTENT ===== */
+  .content { max-width: 1000px; margin: 0 auto; padding: 26px 26px 40px; }
+  .content h1 {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 24px; color: #003366; margin: 0 0 10px 0; font-weight: bold;
+  }
+  .content h2 {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 17px; color: #cc0000; margin: 26px 0 8px 0; font-weight: bold;
+  }
+  .content p { margin: 0 0 10px 0; }
+  .content .lead {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 18px; line-height: 1.45; color: #202a3b;
+  }
+
+  .shot { margin: 10px 0 26px 0; }
+  .shot img { display: block; width: 100%; border: 1px solid #000000; }
+  .shot .cap { font-size: 13px; color: #666666; text-align: center; margin-top: 6px; font-style: italic; }
+
+  table.spec { border-collapse: collapse; font-size: 15px; width: 100%; }
+  table.spec th, table.spec td { text-align: left; padding: 3px 18px 3px 0; vertical-align: top; }
+  table.spec th { color: #666666; font-weight: normal; white-space: nowrap; }
+  table.spec td { overflow-wrap: anywhere; word-break: break-word; }
+
+  code { font-family: "Courier New", monospace; background: #f4f4f4; padding: 0 2px; }
+
+  .langs { font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 2; }
+  .langs a { white-space: nowrap; }
+  .langs .cur { color: #000000; font-weight: bold; }
+
+  /* ===== FOOTER ===== */
+  .footer {
+    border-top: 3px solid #000000;
+    background: #f4f4f4;
+    padding: 10px 16px;
+    font-size: 13px;
+    color: #666666;
+    text-align: center;
+  }
+
+  /* ===== RESPONSIVE ===== */
+  @media (max-width: 767px) {
+    .nav { font-size: 13px; line-height: 2; }
+    .header .title { font-size: 22px; }
+    .header .tag { font-size: 12px; }
+    .header .logo { width: 40px; height: 40px; }
+    .content { padding: 16px 16px 24px; }
+    .content h1 { font-size: 20px; }
+    .content h2 { font-size: 16px; }
+  }
+  [dir="rtl"] table.spec th, [dir="rtl"] table.spec td { text-align: right; padding: 3px 0 3px 18px; }
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <div class="brand">
+      <a href="index.html"><img class="logo" src="assets/nordstjernen.svg" alt="Nordstjernen logo"></a>
+      <span class="title"><a href="index.html">Nordstjernen</a></span>
+    </div>
+    <div class="tag">छोटा, स्थिर, स्वतंत्र &middot; C में शुरू से लिखा गया &middot; कोई JIT नहीं, कोई टेलीमेट्री नहीं</div>
+  </div>
+
+  <div class="nav">
+    <a href="#about">परिचय</a><span class="sep">&middot;</span>
+    <a href="#specs">विनिर्देश</a><span class="sep">&middot;</span>
+    <a href="#download">डाउनलोड</a><span class="sep">&middot;</span>
+    <a href="screenshots.html">स्क्रीनशॉट</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen">github</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/releases">रिलीज़</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">लाइसेंस</a><span class="sep">&middot;</span>
+    <a href="https://discord.gg/4W959nW5vF">discord</a>
+  </div>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>Nordstjernen वेब ब्राउज़र</h1>
+        <p class="lead">Nordstjernen एक वेब ब्राउज़र है, जो C में शुरू से लिखा गया है, और HTML तथा CSS मानकों का समर्थन करने पर केंद्रित है। यह Windows, Mac और Linux पर चलता है, तथा Android पोर्ट प्रगति पर है। Nordstjernen नॉर्वे में बनाया गया है।</p>
+
+        <div class="shot">
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1333" height="1000" loading="lazy" alt="Nordstjernen rendering a web page"></a>
+          <div class="cap">Nordstjernen एक पेज प्रस्तुत करते हुए। <a href="screenshots.html">और स्क्रीनशॉट &raquo;</a></div>
+        </div>
+
+        <p><b>HTML मानक।</b> व्यवहार को किसी अन्य ब्राउज़र के विरुद्ध नहीं, बल्कि अनुभाग-दर-अनुभाग मानक पाठ के विरुद्ध मापा जाता है।</p>
+        <p><b>सुरक्षित।</b> प्रति-टैब-प्रक्रिया डिज़ाइन &mdash; प्रत्येक टैब अपनी ही सैंडबॉक्स्ड रेंडरर प्रक्रिया में चलता है (Linux पर seccomp + Landlock), जो IPC और साझा-मेमोरी फ्रेमबफ़र के माध्यम से UI से संवाद करता है। कोई JIT नहीं।</p>
+        <p><b>न्यूनतमवाद।</b> पूरा इंजन C का एक सघन संग्रह है &mdash; इतना छोटा कि एक व्यक्ति इसे आद्योपांत पढ़ और जाँच सके।</p>
+        <p>Nordstjernen में कोई JIT नहीं है, इसलिए यह कहीं अधिक सुरक्षित है, और फिर भी पर्याप्त तेज़ हो सकता है। यह किसी भी प्रकार की कोई टेलीमेट्री नहीं भेजता।</p>
+
+        <a id="specs"></a>
+        <h2>विनिर्देश</h2>
+        <table class="spec">
+          <tr><th>भाषा</th><td>C &middot; पूर्णतः जाँच-योग्य</td></tr>
+          <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> (पार्सर, WHATWG URL, सेलेक्टर)</td></tr>
+          <tr><th>javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> &mdash; बाइटकोड इंटरप्रेटर, कोई JIT नहीं</td></tr>
+          <tr><th>webassembly</th><td><a href="https://github.com/bytecodealliance/wasm-micro-runtime">WAMR</a> &mdash; <code>WebAssembly</code> JS API के पीछे इंटरप्रेटर</td></tr>
+          <tr><th>छवियाँ</th><td><a href="https://github.com/google/wuffs">Wuffs</a> (PNG / GIF / BMP / JPEG / WebP lossless)</td></tr>
+          <tr><th>ui</th><td><a href="https://www.gtk.org">GTK 4</a> &middot; Pango टेक्स्ट शेपिंग &middot; प्रति पेज एक विंडो, कोई टैब स्ट्रिप नहीं</td></tr>
+          <tr><th>नेटवर्क</th><td><a href="https://curl.se">libcurl</a> &middot; HTTP/2</td></tr>
+          <tr><th>हार्डनिंग</th><td>प्रति-टैब-प्रक्रिया &middot; Linux पर seccomp + Landlock सैंडबॉक्स &middot; कोई JIT नहीं</td></tr>
+          <tr><th>गोपनीयता</th><td>कोई टेलीमेट्री नहीं &middot; विभाजित कुकीज़ &middot; HSTS &middot; CSP</td></tr>
+          <tr><th>प्लेटफ़ॉर्म</th><td>linux &middot; windows &middot; macos &middot; android (पोर्ट प्रगति पर)</td></tr>
+          <tr><th>लाइसेंस</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; 10 वर्ष बाद MIT</td></tr>
+        </table>
+
+        <a id="download"></a>
+        <h2>डाउनलोड</h2>
+        <p>नाइटली बिल्ड डाउनलोड करें। ये हर रात <code>main</code> से पुनः बनाए जाते हैं और नवीनतम कोड की ओर इशारा करते हैं &mdash; अत्याधुनिक, खुरदुरे किनारों की अपेक्षा करें।</p>
+
+        <table class="spec dl">
+          <tr><th>Windows</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip">nordstjernen-windows-x86_64.zip</a></td></tr>
+          <tr><th>macOS</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg">nordstjernen-macos.dmg</a></td></tr>
+          <tr><th>Debian</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb">nordstjernen-debian-amd64.deb</a></td></tr>
+          <tr><th>Ubuntu</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb">nordstjernen-ubuntu-amd64.deb</a></td></tr>
+          <tr><th>openSUSE</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm">nordstjernen-opensuse-x86_64.rpm</a></td></tr>
+          <tr><th>Linux (पोर्टेबल)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip">nordstjernen-linux-x86_64.zip</a></td></tr>
+          <tr><th>Alpine (musl)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk">nordstjernen-alpine-x86_64.apk</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip">.zip</a></td></tr>
+          <tr><th>Java API (JDK 21)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-java.jar">nordstjernen-java.jar</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar">स्रोत</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar">javadoc</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/java/apidocs/">API दस्तावेज़</a></td></tr>
+          <tr><th>स्रोत</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz">nordstjernen-src.tar.xz</a></td></tr>
+          <tr><th>चेकसम</th><td><a href="https://www.nordstjernen.org/nightly/SHA256SUMS">SHA256SUMS</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/">सभी नाइटली फ़ाइलें</a></td></tr>
+        </table>
+
+        <a id="languages"></a>
+        <h2>भाषाएँ</h2>
+        <p class="langs">
+          <a href="index.html">English</a> &middot;
+          <a href="index_cn.html">中文</a> &middot;
+          <span class="cur">हिन्दी</span> &middot;
+          <a href="index_es.html">Espa&ntilde;ol</a> &middot;
+          <a href="index_fr.html">Fran&ccedil;ais</a> &middot;
+          <a href="index_ar.html">العربية</a> &middot;
+          <a href="index_bn.html">বাংলা</a> &middot;
+          <a href="index_pt.html">Portugu&ecirc;s</a> &middot;
+          <a href="index_ru.html">Русский</a> &middot;
+          <a href="index_ur.html">اردو</a> &middot;
+          <a href="index_id.html">Bahasa Indonesia</a> &middot;
+          <a href="index_de.html">Deutsch</a> &middot;
+          <a href="index_jp.html">日本語</a> &middot;
+          <a href="index_sw.html">Kiswahili</a> &middot;
+          <a href="index_mr.html">मराठी</a> &middot;
+          <a href="index_te.html">తెలుగు</a> &middot;
+          <a href="index_tr.html">T&uuml;rk&ccedil;e</a> &middot;
+          <a href="index_ta.html">தமிழ்</a> &middot;
+          <a href="index_vi.html">Ti&#7871;ng Vi&#7879;t</a> &middot;
+          <a href="index_ko.html">한국어</a> &middot;
+          <a href="index_no.html">Norsk</a>
+        </p>
+
+  </div>
+
+  <div class="footer">
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="privacy/">गोपनीयता</a> &middot;
+    <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
+  </div>
+
+</div>
+
+</body>
+</html>
