@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nordstjernen Browser 1.0.8 released!</title>
+<meta name="description" content="Nordstjernen Browser 1.0.8 released - a maintenance release of an independent web browser written from scratch in C. No telemetry, no JIT.">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<style type="text/css">
+  html, body {
+    margin: 0; padding: 0;
+    background: #ffffff;
+    color: #000000;
+    font-family: Verdana, Arial, Helvetica, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  img { border: 0; }
+  a:link    { color: #003366; }
+  a:visited { color: #666699; }
+  a:hover   { color: #cc0000; }
+
+  .frame {
+    margin: 10px;
+    border: 3px solid #000000;
+    background: #ffffff;
+  }
+
+  /* ===== HEADER ===== */
+  .header {
+    background: #070d3a;
+    background-image:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='110' shape-rendering='geometricPrecision'><defs><radialGradient id='halo' cx='50%25' cy='50%25' r='50%25'><stop offset='0%25' stop-color='%23fff7c2' stop-opacity='.95'/><stop offset='35%25' stop-color='%23fff2a0' stop-opacity='.35'/><stop offset='70%25' stop-color='%23fff2a0' stop-opacity='.05'/><stop offset='100%25' stop-color='%23fff2a0' stop-opacity='0'/></radialGradient><radialGradient id='star' cx='50%25' cy='40%25' r='65%25'><stop offset='0%25' stop-color='%23ffffff'/><stop offset='60%25' stop-color='%23f0f4ff'/><stop offset='100%25' stop-color='%23b9c4e8'/></radialGradient><radialGradient id='core' cx='50%25' cy='50%25' r='50%25'><stop offset='0%25' stop-color='%23ffffff'/><stop offset='40%25' stop-color='%23fff4b8'/><stop offset='100%25' stop-color='%23ffba2f'/></radialGradient></defs><g fill='%23ffffff'><circle cx='12' cy='18' r='0.6' opacity='.55'/><circle cx='28' cy='62' r='1.2' opacity='.85'/><circle cx='46' cy='32' r='0.7' opacity='.6'/><circle cx='62' cy='82' r='0.9' opacity='.7'/><circle cx='78' cy='18' r='1' opacity='.8'/><circle cx='98' cy='54' r='0.6' opacity='.5'/><circle cx='116' cy='90' r='1.3' opacity='.9'/><circle cx='132' cy='28' r='0.8' opacity='.65'/><circle cx='154' cy='70' r='1.1' opacity='.85'/><circle cx='172' cy='14' r='0.7' opacity='.6'/><circle cx='190' cy='44' r='0.5' opacity='.45'/><circle cx='208' cy='84' r='1' opacity='.8'/><circle cx='224' cy='22' r='1.4' opacity='.9'/><circle cx='244' cy='58' r='0.8' opacity='.7'/><circle cx='262' cy='96' r='0.7' opacity='.6'/><circle cx='280' cy='30' r='1.2' opacity='.85'/><circle cx='298' cy='72' r='0.6' opacity='.55'/><circle cx='316' cy='10' r='0.9' opacity='.75'/><circle cx='334' cy='46' r='1.3' opacity='.9'/><circle cx='354' cy='86' r='0.7' opacity='.6'/><circle cx='372' cy='20' r='1' opacity='.8'/><circle cx='392' cy='62' r='0.5' opacity='.45'/><circle cx='410' cy='98' r='0.9' opacity='.75'/><circle cx='428' cy='34' r='1.2' opacity='.85'/><circle cx='448' cy='76' r='0.6' opacity='.55'/><circle cx='468' cy='14' r='1.1' opacity='.85'/><circle cx='488' cy='50' r='0.7' opacity='.6'/><circle cx='506' cy='90' r='1.3' opacity='.9'/><circle cx='526' cy='26' r='0.8' opacity='.7'/><circle cx='544' cy='66' r='0.6' opacity='.55'/><circle cx='564' cy='100' r='1' opacity='.8'/><circle cx='584' cy='40' r='0.7' opacity='.6'/><circle cx='604' cy='80' r='1.4' opacity='.9'/><circle cx='624' cy='18' r='0.6' opacity='.55'/><circle cx='642' cy='56' r='0.9' opacity='.75'/><circle cx='662' cy='94' r='0.5' opacity='.45'/><circle cx='680' cy='30' r='1.2' opacity='.85'/><circle cx='700' cy='70' r='0.8' opacity='.7'/><circle cx='720' cy='12' r='1.1' opacity='.85'/><circle cx='738' cy='48' r='0.6' opacity='.5'/><circle cx='758' cy='88' r='1' opacity='.8'/><circle cx='778' cy='22' r='0.7' opacity='.6'/><circle cx='798' cy='62' r='1.3' opacity='.9'/><circle cx='818' cy='98' r='0.8' opacity='.7'/><circle cx='838' cy='36' r='0.5' opacity='.45'/><circle cx='858' cy='76' r='1' opacity='.8'/><circle cx='878' cy='16' r='0.9' opacity='.75'/><circle cx='898' cy='54' r='1.4' opacity='.9'/><circle cx='918' cy='92' r='0.6' opacity='.55'/><circle cx='938' cy='28' r='1.1' opacity='.85'/><circle cx='958' cy='68' r='0.7' opacity='.6'/><circle cx='978' cy='100' r='1' opacity='.8'/><circle cx='998' cy='44' r='0.5' opacity='.45'/><circle cx='1018' cy='82' r='1.2' opacity='.85'/><circle cx='1038' cy='20' r='0.8' opacity='.7'/><circle cx='1058' cy='60' r='1.3' opacity='.9'/><circle cx='1078' cy='96' r='0.6' opacity='.55'/><circle cx='1098' cy='32' r='0.9' opacity='.75'/><circle cx='1118' cy='72' r='0.7' opacity='.6'/><circle cx='1138' cy='14' r='1.4' opacity='.9'/><circle cx='1158' cy='52' r='0.6' opacity='.55'/><circle cx='1178' cy='90' r='1.1' opacity='.85'/><circle cx='1198' cy='26' r='0.8' opacity='.7'/><circle cx='1218' cy='64' r='0.5' opacity='.45'/><circle cx='1238' cy='100' r='1.3' opacity='.9'/><circle cx='1258' cy='38' r='0.7' opacity='.6'/><circle cx='1278' cy='80' r='1' opacity='.8'/><circle cx='1298' cy='18' r='0.9' opacity='.75'/><circle cx='1318' cy='58' r='1.4' opacity='.9'/><circle cx='1338' cy='94' r='0.6' opacity='.55'/><circle cx='1358' cy='30' r='1.1' opacity='.85'/><circle cx='1378' cy='70' r='0.7' opacity='.6'/><circle cx='1398' cy='12' r='0.5' opacity='.45'/><circle cx='1418' cy='50' r='1.2' opacity='.85'/><circle cx='1438' cy='88' r='0.8' opacity='.7'/><circle cx='1458' cy='24' r='1.3' opacity='.9'/><circle cx='1478' cy='66' r='0.6' opacity='.55'/><circle cx='1498' cy='98' r='0.9' opacity='.75'/><circle cx='1518' cy='34' r='0.7' opacity='.6'/><circle cx='1538' cy='78' r='1.1' opacity='.85'/><circle cx='1558' cy='16' r='0.5' opacity='.45'/><circle cx='1578' cy='56' r='1' opacity='.8'/><circle cx='1592' cy='92' r='0.8' opacity='.7'/></g><g fill='%23ffffff' opacity='.9'><polygon points='84,36 86.5,42 92.5,44 86.5,46 84,52 81.5,46 75.5,44 81.5,42'/><polygon points='262,18 264.5,24 270.5,26 264.5,28 262,34 259.5,28 253.5,26 259.5,24'/><polygon points='486,68 488.5,74 494.5,76 488.5,78 486,84 483.5,78 477.5,76 483.5,74'/><polygon points='722,38 724.5,44 730.5,46 724.5,48 722,54 719.5,48 713.5,46 719.5,44'/><polygon points='948,72 950.5,78 956.5,80 950.5,82 948,88 945.5,82 939.5,80 945.5,78'/><polygon points='1172,30 1174.5,36 1180.5,38 1174.5,40 1172,46 1169.5,40 1163.5,38 1169.5,36'/><polygon points='1402,66 1404.5,72 1410.5,74 1404.5,76 1402,82 1399.5,76 1393.5,74 1399.5,72'/></g><g><circle cx='402' cy='52' r='14' fill='url(%23halo)'/><polygon points='402,42 404,52 412,54 404,56 402,66 400,56 392,54 400,52' fill='url(%23star)' opacity='.6'/><circle cx='402' cy='52' r='2.4' fill='url(%23core)'/></g><g><circle cx='1052' cy='40' r='12' fill='url(%23halo)' opacity='.85'/><polygon points='1052,32 1054,40 1062,42 1054,44 1052,52 1050,44 1042,42 1050,40' fill='url(%23star)' opacity='.55'/><circle cx='1052' cy='40' r='1.8' fill='url(%23core)'/></g><g stroke='%23ffffff' stroke-width='0.6' opacity='.35'><line x1='560' y1='8' x2='620' y2='30'/><line x1='1280' y1='12' x2='1340' y2='34'/></g></svg>"),
+      radial-gradient(ellipse 60% 90% at 88% 50%, rgba(120,90,180,0.30) 0%, rgba(120,90,180,0) 60%),
+      radial-gradient(ellipse 50% 80% at 14% 50%, rgba(70,120,200,0.28) 0%, rgba(70,120,200,0) 65%),
+      radial-gradient(ellipse at 35% 45%, #1a2b6b 0%, #070d3a 55%, #01030f 100%);
+    background-repeat: repeat-x, no-repeat, no-repeat, no-repeat;
+    background-position: 0 0, center, center, center;
+    background-size: auto 100%, auto, auto, auto;
+    color: #ffffff;
+    border-bottom: 3px solid #000000;
+  }
+  .header { position: relative; text-align: center; padding: 16px 12px; }
+  .header .bestviewed { position: absolute; top: 10px; right: 12px; line-height: 0; }
+  .header .bestviewed img { display: block; }
+  .header .brand { display: inline-flex; align-items: center; gap: 14px; }
+  .header .logo { width: 56px; height: 56px; display: block; }
+  .header .title {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 34px; font-weight: bold; line-height: 1.1;
+    text-shadow: 0 1px 2px rgba(0,0,0,.6);
+  }
+  .header .title a { color: #ffffff; text-decoration: none; }
+  .header .tag {
+    font-size: 14px; color: #c8d3ee;
+    margin-top: 6px;
+  }
+
+  /* ===== NAV ===== */
+  .nav {
+    border-bottom: 3px solid #000000;
+    background: #f4f4f4;
+    text-align: center;
+    padding: 8px 12px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 14px;
+  }
+  .nav a {
+    color: #003366;
+    text-decoration: none;
+    padding: 0 10px;
+    white-space: nowrap;
+  }
+  .nav a:hover { color: #cc0000; text-decoration: underline; }
+  .nav .sep { color: #999999; padding: 0 2px; }
+
+  /* ===== CONTENT ===== */
+  .content { max-width: 1000px; margin: 0 auto; padding: 26px 26px 40px; }
+  .content h1 {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 24px;
+    color: #cc0000;
+    margin: 0 0 10px 0;
+    font-weight: bold;
+  }
+  .content h2 {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 17px;
+    color: #cc0000;
+    margin: 26px 0 8px 0;
+    font-weight: bold;
+  }
+  .content p { margin: 0 0 10px 0; }
+
+  .shot { margin: 10px 0 26px 0; }
+  .shot img { display: block; width: 100%; height: auto; border: 1px solid #000000; }
+  .shot .cap {
+    font-size: 13px; color: #666666;
+    text-align: center; margin-top: 6px;
+    font-style: italic;
+  }
+
+  .news .date {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px;
+    color: #cc0000;
+    font-weight: bold;
+    letter-spacing: 1px;
+  }
+
+  table.spec { border-collapse: collapse; font-size: 15px; }
+  table.spec th, table.spec td { text-align: left; padding: 3px 18px 3px 0; vertical-align: top; }
+  table.spec th { color: #666666; font-weight: normal; white-space: nowrap; }
+
+  code { font-family: "Courier New", monospace; background: #f4f4f4; padding: 0 2px; }
+
+  /* ===== FOOTER ===== */
+  .footer {
+    border-top: 3px solid #000000;
+    background: #f4f4f4;
+    padding: 10px 16px;
+    font-size: 13px;
+    color: #666666;
+    text-align: center;
+  }
+  .footer .counter { margin-bottom: 6px; }
+  .footer .counter img { display: inline-block; height: 20px; width: auto; }
+
+  /* ===== RESPONSIVE ===== */
+  @media (max-width: 767px) {
+    .nav { font-size: 13px; line-height: 2; }
+    .header .bestviewed { display: none; }
+    .header .title { font-size: 22px; }
+    .header .tag { font-size: 12px; }
+    .header .logo img { width: 40px; height: 40px; }
+    .content { padding: 16px 16px 24px; }
+    .content h1 { font-size: 20px; }
+    .content h2 { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen">
+      <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
+    </a>
+    <div class="brand">
+      <a href="."><img class="logo" src="assets/nordstjernen.svg" alt="*"></a>
+      <span class="title"><a href=".">nordstjernen.org</a></span>
+    </div>
+    <div class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</div>
+  </div>
+
+  <div class="nav">
+    <a href="#about">about</a><span class="sep">&middot;</span>
+    <a href="#news">news</a><span class="sep">&middot;</span>
+    <a href="#specs">specifications</a><span class="sep">&middot;</span>
+    <a href="screenshots.html">screenshots</a><span class="sep">&middot;</span>
+    <a href="#download">download</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen">github</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/releases">releases</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">license</a><span class="sep">&middot;</span>
+    <a href="https://discord.gg/4W959nW5vF">discord</a>
+  </div>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>Nordstjernen Browser 1.0.8 released!</h1>
+        <p>Today, 15 June 2026, we are pleased to announce the release of <b>Nordstjernen 1.0.8</b>, a maintenance release that builds on 1.0.7. Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, Mac and Linux, with an Android port in progress. Nordstjernen is built in Norway.</p>
+
+        <p>This is a focused bug-fix and stability release: it continues to iron out rough edges reported since 1.0.7, with rendering and reliability fixes throughout. There are no new external dependencies and no telemetry &mdash; just a steadier 1.0.</p>
+
+        <p>Nordstjernen Browser version 1.0.8 is available now! <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.8">Read the full release notes here</a>, or <a href="#download">jump straight to the downloads</a>.</p>
+
+        <p>&laquo; <a href="index.html">Back to nordstjernen.org</a></p>
+
+        <div class="shot">
+          <a href="screenshots/screenshot-1-0-3.png"><img src="screenshots/screenshot-1-0-3.png" width="1920" height="1080" alt="Nordstjernen start page"></a>
+          <div class="cap">Nordstjernen rendering a page. <a href="screenshots.html">more screenshots &raquo;</a></div>
+        </div>
+
+        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 123 spec rows fully implemented, 48 partial, 4 absent as of June 2026. See the standards table below and <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p><b>Secure.</b> Process-per-tab design &mdash; each tab runs in its own sandboxed renderer process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
+        <p><b>Minimalism.</b> The whole engine is about 109,000 lines of C written by Claude and Codex (117 files in <code>src/</code>, excluding the vendored libraries) &mdash; small enough for one person to read and audit end-to-end.</p>
+        <p>Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.</p>
+
+        <a id="news"></a>
+        <h2>news</h2>
+        <p><span class="date">15&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.8</b> released &mdash; a maintenance release.
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.8">Release notes &raquo;</a></p>
+
+        <p><span class="date">14&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.7</b> released &mdash; a maintenance release.
+        <a href="release-1-0-7.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.7">Release notes &raquo;</a></p>
+
+        <p><span class="date">14&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.6</b> released &mdash; a maintenance release.
+        <a href="release-1-0-6.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.6">Release notes &raquo;</a></p>
+
+        <p><span class="date">13&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.5</b> released &mdash; a maintenance release.
+        <a href="release-1-0-5.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.5">Release notes &raquo;</a></p>
+
+        <p><span class="date">13&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.4</b> released &mdash; a maintenance release.
+        <a href="release-1-0-4.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.4">Release notes &raquo;</a></p>
+
+        <p><span class="date">10&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.3</b> released &mdash; faster page loads and a UI translated into 40 languages.
+        <a href="release-1-0-3.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.3">Release notes &raquo;</a></p>
+
+        <p><span class="date">9&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.2</b> released &mdash; a maintenance release.
+        <a href="release-1-0-2.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.2">Release notes &raquo;</a></p>
+
+        <p><span class="date">7&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.1</b> released &mdash; a maintenance release.
+        <a href="release-1-0-1.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.1">Release notes &raquo;</a></p>
+
+        <p><span class="date">5&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.0</b> released &mdash; the first stable release.
+        <a href="release-1-0-0.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.0">Release notes &raquo;</a></p>
+
+        <p><span class="date">31&nbsp;MAY&nbsp;2026</span> &middot;
+        Nordstjernen <b>0.8.1</b> released.
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.8.1">Release notes &raquo;</a></p>
+
+        <p><span class="date">28&nbsp;MAY&nbsp;2026</span> &middot;
+        Nordstjernen <b>0.8.0</b> released.
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.8.0">Release notes &raquo;</a></p>
+
+        <p><span class="date">24&nbsp;MAY&nbsp;2026</span> &middot;
+        Nordstjernen <b>0.7.0</b> released.
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/0.7.0">Release notes &raquo;</a></p>
+
+        <a id="specs"></a>
+        <h2>specifications</h2>
+        <table class="spec">
+          <tr><th>language</th><td>C &middot; ~109 kLOC across 117 files in <code>src/</code>, fully auditable</td></tr>
+          <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> (parser, WHATWG URL, selectors)</td></tr>
+          <tr><th>javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> &mdash; bytecode interpreter, no JIT</td></tr>
+          <tr><th>webassembly</th><td><a href="https://github.com/bytecodealliance/wasm-micro-runtime">WAMR</a> &mdash; interpreter behind the <code>WebAssembly</code> JS API</td></tr>
+          <tr><th>images</th><td><a href="https://github.com/google/wuffs">Wuffs</a> v0.4 (PNG / GIF / BMP / JPEG / WebP lossless)</td></tr>
+          <tr><th>ui</th><td><a href="https://www.gtk.org">GTK 4</a> &middot; Pango text shaping &middot; one window per page, no tab strip</td></tr>
+          <tr><th>network</th><td><a href="https://curl.se">libcurl</a> &middot; HTTP/2</td></tr>
+          <tr><th>hardening</th><td>process-per-tab &middot; seccomp + Landlock sandbox on Linux &middot; sandboxed renderer processes &middot; no JIT</td></tr>
+          <tr><th>privacy</th><td>no telemetry &middot; partitioned cookies &middot; HSTS &middot; CSP</td></tr>
+          <tr><th>standards</th><td>123 spec rows fully implemented, 48 partial, 4 absent (June 2026)</td></tr>
+          <tr><th>platforms</th><td>linux &middot; windows &middot; macos &middot; android (port in progress)</td></tr>
+          <tr><th>license</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years</td></tr>
+        </table>
+
+        <a id="download"></a>
+        <h2>download</h2>
+        <p>Latest tagged release: Nordstjernen <b>1.0.8</b> &mdash; released 15 June 2026.
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.8">full release notes &raquo;</a></p>
+
+        <p><b>For platform-specific builds, use the nightly builds.</b> They are rebuilt
+        from <code>main</code> each night and point at the latest code &mdash; bleeding
+        edge, expect rough edges.</p>
+
+        <table class="spec dl">
+          <tr>
+            <th>Windows</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip">nordstjernen-windows-x86_64.zip</a></td>
+          </tr>
+          <tr>
+            <th>macOS</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg">nordstjernen-macos.dmg</a></td>
+          </tr>
+          <tr>
+            <th>Debian</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb">nordstjernen-debian-amd64.deb</a></td>
+          </tr>
+          <tr>
+            <th>Ubuntu</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb">nordstjernen-ubuntu-amd64.deb</a></td>
+          </tr>
+          <tr>
+            <th>openSUSE</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm">nordstjernen-opensuse-x86_64.rpm</a></td>
+          </tr>
+          <tr>
+            <th>Linux (portable)</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip">nordstjernen-linux-x86_64.zip</a></td>
+          </tr>
+          <tr>
+            <th>Alpine (musl)</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk">nordstjernen-alpine-x86_64.apk</a> &middot;
+                <a href="https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip">.zip</a></td>
+          </tr>
+          <tr>
+            <th>Java API (JDK 21)</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-java.jar">nordstjernen-java.jar</a> &middot;
+                <a href="https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar">sources</a> &middot;
+                <a href="https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar">javadoc</a> &middot;
+                <a href="https://www.nordstjernen.org/nightly/java/apidocs/">API docs</a></td>
+          </tr>
+          <tr>
+            <th>Source</th>
+            <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz">nordstjernen-src.tar.xz</a></td>
+          </tr>
+          <tr>
+            <th>Checksums</th>
+            <td><a href="https://www.nordstjernen.org/nightly/SHA256SUMS">SHA256SUMS</a> &middot;
+                <a href="https://www.nordstjernen.org/nightly/">all nightly files</a></td>
+          </tr>
+        </table>
+
+  </div>
+
+  <div class="footer">
+    <div class="counter"><img src="counter.php" alt="visitor count"></div>
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
+  </div>
+
+</div>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script type="text/javascript">
+$(function () {
+  $('a').on('mouseenter', function () {
+    window.status = $(this).attr('href') || '';
+  }).on('mouseleave', function () {
+    window.status = 'nordstjernen.org';
+  });
+  window.status = 'nordstjernen.org';
+});
+</script>
+
+</body>
+</html>
