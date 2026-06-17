@@ -178,11 +178,6 @@
 
         <p>&laquo; <a href="index.html">Back to nordstjernen.org</a></p>
 
-        <div class="shot">
-          <a href="screenshots/screenshot-1-0-3.png"><img src="screenshots/screenshot-1-0-3.png" width="1920" height="1080" alt="Nordstjernen start page"></a>
-          <div class="cap">Nordstjernen rendering a page. <a href="screenshots.html">more screenshots &raquo;</a></div>
-        </div>
-
         <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 123 spec rows fully implemented, 48 partial, 4 absent as of June 2026. See the standards table below and <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
         <p><b>Secure.</b> Process-per-tab design &mdash; each tab runs in its own sandboxed renderer process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
         <p><b>Minimalism.</b> The whole engine is about 109,000 lines of C written by Claude and Codex (117 files in <code>src/</code>, excluding the vendored libraries) &mdash; small enough for one person to read and audit end-to-end.</p>
