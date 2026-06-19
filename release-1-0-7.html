@@ -321,13 +321,15 @@
 
 </div>
 
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script type="text/javascript">
-$(function () {
-  $('a').on('mouseenter', function () {
-    window.status = $(this).attr('href') || '';
-  }).on('mouseleave', function () {
-    window.status = 'nordstjernen.org';
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('a').forEach(function (link) {
+    link.addEventListener('mouseenter', function () {
+      window.status = link.getAttribute('href') || '';
+    });
+    link.addEventListener('mouseleave', function () {
+      window.status = 'nordstjernen.org';
+    });
   });
   window.status = 'nordstjernen.org';
 });
