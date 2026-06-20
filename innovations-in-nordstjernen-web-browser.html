@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Innovations in the Nordstjernen web browser</title>
+<meta name="description" content="A survey of what the Nordstjernen web browser does today, how it is built, the technical innovations that set it apart, and where it is going. Written from scratch in C. No JIT, no telemetry.">
+<link rel="canonical" href="https://www.nordstjernen.org/innovations-in-nordstjernen-web-browser.html">
+<meta name="theme-color" content="#070d3a">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Nordstjernen">
+<meta property="og:locale" content="en">
+<meta property="og:title" content="Innovations in the Nordstjernen web browser">
+<meta property="og:description" content="A clean-room web browser written from scratch in C, small enough for one person to audit end to end. No JIT, no telemetry.">
+<meta property="og:url" content="https://www.nordstjernen.org/innovations-in-nordstjernen-web-browser.html">
+<meta property="og:image" content="https://www.nordstjernen.org/screenshots/screenshot.png">
+<meta property="og:image:alt" content="Nordstjernen rendering a web page">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <a class="skip-link" href="#article">Skip to content</a>
+
+  <header class="header">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen">
+      <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
+    </a>
+    <div class="brand">
+      <a href="."><img class="logo" src="assets/nordstjernen.gif" width="56" height="56" alt="Nordstjernen logo"></a>
+      <span class="title"><a href=".">Nordstjernen</a></span>
+    </div>
+    <p class="tag">Nordstjernen is an independent, legendary web browser</p>
+  </header>
+
+  <nav class="nav" aria-label="Primary">
+    <a href="index.html#about">about</a><span class="sep" aria-hidden="true">&middot;</span>
+    <a href="index.html#news">news</a><span class="sep" aria-hidden="true">&middot;</span>
+    <a href="index.html#specs">specifications</a><span class="sep" aria-hidden="true">&middot;</span>
+    <a href="screenshots.html">screenshots</a><span class="sep" aria-hidden="true">&middot;</span>
+    <a href="index.html#download">download</a><span class="sep" aria-hidden="true">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen">github</a><span class="sep" aria-hidden="true">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/releases">releases</a><span class="sep" aria-hidden="true">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">license</a><span class="sep" aria-hidden="true">&middot;</span>
+    <a href="https://discord.gg/4W959nW5vF">discord</a>
+  </nav>
+
+  <main class="content">
+
+        <h1 id="article" style="color:#003366;">Innovations in the Nordstjernen web browser</h1>
+
+        <p class="lead">Nordstjernen (&ldquo;the North Star&rdquo;) is a web browser written from scratch in C, built in Norway. It is a clean-room implementation &mdash; no Gecko, no WebKit, no Blink, nothing forked from an existing engine.</p>
+
+        <p>Where the rest of the industry has converged on three engines maintained by a handful of the largest companies on earth, Nordstjernen is small enough that a single human can read and audit it end to end: roughly 127,000 lines of C plus a thin C++/Qt shell. This article surveys what the browser does today, how it is built, the technical innovations that set it apart, and where it is going.</p>
+
+        <p>&laquo; <a href="index.html">Back to nordstjernen.org</a></p>
+
+        <figure class="shot">
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1333" height="1000" loading="lazy" alt="Nordstjernen rendering a web page"></a>
+          <figcaption class="cap">Nordstjernen rendering a page. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
+        </figure>
+
+        <h2 id="features">Current features and architecture</h2>
+        <p>Nordstjernen is a real browser, not a toy. It targets the HTML and CSS standards directly &mdash; behaviour is measured against the WHATWG/W3C spec text, section by section, rather than against another browser&rsquo;s quirks. The reference standards are the <a href="https://html.spec.whatwg.org/">WHATWG HTML Living Standard</a>, the <a href="https://dom.spec.whatwg.org/">WHATWG DOM Standard</a>, the <a href="https://url.spec.whatwg.org/">WHATWG URL Standard</a>, and the <a href="https://www.w3.org/TR/CSS/">W3C CSS specifications</a> (the current <a href="https://www.w3.org/TR/css-2023/">CSS Snapshot</a> plus the individual modules &mdash; <a href="https://www.w3.org/TR/css-cascade-5/">Cascade</a>, <a href="https://www.w3.org/TR/css-flexbox-1/">Flexbox</a>, <a href="https://www.w3.org/TR/css-grid-2/">Grid</a>, <a href="https://www.w3.org/TR/css-transforms-2/">Transforms</a>). As of mid-2026 the section-by-section walk-through of the in-scope HTML standard records 136 spec rows fully implemented, 27 partial, and 4 absent.</p>
+
+        <h3>Small by design</h3>
+        <p>The single most important number in this whole document is the size of the source. Nordstjernen&rsquo;s engine is <b>about 120,000 lines of clean-room C</b> (roughly 127,000 counting the thin C++/Qt shell). For comparison, the engines it competes with are cited at <b>tens of millions</b> of lines: Chromium is commonly estimated at around 35 million lines of code, and Firefox/Gecko at well over 20 million. Nordstjernen is therefore on the order of <b>200&ndash;300&times; smaller</b> than either.</p>
+        <p>That is not a vanity metric. A codebase one person can read end to end in a few weeks is a codebase that can actually be <i>audited</i>, reasoned about, and kept honest. Tens of millions of lines cannot be &mdash; not by any individual, and arguably not by any single team. Small is the security property, the maintainability property, and the independence property all at once: it is the reason a browser like this can exist outside a giant corporation at all.</p>
+
+        <p><b>Engine stack.</b> The pieces are deliberately small and vendored in-tree so there are no submodules and no surprise downloads:</p>
+        <ul>
+          <li><b>HTML &rarr; DOM, CSS, and URLs</b> &mdash; the <a href="https://github.com/lexbor/lexbor">lexbor</a> parser, forked in-tree and modified for tight integration. The same library provides the WHATWG URL implementation, so origins, IDN, and parsing all share one code path.</li>
+          <li><b>JavaScript</b> &mdash; the <a href="https://github.com/quickjs-ng/quickjs">QuickJS</a> interpreter (quickjs-ng fork), with DOM, Shadow DOM, observer APIs, Canvas 2D, and WebCrypto wired in. Crucially, <b>no JIT</b> (more on that below).</li>
+          <li><b>WebAssembly</b> &mdash; the full JS API (<code>compile</code>, <code>instantiate</code>, <code>Memory</code>, <code>Table</code>, externref) over a WAMR interpreter; it runs wasm-bindgen bundles.</li>
+          <li><b>Images</b> &mdash; memory-safe decoding through Google&rsquo;s <a href="https://github.com/google/wuffs">Wuffs</a> (PNG, GIF, BMP, JPEG), with libwebp for WebP and librsvg for SVG.</li>
+          <li><b>Networking</b> &mdash; HTTP/2 over libcurl, with HSTS, CSP, and partitioned cookies.</li>
+          <li><b>Cryptography</b> &mdash; <code>crypto.subtle</code> implemented directly over OpenSSL&rsquo;s EVP APIs: hashing, HMAC, AES, RSA, ECDSA/ECDH, HKDF, and PBKDF2.</li>
+        </ul>
+
+        <p><b>Rendering and the UI shell.</b> CSS cascade, flexbox, grid, transforms, gradients, and <code>@keyframes</code> are laid out and painted through GTK 4&rsquo;s GSK renderer (a Qt 6 shell is also shipped). A minimalist presentation-MathML renderer puts equations inline on the text baseline. WebGL 1/2 is mapped onto OpenGL ES, opt-in per site and gated behind a trust prompt. An experimental WebGPU surface layers over external wgpu-native and stays off unless explicitly enabled.</p>
+
+        <p><b>Media, kept deliberately tiny.</b> Exactly one video codec is built in &mdash; MPEG-1, decoded in pure portable C by the vendored single-file <a href="https://github.com/phoboslab/pl_mpeg">pl_mpeg</a>. An <code>.mpg</code>/<code>.mpeg</code>/<code>.m1v</code> <code>&lt;video&gt;</code> plays inline, honouring <code>autoplay</code>/<code>loop</code>/<code>muted</code>/<code>poster</code> and click-to-play. Audio (MP2 via pl_mpeg, MP3 via minimp3) plays through a small unsandboxed helper over SDL2. Everything else &mdash; other codecs, streaming <code>blob:</code> sources &mdash; is handed to an external player. There is no media stack to maintain or to be exploited.</p>
+
+        <p><b>Process-per-tab isolation.</b> Each tab&rsquo;s engine runs in its own sandboxed <code>nordstjernen-renderer</code> process. The GTK/Qt application is a thin shell that blits the renderer&rsquo;s shared-memory framebuffer and forwards input over an IPC control channel. A page that crashes &mdash; or is compromised &mdash; cannot take down the UI or reach its siblings. An optional <code>--single-process</code> mode trades the sandbox for footprint on low-memory machines and for debugging.</p>
+
+        <p><b>A local-only AI start page.</b> The <code>about:start</code> new-tab page is a chat with a small language model running entirely on the user&rsquo;s machine via llama.cpp &mdash; no cloud, no network at inference time. Models download once, integrity-checked against a pinned SHA-256 digest, with optional Vulkan or Metal GPU offload. This is the <i>only</i> AI in the product: there are no AI-style web APIs exposed to pages, by design.</p>
+
+        <p>Nordstjernen ships no telemetry of any kind, does not phone home, and does not run &ldquo;studies&rdquo; infrastructure.</p>
+
+        <h2 id="why-c">Why C</h2>
+        <p>Writing a new browser in C in 2026 looks contrarian, and it is a deliberate choice. The benefits the language buys here are concrete:</p>
+        <ul>
+          <li><b>Ubiquity and portability.</b> A C99/C23 toolchain exists for every platform that matters &mdash; and several that don&rsquo;t. The same source builds with GCC and Clang on Windows, macOS, Linux, Android, FreeBSD, and NetBSD. That is a large part of how a tiny project reaches so many targets.</li>
+          <li><b>No runtime, no GC, no hidden machinery.</b> There is no language runtime to ship, no garbage collector pausing the renderer, and no framework between the code and the system call. What you read is what runs &mdash; which is exactly what makes a security audit tractable.</li>
+          <li><b>Predictable performance and memory.</b> Layout and paint are memory-bandwidth-bound work; C&rsquo;s direct control over allocation, data layout, and cache behaviour matters, and there are no surprises from a JIT warming up or a GC kicking in.</li>
+          <li><b>A stable ABI and clean embedding.</b> The C ABI is the lingua franca of software. It is why the engine drops cleanly behind a C embedding API, a JNI bridge to the JVM, and a C++/Qt shell without glue layers or marshalling runtimes.</li>
+          <li><b>Longevity and small dependencies.</b> C code written carefully today will still compile in twenty years. The toolchain is everywhere, mature, and not going anywhere &mdash; no churning ecosystem, no package-manager supply chain to vet on every build.</li>
+          <li><b>Auditability.</b> Combined with the comment-free, self-explaining house style and the ~120,000-line ceiling, plain C keeps the whole engine within reach of a single reader.</li>
+        </ul>
+
+        <h3>Modern C: the language kept evolving</h3>
+        <p>C is not the language it was in 1999. The current standard, <b>C23</b> (ISO/IEC 9899:2024), modernised it considerably, and Nordstjernen builds against contemporary GCC and Clang that implement it. The improvements that matter for safe, readable systems code include:</p>
+        <ul>
+          <li><b><code>nullptr</code></b> and a real <code>bool</code> / <code>true</code> / <code>false</code> as keywords, removing a layer of macro hackery and null-pointer ambiguity.</li>
+          <li><b><code>constexpr</code></b> objects and <b><code>typeof</code></b> / <code>typeof_unqual</code>, bringing compile-time constants and type introspection into standard C.</li>
+          <li><b><code>_BitInt(N)</code></b> for exact-width integers, and <b><code>&lt;stdckdint.h&gt;</code></b> checked integer arithmetic (<code>ckd_add</code>/<code>ckd_sub</code>/<code>ckd_mul</code>) &mdash; overflow-safe math without hand-rolled guards, which is a real security win for a parser.</li>
+          <li><b><code>[[nodiscard]]</code>, <code>[[maybe_unused]]</code>, <code>[[fallthrough]]</code></b> and friends: standard attributes that let the compiler catch whole classes of mistakes the way other languages do.</li>
+          <li><b><code>#embed</code></b> for pulling binary assets straight into the build, binary integer literals, <code>auto</code> type inference, <code>enum</code>s with a fixed underlying type, and UTF-8 (<code>u8</code>) string improvements.</li>
+        </ul>
+        <p>The takeaway: &ldquo;written in C&rdquo; no longer means &ldquo;written in K&amp;R C.&rdquo; A modern C codebase gets static-analysis-friendly attributes, checked arithmetic, and stronger typing while keeping everything that makes C portable, fast, and auditable.</p>
+
+        <h2 id="methodology">Development methodology</h2>
+        <p>Nordstjernen is developed in a way that is itself part of the story.</p>
+        <ul>
+          <li><b>Clean-room and self-auditable.</b> The guiding constraint is that the source stays readable and maintainable by a single human. Every dependency is small, vendored, and understood. There are no millions of lines of inherited engine code that nobody on the project has read.</li>
+          <li><b>Spec-first, not browser-first.</b> Conformance is tracked against the spec text section by section, and against the open web-platform-tests suite, with a running scoreboard that drives the highest-return-on-investment fixes first.</li>
+          <li><b>The running browser is the test oracle.</b> The project has no automated unit-test suite by deliberate choice. Correctness is verified by building and running the browser on the affected path. A change is &ldquo;done&rdquo; only when it compiles cleanly with both GCC and Clang, the browser launches, the affected UI path works, and it is committed.</li>
+          <li><b>Comment-free, self-explaining code.</b> House style forbids inline comments: each file carries one short header line and the code is made to explain itself through naming and decomposition instead.</li>
+          <li><b>Autonomous, long-running AI sessions.</b> Much of the work happens in uninterrupted agent sessions that default to acting rather than asking &mdash; diagnose, fix, build, smoke-test, commit, push &mdash; with a human steering direction rather than approving each step.</li>
+          <li><b>Cross-platform CI as a sanity net.</b> Linux, macOS, Windows, Qt, Android, and Java workflows run on every push, with CodeQL and Semgrep scanning, while the local Linux build remains the primary correctness gate.</li>
+        </ul>
+
+        <h2 id="innovations">Innovations</h2>
+
+        <h3>Ahead-of-time JavaScript compilation &mdash; speed without a JIT</h3>
+        <p>The headline innovation is the <b>AOT JavaScript compiler</b>. Every production browser speeds up JavaScript with a just-in-time compiler that allocates writable memory at runtime, writes machine code into it, and flips it executable. That single capability is the substrate for an entire class of real-world browser exploits &mdash; JIT spraying, type-confusion &rarr; JIT &mdash; and it forces the sandbox to permit <code>mprotect(PROT_EXEC)</code>, weakening it for everything else.</p>
+        <p>Nordstjernen moves code generation to <b>build time</b>. Its <code>aotc</code> tool reuses the real QuickJS front end to compile JavaScript to bytecode, proves a function lies in a safe numeric subset, and lowers that bytecode to C, which a trusted offline compiler turns into native code mapped from a read-only executable image. The analysis is <b>sound by construction</b>: the compiler emits native code only when it can prove the result is bit-for-bit identical to interpreting the function, and otherwise declines so the interpreter handles it. It can never change a program&rsquo;s meaning &mdash; at worst a function simply is not accelerated. A 55-case self-check confirms AOT and interpreter agree across arithmetic, logic, loops, recursion, float math, and edge cases, and that out-of-subset programs fall back correctly.</p>
+        <p>The payoff: <b>3.8&times;&ndash;35&times; faster</b> than the interpreter on numeric workloads &mdash; <code>fib(28)</code> retires 9.2M instructions versus the interpreter&rsquo;s 1.06 billion &mdash; <b>while the renderer never needs writable-executable memory at all</b>. The seccomp sandbox keeps denying it. This is a genuinely different point in the design space: JIT-class speed on the workloads it can prove safe to accelerate, with none of a JIT&rsquo;s attack surface. The accelerated subset is numeric today and widening; everything outside it runs interpreted, exactly as before.</p>
+
+        <h3>Security: a landlocked renderer</h3>
+        <p>Security is structural rather than bolted on. Each tab&rsquo;s engine runs as an unprivileged child process behind an IPC and shared-memory boundary, and on Linux that process is <b>landlocked</b> &mdash; confined with both a <code>seccomp</code> system-call filter and the kernel&rsquo;s Landlock LSM &mdash; so even a fully compromised renderer can touch almost nothing: no filesystem it was not explicitly granted, no sound device (audio is brokered out to a separate helper), and, thanks to the no-JIT design, no way to create executable memory. The untrusted page never launches external programs; only the trusted UI shell does. Combined with no telemetry and no auto-update pinger, the result is a browser whose threat surface is small enough to reason about.</p>
+
+        <h3>Built clean-room by AI agents</h3>
+        <p>Nordstjernen is, as a practical matter, a browser written largely by <b>AI coding agents</b> &mdash; Claude and Codex &mdash; working in long autonomous sessions against a human-defined product vision and a strict set of operating constraints. It is a concrete demonstration that a from-scratch, spec-conformant, cross-platform browser engine is now within reach of agentic development, when paired with disciplined methodology: small vendored dependencies, a self-auditable codebase, a spec-first conformance target, and the running browser as the verification oracle. The 127,000 lines are not inherited; they were written, here, deliberately.</p>
+
+        <h3>A license that prevents harmful free-riding while allowing commercial use</h3>
+        <p>Nordstjernen ships under the <b>Nordstjernen Source License v1.0</b> (NSL-1.0), inspired by the Functional Source License. The intent is to be genuinely open and fair while preventing the one outcome that kills small open projects &mdash; a larger company taking the code wholesale and shipping a competing browser:</p>
+        <ul>
+          <li>You may <b>use, copy, modify, create derivative works, publish, and distribute</b> the software for any purpose <b>except a Competing Use</b> &mdash; i.e. offering it as a substitute browser product or service.</li>
+          <li>Internal use, non-commercial education and research, and professional services for licensees are all explicitly permitted.</li>
+          <li><b>Commercialization is available</b> by separate written agreement: a commercial license can grant rights beyond the public terms, including the right to make a competing product or to redistribute under different terms.</li>
+          <li>Every release <b>converts to the MIT license ten years after it is published</b> &mdash; an irrevocable grant &mdash; so the work always flows into the fully-free commons on a fixed schedule.</li>
+        </ul>
+        <p>This combination &mdash; open and modifiable for almost everyone, protected against extractive free-riding, monetizable by agreement, and guaranteed to become MIT over time &mdash; is itself one of the project&rsquo;s deliberate innovations.</p>
+
+        <h3>And several quieter ones</h3>
+        <p>The headline items above are not the whole list. A few smaller innovations matter in aggregate:</p>
+        <ul>
+          <li><b>A two-layer crash architecture.</b> A renderer crash is contained to its tab; a crash or hang of the thin UI shell itself is caught by an on-by-default <b>watchdog supervisor</b> that respawns it transparently. The two layers compose so neither a hostile page nor a shell bug takes the browser down.</li>
+          <li><b>A shared-memory framebuffer protocol.</b> The renderer paints into a shared-memory buffer that the shell blits, with input forwarded over an IPC control channel. The same protocol drives in-process (<code>--single-process</code>), out-of-process, and even a remote <code>nordstjernen-renderer</code> over HTTP/JSON &mdash; one boundary, many deployments.</li>
+          <li><b>No-JNI JVM embedding.</b> On the JVM the engine can be driven either through a thin JNI bridge or, for crash isolation, as a separate renderer process over the HTTP/JSON protocol, so an engine crash cannot take down the host JVM. A standalone Swing browser app rides the same binding.</li>
+          <li><b>Translation without gettext.</b> UI strings are English-source and translated at startup through an in-tree catalogue (<code>src/i18n.c</code>, <code>data/i18n/*.lang</code>) with English fallback &mdash; no <code>.po</code> tooling, no gettext dependency, no build-time codegen.</li>
+          <li><b>Memory-safe-by-default media paths.</b> Image bytes go through Wuffs (transpiled, memory-safe), the lone video codec is pure-C MPEG-1 needing no syscalls beyond memory, and audio is brokered to a separate helper &mdash; so the most exploited surfaces in other browsers are either memory-safe or out of the sandbox entirely.</li>
+        </ul>
+
+        <h2 id="david-goliath">David vs Goliath: why the web needs more engines</h2>
+        <p>It is worth stating plainly what Nordstjernen is up against. Essentially the entire web now renders on <b>three engines</b>: Blink (Google), WebKit (Apple), and Gecko (Mozilla, itself largely funded by Google). Blink and WebKit share a common ancestor, and Mozilla&rsquo;s market share keeps shrinking, so in practice the web is increasingly <b>one engine, controlled by one advertising company</b>. When a browser engine is also the de-facto specification, &ldquo;standards compliance&rdquo; quietly becomes &ldquo;whatever Chrome does.&rdquo; A single vendor effectively decides what the web <i>is</i>.</p>
+        <p>That monoculture is fragile in three ways:</p>
+        <ul>
+          <li><b>Security</b>, because a single class of bug &mdash; a V8 type confusion, say &mdash; is simultaneously a flaw in Chrome, Edge, Brave, Opera, Electron, and every other Chromium shell.</li>
+          <li><b>Governance</b>, because web features that are inconvenient to an ad business (or convenient to it) ship or don&rsquo;t ship at one company&rsquo;s discretion.</li>
+          <li><b>Viability</b>, because the engines are now so enormous &mdash; tens of millions of lines &mdash; that no new entrant can realistically write one, which is exactly why there have been no new ones for over a decade.</li>
+        </ul>
+        <p>Nordstjernen is the contrary bet: that a from-scratch engine <i>can</i> still be built by a tiny team, precisely <b>because</b> it refuses the bloat &mdash; ~127,000 lines instead of tens of millions, no JIT, one video codec, no telemetry, auditable end to end by one person. The web does not need another Chromium skin; it needs a genuinely independent engine, and an independent engine is only credible if it is small enough to actually exist outside a trillion-dollar company. More alternatives are not a luxury here &mdash; they are the only thing that keeps the web a commons rather than a product.</p>
+
+        <h2 id="more-secure">Is it more secure than Chrome?</h2>
+        <p>Honestly: <b>in some structural ways yes, in overall battle-hardening not yet &mdash; and the two answers are not in tension.</b></p>
+        <p>Where Nordstjernen has the stronger <i>design</i>:</p>
+        <ul>
+          <li><b>No JIT, ever.</b> The renderer never needs writable-executable memory, so the single most exploited capability in modern browsers &mdash; runtime code generation &mdash; is simply absent. The seccomp filter can keep denying <code>mprotect(PROT_EXEC)</code> for every code path.</li>
+          <li><b>A far smaller attack surface.</b> ~127,000 auditable lines versus tens of millions; one media codec instead of a full media stack; memory-safe image decoding via Wuffs.</li>
+          <li><b>Defence in depth on Linux.</b> seccomp <i>and</i> Landlock confine each renderer; audio is brokered out; the page never launches subprocesses.</li>
+          <li><b>No telemetry, no auto-update channel</b> to attack or to leak through.</li>
+        </ul>
+        <p>Where Chrome is, candidly, ahead today:</p>
+        <ul>
+          <li><b>Maturity and scale of review.</b> V8 and Blink are continuously fuzzed by a large dedicated security team, with a multi-million-dollar bug-bounty program and the fastest patch-and-ship pipeline in the industry.</li>
+          <li><b>Site Isolation and the V8 sandbox.</b> Chrome&rsquo;s process-per-site-origin model and V8&rsquo;s heap-isolation sandbox are mature mitigations refined over years of real attacks.</li>
+          <li><b>Exposure as proof.</b> Chrome is attacked constantly, so its defences are tested constantly; Nordstjernen&rsquo;s simply have not faced the same fire.</li>
+        </ul>
+        <p>The fair conclusion: Nordstjernen&rsquo;s <i>threat model is smaller and easier to reason about</i>, and it structurally eliminates the exploit class that produces most in-the-wild browser zero-days. That is a real and durable advantage. But &ldquo;smaller attack surface&rdquo; is not the same as &ldquo;more hardened,&rdquo; and the project does not claim to have out-engineered Google&rsquo;s security organisation. It claims something narrower and more defensible: <b>there is much less to attack, and the worst foothold &mdash; a JIT &mdash; is not there at all.</b></p>
+
+        <h3>The exploit class Nordstjernen designs away: JIT CVEs in 2026</h3>
+        <p>The argument is not abstract. Chrome shipped a string of V8 zero-days in 2026, several of them exploited in the wild before a patch existed, and the JIT compiler is squarely in the firing line:</p>
+        <ul>
+          <li><b>CVE-2026-3910</b> &mdash; a <b>type confusion in V8&rsquo;s Maglev JIT compiler</b>, specifically its Phi-untagging pass: once a JIT-compiled function runs, the type confusion yields out-of-bounds read/write in the renderer. Exploited in the wild before the fix in Chrome 146, and added to CISA&rsquo;s Known Exploited Vulnerabilities catalog in March 2026. This is exactly the bug shape AOT removes &mdash; there is no Maglev, no runtime-JITed function, and no writable-executable page to confuse.</li>
+          <li><b>CVE-2026-11645</b> &mdash; out-of-bounds memory access in V8 (CVSS 8.8), the fifth Chrome zero-day of 2026, with an exploit acknowledged in the wild.</li>
+          <li><b>CVE-2026-6363</b> &mdash; V8 type confusion allowing memory corruption and code execution, fixed in Chrome 147.</li>
+          <li><b>CVE-2026-2441, CVE-2026-3909, CVE-2026-5281</b> &mdash; the remaining 2026 Chrome zero-days exploited in the wild, several in V8.</li>
+        </ul>
+        <p>Every one of these lives in the JIT/optimising-compiler machinery or the V8 type system that the JIT exists to exploit. A browser with no JIT does not get to be <i>invulnerable</i> &mdash; but it does get to be <b>immune to this entire category</b>, which in 2026 was the category doing the most damage.</p>
+
+        <h2 id="future">Future work and the path to world dominance</h2>
+        <p>The near-term roadmap follows the spec scoreboard: close the remaining partial and absent HTML rows, raise the web-platform-tests score on the highest-return areas, and broaden CSS and forms coverage until typical sites render indistinguishably from the incumbents. The AOT compiler&rsquo;s proven-safe subset will widen beyond pure numerics toward strings, arrays, and object shapes, narrowing the remaining gap to a JIT without ever reintroducing one.</p>
+        <p>Reach is the other axis. Nordstjernen already runs on Windows, macOS, Linux, Android, FreeBSD, NetBSD, and the JVM, with both GTK and Qt shells and a C and Java embedding API. The strategy for broad adoption is the opposite of the incumbents&rsquo;: instead of an ever-larger engine that only a megacorporation can maintain, Nordstjernen offers a browser small enough to <i>understand</i> &mdash; auditable, telemetry-free, JIT-free, and structurally sandboxed &mdash; as the rational default for anyone who actually cares what their browser is doing. Embeddability turns the engine into a building block for other software; the local-AI start page shows how assistance can be added without surrendering privacy; and the ten-year MIT conversion guarantees the work outlives any single steward.</p>
+        <p>The North Star is fixed: a fast, secure, minimal, self-auditable web browser that one person can hold in their head &mdash; and that, multiplied across everyone who wants exactly that, is the path to the top.</p>
+
+        <p>&laquo; <a href="index.html">Back to nordstjernen.org</a></p>
+
+  </main>
+
+  <footer class="footer">
+    <div class="counter"><img src="counter.php" alt="visitor count" width="120" height="20" loading="lazy"></div>
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="privacy/">Privacy</a> &middot;
+    <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
+  </footer>
+
+</div>
+
+</body>
+</html>
