@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="te">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>నార్డ్‌స్టర్నెన్ వెబ్ బ్రౌజర్ - చిన్నది, స్థిరమైనది, స్వతంత్రమైనది. C లో వ్రాయబడింది.</title>
+<meta name="description" content="నార్డ్‌స్టర్నెన్ - C లో మొదటి నుండి వ్రాయబడిన ఒక స్వతంత్ర వెబ్ బ్రౌజర్. టెలిమెట్రీ లేదు, JIT లేదు.">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <div class="brand">
+      <a href="index.html"><img class="logo" src="assets/nordstjernen.svg" alt="Nordstjernen logo"></a>
+      <span class="title"><a href="index.html">Nordstjernen</a></span>
+    </div>
+    <div class="tag">చిన్నది, స్థిరమైనది, స్వతంత్రమైనది &middot; C లో మొదటి నుండి వ్రాయబడింది &middot; JIT లేదు, టెలిమెట్రీ లేదు</div>
+  </div>
+
+  <div class="nav">
+    <a href="#about">గురించి</a><span class="sep">&middot;</span>
+    <a href="#specs">విశిష్టతలు</a><span class="sep">&middot;</span>
+    <a href="#download">డౌన్‌లోడ్</a><span class="sep">&middot;</span>
+    <a href="screenshots.html">స్క్రీన్‌షాట్‌లు</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen">github</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/releases">విడుదలలు</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">లైసెన్స్</a><span class="sep">&middot;</span>
+    <a href="https://discord.gg/4W959nW5vF">discord</a>
+  </div>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>నార్డ్‌స్టర్నెన్ వెబ్ బ్రౌజర్</h1>
+        <p class="lead">నార్డ్‌స్టర్నెన్ అనేది C లో మొదటి నుండి వ్రాయబడిన ఒక వెబ్ బ్రౌజర్, ఇది HTML మరియు CSS ప్రమాణాలకు మద్దతు ఇవ్వడంపై దృష్టి సారిస్తుంది. ఇది Windows, Mac మరియు Linux లపై నడుస్తుంది, Android పోర్ట్ ప్రగతిలో ఉంది. నార్డ్‌స్టర్నెన్ నార్వేలో నిర్మించబడింది.</p>
+
+        <div class="shot">
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1333" height="1000" loading="lazy" alt="Nordstjernen rendering a web page"></a>
+          <div class="cap">నార్డ్‌స్టర్నెన్ ఒక పేజీని రెండర్ చేస్తోంది. <a href="screenshots.html">మరిన్ని స్క్రీన్‌షాట్‌లు &raquo;</a></div>
+        </div>
+
+        <p><b>HTML ప్రమాణం.</b> ప్రవర్తన మరొక బ్రౌజర్‌తో కాకుండా, విభాగం వారీగా స్పెసిఫికేషన్ టెక్స్ట్‌తో పోల్చి కొలవబడుతుంది.</p>
+        <p><b>సురక్షితమైనది.</b> ప్రతి-ట్యాబ్-కు-ఒక-ప్రాసెస్ రూపకల్పన &mdash; ప్రతి ట్యాబ్ దాని స్వంత శాండ్‌బాక్స్ చేయబడిన రెండరర్ ప్రాసెస్‌లో నడుస్తుంది (Linux లో seccomp + Landlock), IPC మరియు షేర్డ్-మెమరీ ఫ్రేమ్‌బఫర్‌ల ద్వారా UI తో మాట్లాడుతుంది. JIT లేదు.</p>
+        <p><b>కనిష్టత్వం.</b> మొత్తం ఇంజిన్ ఒక సంక్షిప్త C కోడ్ సమూహం &mdash; ఒక వ్యక్తి మొదటి నుండి చివరి వరకు చదివి ఆడిట్ చేయడానికి తగినంత చిన్నది.</p>
+        <p>నార్డ్‌స్టర్నెన్‌కు JIT లేదు, కాబట్టి ఇది చాలా సురక్షితమైనది, అయినా తగినంత వేగంగా ఉంటుంది. ఇది ఎలాంటి టెలిమెట్రీని పంపదు.</p>
+
+        <a id="specs"></a>
+        <h2>విశిష్టతలు</h2>
+        <table class="spec">
+          <tr><th>భాష</th><td>C &middot; పూర్తిగా ఆడిట్ చేయదగినది</td></tr>
+          <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> (పార్సర్, WHATWG URL, సెలెక్టర్‌లు)</td></tr>
+          <tr><th>javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> &mdash; బైట్‌కోడ్ ఇంటర్‌ప్రెటర్, JIT లేదు</td></tr>
+          <tr><th>webassembly</th><td><a href="https://github.com/bytecodealliance/wasm-micro-runtime">WAMR</a> &mdash; <code>WebAssembly</code> JS API వెనుక ఇంటర్‌ప్రెటర్</td></tr>
+          <tr><th>చిత్రాలు</th><td><a href="https://github.com/google/wuffs">Wuffs</a> (PNG / GIF / BMP / JPEG / WebP lossless)</td></tr>
+          <tr><th>ui</th><td><a href="https://www.gtk.org">GTK 4</a> &middot; Pango టెక్స్ట్ షేపింగ్ &middot; పేజీకి ఒక విండో, ట్యాబ్ స్ట్రిప్ లేదు</td></tr>
+          <tr><th>నెట్‌వర్క్</th><td><a href="https://curl.se">libcurl</a> &middot; HTTP/2</td></tr>
+          <tr><th>హార్డెనింగ్</th><td>ప్రతి-ట్యాబ్-కు-ఒక-ప్రాసెస్ &middot; Linux లో seccomp + Landlock శాండ్‌బాక్స్ &middot; JIT లేదు</td></tr>
+          <tr><th>గోప్యత</th><td>టెలిమెట్రీ లేదు &middot; విభజించబడిన కుకీలు &middot; HSTS &middot; CSP</td></tr>
+          <tr><th>ప్లాట్‌ఫారమ్‌లు</th><td>linux &middot; windows &middot; macos &middot; android (పోర్ట్ ప్రగతిలో ఉంది)</td></tr>
+          <tr><th>లైసెన్స్</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; 10 సంవత్సరాల తర్వాత MIT</td></tr>
+        </table>
+
+        <a id="download"></a>
+        <h2>డౌన్‌లోడ్</h2>
+        <p>నైట్లీ బిల్డ్‌లను డౌన్‌లోడ్ చేసుకోండి. అవి ప్రతి రాత్రి <code>main</code> నుండి తిరిగి నిర్మించబడతాయి మరియు తాజా కోడ్‌ను సూచిస్తాయి &mdash; అత్యాధునిక అంచు, కఠినమైన అంచులను ఆశించండి.</p>
+
+        <table class="spec dl">
+          <tr><th>Windows</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip">nordstjernen-windows-x86_64.zip</a></td></tr>
+          <tr><th>macOS</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg">nordstjernen-macos.dmg</a></td></tr>
+          <tr><th>Debian</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb">nordstjernen-debian-amd64.deb</a></td></tr>
+          <tr><th>Ubuntu</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb">nordstjernen-ubuntu-amd64.deb</a></td></tr>
+          <tr><th>openSUSE</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm">nordstjernen-opensuse-x86_64.rpm</a></td></tr>
+          <tr><th>Linux (పోర్టబుల్)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip">nordstjernen-linux-x86_64.zip</a></td></tr>
+          <tr><th>Alpine (musl)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk">nordstjernen-alpine-x86_64.apk</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip">.zip</a></td></tr>
+          <tr><th>Java API (JDK 21)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-java.jar">nordstjernen-java.jar</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar">సోర్సెస్</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar">javadoc</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/java/apidocs/">API పత్రాలు</a></td></tr>
+          <tr><th>సోర్స్</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz">nordstjernen-src.tar.xz</a></td></tr>
+          <tr><th>చెక్‌సమ్‌లు</th><td><a href="https://www.nordstjernen.org/nightly/SHA256SUMS">SHA256SUMS</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/">అన్ని నైట్లీ ఫైళ్లు</a></td></tr>
+        </table>
+
+        <a id="languages"></a>
+        <h2>భాషలు</h2>
+        <p class="langs">
+          <a href="index.html">English</a> &middot;
+          <a href="index_cn.html">中文</a> &middot;
+          <a href="index_hi.html">हिन्दी</a> &middot;
+          <a href="index_es.html">Espa&ntilde;ol</a> &middot;
+          <a href="index_fr.html">Fran&ccedil;ais</a> &middot;
+          <a href="index_ar.html">العربية</a> &middot;
+          <a href="index_bn.html">বাংলা</a> &middot;
+          <a href="index_pt.html">Portugu&ecirc;s</a> &middot;
+          <a href="index_ru.html">Русский</a> &middot;
+          <a href="index_ur.html">اردو</a> &middot;
+          <a href="index_id.html">Bahasa Indonesia</a> &middot;
+          <a href="index_de.html">Deutsch</a> &middot;
+          <a href="index_jp.html">日本語</a> &middot;
+          <a href="index_sw.html">Kiswahili</a> &middot;
+          <a href="index_mr.html">मराठी</a> &middot;
+          <span class="cur">తెలుగు</span> &middot;
+          <a href="index_tr.html">T&uuml;rk&ccedil;e</a> &middot;
+          <a href="index_ta.html">தமிழ்</a> &middot;
+          <a href="index_vi.html">Ti&#7871;ng Vi&#7879;t</a> &middot;
+          <a href="index_ko.html">한국어</a> &middot;
+          <a href="index_no.html">Norsk</a>
+        </p>
+
+  </div>
+
+  <div class="footer">
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="privacy/">గోప్యత</a> &middot;
+    <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
+  </div>
+
+</div>
+
+</body>
+</html>

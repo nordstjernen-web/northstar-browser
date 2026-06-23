@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nordstjernen nettleser - liten, stødig, uavhengig. Skrevet i C.</title>
+<meta name="description" content="Nordstjernen - en uavhengig nettleser skrevet fra bunnen av i C. Ingen telemetri, ingen JIT.">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <div class="brand">
+      <a href="index.html"><img class="logo" src="assets/nordstjernen.svg" alt="Nordstjernen logo"></a>
+      <span class="title"><a href="index.html">Nordstjernen</a></span>
+    </div>
+    <div class="tag">liten, stødig, uavhengig &middot; skrevet fra bunnen av i C &middot; ingen JIT, ingen telemetri</div>
+  </div>
+
+  <div class="nav">
+    <a href="#about">om</a><span class="sep">&middot;</span>
+    <a href="#specs">spesifikasjoner</a><span class="sep">&middot;</span>
+    <a href="#download">last ned</a><span class="sep">&middot;</span>
+    <a href="screenshots.html">skjermbilder</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen">github</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/releases">utgivelser</a><span class="sep">&middot;</span>
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">lisens</a><span class="sep">&middot;</span>
+    <a href="https://discord.gg/4W959nW5vF">discord</a>
+  </div>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>Nordstjernen nettleser</h1>
+        <p class="lead">Nordstjernen er en nettleser, skrevet fra bunnen av i C, med fokus på å støtte HTML- og CSS-standardene. Den kjører på Windows, Mac og Linux, med en Android-port under utvikling. Nordstjernen er laget i Norge.</p>
+
+        <div class="shot">
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1333" height="1000" loading="lazy" alt="Nordstjernen rendering a web page"></a>
+          <div class="cap">Nordstjernen viser en nettside. <a href="screenshots.html">flere skjermbilder &raquo;</a></div>
+        </div>
+
+        <p><b>HTML-standarden.</b> Atferden måles mot selve spesifikasjonsteksten, avsnitt for avsnitt, ikke mot en annen nettleser.</p>
+        <p><b>Sikker.</b> Prosess-per-fane-design &mdash; hver fane kjører i sin egen sandkasse-rendererprosess (seccomp + Landlock på Linux), og snakker med grensesnittet over IPC og delt-minne-rammebuffere. Ingen JIT.</p>
+        <p><b>Minimalisme.</b> Hele motoren er en kompakt mengde C &mdash; liten nok til at én person kan lese og granske den fra ende til annen.</p>
+        <p>Nordstjernen har ingen JIT, så den er mye sikrere, og kan likevel være rask nok. Den sender ingen form for telemetri.</p>
+
+        <a id="specs"></a>
+        <h2>spesifikasjoner</h2>
+        <table class="spec">
+          <tr><th>språk</th><td>C &middot; fullt reviderbar</td></tr>
+          <tr><th>html / css</th><td><a href="https://github.com/lexbor/lexbor">lexbor</a> (parser, WHATWG URL, selektorer)</td></tr>
+          <tr><th>javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> &mdash; bytekode-tolk, ingen JIT</td></tr>
+          <tr><th>webassembly</th><td><a href="https://github.com/bytecodealliance/wasm-micro-runtime">WAMR</a> &mdash; tolk bak <code>WebAssembly</code>-JS-API-et</td></tr>
+          <tr><th>bilder</th><td><a href="https://github.com/google/wuffs">Wuffs</a> (PNG / GIF / BMP / JPEG / WebP tapsfri)</td></tr>
+          <tr><th>grensesnitt</th><td><a href="https://www.gtk.org">GTK 4</a> &middot; Pango tekstforming &middot; ett vindu per side, ingen fanerad</td></tr>
+          <tr><th>nettverk</th><td><a href="https://curl.se">libcurl</a> &middot; HTTP/2</td></tr>
+          <tr><th>herding</th><td>prosess-per-fane &middot; seccomp + Landlock-sandkasse på Linux &middot; ingen JIT</td></tr>
+          <tr><th>personvern</th><td>ingen telemetri &middot; partisjonerte informasjonskapsler &middot; HSTS &middot; CSP</td></tr>
+          <tr><th>plattformer</th><td>linux &middot; windows &middot; macos &middot; android (port under utvikling)</td></tr>
+          <tr><th>lisens</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; MIT etter 10 år</td></tr>
+        </table>
+
+        <a id="download"></a>
+        <h2>last ned</h2>
+        <p>Last ned de nattlige byggene. De bygges på nytt fra <code>main</code> hver natt og peker på den nyeste koden &mdash; helt på kanten, forvent ujevne kanter.</p>
+
+        <table class="spec dl">
+          <tr><th>Windows</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip">nordstjernen-windows-x86_64.zip</a></td></tr>
+          <tr><th>macOS</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg">nordstjernen-macos.dmg</a></td></tr>
+          <tr><th>Debian</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb">nordstjernen-debian-amd64.deb</a></td></tr>
+          <tr><th>Ubuntu</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb">nordstjernen-ubuntu-amd64.deb</a></td></tr>
+          <tr><th>openSUSE</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm">nordstjernen-opensuse-x86_64.rpm</a></td></tr>
+          <tr><th>Linux (portabel)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip">nordstjernen-linux-x86_64.zip</a></td></tr>
+          <tr><th>Alpine (musl)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk">nordstjernen-alpine-x86_64.apk</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip">.zip</a></td></tr>
+          <tr><th>Java API (JDK 21)</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-java.jar">nordstjernen-java.jar</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar">kilder</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar">javadoc</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/java/apidocs/">API-dokumentasjon</a></td></tr>
+          <tr><th>Kildekode</th><td><a href="https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz">nordstjernen-src.tar.xz</a></td></tr>
+          <tr><th>Kontrollsummer</th><td><a href="https://www.nordstjernen.org/nightly/SHA256SUMS">SHA256SUMS</a> &middot;
+              <a href="https://www.nordstjernen.org/nightly/">alle nattlige filer</a></td></tr>
+        </table>
+
+        <a id="languages"></a>
+        <h2>språk</h2>
+        <p class="langs">
+          <a href="index.html">English</a> &middot;
+          <a href="index_cn.html">中文</a> &middot;
+          <a href="index_hi.html">हिन्दी</a> &middot;
+          <a href="index_es.html">Espa&ntilde;ol</a> &middot;
+          <a href="index_fr.html">Fran&ccedil;ais</a> &middot;
+          <a href="index_ar.html">العربية</a> &middot;
+          <a href="index_bn.html">বাংলা</a> &middot;
+          <a href="index_pt.html">Portugu&ecirc;s</a> &middot;
+          <a href="index_ru.html">Русский</a> &middot;
+          <a href="index_ur.html">اردو</a> &middot;
+          <a href="index_id.html">Bahasa Indonesia</a> &middot;
+          <a href="index_de.html">Deutsch</a> &middot;
+          <a href="index_jp.html">日本語</a> &middot;
+          <a href="index_sw.html">Kiswahili</a> &middot;
+          <a href="index_mr.html">मराठी</a> &middot;
+          <a href="index_te.html">తెలుగు</a> &middot;
+          <a href="index_tr.html">T&uuml;rk&ccedil;e</a> &middot;
+          <a href="index_ta.html">தமிழ்</a> &middot;
+          <a href="index_vi.html">Ti&#7871;ng Vi&#7879;t</a> &middot;
+          <a href="index_ko.html">한국어</a> &middot;
+          <span class="cur">Norsk</span>
+        </p>
+
+  </div>
+
+  <div class="footer">
+    Copyright &copy; 2026 Nordstjernen-prosjektet &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="privacy/">Personvern</a> &middot;
+    <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
+  </div>
+
+</div>
+
+</body>
+</html>
