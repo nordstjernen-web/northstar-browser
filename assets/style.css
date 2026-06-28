@@ -146,6 +146,47 @@
   .langs a { white-space: nowrap; }
   .langs .cur { color: #000000; font-weight: bold; }
 
+  /* ===== DOWNLOAD BUTTON ===== */
+  .btn-red,
+  .btn-red:link,
+  .btn-red:visited {
+    display: inline-block;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 17px;
+    font-weight: bold;
+    color: #ffffff;
+    background: #cc0000;
+    border: 2px solid #000000;
+    padding: 11px 26px;
+    text-decoration: none;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,.3);
+  }
+  .btn-red:hover {
+    background: #a30000;
+    color: #ffffff;
+    text-decoration: none;
+  }
+  .btn-red:active { transform: translateY(1px); }
+  .btn-red:focus-visible { outline: 2px solid #000000; outline-offset: 2px; }
+
+  /* OS-detect hero on the download page */
+  .os-hero {
+    margin: 8px 0 26px 0;
+    padding: 22px 20px;
+    border: 2px solid #000000;
+    border-radius: 6px;
+    background: #f4f4f4;
+    text-align: center;
+  }
+  .os-hero .btn-red { font-size: 20px; padding: 14px 34px; }
+  .os-hero .os-note {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px;
+    color: #666666;
+    margin: 12px 0 0 0;
+  }
+
   /* ===== FOOTER ===== */
   .footer {
     border-top: 3px solid #000000;
