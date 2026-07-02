@@ -53,13 +53,28 @@
   .nav {
     border-bottom: 3px solid #000000;
     background: #f4f4f4;
-    text-align: center;
-    padding: 8px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 12px;
     font-family: Arial, Helvetica, sans-serif;
-    font-size: 17px;
+    font-size: 16px;
+    line-height: 1;
   }
-  .nav a { color: #003366; text-decoration: none; padding: 0 10px; }
-  .nav a:hover { color: #cc0000; text-decoration: underline; }
+  .nav a {
+    color: #003366;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 0 16px;
+    border: 1px solid #bfc7d6;
+    border-radius: 4px;
+    background: #ffffff;
+    white-space: nowrap;
+  }
+  .nav a:hover { color: #cc0000; border-color: #cc0000; }
   .content {
     max-width: 760px;
     margin: 0 auto;
