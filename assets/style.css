@@ -76,7 +76,7 @@
     line-height: 1;
   }
   .nav a,
-  .nav-more > summary {
+  .nav-more-btn {
     color: #003366;
     text-decoration: none;
     display: inline-flex;
@@ -89,37 +89,25 @@
     white-space: nowrap;
   }
   .nav a:hover,
-  .nav-more > summary:hover { color: #cc0000; border-color: #cc0000; }
+  .nav-more-btn:hover { color: #cc0000; border-color: #cc0000; }
 
-  /* "More" dropdown — plain <details>, no JavaScript needed */
-  .nav-more { position: relative; }
-  .nav-more > summary { cursor: pointer; list-style: none; gap: 6px; }
-  .nav-more > summary::-webkit-details-marker { display: none; }
-  .nav-more > summary:focus-visible { outline: 2px solid #cc0000; outline-offset: 2px; }
-  .nav-more[open] > summary { color: #cc0000; border-color: #cc0000; }
-  .nav-more .menu {
+  /* Secondary links: one set of markup for all screen sizes. On desktop
+     .nav-sec shows inline and the "More" toggle is hidden; on mobile the
+     hidden checkbox + label collapse .nav-sec — no JavaScript needed. */
+  .nav-more-toggle {
     position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 20;
+    width: 1px; height: 1px;
+    opacity: 0;
+  }
+  .nav-more-btn { display: none; cursor: pointer; gap: 6px; }
+  .nav-more-toggle:focus-visible + .nav-more-btn { outline: 2px solid #cc0000; outline-offset: 2px; }
+  .nav-more-toggle:checked + .nav-more-btn { color: #cc0000; border-color: #cc0000; }
+  .nav-sec {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 170px;
-    padding: 6px;
-    background: #ffffff;
-    border: 1px solid #bfc7d6;
-    border-radius: 4px;
-    box-shadow: 0 4px 10px rgba(0,0,0,.18);
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
   }
-  .nav .nav-more .menu a {
-    border: 0;
-    border-radius: 3px;
-    justify-content: flex-start;
-    min-height: 34px;
-  }
-  .nav .nav-more .menu a:hover { background: #f4f4f4; }
-  [dir="rtl"] .nav-more .menu { right: auto; left: 0; }
 
   /* ===== CONTENT ===== */
   .content { max-width: 1000px; margin: 0 auto; padding: 26px 26px 40px; }
@@ -278,10 +266,13 @@
       font-size: 14px;
     }
     .nav a,
-    .nav-more > summary {
+    .nav-more-btn {
       min-height: 36px;
       padding: 0 12px;
     }
+    .nav-more-btn { display: inline-flex; }
+    .nav-sec { display: none; width: 100%; gap: 6px; }
+    .nav-more-toggle:checked ~ .nav-sec { display: flex; }
     .content {
       padding: 18px 15px 28px;
       overflow-wrap: anywhere;
@@ -359,5 +350,5 @@
     .header .tag { margin-left: 54px; }
     .header .logo { width: 42px; height: 42px; }
     .nav a,
-    .nav-more > summary { padding: 0 9px; }
+    .nav-more-btn { padding: 0 9px; }
   }
