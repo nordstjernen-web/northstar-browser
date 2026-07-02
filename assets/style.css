@@ -75,7 +75,8 @@
     font-size: 16px;
     line-height: 1;
   }
-  .nav a {
+  .nav a,
+  .nav-more > summary {
     color: #003366;
     text-decoration: none;
     display: inline-flex;
@@ -87,7 +88,38 @@
     background: #ffffff;
     white-space: nowrap;
   }
-  .nav a:hover { color: #cc0000; border-color: #cc0000; }
+  .nav a:hover,
+  .nav-more > summary:hover { color: #cc0000; border-color: #cc0000; }
+
+  /* "More" dropdown — plain <details>, no JavaScript needed */
+  .nav-more { position: relative; }
+  .nav-more > summary { cursor: pointer; list-style: none; gap: 6px; }
+  .nav-more > summary::-webkit-details-marker { display: none; }
+  .nav-more > summary:focus-visible { outline: 2px solid #cc0000; outline-offset: 2px; }
+  .nav-more[open] > summary { color: #cc0000; border-color: #cc0000; }
+  .nav-more .menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 170px;
+    padding: 6px;
+    background: #ffffff;
+    border: 1px solid #bfc7d6;
+    border-radius: 4px;
+    box-shadow: 0 4px 10px rgba(0,0,0,.18);
+  }
+  .nav .nav-more .menu a {
+    border: 0;
+    border-radius: 3px;
+    justify-content: flex-start;
+    min-height: 34px;
+  }
+  .nav .nav-more .menu a:hover { background: #f4f4f4; }
+  [dir="rtl"] .nav-more .menu { right: auto; left: 0; }
 
   /* ===== CONTENT ===== */
   .content { max-width: 1000px; margin: 0 auto; padding: 26px 26px 40px; }
@@ -245,7 +277,8 @@
       border-bottom-width: 2px;
       font-size: 14px;
     }
-    .nav a {
+    .nav a,
+    .nav-more > summary {
       min-height: 36px;
       padding: 0 12px;
     }
@@ -325,5 +358,6 @@
     .header .title { font-size: 24px; }
     .header .tag { margin-left: 54px; }
     .header .logo { width: 42px; height: 42px; }
-    .nav a { padding: 0 9px; }
+    .nav a,
+    .nav-more > summary { padding: 0 9px; }
   }
