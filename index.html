@@ -14,7 +14,7 @@
 <meta property="og:description" content="A web browser written from scratch in C.">
 <meta property="og:url" content="https://www.nordstjernen.org/">
 <meta property="og:image" content="https://www.nordstjernen.org/screenshots/screenshot.png">
-<meta property="og:image:alt" content="Nordstjernen rendering a web page">
+<meta property="og:image:alt" content="Nordstjernen's about:start start page">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
 <script type="application/ld+json">
@@ -23,7 +23,7 @@
   "@type": "SoftwareApplication",
   "name": "Nordstjernen",
   "applicationCategory": "BrowserApplication",
-  "operatingSystem": "Windows, macOS, Linux",
+  "operatingSystem": "Windows, macOS, Linux, Android, iOS",
   "softwareVersion": "1.0.18",
   "url": "https://www.nordstjernen.org/",
   "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.18",
@@ -68,19 +68,22 @@
   <main class="content">
 
         <h1 id="about" style="color:#003366;">Nordstjernen Web Browser</h1>
-        <p class="lead">Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, Mac and Linux, with an Android port in progress. Nordstjernen is built in Norway.</p>
+        <p class="lead">Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, macOS and Linux, with builds for Android, iOS, FreeBSD, NetBSD and the JVM. Nordstjernen is built in Norway.</p>
 
         <p class="release-line">Nordstjernen Browser version 1.0.18 released! <a href="release-1-0-18.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.18">More info here</a>.</p>
 
         <figure class="shot">
-          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1333" height="1000" loading="lazy" alt="Nordstjernen rendering a web page"></a>
-          <figcaption class="cap">Nordstjernen rendering a page. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1008" height="752" loading="lazy" alt="Nordstjernen's about:start start page — the Manifest Destiny splash, with on-device search and a local AI window"></a>
+          <figcaption class="cap">Nordstjernen&rsquo;s about:start page &mdash; the &ldquo;Manifest Destiny&rdquo; splash. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
         </figure>
 
-        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 139 spec rows fully implemented, 29 partial, 3 absent across WHATWG HTML sections 1&ndash;16 as of June 2026. See <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
-        <p><b>Secure.</b> Process-per-tab design &mdash; each tab runs in its own sandboxed renderer process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
-        <p><b>Minimalism.</b> The whole engine is about 145,000 lines of clean-room C, excluding the vendored libraries &mdash; small enough for one person to read and audit end-to-end.</p>
-        <p><b>Local AI.</b> The <code>about:start</code> new-tab page is a chat with a small language model running entirely on your machine via <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> &mdash; no cloud, no network at inference time. Build with <code>-Dai=disabled</code> for a fully offline binary.</p>
+        <div class="features">
+        <p class="feature"><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial and 0 absent across WHATWG HTML sections 1&ndash;16 (July 2026). No element or API row is fully absent any more: every one is implemented, partial, or a deliberate non-goal. See <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p class="feature"><b>Secure.</b> Process-per-tab design &mdash; each tab runs in its own sandboxed renderer process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
+        <p class="feature"><b>Minimalism.</b> The whole engine is about 145,000 lines of clean-room C, excluding the vendored libraries &mdash; small enough for one person to read and audit end-to-end.</p>
+        <p class="feature"><b>Capable.</b> JavaScript on QuickJS with Canvas&nbsp;2D, WebCrypto, Service Workers and the Navigation API &middot; WebAssembly via WAMR &middot; opt-in per-site WebGL &middot; inline <code>&lt;video&gt;</code> (MPEG-1 always, WebM/VP9 where FFmpeg is present) with WebVTT captions &middot; presentation MathML &middot; on-device safe browsing against a local blocklist.</p>
+        <p class="feature"><b>Local AI.</b> The <code>about:start</code> new-tab page is a chat with a small language model running entirely on your machine via <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> &mdash; no cloud, no network at inference time. Build with <code>-Dai=disabled</code> for a fully offline binary.</p>
+        </div>
         <p>Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.</p>
         <p>Read more about the <a href="innovations-in-nordstjernen-web-browser.html">innovations in the Nordstjernen web browser</a>.</p>
 
@@ -134,19 +137,21 @@
           <tr><th scope="row">javascript</th><td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> &mdash; bytecode interpreter, no JIT</td></tr>
           <tr><th scope="row">webassembly</th><td><a href="https://github.com/bytecodealliance/wasm-micro-runtime">WAMR</a> &mdash; interpreter behind the <code>WebAssembly</code> JS API</td></tr>
           <tr><th scope="row">images</th><td><a href="https://github.com/google/wuffs">Wuffs</a> v0.4 (PNG / GIF / BMP / JPEG) &middot; libwebp (WebP) &middot; libavif (AVIF, optional)</td></tr>
+          <tr><th scope="row">media</th><td>inline <code>&lt;video&gt;</code> &mdash; MPEG-1 via <a href="https://github.com/phoboslab/pl_mpeg">pl_mpeg</a> &middot; WebM (VP9/VP8 + Opus/Vorbis) via optional FFmpeg &middot; WebVTT captions &middot; SDL2 audio</td></tr>
           <tr><th scope="row">ai</th><td><a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> &mdash; on-device <code>about:start</code> chat &middot; no cloud &middot; optional GPU offload (Vulkan / Metal) &middot; <code>-Dai=disabled</code> for offline builds</td></tr>
           <tr><th scope="row">ui</th><td><a href="https://www.gtk.org">GTK 4</a> (&ge;&nbsp;4.22.1 on Windows, &ge;&nbsp;4.14 elsewhere) &middot; Pango text shaping</td></tr>
           <tr><th scope="row">network</th><td><a href="https://curl.se">libcurl</a> &ge;&nbsp;8.5 &middot; HTTP/2</td></tr>
           <tr><th scope="row">hardening</th><td>process-per-tab &middot; seccomp + Landlock sandbox on Linux &middot; sandboxed renderer processes &middot; no JIT</td></tr>
-          <tr><th scope="row">privacy</th><td>no telemetry &middot; partitioned cookies &middot; HSTS &middot; CSP &middot; SRI</td></tr>
-          <tr><th scope="row">standards</th><td>139 spec rows fully implemented, 29 partial, 3 absent &middot; WHATWG HTML sections 1&ndash;16 (June 2026)</td></tr>
-          <tr><th scope="row">platforms</th><td>linux (gtk) &middot; windows &middot; macos &middot; android &middot; java/jvm &middot; freebsd &middot; netbsd</td></tr>
+          <tr><th scope="row">privacy</th><td>no telemetry &middot; partitioned cookies &middot; HSTS &middot; CSP &middot; SRI &middot; on-device safe browsing</td></tr>
+          <tr><th scope="row">standards</th><td>140 spec rows fully implemented, 31 partial, 0 absent &middot; WHATWG HTML sections 1&ndash;16 (July 2026)</td></tr>
+          <tr><th scope="row">platforms</th><td>linux (gtk) &middot; windows &middot; macos &middot; android &middot; ios &middot; java/jvm &middot; freebsd &middot; netbsd</td></tr>
           <tr><th scope="row">license</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years &middot; The Nordstjernen Source License is inspired by the <a href="https://fsl.software/">Functional Source License (FSL)</a>, a Fair Source license that converts to Apache 2.0 or MIT.</td></tr>
         </table>
 
         <h2 id="download">download</h2>
         <p>Latest tagged release: Nordstjernen <b>1.0.18</b> &mdash; released 6 July 2026.
-        Builds for Windows, macOS and Linux, plus the source, are all on the download page.</p>
+        Builds for Windows, macOS and Linux, plus the source, are all on the download page.
+        Android is available on <a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a>.</p>
 
         <p><a class="btn-red" href="download.html">Download Nordstjernen &raquo;</a></p>
 
