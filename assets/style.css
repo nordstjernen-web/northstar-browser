@@ -140,6 +140,19 @@
     color: #333333;
   }
 
+  /* Feature highlights on the home page */
+  .features { margin: 4px 0 14px; }
+  .feature {
+    margin: 0 0 8px 0;
+    padding: 9px 14px;
+    background: #f7f8fb;
+    border: 1px solid #e3e7f0;
+    border-left: 3px solid #cc0000;
+    border-radius: 0 4px 4px 0;
+  }
+  .feature:last-child { margin-bottom: 0; }
+  .feature b { color: #003366; }
+
   .shot { margin: 10px 0 26px 0; }
   .shot a { display: block; }
   .shot img { display: block; width: 100%; border: 1px solid #000000; }

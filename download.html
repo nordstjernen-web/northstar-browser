@@ -14,7 +14,7 @@
 <meta property="og:description" content="An independent web browser written from scratch in C. No telemetry, no JIT.">
 <meta property="og:url" content="https://www.nordstjernen.org/download.html">
 <meta property="og:image" content="https://www.nordstjernen.org/screenshots/screenshot.png">
-<meta property="og:image:alt" content="Nordstjernen rendering a web page">
+<meta property="og:image:alt" content="Nordstjernen's about:start start page">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
 <script type="application/ld+json">
@@ -79,7 +79,8 @@
         <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.18">full release notes &raquo;</a></p>
 
         <p>Nordstjernen is also available on the
-        <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a>.</p>
+        <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a>
+        and on <a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a> for Android.</p>
 
         <p><b>For platform-specific builds, use the nightly builds.</b> They are rebuilt
         from <code>main</code> each night and point at the latest code &mdash; bleeding
@@ -95,6 +96,10 @@
           <tr>
             <th scope="row">macOS</th>
             <td><a href="https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg">nordstjernen-macos.dmg</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Android</th>
+            <td><a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a></td>
           </tr>
           <tr>
             <th scope="row">Debian</th>
@@ -170,7 +175,7 @@
       href = nightly + 'nordstjernen-windows-x86_64.zip';
     } else if (/Android/i.test(probe)) {
       os = 'Android';
-      href = 'https://github.com/nordstjernen-web/nordstjernen/releases';
+      href = 'https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser';
     } else if (/iPhone|iPad|iPod/i.test(probe)) {
       os = 'iOS';
       href = 'https://github.com/nordstjernen-web/nordstjernen/releases';
