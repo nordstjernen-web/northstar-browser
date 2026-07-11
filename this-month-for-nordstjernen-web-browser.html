@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>This month for the Nordstjernen web browser</title>
+<meta name="description" content="A month in review for the Nordstjernen web browser: 11 June – 11 July 2026. Ten point releases (1.0.8–1.0.18), zero absent HTML spec rows, inline WebM and MSE video, content blocking, on-device Safe Browsing, a new iOS port, and a broad security-hardening pass. No JIT, no telemetry.">
+<link rel="canonical" href="https://www.nordstjernen.org/this-month-for-nordstjernen-web-browser.html">
+<meta name="theme-color" content="#070d3a">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Nordstjernen">
+<meta property="og:locale" content="en">
+<meta property="og:title" content="This month for the Nordstjernen web browser">
+<meta property="og:description" content="A review of the last 30 days: ten releases, zero absent HTML spec rows, real-world inline video, content blocking, on-device Safe Browsing, and a new iOS port. Written from scratch in C. No JIT, no telemetry.">
+<meta property="og:url" content="https://www.nordstjernen.org/this-month-for-nordstjernen-web-browser.html">
+<meta property="og:image" content="https://www.nordstjernen.org/screenshots/screenshot.png">
+<meta property="og:image:alt" content="Nordstjernen rendering a web page">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <a class="skip-link" href="#article">Skip to content</a>
+
+  <header class="header">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen">
+      <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
+    </a>
+    <div class="brand">
+      <a href="."><img class="logo" src="assets/nordstjernen.gif" width="56" height="56" alt="Nordstjernen logo"></a>
+      <span class="title"><a href=".">Nordstjernen</a></span>
+    </div>
+    <p class="tag">Nordstjernen is an independent, legendary web browser</p>
+  </header>
+
+  <nav class="nav" aria-label="Primary">
+    <a href="index.html#about">About</a>
+    <a href="index.html#news">News</a>
+    <a href="screenshots.html">Screenshots</a>
+    <a href="download.html">Download</a>
+    <a href="https://github.com/nordstjernen-web/nordstjernen">GitHub</a>
+    <input type="checkbox" id="nav-more" class="nav-more-toggle">
+    <label class="nav-more-btn" for="nav-more">More <span aria-hidden="true">&#9662;</span></label>
+    <div class="nav-sec">
+      <a href="index.html#specs">Specifications</a>
+      <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Releases</a>
+      <a href="https://discord.gg/4W959nW5vF">Discord</a>
+    </div>
+  </nav>
+
+  <main class="content">
+
+        <h1 id="article" style="color:#003366;">This month for the Nordstjernen web browser</h1>
+
+        <p class="lead">A review of the last 30 days &mdash; 11&nbsp;June to 11&nbsp;July 2026. Ten point releases, the last absent rows in the HTML standard closed, and a hard push on real-world video, content blocking, on-device safety and platform reach &mdash; all while staying no-JIT and telemetry-free.</p>
+
+        <p>Nordstjernen (&ldquo;the North Star&rdquo;) is a web browser written from scratch in C, built in Norway &mdash; a clean-room engine small enough for one person to read end to end. This is what changed in the last month. If you only read one line: the engine grew from roughly <b>109,000 to about 145,000 lines of C</b>, shipped <b>ten releases (1.0.8 &rarr; 1.0.18)</b>, and reached <b>zero absent rows</b> in the in-scope HTML standard &mdash; every &sect;1&ndash;&sect;16 element and API is now implemented, partial, or a deliberate non-goal.</p>
+
+        <p>&laquo; <a href="index.html">Back to nordstjernen.org</a></p>
+
+        <figure class="shot">
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1008" height="752" loading="lazy" alt="Nordstjernen rendering a web page"></a>
+          <figcaption class="cap">Nordstjernen&rsquo;s <code>about:start</code> page, redesigned this month. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
+        </figure>
+
+        <h2 id="by-the-numbers">The month by the numbers</h2>
+        <div class="features">
+          <div class="feature"><b>10 releases</b> &mdash; 1.0.8 through 1.0.18, shipped between 15&nbsp;June and 6&nbsp;July, with 1.0.19 now in development on <code>main</code>. Roughly a thousand commits landed in the window.</div>
+          <div class="feature"><b>~109k &rarr; ~145k lines of C</b> &mdash; the clean-room engine grew by about a third and is still small enough to audit end to end. No JIT; W^X holds process-wide.</div>
+          <div class="feature"><b>140 / 31 / 0</b> &mdash; the section-by-section walk-through of the HTML standard (&sect;1&ndash;&sect;16) now records 140 rows fully implemented, 31 partial, and <b>0 absent</b>, up from 123&nbsp;/&nbsp;48&nbsp;/&nbsp;4 at the start of the month.</div>
+          <div class="feature"><b>+1 platform, &minus;1 platform</b> &mdash; a new iOS port that builds end to end in CI arrived; OpenBSD was retired. Android is now published on the Google Play Store.</div>
+        </div>
+
+        <h2 id="standards">Closing the last gaps in the HTML standard</h2>
+        <p>Nordstjernen measures itself against the <b>spec text</b>, section by section, rather than against another browser. This month the running scoreboard crossed a symbolic line: <b>no element or API row in &sect;1&ndash;&sect;16 is fully absent any more.</b> Everything is implemented, tracked as partial, or a by-design non-goal (plugins, <code>frame</code>/<code>frameset</code>, <code>applet</code>/<code>marquee</code>, telemetry, and AI-style web APIs). The remaining work is now refinement of partial rows &mdash; multi-column vertical text, <code>iframe srcdoc</code>, quirks-mode deltas &mdash; not blank spaces.</p>
+        <p>JavaScript conformance got the same treatment: several deep passes against the <b>test262</b> suite drove the unexpected-failure count down (one pass went from 28 to 15), alongside a stream of spec-accuracy fixes to DOM nodes, CSSOM serialization, forms, <code>fetch</code>, encodings, history and messaging. A serve-free local web-platform-tests runner (<code>wpt-local.sh</code>) was added so conformance can be checked without standing up a server.</p>
+
+        <h2 id="media">Real-world video, done the small way</h2>
+        <p>The largest single theme of the month was making inline video work on real sites &mdash; without importing a media stack. The pieces came together across several releases:</p>
+        <ul>
+          <li><b>WebM playback</b> (1.0.14). <code>&lt;video&gt;</code> now decodes <b>VP9/VP8 with Opus/Vorbis</b> inline when FFmpeg&rsquo;s libav* is present &mdash; the system copy on Linux, a minimal LGPL build bundled on macOS and Windows. MPEG-1 still always plays, decoded in-tree by pl_mpeg.</li>
+          <li><b>Media Source Extensions.</b> Streaming sites that drive playback through <code>MediaSource</code>/<code>SourceBuffer</code> and <code>blob:</code> now play inline. A dedicated, sandboxed <b><code>nordstjernen-video</code> helper process</b> decodes the stream and the shell composites its frames over the page &mdash; and it was ported to <b>both Windows and macOS</b> this month, with audio-clock (audio-master) A/V sync and incremental demuxing of growing streams.</li>
+          <li><b>Captions.</b> A default <code>&lt;track&gt;</code> of WebVTT subtitles is fetched, parsed into timed cues, and painted over the bottom of the video.</li>
+          <li><b>No more site hacks.</b> YouTube-specific media scraping and assorted per-site paint/layout hacks were <b>removed</b> in favour of a standards-based media-metadata extractor. The house rule is explicit: improve the generic engine to run real sites, rather than special-casing them.</li>
+          <li><b>Native open-media decoders.</b> So WebM and Ogg still play where FFmpeg is absent, Nordstjernen now detects and links <b>dav1d, libvpx, Opus, Vorbis</b> (and libvorbisfile / native Ogg&nbsp;Opus), and vendored the small <b>libnestegg</b> WebM demuxer.</li>
+        </ul>
+        <p>Underneath all of this, the <b>audio path was rebuilt</b> (1.0.10): SDL2 output with in-tree <b>pl_mpeg (MP2)</b> and <b>minimp3 (MP3)</b> decoding replaced the previous vendored backend, keeping audio as a handful of single-file decoders in a separate unsandboxed helper rather than a codec library in the renderer. Capture arrived too &mdash; <b>camera and microphone</b> via <code>getUserMedia</code>, each behind a per-site permission prompt.</p>
+
+        <h2 id="blocking-safety">Content blocking and on-device safety</h2>
+        <p>Release 1.0.16 added two privacy-and-safety features that run entirely on your machine:</p>
+        <ul>
+          <li><b>Initial WebExtensions support with content blocking.</b> A WebExtensions loader and content-script host (<code>src/ext.c</code>) implements <b><code>declarativeNetRequest</code></b>, so EasyList/ABP-style filter lists can block ads and trackers before requests go out.</li>
+          <li><b>Local Safe Browsing.</b> Before a top-level navigation is fetched, its host is checked against an on-device SHA-256 blocklist (<code>src/safebrowsing.c</code>). A match shows a full-page warning with the choice to go back or continue. The check is <b>entirely local</b> &mdash; nothing about your browsing leaves the machine &mdash; and the list is user-overridable.</li>
+        </ul>
+
+        <h2 id="networking">Networking, modernised</h2>
+        <ul>
+          <li><b>HTTP/2 multiplexing</b> (1.0.12) over a shared libcurl multi handle &mdash; connections are reused across a page&rsquo;s requests instead of reopened.</li>
+          <li><b>HTTP/3</b> is requested when the linked libcurl supports it, and <b>WebSocket</b> now rides libcurl&rsquo;s native API exclusively (the hand-rolled RFC&nbsp;6455 framer was dropped).</li>
+          <li><b>Encrypted Client Hello</b> is enabled when the TLS backend offers it, and the post-quantum <code>X25519MLKEM768</code> key exchange is used where available.</li>
+          <li><b>ES modules for real apps</b> &mdash; <code>&lt;script type="importmap"&gt;</code> support (1.0.11) means bare specifiers like <code>import "three"</code> resolve, so modern bundler-free sites and three.js examples load; module workers (<code>new Worker(url, {type:'module'})</code>) landed as well.</li>
+        </ul>
+
+        <h2 id="platform-apis">More of the web platform</h2>
+        <p>Beyond media, a batch of platform APIs and CSS features arrived:</p>
+        <ul>
+          <li><b>Navigation API</b> &mdash; <code>window.navigation</code> for single-page routing: a cancelable <code>navigate</code> event with <code>intercept()</code> and a full history-entry model.</li>
+          <li><b>Customized built-in elements</b> &mdash; <code>customElements.define(name, ctor, {extends})</code> plus <code>&lt;button is="&hellip;"&gt;</code> upgrade the built-in through the full reaction lifecycle.</li>
+          <li><b>WebCrypto</b> gained Ed25519 and X25519, plus AES-KW key wrapping, over OpenSSL.</li>
+          <li><b>CSS &amp; layout</b> &mdash; vertical <code>writing-mode</code> for block containers with <code>text-orientation</code>/upright text, proper CSS-table cells with height distribution, <code>:has()</code> and container queries kept on the incremental-restyle path, <code>calc()</code> font sizes, real blurred <code>box-shadow</code>, interactive <code>&lt;select&gt;</code>/<code>&lt;datalist&gt;</code> listboxes, and <code>createConicGradient</code> on canvas.</li>
+        </ul>
+
+        <h2 id="security">A browser-wide security hardening pass</h2>
+        <p>In keeping with the &ldquo;small enough to audit&rdquo; ethos, an end-to-end source review in early July produced dozens of hardening fixes at once. Among them:</p>
+        <ul>
+          <li><b>Resource-exhaustion guards</b> &mdash; caps on CSS custom-property <code>var()</code> expansion (billion-laughs), image dimensions (decompression bombs), IndexedDB connections in private mode, and oversized cache files.</li>
+          <li><b>Memory-safety fixes</b> &mdash; use-after-free repairs across canvas, paint, WASM, WebGPU and the observer paths; a robust-buffer-access GL context to contain out-of-bounds vertex fetches; NaN-geometry guards in paint.</li>
+          <li><b>Sandbox &amp; privilege</b> &mdash; the video helper is now seccomp-confined, the macOS renderer and shell run under a Seatbelt sandbox, and on Windows the browser <b>drops Administrator rights</b> by relaunching de-elevated.</li>
+          <li><b>Network hygiene</b> &mdash; stopped <code>AUTOREFERER</code> from leaking full URLs across cross-origin redirects, refused UTF-7 and replacement-mapped charsets in the decode path, and hardened the extension content-script bridge against cross-extension theft.</li>
+        </ul>
+
+        <h2 id="platforms">Platform reach</h2>
+        <ul>
+          <li><b>iOS</b> &mdash; a new UIKit host app plus engine cross-compilation (<code>is_mobile</code>) and a CI portability workflow; the iOS build now compiles end to end in CI.</li>
+          <li><b>macOS</b> &mdash; the published <code>.dmg</code> is now <b>signed and notarised</b>, ships Apple Silicon only, builds on the macOS&nbsp;26 (Tahoe) runner, and gained WebGL&nbsp;1 through a CGL core context.</li>
+          <li><b>Android</b> &mdash; now on the <a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play Store</a>, free and telemetry-free, with <code>minSdk</code> lowered to run on Android&nbsp;14.</li>
+          <li><b>OpenBSD</b> &mdash; retired (1.0.9): its base LibreSSL lacks the OpenSSL&nbsp;3 provider APIs WebCrypto needs, so rather than ship a perpetually red nightly the target was dropped. FreeBSD and NetBSD remain.</li>
+        </ul>
+
+        <h2 id="ui">Shell and UI polish</h2>
+        <ul>
+          <li><b>A Task Manager window</b> &mdash; per-process CPU&nbsp;%, memory and thread counts, JVM-style thread dumps (on <code>SIGQUIT</code>), a watchdog row, and <b>End Task</b> that also cleans up media helpers.</li>
+          <li><b>Developer Tools</b> &mdash; a tabbed console window, reachable with <code>Ctrl+Shift+J</code> / <code>F12</code>.</li>
+          <li><b>A non-modal permission bar</b> replaced the old modal WebGL/camera trust dialogs; WebGL is now <b>enabled by default</b>. An HTTPS security shield sits left of the address bar, and private tabs stay out of session recovery.</li>
+          <li><b>A dedicated AI Window</b> moved the local, on-device <code>about:start</code> assistant out of a browser tab, and the <code>about:start</code> splash was redesigned as an animated civilization-panorama scene.</li>
+        </ul>
+
+        <h2 id="scope">Scope discipline: the email experiment</h2>
+        <p>Not everything that was tried stuck &mdash; and that is by design. Around 1.0.17 an experimental <b>built-in email client</b> (<code>about:email</code>, IMAP/POP3/SMTP with provider auto-configuration, primary-password-encrypted credentials and attachment viewing) was added, and then <b>removed a few days later</b> to keep the browser focused on being a browser. The project&rsquo;s guiding principle is to cut scope rather than corners; the email client is a clean example of that in action.</p>
+
+        <h2 id="timeline">Release timeline</h2>
+        <table class="spec">
+          <tr><th>1.0.8 &middot; 15&nbsp;Jun</th><td>Stability; CSS <code>cursor</code> keywords with platform fallback chains.</td></tr>
+          <tr><th>1.0.9 &middot; 16&nbsp;Jun</th><td>Engine and documentation maintenance; OpenBSD retired as a build target.</td></tr>
+          <tr><th>1.0.10 &middot; 18&nbsp;Jun</th><td>Audio overhaul (SDL2 + pl_mpeg + minimp3); security hardening.</td></tr>
+          <tr><th>1.0.11 &middot; 19&nbsp;Jun</th><td>Import maps for ES modules; WebGL <code>getShaderPrecisionFormat</code> (three.js renders); layout fixes.</td></tr>
+          <tr><th>1.0.12 &middot; 21&nbsp;Jun</th><td>HTTP/2 connection multiplexing; a tabbed Developer Tools console window.</td></tr>
+          <tr><th>1.0.14 &middot; 23&nbsp;Jun</th><td>Inline WebM (VP9/VP8 + Opus/Vorbis); CSSOM rule model; <code>HTMLImageElement.decode()</code>; the WebVTT text-track model.</td></tr>
+          <tr><th>1.0.15 &middot; 25&nbsp;Jun</th><td>Maintenance; a QuickJS interpreter fast path for object/string equality.</td></tr>
+          <tr><th>1.0.16 &middot; 27&nbsp;Jun</th><td>Initial WebExtensions with <code>declarativeNetRequest</code> content blocking; local Safe Browsing; updated vendored engines.</td></tr>
+          <tr><th>1.0.17 &middot; 30&nbsp;Jun</th><td>Replaced-element sizing per spec; camera + microphone capture; a dedicated AI Window; more test262 fixes.</td></tr>
+          <tr><th>1.0.18 &middot; 6&nbsp;Jul</th><td>The media + hardening release: out-of-process video helper across desktop platforms, the source-review security pass, a signed/notarised macOS build, WebGL on by default.</td></tr>
+          <tr><th>1.0.19-dev &middot; on <code>main</code></th><td>iOS builds in CI; Navigation API; customized built-in elements; vertical writing-mode; native open-media decoders; WebVTT captions over inline video; Android&nbsp;14 support.</td></tr>
+        </table>
+
+        <h2 id="constant">What stayed the same</h2>
+        <p>Through all of it, the constraints held. Nordstjernen still ships <b>no JIT</b> (the renderer never needs writable-executable memory), <b>no telemetry</b>, and <b>no auto-update pinger</b>. Each tab&rsquo;s engine still runs in its own sandboxed process behind an IPC and shared-memory boundary, seccomp- and Landlock-confined on Linux. The whole engine is still clean-room C, still vendored in-tree with no submodules, and still small enough for one person to hold in their head. A busy month &mdash; measured against a fixed North Star.</p>
+
+        <p>&laquo; <a href="index.html">Back to nordstjernen.org</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen/commits/main">full commit history &raquo;</a></p>
+
+  </main>
+
+  <footer class="footer">
+    <div class="counter"><img src="counter.php" alt="visitor count" width="120" height="20" loading="lazy"></div>
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="https://discord.gg/4W959nW5vF">Discord</a> &middot;
+    <a href="privacy/">Privacy</a> &middot;
+    <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
+  </footer>
+
+</div>
+
+</body>
+</html>
