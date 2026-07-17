@@ -24,9 +24,9 @@
   "name": "Nordstjernen",
   "applicationCategory": "BrowserApplication",
   "operatingSystem": "Windows, macOS, Linux, Android, iOS",
-  "softwareVersion": "1.0.18",
+  "softwareVersion": "1.0.19",
   "url": "https://www.nordstjernen.org/",
-  "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.18",
+  "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.19",
   "license": "https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
@@ -70,15 +70,15 @@
         <h1 id="about" style="color:#003366;">Nordstjernen Web Browser</h1>
         <p class="lead">Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, macOS and Linux, with builds for Android, iOS, FreeBSD, NetBSD and the JVM. Nordstjernen is built in Norway.</p>
 
-        <p class="release-line">Nordstjernen Browser version 1.0.18 released! <a href="release-1-0-18.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.18">More info here</a>.</p>
+        <p class="release-line">Nordstjernen Browser version 1.0.19 released! <a href="release-1-0-19.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.19">More info here</a>.</p>
 
         <figure class="shot">
-          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1008" height="752" loading="lazy" alt="Nordstjernen's about:start start page — the Manifest Destiny splash, with on-device search and a local AI window"></a>
-          <figcaption class="cap">Nordstjernen&rsquo;s about:start page &mdash; the &ldquo;Manifest Destiny&rdquo; splash. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1012" height="754" loading="lazy" alt="Nordstjernen's about:start start page — an animated civilization panorama, with on-device search and a local AI window"></a>
+          <figcaption class="cap">Nordstjernen&rsquo;s about:start page &mdash; the animated splash panorama. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
         </figure>
 
         <div class="features">
-        <p class="feature"><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial and 0 absent across WHATWG HTML sections 1&ndash;16 (July 2026). No element or API row is fully absent any more: every one is implemented, partial, or a deliberate non-goal. See <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p class="feature"><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial and 0 absent across WHATWG HTML sections 1&ndash;16 (July 2026). No element or API row is fully absent any more: every one is implemented, partial, or a deliberate non-goal. Against the <a href="https://github.com/web-platform-tests/wpt">Web Platform Tests</a>, the full wpt-fast tree now passes <b>88.4% of subtests overall</b> &mdash; 91.7% of the HTML suite &mdash; and QuickJS runs the test262 conformance suite clean. See <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
         <p class="feature"><b>Secure.</b> Process-per-tab design &mdash; each tab runs in its own sandboxed renderer process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
         <p class="feature"><b>Minimalism.</b> The whole engine is about 145,000 lines of clean-room C, excluding the vendored libraries &mdash; small enough for one person to read and audit end-to-end.</p>
         <p class="feature"><b>Capable.</b> JavaScript on QuickJS with Canvas&nbsp;2D, WebCrypto, Service Workers and the Navigation API &middot; WebAssembly via WAMR &middot; opt-in per-site WebGL &middot; inline <code>&lt;video&gt;</code> (MPEG-1 always, WebM/VP9 where FFmpeg is present) with WebVTT captions &middot; presentation MathML &middot; on-device safe browsing against a local blocklist.</p>
@@ -89,6 +89,11 @@
 
         <h2 id="news">news</h2>
         <ul class="news">
+        <li><time class="date" datetime="2026-07-17">17&nbsp;JUL&nbsp;2026</time> &middot;
+        Nordstjernen <b>1.0.19</b> released &mdash; a big step in web-standards conformance, a new animated about:start splash, and a fresh iOS port.
+        <a href="release-1-0-19.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.19">Release notes &raquo;</a></li>
+
         <li><time class="date" datetime="2026-07-06">6&nbsp;JUL&nbsp;2026</time> &middot;
         Nordstjernen <b>1.0.18</b> released &mdash; a maintenance release.
         <a href="release-1-0-18.html">Announcement &raquo;</a> &middot;
@@ -143,13 +148,13 @@
           <tr><th scope="row">network</th><td><a href="https://curl.se">libcurl</a> &ge;&nbsp;8.5 &middot; HTTP/2</td></tr>
           <tr><th scope="row">hardening</th><td>process-per-tab &middot; seccomp + Landlock sandbox on Linux &middot; sandboxed renderer processes &middot; no JIT</td></tr>
           <tr><th scope="row">privacy</th><td>no telemetry &middot; partitioned cookies &middot; HSTS &middot; CSP &middot; SRI &middot; on-device safe browsing</td></tr>
-          <tr><th scope="row">standards</th><td>140 spec rows fully implemented, 31 partial, 0 absent &middot; WHATWG HTML sections 1&ndash;16 (July 2026)</td></tr>
+          <tr><th scope="row">standards</th><td>140 spec rows fully implemented, 31 partial, 0 absent &middot; WHATWG HTML sections 1&ndash;16 &middot; Web Platform Tests: 88.4% of subtests overall, 91.7% HTML (July 2026)</td></tr>
           <tr><th scope="row">platforms</th><td>linux (gtk) &middot; windows &middot; macos &middot; android &middot; ios &middot; java/jvm &middot; freebsd &middot; netbsd</td></tr>
           <tr><th scope="row">license</th><td><a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years &middot; The Nordstjernen Source License is inspired by the <a href="https://fsl.software/">Functional Source License (FSL)</a>, a Fair Source license that converts to Apache 2.0 or MIT.</td></tr>
         </table>
 
         <h2 id="download">download</h2>
-        <p>Latest tagged release: Nordstjernen <b>1.0.18</b> &mdash; released 6 July 2026.
+        <p>Latest tagged release: Nordstjernen <b>1.0.19</b> &mdash; released 17 July 2026.
         Builds for Windows, macOS and Linux, plus the source, are all on the download page.
         Android is available on <a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a>.</p>
 
