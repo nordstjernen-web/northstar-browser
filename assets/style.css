@@ -165,14 +165,14 @@
   /* Animated about:start splash: overlay a looping GIF of the "Manifest
      Destiny" start-page banner exactly over its spot in the static
      screenshot, so the browser chrome stays crisp while the splash lives.
-     Positioned as a share of the 1008x752 shot (banner at 162,119, 684x232,
-     +1px for the image border). */
+     Positioned as a share of the 1012x754 shot (banner at 148,126, 684x233,
+     border included). */
   .shot a[href="screenshots/screenshot.png"] { position: relative; }
   .shot a[href="screenshots/screenshot.png"]::after {
     content: "";
     position: absolute;
-    left: 16.14%; top: 15.92%;
-    width: 67.72%; height: 30.77%;
+    left: 14.66%; top: 16.76%;
+    width: 67.46%; height: 30.91%;
     background: url(about-start-splash.gif) center center / 100% 100% no-repeat;
     pointer-events: none;
   }
