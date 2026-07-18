@@ -37,7 +37,6 @@ install -dm755 "$PKGROOT/usr/share/northstar"
 install -dm755 "$PKGROOT/usr/share/doc/northstar"
 
 install -m755 "$STAGE/northstar" "$PKGROOT/usr/bin/northstar"
-install -m755 "$STAGE/northstar-renderer" "$PKGROOT/usr/bin/northstar-renderer"
 # Audio playback helper, when SDL2 was available at build time. It is added to
 # the dpkg-shlibdeps scan below so its libSDL2 dependency lands in Depends.
 if [ -x "$STAGE/northstar-audio" ]; then
@@ -85,20 +84,10 @@ STRIP_RE='^lib(avif|aom|dav1d|gav1|yuv|sharpyuv|rav1e|svtav1)'
 bundled_any=0
 if command -v patchelf >/dev/null 2>&1; then
     install -dm755 "$BUNDLE_DIR"
-    # WebGPU: the engine links libwgpu_native.so directly (its DT_NEEDED was
-    # rewritten to the bare soname by pack-linux.sh), and it is not a system
-    # package, so a WebGPU-enabled build must carry the copy pack-linux staged
-    # or the binaries won't even start. Bundle it like the codec libs below.
-    if [ -e "$STAGE/libwgpu_native.so" ]; then
-        cp -L "$STAGE/libwgpu_native.so" "$BUNDLE_DIR/libwgpu_native.so"
-        chmod 644 "$BUNDLE_DIR/libwgpu_native.so"
-        patchelf --set-rpath '$ORIGIN' "$BUNDLE_DIR/libwgpu_native.so" 2>/dev/null
-    fi
     # BFS over the dependency closure of the seed codec libs, so every backend
     # libavif pulls in (gav1, aom, dav1d, rav1e, SvtAv1, yuv, sharpyuv, …)
     # is bundled too -- no per-name allow-list to keep in sync.
-    worklist=$( { ldd "$PKGROOT/usr/bin/northstar" 2>/dev/null; \
-                  ldd "$PKGROOT/usr/bin/northstar-renderer" 2>/dev/null; } \
+    worklist=$(ldd "$PKGROOT/usr/bin/northstar" 2>/dev/null \
                  | grep -oE '/[^ ]+\.so[^ ]*' | grep -E "$SEED_RE")
     seen=""
     while [ -n "$worklist" ]; do
@@ -124,15 +113,8 @@ if command -v patchelf >/dev/null 2>&1; then
     done
     if [ -n "$(ls -A "$BUNDLE_DIR" 2>/dev/null)" ]; then
         rpath_ok=1
-        # Both the launcher and the renderer link libavif (image decoding
-        # lives in the engine both share), so both need the bundle on their
-        # rpath -- otherwise the renderer fails to start with
-        # "libavif.so.NN: cannot open shared object file".
-        for bin in northstar northstar-renderer; do
-            [ -e "$PKGROOT/usr/bin/$bin" ] || continue
-            patchelf --set-rpath '$ORIGIN/../lib/northstar' \
-                "$PKGROOT/usr/bin/$bin" 2>/dev/null || rpath_ok=0
-        done
+        patchelf --set-rpath '$ORIGIN/../lib/northstar' \
+            "$PKGROOT/usr/bin/northstar" 2>/dev/null || rpath_ok=0
         if [ "$rpath_ok" = 1 ]; then
             bundled_any=1
             echo "pack-deb: bundled$(ls "$BUNDLE_DIR" | sed 's/^/ /' | tr -d '\n')"
@@ -146,7 +128,7 @@ fi
 
 INSTALLED_KB=$(du -sk "$PKGROOT/usr" | cut -f1)
 
-FALLBACK_DEPS="libgtk-4-1, libepoxy0, libcurl4 | libcurl4t64, libuchardet0, librsvg2-2, libpsl5 | libpsl5t64, libsqlite3-0, libpoppler-glib8, libfontconfig1"
+FALLBACK_DEPS="libgtk-4-1, libcurl4 | libcurl4t64, libuchardet0, librsvg2-2, libpsl5 | libpsl5t64, libsqlite3-0, libseccomp2, libfontconfig1"
 
 RUNTIME_DEPS=""
 if command -v dpkg-shlibdeps >/dev/null 2>&1; then
@@ -157,10 +139,7 @@ Source: northstar
 Package: northstar
 Architecture: any
 CTL
-    # Scan the renderer too: it is the binary that actually decodes video, so
-    # the FFmpeg libav* SONAMEs of an inline-WebM build land in Depends from
-    # here (the GTK shell links them via the shared engine as well).
-    scan_bins=(usr/bin/northstar usr/bin/northstar-renderer)
+    scan_bins=(usr/bin/northstar)
     [ -x "$PKGROOT/usr/bin/northstar-audio" ] && scan_bins+=(usr/bin/northstar-audio)
     RUNTIME_DEPS=$(cd "$PKGROOT" \
         && dpkg-shlibdeps -O --ignore-missing-info "${scan_bins[@]}" 2>/dev/null \
@@ -191,15 +170,14 @@ Architecture: ${DEBARCH}
 Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
 Installed-Size: ${INSTALLED_KB}
 Depends: ${RUNTIME_DEPS}
-Recommends: mpv | vlc | celluloid | totem | mplayer
 Section: web
 Priority: optional
 Homepage: https://nordstjernen.org
-Description: Northstar Web Navigator — a small, hand-written web browser
- Northstar is a small, source-available web browser written in C with
- GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
- JavaScript glue are written from scratch — no third-party browser engine
- is used. SVG images are rendered with librsvg.
+Description: Northstar web browser — minimalist GTK 4 browser, GPL edition
+ Northstar is a small free-software web browser written from scratch in
+ C with GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint
+ and JavaScript glue contain no third-party browser engine. SVG images
+ are rendered with librsvg. Licensed GPL-3.0-or-later.
 EOF
 
 cat > "$PKGROOT/DEBIAN/postinst" <<'EOF'

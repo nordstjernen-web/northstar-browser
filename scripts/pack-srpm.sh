@@ -43,9 +43,9 @@ cat > "$SPEC" <<SPEC_EOF
 Name:           ${NAME}
 Version:        ${VERSION}
 Release:        1%{?dist}
-Summary:        Northstar Web Navigator — a small, hand-written web browser
+Summary:        Northstar web browser — minimalist GTK 4 browser, GPL edition
 
-License:        Proprietary
+License:        GPL-3.0-or-later
 URL:            https://nordstjernen.org
 Source0:        ${SLUG}.tar.gz
 
@@ -56,12 +56,15 @@ BuildRequires:  ninja-build
 BuildRequires:  cmake
 BuildRequires:  pkgconf-pkg-config
 BuildRequires:  pkgconfig(gtk4)
-BuildRequires:  pkgconfig(epoxy)
 BuildRequires:  pkgconfig(libcurl)
+BuildRequires:  pkgconfig(libcrypto)
 BuildRequires:  pkgconfig(uchardet)
 BuildRequires:  pkgconfig(librsvg-2.0)
 BuildRequires:  pkgconfig(libpsl)
 BuildRequires:  pkgconfig(libseccomp)
+BuildRequires:  pkgconfig(libavif)
+BuildRequires:  pkgconfig(sqlite3)
+BuildRequires:  pkgconfig(sdl2)
 
 Requires:       gtk4
 Requires:       libcurl
@@ -69,10 +72,10 @@ Requires:       uchardet
 Requires:       librsvg2
 
 %description
-Northstar is a small, source-available web browser written in C with
-GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
-JavaScript glue are written from scratch — no third-party browser
-engine is used. SVG images are rendered with librsvg.
+Northstar is a small free-software web browser written from scratch in
+C with GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint
+and JavaScript glue contain no third-party browser engine. SVG images
+are rendered with librsvg. Licensed GPL-3.0-or-later.
 
 %prep
 %setup -q
@@ -95,7 +98,6 @@ install -dm755 %{buildroot}%{_datadir}/applications
 install -dm755 %{buildroot}%{_docdir}/%{name}
 
 install -m755 builddir/src/gtk/northstar %{buildroot}%{_bindir}/northstar
-install -m755 builddir/src/northstar-renderer %{buildroot}%{_bindir}/northstar-renderer
 install -m644 data/icons/hicolor/scalable/apps/northstar.svg \\
     %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/northstar.svg
 install -m644 data/northstar.desktop \\
@@ -106,7 +108,6 @@ install -m644 LICENSE %{buildroot}%{_docdir}/%{name}/
 
 %files
 %{_bindir}/northstar
-%{_bindir}/northstar-renderer
 %{_datadir}/icons/hicolor/scalable/apps/northstar.svg
 %{_datadir}/applications/org.northstar.WebBrowser.desktop
 %doc %{_docdir}/%{name}/README.md

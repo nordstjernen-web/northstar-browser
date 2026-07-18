@@ -20,59 +20,19 @@ SLUG="northstar-${FSVERSION}-linux-${ARCH}"
 STAGE="$ROOT/dist/${SLUG}"
 ZIP="$ROOT/dist/${SLUG}.zip"
 
-# WebGPU (experimental): the meson feature is `auto`, so it is compiled in
-# whenever wgpu-native is reachable. For a redistributable build we fetch the
-# pinned wgpu-native release, point meson at it, and bundle the shared library
-# beside the binaries with an $ORIGIN rpath. NS_WEBGPU=0/disabled forces it off;
-# NS_WEBGPU=1/enabled makes a missing wgpu-native fatal; anything else (the
-# default) degrades to a WebGPU-free build when wgpu-native cannot be fetched.
-WEBGPU_MODE=${NS_WEBGPU:-auto}
-WGPU_ROOT=""
-WEBGPU_SETUP_ARGS=()
-case "$WEBGPU_MODE" in
-    0|off|disabled|no) log "WebGPU: disabled (NS_WEBGPU=$WEBGPU_MODE)" ;;
-    *)
-        if WGPU_ROOT=$("$ROOT/scripts/fetch-wgpu-native.sh"); then
-            WEBGPU_SETUP_ARGS=( -Dwebgpu=enabled -Dwgpu_native_root="$WGPU_ROOT" )
-            log "WebGPU: enabled (wgpu-native at $WGPU_ROOT)"
-        else
-            WGPU_ROOT=""
-            if [ "$WEBGPU_MODE" = 1 ] || [ "$WEBGPU_MODE" = enabled ] || [ "$WEBGPU_MODE" = on ]; then
-                log "ERROR: NS_WEBGPU=$WEBGPU_MODE but wgpu-native could not be fetched"
-                exit 1
-            fi
-            log "WebGPU: not bundled (wgpu-native unavailable for this platform); building without it"
-        fi ;;
-esac
-
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" --buildtype=release -Db_lto="${NS_BUILD_LTO:-true}" \
         -Db_ndebug=true --strip \
-        ${NS_BUILD_DATE:+-Dbuild_date="$NS_BUILD_DATE"} \
-        ${WEBGPU_SETUP_ARGS[@]+"${WEBGPU_SETUP_ARGS[@]}"}
+        ${NS_BUILD_DATE:+-Dbuild_date="$NS_BUILD_DATE"}
 fi
 meson compile -C "$BUILDDIR" ${NS_BUILD_JOBS:+-j "$NS_BUILD_JOBS"}
 strip --strip-all "$BUILDDIR/src/gtk/northstar"
-# The GUI is a thin shell that spawns one sandboxed northstar-renderer
-# process per tab; it must ship alongside the main binary.
-strip --strip-all "$BUILDDIR/src/northstar-renderer"
 # The audio playback helper (MP2/MP3 decode + SDL2 output). Built only when
 # SDL2 was present at configure time (meson 'audio' feature is auto); ship it
-# beside the main binary so the shell can spawn it for <video>/<audio> sound.
+# beside the main binary so the shell can spawn it for <audio> sound.
 AUDIO_BIN="$BUILDDIR/src/northstar-audio"
 if [ -f "$AUDIO_BIN" ]; then
     strip --strip-all "$AUDIO_BIN"
-fi
-# Inline WebM (VP9/VP8 + Opus/Vorbis) is compiled in only when FFmpeg's libav*
-# was present at configure time (meson auto-detect). When it is, the engine
-# links libavformat directly, so the FFmpeg runtime libraries become a hard
-# requirement documented below.
-WEBM=0
-if ldd "$BUILDDIR/src/northstar-renderer" 2>/dev/null | grep -q 'libavformat'; then
-    WEBM=1
-    log "WebM: built (libav linked) — FFmpeg runtime libs required at install"
-else
-    log "WebM: not built (libav absent at configure time)"
 fi
 
 LOADER=$(ldd "$BUILDDIR/src/gtk/northstar" 2>/dev/null \
@@ -86,7 +46,7 @@ fi
 
 if [ "$LIBC" = musl ]; then
     LIBC_REQ='- musl libc (Alpine 3.19+ era and later)'
-    RUNTIME_INSTALL='    sudo apk add gtk4.0 libcurl uchardet librsvg poppler-glib libavif libwebp \
+    RUNTIME_INSTALL='    sudo apk add gtk4.0 libcurl uchardet librsvg libavif \
         libseccomp libpsl sqlite-libs ca-certificates font-dejavu sdl2 # Alpine (musl)'
 else
     # Don't guess the glibc floor — read it from the binary we just built.
@@ -94,18 +54,17 @@ else
         | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -t. -k1,1V -k2,2n -u \
         | tail -1 | cut -d_ -f2)
     LIBC_REQ="- glibc ${GLIBC_MIN:-2.38}+ (the build container's generation; check with: ldd --version)"
-    RUNTIME_INSTALL='    sudo apt   install libgtk-4-1 libcurl4 libuchardet0 librsvg2-2 libwebp7 \
-        libpoppler-glib8 libavif16 libpsl5 libseccomp2 libsqlite3-0 libsdl2-2.0-0   # Debian/Ubuntu
-    sudo dnf   install gtk4 libcurl libuchardet librsvg2 poppler-glib libwebp \
-        libavif libpsl libseccomp sqlite-libs SDL2                     # Fedora/RHEL
-    sudo zypper install libgtk-4-1 libcurl4 libuchardet0 librsvg-2-2 libwebp7 \
-        libpoppler-glib8 libavif16 libpsl5 libseccomp2 libsqlite3-0 libSDL2-2_0-0   # openSUSE'
+    RUNTIME_INSTALL='    sudo apt   install libgtk-4-1 libcurl4 libuchardet0 librsvg2-2 \
+        libavif16 libpsl5 libseccomp2 libsqlite3-0 libsdl2-2.0-0   # Debian/Ubuntu
+    sudo dnf   install gtk4 libcurl libuchardet librsvg2 \
+        libavif libpsl libseccomp sqlite-libs SDL2                 # Fedora/RHEL
+    sudo zypper install libgtk-4-1 libcurl4 libuchardet0 librsvg-2-2 \
+        libavif16 libpsl5 libseccomp2 libsqlite3-0 libSDL2-2_0-0   # openSUSE'
 fi
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/data/icons/hicolor/scalable/apps"
 cp "$BUILDDIR/src/gtk/northstar" "$STAGE/"
-cp "$BUILDDIR/src/northstar-renderer" "$STAGE/"
 if [ -f "$AUDIO_BIN" ]; then
     cp "$AUDIO_BIN" "$STAGE/"
 fi
@@ -114,68 +73,9 @@ cp "$ROOT"/data/icons/hicolor/scalable/apps/northstar*.svg \
    "$STAGE/data/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/northstar.desktop" "$STAGE/data/"
 
-# When WebGPU was built, ship libwgpu_native.so beside the binaries and point
-# their rpath at $ORIGIN so the renderer (and the GTK shell, which links
-# the engine) load it from the bundle rather than a system path. WebGPU still
-# stays dormant at runtime until the browser is launched with --enable-webgpu.
-WEBGPU_BUNDLED=0
-if [ -n "$WGPU_ROOT" ] && [ -e "$WGPU_ROOT/lib/libwgpu_native.so" ]; then
-    if command -v patchelf >/dev/null 2>&1; then
-        cp -L "$WGPU_ROOT/lib/libwgpu_native.so" "$STAGE/libwgpu_native.so"
-        chmod 644 "$STAGE/libwgpu_native.so"
-        # wgpu-native ships the cdylib with no SONAME, so meson recorded the
-        # full build-tree path as the binaries' DT_NEEDED — an $ORIGIN rpath
-        # alone would be ignored. Give the bundled copy a plain soname and
-        # rewrite each binary's NEEDED to the bare name so $ORIGIN resolves it.
-        patchelf --set-soname libwgpu_native.so "$STAGE/libwgpu_native.so"
-        for bin in northstar northstar-renderer; do
-            [ -e "$STAGE/$bin" ] || continue
-            cur=$(patchelf --print-needed "$STAGE/$bin" \
-                  | grep -E '(^|/)libwgpu_native\.so$' | head -1)
-            if [ -n "$cur" ] && [ "$cur" != libwgpu_native.so ]; then
-                patchelf --replace-needed "$cur" libwgpu_native.so "$STAGE/$bin"
-            fi
-            patchelf --set-rpath '$ORIGIN' "$STAGE/$bin"
-        done
-        WEBGPU_BUNDLED=1
-        log "WebGPU: bundled libwgpu_native.so (rpath \$ORIGIN)"
-    else
-        log "WebGPU: built but patchelf is missing; not bundling libwgpu_native.so"
-    fi
-fi
-
 cp "$ROOT/README.md" "$STAGE/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/"
 cp "$ROOT/LICENSE" "$STAGE/"
-
-if [ "$WEBM" = 1 ]; then
-    WEBM_REQ_NOTE='- FFmpeg libav* (libavformat / libavcodec / libavutil / libswscale /
-  libswresample) — **inline WebM playback** (VP9/VP8 video + Opus/Vorbis
-  audio). This build links them, so the binary will not start unless they
-  are installed:
-
-      sudo apt    install ffmpeg         # Debian/Ubuntu
-      sudo dnf    install ffmpeg-libs    # Fedora/RHEL (RPM Fusion)
-      sudo zypper install ffmpeg         # openSUSE (Packman)
-      sudo apk add ffmpeg-libs           # Alpine (musl)
-'
-else
-    WEBM_REQ_NOTE=''
-fi
-
-if [ "$WEBGPU_BUNDLED" = 1 ]; then
-    WEBGPU_RUN_NOTE='
-### Experimental WebGPU
-
-This build includes experimental WebGPU (`navigator.gpu`) over the bundled
-`libwgpu_native.so` (loaded from beside the binary via an `$ORIGIN` rpath). It
-is **off by default**; start the browser with `--enable-webgpu` to turn it on:
-
-    ./northstar --enable-webgpu https://example.com
-'
-else
-    WEBGPU_RUN_NOTE=''
-fi
 
 cat > "$STAGE/INSTALL.md" <<EOF
 # Northstar ${VERSION} — Linux ${ARCH} binary
@@ -194,14 +94,12 @@ against the other C library — pick the matching download.
 
 ${LIBC_REQ}
 - GTK 4.6+, with gio, gobject, pango, cairo, gdk-pixbuf
-- libepoxy (usually pulled in by GTK 4; WebGL dispatch)
 - libcurl with a TLS backend; OpenSSL 3 (libcrypto)
 - libuchardet
 - librsvg (SVG rendering)
-- libpoppler-glib (PDF rendering)
 - libavif 16 (AVIF images — only in recent distro releases)
-- libwebp (WebP images)
-${WEBM_REQ_NOTE}- libpsl, libseccomp, libsqlite3
+- libpsl, libseccomp, libsqlite3
+- SDL2 (audio playback helper)
 - fontconfig + a font set; harfbuzz; freetype; libstdc++
 - ca-certificates (TLS trust store)
 - An X11 or Wayland session
@@ -216,7 +114,6 @@ For Linux distros without modern GTK 4, build an AppImage instead
 ## Run
 
     ./northstar https://example.com
-${WEBGPU_RUN_NOTE}
 
 ## Install on user path
 
@@ -226,8 +123,8 @@ ${WEBGPU_RUN_NOTE}
 
 ## License
 
-Source-available; redistribution / commercial use require a license.
-Copyright 2026 Andreas Røsdal. See README.md for details.
+Free software under the GNU General Public License, version 3 or later.
+Copyright 2026 Andreas Røsdal. See LICENSE and README.md for details.
 EOF
 
 log "staged: $(cd "$STAGE" && find . -type f | sort | tr '\n' ' ')"

@@ -89,7 +89,6 @@ DEPLOY_GTK_VERSION=4 \
 "$LINUXDEPLOY" --appimage-extract-and-run \
     --appdir "$APPDIR" \
     --executable "$APPDIR/usr/bin/northstar" \
-    --executable "$APPDIR/usr/bin/northstar-renderer" \
     --desktop-file "$APPDIR/usr/share/applications/org.northstar.WebBrowser.desktop" \
     --icon-file "$PNG_ICON" \
     --plugin gtk

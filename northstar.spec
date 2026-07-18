@@ -9,9 +9,9 @@
 
 
 Name:           northstar
-Version:        1.0.17
+Version:        1.0.0
 Release:        0
-Summary:        Small, hand-written GTK web browser
+Summary:        Small GTK web browser written from scratch in C
 License:        GPL-3.0-or-later
 Group:          Productivity/Networking/Web/Browsers
 URL:            https://nordstjernen.org

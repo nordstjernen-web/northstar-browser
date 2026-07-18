@@ -34,7 +34,6 @@ rm -rf "$RPMTOP"
 mkdir -p "$RPMTOP"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
 cp "$STAGE/northstar" "$RPMTOP/SOURCES/"
-cp "$STAGE/northstar-renderer" "$RPMTOP/SOURCES/"
 # All app + toolbar icons the UI and about: pages look up by name
 # (northstar-back, northstar-reload, …) — not just the app icon.
 ( cd "$ROOT/data/icons/hicolor/scalable/apps" && \
@@ -43,26 +42,7 @@ cp "$STAGE/northstar-renderer" "$RPMTOP/SOURCES/"
 cp "$ROOT/data/northstar.desktop" "$RPMTOP/SOURCES/"
 cp "$ROOT/README.md" "$RPMTOP/SOURCES/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$RPMTOP/SOURCES/"
-
-# WebGPU: when pack-linux staged libwgpu_native.so, the binaries link it by its
-# bare soname (DT_NEEDED=libwgpu_native.so), so the RPM must ship it under
-# %{_libdir}/northstar with an $ORIGIN rpath, exclude the auto-Requires on it
-# (it is bundled, not a system package), and rely on rpm's auto-Provides from
-# the bundled copy to satisfy the in-package reference.
-WGPU_SOURCE=""
-WGPU_EXCLUDE=""
-WGPU_INSTALL=""
-WGPU_FILES=""
-if [ -e "$STAGE/libwgpu_native.so" ]; then
-    cp -L "$STAGE/libwgpu_native.so" "$RPMTOP/SOURCES/libwgpu_native.so"
-    WGPU_SOURCE="Source6:        libwgpu_native.so"
-    WGPU_EXCLUDE='%global __requires_exclude ^libwgpu_native\.so.*$'
-    WGPU_INSTALL='install -dm755 %{buildroot}%{_libdir}/northstar
-install -m644 %{SOURCE6} %{buildroot}%{_libdir}/northstar/libwgpu_native.so
-patchelf --set-rpath '\''$ORIGIN/../%{_lib}/northstar'\'' %{buildroot}%{_bindir}/northstar
-patchelf --set-rpath '\''$ORIGIN/../%{_lib}/northstar'\'' %{buildroot}%{_bindir}/northstar-renderer'
-    WGPU_FILES='%{_libdir}/northstar/'
-fi
+cp "$ROOT/LICENSE" "$RPMTOP/SOURCES/"
 
 # Audio playback helper, when SDL2 was available at build time. AutoReqProv
 # picks up its libSDL2 SONAME as a Requires automatically.
@@ -81,9 +61,9 @@ cat > "$SPEC" <<SPEC_EOF
 Name:           northstar
 Version:        ${RPMVERSION}
 Release:        1%{?dist}
-Summary:        Northstar Web Navigator — a small, hand-written web browser
+Summary:        Northstar web browser — minimalist GTK 4 browser, GPL edition
 
-License:        Proprietary
+License:        GPL-3.0-or-later
 URL:            https://nordstjernen.org
 BuildArch:      ${ARCH}
 
@@ -92,22 +72,20 @@ Source1:        northstar-icons.tar.gz
 Source2:        northstar.desktop
 Source3:        README.md
 Source4:        THIRD-PARTY-LICENSES.md
-Source5:        northstar-renderer
+Source5:        LICENSE
 ${AUDIO_SOURCE}
-${WGPU_SOURCE}
 
 AutoReqProv:    yes
-${WGPU_EXCLUDE}
 
 %define debug_package %{nil}
 %global __strip /bin/true
 %global __os_install_post %{nil}
 
 %description
-Northstar is a small, source-available web browser written in C with
-GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint and
-JavaScript glue are written from scratch — no third-party browser
-engine is used. SVG images are rendered with librsvg.
+Northstar is a small free-software web browser written from scratch in
+C with GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint
+and JavaScript glue contain no third-party browser engine. SVG images
+are rendered with librsvg. Licensed GPL-3.0-or-later.
 
 %prep
 # nothing to prep; binary is prebuilt
@@ -123,7 +101,6 @@ install -dm755 %{buildroot}%{_datadir}/applications
 install -dm755 %{buildroot}%{_docdir}/northstar
 
 install -m755 %{SOURCE0} %{buildroot}%{_bindir}/northstar
-install -m755 %{SOURCE5} %{buildroot}%{_bindir}/northstar-renderer
 tar -xzf %{SOURCE1} -C %{buildroot}%{_datadir}/icons/hicolor/scalable/apps
 chmod 644 %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/northstar*
 # Install under the app-id name so Wayland compositors can match the
@@ -131,17 +108,15 @@ chmod 644 %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/northstar*
 install -m644 %{SOURCE2} %{buildroot}%{_datadir}/applications/org.northstar.WebBrowser.desktop
 install -m644 %{SOURCE3} %{buildroot}%{_docdir}/northstar/
 install -m644 %{SOURCE4} %{buildroot}%{_docdir}/northstar/
+install -m644 %{SOURCE5} %{buildroot}%{_docdir}/northstar/
 ${AUDIO_INSTALL}
-${WGPU_INSTALL}
 
 %files
 %{_bindir}/northstar
-%{_bindir}/northstar-renderer
 %{_datadir}/icons/hicolor/scalable/apps/northstar*
 %{_datadir}/applications/org.northstar.WebBrowser.desktop
 %{_docdir}/northstar/
 ${AUDIO_FILES}
-${WGPU_FILES}
 
 %post
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
