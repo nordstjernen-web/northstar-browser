@@ -113,7 +113,7 @@ meson compile -C builddir
 The JavaScript engine is
 [quickjs-ng](https://github.com/quickjs-ng/quickjs), consumed as an
 **upstream meson subproject** pinned to a release
-(`subprojects/quickjs-ng.wrap`, currently v0.9.0) — no in-tree fork.
+(`subprojects/quickjs-ng.wrap`, currently v0.15.1) — no in-tree fork.
 `meson setup` fetches it and exposes it as the `libquickjs`
 dependency. The browser includes only the public `<quickjs.h>`. A
 few browser-side entry points that stock quickjs-ng does not expose —
