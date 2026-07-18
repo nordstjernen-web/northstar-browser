@@ -108,62 +108,39 @@ if host_machine.system() == 'windows'
   )
 endif
 
-if is_mobile
-  northstar_deps = [
-    glib,
-    gobject,
-    gio,
-    gmodule,
-    cairo,
-    pango,
-    pangocairo,
-    libcurl,
-    libcrypto,
-    libm,
-    libquickjs,
-    libwuffs,
-    libplmpeg,
-    libuchardet,
-    liblexbor,
-    libwamr,
-    sqlite3,
-    zlib,
-  ]
-else
-  northstar_deps = [
-    glib,
-    gobject,
-    gio,
-    cairo,
-    pango,
-    pangocairo,
-    gdkpixbuf,
-    gmodule,
-    libcurl,
-    libcrypto,
-    libm,
-    libquickjs,
-    libwuffs,
-    libplmpeg,
-    libuchardet,
-    liblexbor,
-    libwamr,
-    librsvg,
-    sqlite3,
-    zlib,
-  ]
+northstar_deps = [
+  glib,
+  gobject,
+  gio,
+  cairo,
+  pango,
+  pangocairo,
+  gdkpixbuf,
+  gmodule,
+  libcurl,
+  libcrypto,
+  libm,
+  libquickjs,
+  libwuffs,
+  libplmpeg,
+  libuchardet,
+  liblexbor,
+  libwamr,
+  librsvg,
+  sqlite3,
+  zlib,
+]
 
-  if have_seccomp
-    northstar_deps += [libseccomp]
-  endif
+if have_seccomp
+  northstar_deps += [libseccomp]
+endif
 
-  if have_avif
-    northstar_deps += [libavif]
-  endif
+if have_avif
+  northstar_deps += [libavif]
+endif
 
-  if have_enchant
-    northstar_deps += [libenchant]
-  endif
+if have_enchant
+  northstar_deps += [libenchant]
 endif
 
 if have_fontconfig
@@ -235,77 +212,71 @@ if host_machine.system() == 'windows'
 endif
 
 # Optional helper executables (the ipc-http benchmark and the audio helper).
-if not is_mobile
-  rproc_deps = []
-  if host_machine.system() != 'windows'
-    rproc_deps += [cc.find_library('rt', required: false)]
-  endif
-
-  if get_option('ipc_experiment') and host_machine.system() != 'windows'
-    executable(
-      'ipc-http-demo',
-      files('ipc_http_demo.c', 'rproc_http.c', 'ipc_http.c'),
-      include_directories: include_directories('.'),
-      dependencies: rproc_deps,
-      install: false,
-    )
-  endif
-
-  sdl2_dep = dependency('sdl2', required: get_option('audio'))
-  if sdl2_dep.found()
-    libminimp3 = static_library(
-      'minimp3',
-      files('audio/minimp3_impl.c'),
-      include_directories: include_directories('audio'),
-      c_args: cc.get_supported_arguments(['-w']),
-      install: false,
-    )
-
-    audio_deps = [dependency('libcurl'), sdl2_dep, libplmpeg]
-    if libvorbisfile.found()
-      audio_deps += [libvorbisfile]
-    endif
-    if libopusfile.found()
-      audio_deps += [libopusfile]
-    endif
-    # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
-    # the C runtime on macOS and Windows, where find_library('m') is a harmless
-    # no-op.
-    audio_lib_deps = [cc.find_library('m', required: false)]
-
-    # On Linux the helper confines itself with the same Landlock + seccomp
-    # profile as the renderer once its audio device and network stack are up,
-    # so attacker-controlled codec bytes are decoded inside the sandbox.
-    audio_sandbox_sources = []
-    if host_machine.system() == 'linux'
-      audio_sandbox_sources += files('security.c')
-      audio_deps += [glib]
-      if have_seccomp
-        audio_deps += [libseccomp]
-      endif
-    endif
-
-    executable(
-      'northstar-audio',
-      files('audio/main.c') + audio_sandbox_sources,
-      include_directories: include_directories('audio', '.'),
-      link_with: libminimp3,
-      dependencies: audio_deps + audio_lib_deps,
-      win_subsystem: 'windows',
-      install: true,
-    )
-  else
-    message('SDL2 not found — audio playback helper (northstar-audio) disabled')
-  endif
-
+rproc_deps = []
+if host_machine.system() != 'windows'
+  rproc_deps += [cc.find_library('rt', required: false)]
 endif
 
-if not is_mobile and have_gtk
+if get_option('ipc_experiment') and host_machine.system() != 'windows'
+  executable(
+    'ipc-http-demo',
+    files('ipc_http_demo.c', 'rproc_http.c', 'ipc_http.c'),
+    include_directories: include_directories('.'),
+    dependencies: rproc_deps,
+    install: false,
+  )
+endif
+
+sdl2_dep = dependency('sdl2', required: get_option('audio'))
+if sdl2_dep.found()
+  libminimp3 = static_library(
+    'minimp3',
+    files('audio/minimp3_impl.c'),
+    include_directories: include_directories('audio'),
+    c_args: cc.get_supported_arguments(['-w']),
+    install: false,
+  )
+
+  audio_deps = [dependency('libcurl'), sdl2_dep, libplmpeg]
+  if libvorbisfile.found()
+    audio_deps += [libvorbisfile]
+  endif
+  if libopusfile.found()
+    audio_deps += [libopusfile]
+  endif
+  # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
+  # the C runtime on Windows, where find_library('m') is a harmless no-op.
+  audio_lib_deps = [cc.find_library('m', required: false)]
+
+  # On Linux the helper confines itself with the same Landlock + seccomp
+  # profile as the page engine once its audio device and network stack are up,
+  # so attacker-controlled codec bytes are decoded inside the sandbox.
+  audio_sandbox_sources = []
+  if host_machine.system() == 'linux'
+    audio_sandbox_sources += files('security.c')
+    audio_deps += [glib]
+    if have_seccomp
+      audio_deps += [libseccomp]
+    endif
+  endif
+
+  executable(
+    'northstar-audio',
+    files('audio/main.c') + audio_sandbox_sources,
+    include_directories: include_directories('audio', '.'),
+    link_with: libminimp3,
+    dependencies: audio_deps + audio_lib_deps,
+    win_subsystem: 'windows',
+    install: true,
+  )
+else
+  message('SDL2 not found — audio playback helper (northstar-audio) disabled')
+endif
+
+if have_gtk
   subdir('gtk')
 endif
 
-if not is_mobile and not have_gtk
-  message('GTK 4 shell disabled — building the engine, out-of-process renderer' +
-          ' and embeddable library without GTK. WebGL is unavailable in this' +
-          ' configuration (its GL context is GTK-backed).')
+if not have_gtk
+  message('GTK 4 shell disabled — building the engine without GTK.')
 endif

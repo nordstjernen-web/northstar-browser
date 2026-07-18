@@ -70,7 +70,9 @@ quickjs-ng are fetched by `meson setup` as pinned upstream subprojects
 
 ## Dependencies
 
-Northstar is an independent engine — no upstream browser code.
+Northstar's engine is hand-written — it contains no forked browser
+engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
+[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
 
 **Fetched at `meson setup`** (pinned upstream meson subprojects, `subprojects/*.wrap`):
 

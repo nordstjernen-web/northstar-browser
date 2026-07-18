@@ -1,25 +1,26 @@
 # Northstar — Claude operating guide
 
-Northstar ("Northstar Web Navigator") is a web
-browser written from scratch in **C**, using **GTK 4** for the UI and
-**libcurl** for networking. Targets **Linux** (and Windows).
+Northstar is a web browser written from scratch in **C**, using **GTK 4**
+for the UI and **libcurl** for networking. Targets **Linux** (primary) and
+**Windows**.
 
-See `README.md` for the product vision. Northstar is a fresh
-implementation — there is no upstream browser engine, no fork,
-nothing imported.
+See `README.md` for the product vision. Northstar is the GPL /
+open-source edition of the [Nordstjernen
+project](https://github.com/nordstjernen-web/nordstjernen). It carries
+**no upstream browser engine** — the HTML/CSS/JS/layout engine is
+hand-written, not forked from Gecko, WebKit, or Blink.
 
-## Minimalist edition — scope (authoritative)
+## Minimalist GPL edition — scope (authoritative)
 
-This is the minimalist desktop edition. The following have been
-**removed** from the codebase and must not be reintroduced without an
-explicit request: tabs and the process-per-tab architecture (rendering is
-always single-process, in the shell process), WebGL, WebGPU, inline video
-and the `northstar-video` helper (audio playback is kept), the inline
-PDF viewer (poppler), WebP decoding, and the Android, Java, macOS and iOS
-builds and the embeddable `libnorthstar` library API. The build targets
-Linux (primary) and Windows; only the `linux.yml` (gcc) and `windows.yml`
-CI workflows remain. Much of the prose below still describes the full
-project — where it conflicts with this scope note, this note wins.
+This is the minimalist desktop edition. The following are **not** part of
+this codebase and must not be reintroduced without an explicit request:
+tabs and the process-per-tab architecture (rendering is always
+single-process, in the shell process), a per-tab renderer executable,
+WebGL, WebGPU, inline video decoding and the video helpers, the local-AI
+(llama.cpp) feature, the inline PDF viewer (poppler), in-tree WebP
+decoding, and the Android, Java, macOS and iOS builds and the embeddable
+`libnorthstar` library API. The build targets Linux (primary) and Windows;
+only the `linux.yml` (gcc) and `windows.yml` CI workflows remain.
 
 ## Design constraints
 
@@ -27,70 +28,23 @@ project — where it conflicts with this scope note, this note wins.
   maintainable by a single human.
 - HTML5 + modern CSS + modern JavaScript, supported pragmatically as
   far as is feasible without bloat.
-- **No** AI-style web APIs. WebGL **is** supported: a working, minimalist
-  WebGL 1 / 2 over OpenGL ES (`src/webgl.c`, see `docs/webgl.md`). It is
-  opt-in — off by default and gated by a per-site trust prompt — but fully
-  functional once a site is trusted. The `WebGLRenderingContext` /
-  `WebGL2RenderingContext` interface objects also carry the GL enum
-  constants so feature code resolves them without a live context.
-- **WebGPU** (`navigator.gpu`) is an **experimental** feature that layers
-  `src/webgpu.c` over the external
-  [wgpu-native](https://github.com/gfx-rs/wgpu-native) library (the
-  `webgpu.h`/`wgpu.h` headers are vendored in-tree under
-  `third_party/wgpu-native/`). The `webgpu` meson feature is `auto`: it is
-  built whenever wgpu-native is present (its pkg-config file, or
-  `-Dwgpu_native_root` pointing at an extracted release) and silently skipped
-  otherwise — so a stock build on a machine without wgpu-native still carries
-  **no** WebGPU symbol or dependency, exactly as before. `-Dwebgpu=enabled`
-  hard-requires it; `-Dwebgpu=disabled` never builds it. Even in a build that
-  contains it, WebGPU is **off at runtime** until the browser is started with
-  `--enable-webgpu` (which sets `NS_WEBGPU_ALLOW=1`, inherited by the
-  sandboxed renderer); without that flag `navigator.gpu.requestAdapter()`
-  resolves to `null`. wgpu-native is a large dependency and deliberately
-  stays an opt-in build input, never vendored. See `docs/webgpu.md`.
-- The **one vendored, in-tree** video codec is MPEG-1, decoded by the
-  vendored MIT-licensed [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
-  single-file decoder (`subprojects/plmpeg/`, wrapped by
-  `src/video_decode.c`). A `<video>` whose source is an `.mpg`/`.mpeg`/`.m1v`
-  stream plays **inline** — frames are decoded in the sandboxed renderer
-  and advanced off the animation tick (`src/video.c`), honouring
-  `autoplay`/`loop`/`muted`/`poster` and click-to-play/pause. Audio plays
-  via the unsandboxed `northstar-audio` helper (`src/audio/main.c`),
-  which decodes in-tree — pl_mpeg for the MPEG-1/MP2 track, the vendored
-  CC0 [minimp3](https://github.com/lieff/minimp3) (`src/audio/minimp3.h`)
-  for standalone `.mp3` files — and outputs through SDL2's audio device
-  (WASAPI/CoreAudio/ALSA), mixing and resampling the streams itself. The
-  renderer emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume`
-  commands that ride the render-response `X-Audio` side-channel to the
-  shell, which spawns and pumps the helper (`src/gtk/procview.c`).
-  MSE video frames decode in a third process, `northstar-video`
-  (`src/videoproc/main.c`, built when libav is present): the renderer
-  materializes the growing stream to `~/.cache/northstar/msvideo/`
-  and drives it with `video …` lines on the same side-channel; the
-  helper writes BGRA frames into a shm ring that the shell composites
-  over the page surface each tick (see `docs/media.md`). Without the
-  helper (headless, Windows) the renderer decodes in-process as before. The
-  in-tree decoders stay pl_mpeg (MPEG-1 video + MP2) + minimp3 (MP3) — don't
-  vendor further single-file codecs. **WebM is the one FFmpeg-backed
-  extension**, over `libav\*` (`libavformat`/`libavcodec`/`libavutil`/
-  `libswscale`/`libswresample`, system packages — never vendored): the
-  `libav` build path (`-DNS_HAVE_LIBAV`) adds inline
-  **VP9/VP8 video** (libav demux+decode → swscale → texture, in
-  `src/video_decode.c`) and **Opus/Vorbis audio** (decoded in the helper,
-  `src/audio/main.c`) for `.webm`/`.opus`/`.ogg` sources. It is **required on
-  Linux and Windows** (`libav_required` in `meson.build` — YouTube and most
-  modern sites serve VP9/WebM, so the external-player fallback there is
-  unacceptable; the Windows CI installs MSYS2's `mingw-w64-x86_64-ffmpeg`
-  and the `--werror` build fails without it)
-  and **auto-detected on macOS** (a stock build there without libav carries no
-  libav symbol or dependency and behaves exactly as before). The version floor
-  is FFmpeg 8.0's library sonames (libavcodec ≥ 62, libavutil ≥ 60, …). Android
-  stays on the external-player path — its dependency sysroot does not
-  cross-build FFmpeg. Other `<audio>` and other `<video>`
-  codecs render a
-  poster and play overlay; clicking resolves the media URL in the renderer
-  (`ns_browser_media_at`) and reports it over the renderer protocol for
-  embedders — the GTK shell does not launch an external player.
+- **No** AI-style web APIs, **no** WebGL, **no** WebGPU.
+- **Media.** There is no inline video: a `<video>` element lays out but
+  does not decode in this edition. Audio does play, through the
+  unsandboxed `northstar-audio` helper (`src/audio/main.c`), which decodes
+  in-tree — the vendored CC0 [minimp3](https://github.com/lieff/minimp3)
+  (`src/audio/minimp3.h`) for `.mp3`, the vendored MIT
+  [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (`subprojects/plmpeg/`)
+  for MP2, and, when the optional `opusfile`/`vorbisfile` libraries are
+  present, Ogg Opus/Vorbis — and outputs through SDL2's audio device
+  (WASAPI/CoreAudio/ALSA), mixing and resampling itself. The renderer
+  emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands that
+  ride the render-response `X-Audio` side-channel to the shell, which
+  spawns and pumps the helper (`src/gtk/procview.c`).
+- Images decode in-tree: PNG, GIF, BMP and JPEG through
+  [Wuffs](https://github.com/google/wuffs); AVIF through libavif; SVG
+  through librsvg; any other format a GdkPixbuf loader is installed for as
+  a last-resort fallback.
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue
@@ -140,14 +94,11 @@ This repo is driven by Claude in long uninterrupted sessions.
   is `./builddir/src/gtk/northstar.exe`). Every commit must pass
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
-  — that's the per-change correctness gate, not CI. See
-  `docs/Windows.md` for the MSYS2 setup; the rest of this guide
-  uses Unix-style invocations that work in either shell.
-- **CI is enabled.** The Linux / macOS / Windows workflows run on
+  — that's the per-change correctness gate, not CI.
+- **CI is enabled.** The Linux (gcc) and Windows workflows run on
   every push to `main` and every PR targeting `main`, plus manual
-  `workflow_dispatch`. Local Linux is still the primary
-  correctness gate before pushing; CI provides cross-platform
-  sanity coverage.
+  `workflow_dispatch`. Local Linux is still the primary correctness
+  gate before pushing; CI provides cross-platform sanity coverage.
 
 ## Build / verify locally
 
@@ -194,8 +145,9 @@ transpiled-to-C image-decoder library. The single-file release is
 vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static
 subproject. `src/image_wuffs.c::ns_image_decode_wuffs` is tried
 first; it returns NULL for any other format, in which case
-`src/image.c::ns_image_decode_bytes` falls back to GDK-Pixbuf
-(for TIFF / ICO / WebP / etc.) and, last, to librsvg for SVG.
+`src/image.c::ns_image_decode_bytes` falls back to libavif (AVIF),
+then GDK-Pixbuf (for TIFF / ICO / other installed loaders) and,
+last, to librsvg for SVG.
 
 ### URL parsing: lexbor URL module
 
@@ -214,19 +166,6 @@ to identify the charset, then `g_convert`s to UTF-8. No
 hand-rolled BOM / HTTP-charset / meta-charset sniffing — uchardet
 handles all of that internally. The Latin-1 fallback only fires
 if uchardet can't classify the bytes at all.
-
-### WebP: libwebp
-
-Required dependency (Debian/Ubuntu `libwebp-dev`, Fedora/RHEL
-`libwebp-devel`, openSUSE `libwebp-devel`, Alpine `libwebp-dev`,
-MSYS2 `mingw-w64-x86_64-libwebp`, Homebrew `webp`). WebP —
-lossy VP8 (the dominant variant served by the BBC, Wikipedia
-thumbnails, and most modern CDNs), lossless VP8L, and **animated
-WebP** (via libwebpdemux's `WebPAnimDecoder`, playing like animated
-GIFs) — is decoded in-tree by `src/image_webp.c`, tried right after
-the Wuffs decoders. No gdk-pixbuf loader, no
-`loaders.cache` registration, and no sandbox interaction is
-involved; the old `webp-pixbuf-loader` runtime dependency is gone.
 
 ### Web Cryptography: OpenSSL libcrypto
 
@@ -250,34 +189,28 @@ sudo apt install build-essential pkg-config meson ninja-build \
 
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
 enables on-screen spell-checking of editable text. It is auto-detected —
-the build works without it and simply does no spell-checking.
-
-The FFmpeg libav\* dev packages (Debian/Ubuntu `libavformat-dev
-libavcodec-dev libavutil-dev libswscale-dev libswresample-dev`;
-MSYS2 `mingw-w64-x86_64-ffmpeg`) enable inline WebM playback (VP9/VP8 video
-+ Opus/Vorbis audio). **Required on Linux and Windows** (`meson setup` fails
-without them, or with a pre-8.0 FFmpeg); auto-detected on macOS, where without
-them the build carries no libav dependency and WebM falls back to the
-external-player path. FFmpeg 8.0 or newer is required.
+the build works without it and simply does no spell-checking. The
+`opusfile` / `vorbisfile` dev packages, likewise optional, add native Ogg
+Opus/Vorbis decode to the audio helper.
 
 On Fedora/RHEL:
 
 ```sh
-sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
+sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libcurl-devel \
     openssl-devel uchardet-devel librsvg2-devel libpsl-devel sqlite-devel \
-    libseccomp-devel libwebp-devel libavif-devel SDL2-devel
+    libseccomp-devel libavif-devel SDL2-devel
 ```
 
 On openSUSE:
 
 ```sh
-sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
+sudo zypper install gcc pkgconf meson ninja gtk4-devel libcurl-devel \
     libopenssl-devel libuchardet-devel librsvg-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libwebp-devel libavif-devel libSDL2-devel
+    libseccomp-devel libavif-devel libSDL2-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.
-On macOS and Windows it is not used and the syscall filter is a no-op.
+On Windows it is not used and the syscall filter is a no-op.
 
 ### Fast iteration (recommended for AI/Claude loops)
 
@@ -299,18 +232,6 @@ Optionally use the `lld` linker for faster final links
 `meson compile -C builddir` in one shot — use it instead of typing
 the two commands separately.
 
-### WPT scoreboard
-
-`docs/wpt-scores.md` tracks web-platform-tests scores over time and
-documents the improvement loop: pick the highest-ROI area from its
-"ROI by area" table, find the failing subtests in
-`docs/wpt-subtests.tsv`, fix the engine, then rerun just that area
-with `scripts/wpt-score.sh --wpt-root=~/wpt AREA` — it updates the
-doc and data files in place. Commit the regenerated files together
-with the engine change. When asked to improve the WPT score, start
-from the "Top 10 improvements" list there (or the ROI table if the
-list is stale), and re-cluster the list when the scores move.
-
 ## Definition of done
 
 A change is done when:
@@ -328,8 +249,8 @@ don't add `meson test` targets.
 ## Don't
 
 - Don't introduce Mozilla/Gecko code, WebKit code, or any other
-  upstream browser engine source. Northstar is an independent
-  implementation, not a fork.
+  upstream browser engine source. The hand-written engine stays
+  hand-written — Northstar is not a fork of a browser engine.
 - **Don't add site-specific hacks.** No per-site rendering shims, no
   hardcoded hostnames, no grepping a site's private JSON (e.g.
   `ytInitialPlayerResponse`, `mediaDefinitions`, `ytimg`, `movie_player`).
@@ -340,16 +261,8 @@ don't add `meson test` targets.
   special-case the host. The standards-based media metadata extractor in
   `src/html_lexbor.c` is the pattern; the deleted YouTube scraper was the
   anti-pattern.
-- Don't add AI-style web-API surface area, even as stubs. WebGL is a
-  deliberate opt-in exception — extend `src/webgl.c`, don't re-architect it.
-- WebGPU is an experimental exception layered over external wgpu-native
-  (`src/webgpu.c`, `docs/webgpu.md`). The `webgpu` feature is `auto`: built
-  only when wgpu-native is actually present, so a machine without it still
-  gets a build with no WebGPU surface or dependency. Keep it behind the
-  `--enable-webgpu` / `NS_WEBGPU_ALLOW` runtime gate, and don't make
-  wgpu-native a hard/default dependency or vendor its library into the tree
-  (headers only) — a stock `meson setup builddir` on a clean machine must
-  still produce a WebGPU-free binary.
+- Don't add AI-style web-API surface area, even as stubs. Don't
+  reintroduce WebGL or WebGPU.
 - Don't add telemetry, crash reporters, update pingers, or "studies"
   infrastructure. UI translation goes through `src/i18n.c` and the
   `data/i18n/*.lang` catalogues — don't introduce gettext or `.po`

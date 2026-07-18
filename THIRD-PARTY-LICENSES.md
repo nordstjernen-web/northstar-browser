@@ -136,29 +136,6 @@ OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 Licensed under the Apache License, Version 2.0. See the lexbor section
 above for the license text (same license).
 
-### libwebp — BSD 3-Clause License
-
-> WebP image decoding.
-> <https://chromium.googlesource.com/webm/libwebp>
->
-> Copyright (c) 2010, Google Inc. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met: redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer;
-redistributions in binary form must reproduce the above copyright
-notice, this list of conditions and the following disclaimer in the
-documentation and/or other materials provided with the distribution;
-neither the name of Google nor the names of its contributors may be used
-to endorse or promote products derived from this software without
-specific prior written permission. THIS SOFTWARE IS PROVIDED BY THE
-COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
-WARRANTIES ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
-CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF
-THIS SOFTWARE.
-
 ### libpsl — MIT License
 
 > Public Suffix List handling for cookie / origin policy.
@@ -180,8 +157,8 @@ non-commercial, without restriction.
 
 ### libepoxy — MIT License
 
-> OpenGL / OpenGL ES function-pointer management (used by the WebGL
-> backend and GTK's GL rendering).
+> OpenGL / OpenGL ES function-pointer management (pulled in transitively
+> by GTK's GL rendering).
 > <https://github.com/anholt/libepoxy>
 >
 > Copyright (c) 2013-2014 Intel Corporation
@@ -304,9 +281,6 @@ These are linked only when present on the build host (meson
 
 - **libavif** — BSD 2-Clause, © the AOMedia / libavif authors. AVIF
   image decoding.
-- **Poppler** (`poppler-glib`) — GNU GPL 2.0 or later, © the Poppler
-  developers. PDF rendering. Note: Poppler is GPL; a build that links it
-  is subject to the GPL for that combined binary.
 - **Fontconfig** — MIT-style license, © Keith Packard and contributors.
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
   GPL 2.0, at your option, © The FreeType Project.

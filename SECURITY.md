@@ -38,10 +38,8 @@ trusted.
 
 - Bugs in third-party libraries (libcurl, GTK 4, GLib, lexbor, QuickJS,
   Wuffs, librsvg, …). Report upstream; we update when fixes ship.
-- Features we deliberately don't implement: WebGPU, WebRTC,
+- Features we deliberately don't implement: WebGL, WebGPU, WebRTC,
   MSE/EME/DRM, service workers, browser extensions, JIT, "AI" web APIs.
-  (WebGL *is* implemented, but is off by default and gated behind a
-  per-site trust prompt — see `docs/webgl.md`.)
 - CPU-level side channels (Spectre-class).
 - Attacks that already require local code execution as the same user.
 

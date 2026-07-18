@@ -22,7 +22,6 @@ BuildRequires:  meson >= 1.0
 BuildRequires:  ninja
 BuildRequires:  pkgconfig
 BuildRequires:  update-desktop-files
-BuildRequires:  pkgconfig(epoxy)
 BuildRequires:  pkgconfig(enchant-2)
 BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libcrypto)
@@ -31,12 +30,10 @@ BuildRequires:  pkgconfig(libpsl)
 BuildRequires:  pkgconfig(librsvg-2.0) >= 2.46
 BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  pkgconfig(libavif)
-BuildRequires:  pkgconfig(libwebp)
 BuildRequires:  pkgconfig(sdl2)
 BuildRequires:  pkgconfig(sqlite3)
 BuildRequires:  pkgconfig(uchardet)
 Requires:       hicolor-icon-theme
-Recommends:     mpv
 Recommends:     myspell-en_US
 
 %description
@@ -45,10 +42,9 @@ GTK 4 user interface and a libcurl network stack. It is built to be small,
 secure, and readable by a single person end to end.
 
   * A from-scratch HTML5, CSS, and JavaScript engine — no forked browser engine.
-  * Each tab's engine runs in its own sandboxed process (seccomp + Landlock on
-    Linux) behind an IPC and shared-memory framebuffer boundary.
+  * One window, one page, one process: the page engine runs in the shell
+    process behind a seccomp + Landlock syscall sandbox on Linux.
   * No JIT, which keeps the JavaScript attack surface small.
-  * Opt-in WebGL, gated by a per-site trust prompt.
   * No telemetry: it does not phone home and does not track the user.
 
 %prep
@@ -90,7 +86,6 @@ rmdir %{buildroot}%{_includedir}/northstar 2>/dev/null || :
 %doc README.md
 %license %{_datadir}/northstar/LICENSE
 %{_bindir}/northstar
-%{_bindir}/northstar-renderer
 %{_bindir}/northstar-audio
 %{_datadir}/applications/org.northstar.WebBrowser.desktop
 %{_datadir}/metainfo/org.northstar.WebBrowser.metainfo.xml

@@ -104,11 +104,8 @@ message('northstar build profile: ' +
         (ns_is_release ? 'release (LTO + stripped + hardened)'
                        : 'development (debug symbols + frame pointer + hardened)'))
 
-# The GTK shell is a feature: disabling it yields a renderer-only build that
-# needs no GTK 4 at all. is_mobile is retained as a constant (the Android and
-# iOS mobile targets have been removed) so the desktop-only guards below read
-# unchanged.
-is_mobile = false
+# The GTK shell is a feature: disabling it yields an engine-only build that
+# needs no GTK 4 at all.
 gtk_feature = get_option('gtk')
 
 glib       = dependency('glib-2.0')
@@ -120,7 +117,7 @@ pangocairo = dependency('pangocairo')
 gdkpixbuf  = dependency('gdk-pixbuf-2.0')
 
 have_gtk = false
-if not is_mobile and gtk_feature.allowed()
+if gtk_feature.allowed()
   gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
   gtk4 = dependency('gtk4', version: gtk4_min, required: gtk_feature)
   if gtk4.found()
@@ -149,15 +146,13 @@ libpsl = dependency('libpsl')
 
 sqlite3 = dependency('sqlite3')
 
-# gdk-pixbuf (image fallback decoder) and librsvg (SVG) are desktop-only; on
-# Android, Wuffs handles PNG/JPEG/GIF/BMP and other formats degrade gracefully.
-librsvg = dependency('librsvg-2.0', version: '>=2.54', required: not is_mobile)
-have_librsvg = librsvg.found() and not is_mobile
+librsvg = dependency('librsvg-2.0', version: '>=2.54')
+have_librsvg = librsvg.found()
 if have_librsvg
   add_project_arguments('-DNS_HAVE_LIBRSVG=1', language: 'c')
 endif
 
-have_gdk_pixbuf = not is_mobile
+have_gdk_pixbuf = true
 if have_gdk_pixbuf
   add_project_arguments('-DNS_HAVE_GDK_PIXBUF=1', language: 'c')
 endif
@@ -180,8 +175,8 @@ if have_freetype
 endif
 
 
-libavif = dependency('libavif', required: not is_mobile)
-have_avif = libavif.found() and not is_mobile
+libavif = dependency('libavif')
+have_avif = libavif.found()
 if have_avif
   add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
 endif
@@ -199,9 +194,8 @@ if libopusfile.found()
   add_project_arguments('-DNS_HAVE_OPUSFILE=1', language: 'c')
 endif
 # canPlayType/mediaCapabilities may honestly advertise native Ogg audio only
-# where the decoder that plays it is built: the desktop (SDL2) northstar-audio
-# helper. On mobile audio takes a different path, so these are gated off there.
-if not is_mobile and get_option('audio').allowed()
+# where the decoder that plays it is built: the SDL2 northstar-audio helper.
+if get_option('audio').allowed()
   sdl2_probe = dependency('sdl2', required: false)
   if sdl2_probe.found() and libvorbisfile.found()
     add_project_arguments('-DNS_AUDIO_NATIVE_VORBIS=1', language: 'c')
@@ -211,7 +205,7 @@ if not is_mobile and get_option('audio').allowed()
   endif
 endif
 libenchant = dependency('enchant-2', required: false)
-have_enchant = libenchant.found() and not is_mobile
+have_enchant = libenchant.found()
 if have_enchant
   add_project_arguments('-DNS_HAVE_ENCHANT=1', language: 'c')
 endif
@@ -220,7 +214,7 @@ libseccomp = dependency(
   'libseccomp',
   required: host_machine.system() == 'linux',
 )
-have_seccomp = libseccomp.found() and not is_mobile
+have_seccomp = libseccomp.found()
 if have_seccomp
   add_project_arguments('-DNS_HAVE_SECCOMP=1', language: 'c')
 endif
