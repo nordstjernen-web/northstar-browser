@@ -1,0 +1,123 @@
+name: linux
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: gcc on ubuntu-${{ matrix.ubuntu }}
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ['24.04']
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ccache gcc g++ make cmake pkg-config meson ninja-build \
+            libgtk-4-dev libcurl4-openssl-dev libssl-dev \
+            libuchardet-dev librsvg2-dev libpsl-dev libsqlite3-dev \
+            libavif-dev libsdl2-dev libseccomp-dev libenchant-2-dev ca-certificates
+
+      - name: Restore ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-gcc-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-gcc-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=200M
+          ccache --zero-stats
+
+      - name: Select compiler
+        run: |
+          echo "CC=ccache gcc"  >> $GITHUB_ENV
+          echo "CXX=ccache g++" >> $GITHUB_ENV
+
+      - name: Show toolchain versions
+        run: |
+          gcc --version | head -1
+          ccache --version | head -1
+          meson --version
+          ninja --version
+          pkg-config --modversion gtk4
+          pkg-config --modversion libcurl
+
+      - name: Build
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          meson setup builddir --werror
+          meson compile -C builddir 2>&1 | tee build.log
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Smoke test (binary present and executable)
+        run: |
+          test -x builddir/src/gtk/nordstjernen
+          file builddir/src/gtk/nordstjernen
+          ldd builddir/src/gtk/nordstjernen | head -20
+
+      - name: Headless smoke (about:start)
+        run: |
+          set -o pipefail
+          ./builddir/src/gtk/nordstjernen --headless --dump=text about:start > about.txt
+          head -3 about.txt
+          grep -q Nordstjernen about.txt
+
+      - name: Headless baseline smoke (./scripts/dev.sh smoke)
+        run: ./scripts/dev.sh smoke
+
+      - name: Upload build log
+        if: always() && hashFiles('build.log') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-log-${{ matrix.ubuntu }}-gcc
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload nordstjernen binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: nordstjernen-linux-${{ matrix.ubuntu }}-gcc
+          path: builddir/src/gtk/nordstjernen
+          if-no-files-found: error
+          retention-days: 14

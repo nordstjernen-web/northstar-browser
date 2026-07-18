@@ -1,0 +1,22 @@
+<!doctype html><html><head><style>
+body { font-family: sans-serif; margin: 24px; }
+h2 { font-size: 15px; margin: 16px 0 6px; border-bottom: 1px solid #ddd; }
+.fr { quotes: "\00AB" "\00BB" "\2039" "\203A"; }
+.noq q { quotes: none; }
+.cite::before { content: open-quote; color: #a33; }
+.cite::after { content: close-quote; color: #a33; }
+.cite { quotes: '"' '"'; }
+.gc { display: grid; grid-auto-flow: column; grid-template-rows: 28px 28px; grid-auto-columns: 80px; grid-gap: 8px; background: #eef3ff; padding: 8px; width: max-content; }
+.gc div { background: #4a78d0; color: #fff; text-align: center; line-height: 28px; }
+.gc .tall { grid-row: span 2; background: #2a9d5c; }
+</style></head><body>
+<h2>quotes property on q (French «…» with nested ‹…›)</h2>
+<p class="fr">He said <q>this is <q>nested</q> quoting</q> in French style.</p>
+<h2>default q quotes + quotes: none</h2>
+<p>Default: <q>outer <q>inner</q> quote</q>.</p>
+<p class="noq">Suppressed: <q>no quote marks here</q>.</p>
+<h2>open-quote / close-quote content with author quotes</h2>
+<p class="cite">styled citation</p>
+<h2>grid-auto-flow: column with grid-auto-columns: 80px (2 rows)</h2>
+<div class="gc"><div>1</div><div>2</div><div class="tall">tall</div><div>3</div><div>4</div><div>5</div></div>
+</body></html>

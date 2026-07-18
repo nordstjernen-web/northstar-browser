@@ -1,0 +1,94 @@
+# Build artifacts
+/build/
+/dist/
+/data/screenshots/*.png
+/obj-*/
+*.o
+*.a
+*.lo
+*.la
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.exp
+*.lib
+*.ilk
+*.idb
+*.pch
+*.gch
+*.d
+
+# Autotools / configure artifacts (if introduced later)
+/configure.lineno
+/config.cache
+/config.log
+/config.status
+/autom4te.cache/
+
+# Meson / Ninja (likely build system for a GTK4/C project)
+/builddir/
+/builddir-release/
+/builddir-wgpu/
+/builddir-verify/
+/release-build/
+/build-*/
+
+# iOS build artifacts: the cross-compile staging + generated Xcode project.
+/ios/.build/
+/ios/App/vendor/
+/ios/App/Nordstjernen.xcodeproj/
+/ios/sysroot/
+# Downloaded wgpu-native release blobs (headers are vendored; the library is fetched)
+/third_party/wgpu-native/dl/
+.ninja_deps
+.ninja_log
+build.ninja
+compile_commands.json
+
+# Meson auto-downloaded subprojects (wrap files only are committed).
+# lexbor and quickjs-ng are fetched at setup from their upstream releases.
+/subprojects/packagecache/
+/subprojects/lexbor/
+/subprojects/quickjs-ng/
+
+# CMake (in case)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# Editor / OS
+*~
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs / scratch
+*.log
+/.scratch/
+/.cache/
+/local-build.log
+
+# Local dev artifacts (Windows/MSYS2 box)
+/.tmp/
+/.ccache/
+/scripts/_msys_*
+
+# Local Claude settings (allow .claude/settings.json if you want shared)
+.claude/settings.local.json
+
+# Claude harness state
+/.claude/
+perf.data
+
+# Local AI model weights (large; fetched separately, see docs/ai.md)
+/models/
+/subprojects/llama.cpp/

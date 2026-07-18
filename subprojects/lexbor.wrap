@@ -1,0 +1,4 @@
+[wrap-git]
+url = https://github.com/lexbor/lexbor.git
+revision = v3.0.0
+depth = 1

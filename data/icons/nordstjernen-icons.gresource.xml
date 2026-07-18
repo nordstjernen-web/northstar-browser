@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/org/nordstjernen/WebBrowser/icons/scalable/apps">
+    <file alias="nordstjernen.svg">hicolor/scalable/apps/nordstjernen.svg</file>
+    <file alias="nordstjernen-back.svg">hicolor/scalable/apps/nordstjernen-back.svg</file>
+    <file alias="nordstjernen-forward.svg">hicolor/scalable/apps/nordstjernen-forward.svg</file>
+    <file alias="nordstjernen-home.svg">hicolor/scalable/apps/nordstjernen-home.svg</file>
+    <file alias="nordstjernen-reload.svg">hicolor/scalable/apps/nordstjernen-reload.svg</file>
+    <file alias="nordstjernen-stop.svg">hicolor/scalable/apps/nordstjernen-stop.svg</file>
+    <file alias="nordstjernen-go.svg">hicolor/scalable/apps/nordstjernen-go.svg</file>
+    <file alias="nordstjernen-bookmarks.svg">hicolor/scalable/apps/nordstjernen-bookmarks.svg</file>
+    <file alias="nordstjernen-ai.svg">hicolor/scalable/apps/nordstjernen-ai.svg</file>
+    <file alias="nordstjernen-console.svg">hicolor/scalable/apps/nordstjernen-console.svg</file>
+    <file alias="nordstjernen-settings.svg">hicolor/scalable/apps/nordstjernen-settings.svg</file>
+    <file alias="nordstjernen-about.svg">hicolor/scalable/apps/nordstjernen-about.svg</file>
+    <file alias="nordstjernen-stage-connect.svg">hicolor/scalable/apps/nordstjernen-stage-connect.svg</file>
+    <file alias="nordstjernen-stage-fetch.svg">hicolor/scalable/apps/nordstjernen-stage-fetch.svg</file>
+    <file alias="nordstjernen-stage-parse.svg">hicolor/scalable/apps/nordstjernen-stage-parse.svg</file>
+    <file alias="nordstjernen-stage-script.svg">hicolor/scalable/apps/nordstjernen-stage-script.svg</file>
+    <file alias="nordstjernen-stage-render.svg">hicolor/scalable/apps/nordstjernen-stage-render.svg</file>
+    <file alias="nordstjernen-stage-done.svg">hicolor/scalable/apps/nordstjernen-stage-done.svg</file>
+  </gresource>
+</gresources>

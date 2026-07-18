@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Andreas Røsdal -->
+<component type="desktop-application">
+  <id>org.nordstjernen.WebBrowser</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-NSL-1.0</project_license>
+  <name>Nordstjernen</name>
+  <summary>A small, hand-written web browser</summary>
+  <developer id="org.nordstjernen">
+    <name>Andreas Røsdal</name>
+  </developer>
+
+  <description>
+    <p>
+      Nordstjernen is a clean-room web browser written from scratch in C,
+      with a GTK 4 user interface and a libcurl network stack. It is built
+      to be small, secure, and readable by a single person end to end.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>A from-scratch HTML5, CSS, and JavaScript engine — no forked browser engine.</li>
+      <li>Each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC and shared-memory framebuffer boundary.</li>
+      <li>No JIT, which keeps the JavaScript attack surface small.</li>
+      <li>Opt-in WebGL, gated by a per-site trust prompt.</li>
+      <li>No telemetry: it does not phone home and does not track the user.</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">org.nordstjernen.WebBrowser.desktop</launchable>
+
+  <url type="homepage">https://nordstjernen.org</url>
+  <url type="bugtracker">https://github.com/nordstjernen-web/nordstjernen/issues</url>
+  <url type="vcs-browser">https://github.com/nordstjernen-web/nordstjernen</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The Nordstjernen start page</caption>
+      <image>https://raw.githubusercontent.com/nordstjernen-web/nordstjernen/main/docs/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+
+  <categories>
+    <category>Network</category>
+    <category>WebBrowser</category>
+  </categories>
+
+  <keywords>
+    <keyword>web</keyword>
+    <keyword>browser</keyword>
+    <keyword>internet</keyword>
+    <keyword>www</keyword>
+    <keyword>html</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1"/>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#dce8f5</color>
+    <color type="primary" scheme_preference="dark">#16283c</color>
+  </branding>
+
+  <releases>
+    <release version="1.0.17" date="2026-06-29">
+      <description>
+        <p>Email client, media, and rendering release.</p>
+        <ul>
+          <li>Built-in email (about:email): IMAP/POP3/SMTP with one-step provider setup for Gmail, Yahoo, iCloud and Fastmail, app-password and 2-step-verification guidance, and attachment viewing.</li>
+          <li>An optional primary password encrypts saved mail credentials at rest with PBKDF2-SHA256 and AES-256-GCM.</li>
+          <li>Media: initial Media Source Extensions (MSE) append path.</li>
+          <li>Rendering: replaced elements (img, video, canvas, svg) are sized per the CSS rendering spec and default to inline-level.</li>
+          <li>Networking: per-host concurrent-fetch cap and tighter media/renderer IPC bounds.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.16" date="2026-06-26">
+      <description>
+        <p>Extensions, content blocking, and engine hardening release.</p>
+        <ul>
+          <li>Initial WebExtensions support with declarativeNetRequest content blocking and EasyList/ABP filter lists.</li>
+          <li>Local SafeBrowsing-style phishing and malware protection.</li>
+          <li>Updated vendored QuickJS and Lexbor engines, with DOM, XHR, and CSS spec-compliance fixes.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.12" date="2026-06-21">
+      <description>
+        <p>Networking and developer tooling release.</p>
+        <ul>
+          <li>Shared curl multi handle with HTTP/2 connection multiplexing and reuse.</li>
+          <li>Tabbed Developer Tools window expanding the JavaScript console.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.11" date="2026-06-19">
+      <description>
+        <p>Maintenance release.</p>
+        <ul>
+          <li>Net Center masthead refresh and sign-in button layout fixes.</li>
+          <li>Inline atomic box layout positioning correction.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.10" date="2026-06-18">
+      <description>
+        <p>Audio overhaul and hardening release.</p>
+        <ul>
+          <li>New audio path: SDL2 output with in-tree pl_mpeg (MP2) and minimp3 (MP3) decoding, replacing the vendored miniaudio backend.</li>
+          <li>Security hardening: bounded EventSource reconnect delay, a fixed image-source memory leak, and a tightened renderer IPC reply limit.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.0.9" date="2026-06-16">
+      <description>
+        <p>Engine and documentation maintenance release.</p>
+      </description>
+    </release>
+    <release version="1.0.7" date="2026-06-14">
+      <description>
+        <p>Maintenance release.</p>
+      </description>
+    </release>
+  </releases>
+</component>
