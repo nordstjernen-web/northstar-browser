@@ -89,6 +89,3 @@ Thumbs.db
 /.claude/
 perf.data
 
-# Local AI model weights (large; fetched separately, see docs/ai.md)
-/models/
-/subprojects/llama.cpp/

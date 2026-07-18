@@ -36,7 +36,6 @@ wpt_hook_h = custom_target(
 )
 
 northstar_engine_sources = files(
-  'ai.c',
   'anim.c',
   'bytecode_cache.c',
   'bookmarks.c',
@@ -189,15 +188,6 @@ if sdl2_dep.found()
   ns_lib_c_args += ['-DNS_HAVE_SDL']
 endif
 
-if have_ai
-  cpp_stdlib_name = host_machine.system() == 'darwin' ? 'c++' : 'stdc++'
-  northstar_deps += ai_deps
-  northstar_deps += [
-    meson.get_compiler('cpp').find_library(cpp_stdlib_name, required: true),
-    cc.find_library('dl', required: false),
-    dependency('threads'),
-  ]
-endif
 
 northstar_win_subsystem = (
   host_machine.system() == 'windows' ? 'windows' : 'console'

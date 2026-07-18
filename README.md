@@ -51,9 +51,6 @@ engines are unchanged.
 - **Single window / single process** — the browser shows one page in one
   window, and the page engine runs in the shell process (no per-tab
   renderer processes).
-- **Local AI start page** — the `about:start` new-tab page is a chat with
-  a small language model running entirely on your machine via llama.cpp.
-  (Build with `-Dai=disabled` to omit it.)
 - **UI** — bookmarks, find-in-page, save-to-PDF, JS console, settings,
   headless mode.
 
@@ -68,9 +65,8 @@ meson setup builddir && meson compile -C builddir
 ```
 
 WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree. lexbor and
-quickjs-ng — and, for the optional local-AI feature, llama.cpp — are
-fetched by `meson setup` as pinned upstream subprojects (see
-`subprojects/*.wrap`); pass `-Dai=disabled` to skip llama.cpp.
+quickjs-ng are fetched by `meson setup` as pinned upstream subprojects
+(see `subprojects/*.wrap`).
 
 ## Dependencies
 

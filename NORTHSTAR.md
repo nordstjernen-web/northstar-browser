@@ -67,11 +67,7 @@ The GTK frontend is a tabbed, **process-per-tab** browser:
 each tab drives its own sandboxed renderer process over the engine and
 shows full-fidelity output. The shell is a thin display/input client —
 it carries no bespoke in-process renderer anymore (the optional
-`--single-process` mode runs the same renderer on a thread). The
-`about:start` new-tab page hosts a local AI assistant (`src/ai.c`,
-llama.cpp over a pinned Meson subproject): chat, Wikipedia/DuckDuckGo
-tools, and digest-pinned model downloads, all on-device with no network
-at inference time (see `docs/ai.md`).
+`--single-process` mode runs the same renderer on a thread).
 
 The release version lives in the meson project definition and is
 surfaced through `src/version.h`.

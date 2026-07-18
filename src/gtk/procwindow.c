@@ -917,14 +917,6 @@ on_newtab_clicked(GtkButton *b, gpointer ud)
     proc_window_add_tab(ud, "about:start", TRUE);
 }
 
-#if defined(NS_HAVE_AI) && !defined(__APPLE__)
-static void
-on_ai_window_clicked(GtkButton *b, gpointer ud)
-{
-    (void)b;
-    proc_window_add_tab(ud, "about:ai-window", TRUE);
-}
-#endif
 
 static void
 on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer ud)
@@ -997,15 +989,6 @@ act_home(GSimpleAction *a, GVariant *p, gpointer ud)
         ns_proc_view_load(v, pw->home_url ? pw->home_url : "about:start");
 }
 
-#if defined(NS_HAVE_AI) && !defined(__APPLE__)
-static void
-act_new_ai_window(GSimpleAction *a, GVariant *p, gpointer ud)
-{
-    (void)a;
-    (void)p;
-    proc_window_add_tab(ud, "about:ai-window", TRUE);
-}
-#endif
 
 static void
 act_focus_address(GSimpleAction *a, GVariant *p, gpointer ud)
@@ -1548,10 +1531,6 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Ctrl><Shift>j", "F12", NULL });
     install_action(pw, "home", G_CALLBACK(act_home),
                    (const char *[]){ "<Alt>Home", NULL });
-#if defined(NS_HAVE_AI) && !defined(__APPLE__)
-    install_action(pw, "new-ai-window", G_CALLBACK(act_new_ai_window),
-                   (const char *[]){ "<Ctrl><Shift>a", NULL });
-#endif
     install_action(pw, "focus-address", G_CALLBACK(act_focus_address),
                    (const char *[]){ "<Ctrl>l", NULL });
     install_action(pw, "focus-page", G_CALLBACK(act_focus_page),
@@ -1691,16 +1670,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     pw->bookmarks_button = toolbar_button("user-bookmarks-symbolic",
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
-#if defined(NS_HAVE_AI) && !defined(__APPLE__)
-    GtkWidget *ai_window_button =
-        toolbar_button("northstar-ai", ns_i18n("New AI Window"),
-                       G_CALLBACK(on_ai_window_clicked), pw);
-#endif
 
     GMenu *appmenu = g_menu_new();
-#if defined(NS_HAVE_AI) && !defined(__APPLE__)
-    g_menu_append(appmenu, ns_i18n("New AI Window"), "win.new-ai-window");
-#endif
     g_menu_append(appmenu, ns_i18n("Reload"), "win.reload");
     g_menu_append(appmenu, ns_i18n("Find in Page"), "win.find");
     g_menu_append(appmenu, ns_i18n("JavaScript Console"), "win.console");
@@ -1738,9 +1709,6 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
-#if defined(NS_HAVE_AI) && !defined(__APPLE__)
-    gtk_box_append(GTK_BOX(toolbar), ai_window_button);
-#endif
     gtk_box_append(GTK_BOX(toolbar), menu_button);
     gtk_box_append(GTK_BOX(toolbar), logo_button);
     gtk_box_append(GTK_BOX(vbox), toolbar);
