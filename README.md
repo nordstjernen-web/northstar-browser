@@ -9,8 +9,10 @@ small feature set.
 **HTML Standards:** Behaviour is measured against the spec text, section
 by section, not against another browser.
 
-**Security:** the page engine runs behind a seccomp + Landlock syscall
-sandbox on Linux · no JIT.
+**Security:** on Linux the browser runs behind a Landlock filesystem
+sandbox (plus `PR_SET_NO_NEW_PRIVS`), with a default-deny seccomp syscall
+filter added in the headless/tooling and audio-helper processes · no JIT.
+See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 
 **Minimalism:** one window, one page, one process. The engine is a
 compact body of C — small enough for one person to read and audit

@@ -16,7 +16,7 @@ assessment of the impact.
 ## Threat model
 
 Northstar treats the Internet with the outmost suspicion. The attacker controls fetched
-HTML, CSS, JavaScript, images, fonts, media, and PDFs. The user, the
+HTML, CSS, JavaScript, images, fonts, and media. The user, the
 kernel, and the local filesystem outside the sandbox allow-list are
 trusted.
 
@@ -45,16 +45,23 @@ trusted.
 
 ## Defenses
 
-The browser renders each tab's untrusted content in its own
-sandboxed renderer process (`northstar-renderer`); the GTK shell
-is a thin, engine-free display/input process that spawns the renderers
-and blits their shared-memory framebuffers. Defenses are layered so that
-a memory-safety bug in the engine is confined to a per-tab renderer
-process that holds the strongest sandbox, and does not immediately yield
-arbitrary code execution outside the user's data directory. (Per-origin
-*site* isolation — one renderer per site rather than per tab — and a
-networking/storage broker are the next steps; today the renderer still
-does its own fetching and persistence. See `docs/tab-isolation.md`.)
+This minimalist edition runs **single-process**: the HTML/CSS/JS/layout
+engine parses and renders untrusted content in the GTK shell process
+itself (`ns_rproc_single_process_enable`, `src/gtk/appmain.c`). There is
+no separate `northstar-renderer` executable and no per-tab renderer
+process — every page shares one OS process and one address space. The
+only helper the browser spawns is the unsandboxed-at-launch,
+self-sandboxing `northstar-audio` decoder (see *Media*, below).
+
+Because there is no privilege boundary between pages, the layered
+defenses below are **hardening and containment for the whole process**,
+not an inter-process sandbox around a compromised renderer: they shrink
+what a memory-safety bug in the engine can reach (filesystem, syscalls,
+executable memory, network protocols), but a bug in the engine is not
+confined to a subordinate process the way it would be in a multi-process
+browser. A true per-page/per-origin process sandbox is not part of this
+edition; treat process isolation as **absent**, and the defenses here as
+defence-in-depth around a single trusted-code / untrusted-data boundary.
 
 ### Compile-time hardening (`meson.build`)
 
@@ -83,98 +90,82 @@ work without writable executable pages.
 
 ### Linux sandbox
 
-Two independent layers, both default-deny, both installed before any HTML
-is parsed. They describe the **per-tab renderer process**
-(`ns_browser_sandbox`, applied by the `northstar-renderer` entry point
-in `src/renderer_http.c`), which parses all untrusted
-content and therefore holds the strongest confinement. The thin UI shell
-parses no untrusted bytes but must `fork`/`execve` the renderer processes,
-so it runs under a **widened Landlock** (executable renderer directory, with
-`/dev/shm` writable to cover the non-`memfd` shared-memory fallback) and
-**no seccomp** — the real syscall confinement lives in the renderers. The
-renderer framebuffer itself is an anonymous `memfd` passed over the control
-socket, so it normally needs no `/dev/shm` name at all.
+Two syscall/filesystem confinement layers exist, both default-deny, both
+installed from `src/security.c` before any HTML is parsed. **How much of
+the pair is applied depends on the run mode**, and the interactive GUI
+does not get both — read this carefully, because it is the single most
+important caveat in this document:
 
-- **Landlock (filesystem).** Read-only access to system libraries
-  (`/usr`, `/lib`, `/lib64`), `/etc`, the CA bundle, font caches,
-  `/dev/urandom`, and the X11 / Wayland sockets. Read+write access to
-  the per-user XDG config, data, and cache directories under
+| Run mode | Landlock | seccomp-bpf | `PR_SET_NO_NEW_PRIVS` |
+|----------|:--------:|:-----------:|:---------------------:|
+| **Interactive GUI** (the normal browser) | ✅ | ❌ **not applied** | ✅ |
+| Headless / `--dump` / `--eval` / WPT tooling | ✅ | ✅ | ✅ |
+| `northstar-audio` helper | ✅ | ✅ | ✅ |
+
+The interactive GUI runs single-process (the engine is in the shell), and
+its startup path (`proc_mode` in `src/gtk/appmain.c`) applies **Landlock
+only** — it deliberately skips `ns_security_seccomp_init()` because the
+shell must be able to `fork`/`execve` the `northstar-audio` helper, which
+the no-`execve` seccomp filter would block. So on the normal browsing
+path the untrusted-content engine is confined by the filesystem allow-list
+and `PR_SET_NO_NEW_PRIVS`, **but not by the syscall allow-list**. The
+seccomp filter is real and is exercised by the headless/tooling entry
+point and by the audio helper (which re-imposes both layers on itself once
+its device and network are up); closing this gap for the GUI — e.g. via a
+pre-`execve` broker for the audio helper so the engine thread can take the
+full filter — is tracked as future work and called out again under *Known
+gaps*.
+
+- **Landlock (filesystem) — applied in every mode.** Read-only access to
+  system libraries (`/usr`, `/lib`, `/lib64`), `/etc`, the CA bundle, font
+  caches, `/dev/urandom`, and the X11 / Wayland sockets. Read+write access
+  to the per-user XDG config, data, and cache directories under
   `~/.config/northstar`, `~/.local/share/northstar`,
   `~/.cache/northstar`. The rest of `$HOME` — `~/.ssh`, `~/.aws`,
   `~/.netrc`, other browsers' state, shell history — is **not**
-  reachable. No directory the renderer can write to is also
-  executable.
-- **seccomp-bpf (syscalls).** Default-deny allow-list: the filter is
-  built with `SCMP_ACT_ERRNO(EPERM)` as the default action and then
-  permits only the ~266 syscalls the browser actually needs
-  (`ns_seccomp_allowed_names[]` in `src/security.c`); every other
-  syscall returns `EPERM`. `execve` / `execveat` are not on the list, so
-  a compromised renderer cannot pivot to another interpreter or binary
-  even if Landlock would have allowed reading it. `ptrace`, `bpf`,
-  `keyctl`, `mount`, `unshare`, `userfaultfd`, the `io_uring_*` family,
-  `perf_event_open`, `kexec_load`, and the module syscalls are likewise
-  absent from the allow-list. TSYNC propagates the filter to every
-  thread.
-- **Media launcher.** Northstar ships no audio/video codecs; playback
-  is handed off to an external player. The seccomp-confined renderer has
-  `execve` blocked, so it cannot launch anything: when the user clicks an
-  `<audio>`/`<video>` element the renderer only *resolves* the media URL
-  (`ns_browser_media_at`) and hands it to the UI shell over IPC. The
-  shell — which is not seccomp-confined, because it must `execve` the
-  renderer processes — validates the scheme (`http`/`https`/`ftp`/`rtsp`/
-  `rtmp`, or `file://` / an absolute path), rejecting anything with a
-  leading `-` or control characters, then picks a player from a fixed
-  allow-list (`mpv`, `vlc`, `celluloid`, `totem`, `mplayer`, `ffplay`)
-  **itself** and `execve`s it with the URL as the single argument
-  (`ns_media_try_launch` in `src/media.c`). A compromised renderer can
-  therefore at most ask a known media player to open a scheme-checked URL
-  — it cannot choose the binary, inject extra arguments, or `execve`
-  anything itself. (A pre-sandbox broker — `ns_media_broker_start` — is
-  retained for callers that seccomp-confine the *launching* process, such
-  as the embedding library; the default shell uses the direct path.)
+  reachable. No directory the process can write to is also executable, so
+  a bug cannot drop a payload and then map it executable from a writable
+  path. `PR_SET_NO_NEW_PRIVS` is set here too, so a setuid binary cannot
+  be used to regain privileges after a compromise.
+- **seccomp-bpf (syscalls) — applied to headless/tooling and the audio
+  helper.** Default-deny allow-list: the filter is built with
+  `SCMP_ACT_ERRNO(EPERM)` as the default action and then permits only the
+  ~266 syscalls the browser actually needs (`ns_seccomp_allowed_names[]`
+  in `src/security.c`); every other syscall returns `EPERM`. `execve` /
+  `execveat` are not on the list, so a confined process cannot pivot to
+  another interpreter or binary even if Landlock would have allowed
+  reading it. `ptrace`, `bpf`, `keyctl`, `mount`, `unshare`,
+  `userfaultfd`, the `io_uring_*` family, `perf_event_open`, `kexec_load`,
+  and the module syscalls are likewise absent from the allow-list. TSYNC
+  propagates the filter to every thread.
+- **Media / audio.** Northstar decodes audio **in-tree** in a separate
+  `northstar-audio` helper process (`src/audio/main.c`), not via an
+  external player. When a page plays an `<audio>` element the engine emits
+  `open`/`play`/`pause`/`seek`/`stop`/`volume` commands that ride the
+  render-response `X-Audio` side-channel to the shell (`src/gtk/procview.c`),
+  which spawns the helper from the browser's own install directory
+  (`ns_proc_audio_helper_path`) with `g_subprocess_launcher_spawn` and
+  drives it over stdin/stdout — the media URL is fetched and decoded by the
+  helper, never handed to a shell or an arbitrary binary. The helper
+  decodes MP3 (vendored minimp3), MP2 (vendored pl_mpeg) and, when
+  `opusfile`/`vorbisfile` are present, Ogg Opus/Vorbis, and outputs through
+  SDL2; on Linux it re-imposes the same Landlock + seccomp profile on
+  itself before touching codec bytes. `<video>` lays out but is **not**
+  decoded in this edition, so there is no video codec attack surface.
 
-Both layers can be disabled for debugging with `NS_NO_SANDBOX=1` /
-`NS_NO_SECCOMP=1`. Don't use those in normal operation.
+The sandbox can be disabled for debugging with `NS_NO_SANDBOX=1` (Landlock)
+/ `NS_NO_SECCOMP=1` (seccomp). Don't use those in normal operation.
 
-### macOS sandbox
+### macOS
 
-macOS has no Landlock or seccomp, but it ships the **Seatbelt** sandbox
-(`sandbox_init(3)`, `<sandbox.h>`) — a per-process, voluntary, post-launch
-confinement applied from an inline Sandbox Profile Language (SBPL) policy.
-This is the same mechanism Chromium and Firefox use for their macOS renderer
-sandboxes. Northstar applies it from the `__APPLE__` arm of
-`ns_security_sandbox_init` (`src/security.c`), to **both** the per-tab
-`northstar-renderer` and the UI shell, before any HTML is parsed.
-
-- **Filesystem write-confinement.** The profile is `(allow default)` then
-  `(deny file-write*)` then a re-allow of the same write set the Linux
-  Landlock layer permits: the per-user `~/.config/northstar`,
-  `~/.local/share/northstar`, `~/.cache/northstar`, the GLib runtime
-  dir, the user's Downloads directory, the system temp roots
-  (`/private/var/folders`, `/private/tmp`, `/tmp`) and `/dev`. The rest of
-  `$HOME` — `~/.ssh`, `~/.aws`, other browsers' state, shell history, the
-  user's documents — is **not writable**, so a compromised renderer cannot
-  tamper with files, drop persistence, or modify the user's data. Writable
-  directories added at runtime (`ns_security_add_writable_dir`) are folded in
-  the same way.
-- **What it does *not* cover.** Unlike the Linux pairing, there is no
-  syscall-level filter (no seccomp analogue is applied), and reads, network,
-  and `exec` are left to `(allow default)` — the renderer does its own
-  networking, so a blanket network deny is not possible there. This is a
-  filesystem-integrity boundary, narrower than the Linux renderer's
-  read+syscall confinement; it is the macOS half of the same intent, not a
-  full equivalent.
-- **Caveats.** SBPL is undocumented and varies across macOS releases, and
-  `sandbox_init` is marked deprecated (since 10.7) yet remains the API every
-  major browser relies on; Apple keeps it working. The call **fails open** —
-  if the profile is rejected the process logs a warning and continues
-  unconfined rather than refusing to start. Disable for debugging with
-  `NS_NO_SANDBOX=1`.
-
-The App Sandbox / entitlements container is deliberately **not** used: it
-forbids `fork`/`execve` of sibling executables, which is exactly how each
-tab's renderer is spawned, so adopting it would require re-architecting the
-helpers as XPC services (see [`docs/macOS.md`](docs/macOS.md)).
+macOS is **not a supported target** in this minimalist edition — the build
+targets Linux (primary) and Windows only. A macOS Seatbelt
+(`sandbox_init(3)`) path still exists in the `__APPLE__` arm of
+`ns_security_sandbox_init` (`src/security.c`), but it is not compiled or
+exercised by either shipped build, so it is not part of this edition's
+security posture. If macOS support is ever restored, that code (and this
+section) must be reviewed against the single-process model described above
+before being relied on.
 
 ### Windows process mitigations
 
@@ -184,9 +175,12 @@ hardens itself at startup via `SetProcessMitigationPolicy`, called
 from `ns_security_win32_mitigations_init` in `src/security.c`
 **before** any DLL we don't statically link is touched. Six
 policies, all best-effort (an unsupported policy on an older
-Windows just returns `FALSE` and is skipped); the untrusted
-renderer gets all six, the GUI shell gets the first five (it must
-spawn renderer subprocesses):
+Windows just returns `FALSE` and is skipped). This edition is
+single-process, so the one browser process applies **the first
+five**; it skips the sixth (ChildProcess block) because it must
+spawn the `northstar-audio` helper. The full six-policy set is still
+applied by any process that spawns nothing — e.g. the headless
+tooling entry point:
 
 - **ASLR** (`ProcessASLRPolicy`, flags `0x0F`) — force relocate
   images, force bottom-up randomization, high-entropy 64-bit
@@ -214,17 +208,13 @@ spawn renderer subprocesses):
   planting and search-order hijacks.
 - **ChildProcess block** (`ProcessChildProcessPolicy`, flags
   `0x01`) — no `CreateProcess` from this process, so a compromised
-  renderer cannot directly pivot to `cmd.exe` / `powershell` / another
-  binary. Applied **only to the untrusted renderer** (via
-  `ns_browser_sandbox`); the process-per-tab GUI shell legitimately
-  spawns renderer subprocesses and so passes `allow_child_processes`
-  to skip this one policy while keeping the other five. Audio/video
-  handoff goes through `ShellExecuteW`, which the shell performs
-  out-of-process (not as our child) and only after the URL passes the
-  same remote-scheme check used elsewhere
-  (`http`/`https`/`ftp`/`rtsp`/`rtmp`; `file://` and local paths are
-  refused on Windows so a media link can never launch a local
-  executable).
+  process cannot directly pivot to `cmd.exe` / `powershell` / another
+  binary. The single-process GUI passes `allow_child_processes` to
+  **skip** this one policy (keeping the other five) because it must
+  launch the in-tree `northstar-audio.exe` decoder for `<audio>`
+  playback; audio bytes are fetched and decoded inside that helper, not
+  by an external player. A process that never spawns a child (the
+  headless tooling path) takes this policy too.
 
 There is no per-path filesystem sandbox; Windows AppContainer
 would provide one but requires a manifest and code-signing
@@ -305,7 +295,7 @@ attacker-controlled bytes and no path-traversal is possible.
   background-layer list is torn down iteratively, and layout's box-tree
   walkers stop at a fixed depth, so a pathologically nested stylesheet or
   DOM cannot exhaust the stack. Sizes from untrusted sources — decoded
-  image dimensions and the renderer's `X-W`/`X-H`/`X-Stride` reply
+  image dimensions and the render layer's `X-W`/`X-H`/`X-Stride` reply
   headers — are clamped before any `width × height`/`stride × height`
   multiplication, so a crafted dimension cannot integer-overflow a
   bounds check or allocation. `filter: blur()` likewise clamps its
@@ -318,14 +308,20 @@ interpreter — no JIT, no machine-code generation. The DOM/JS bridge
 invalidates opaque pointers on node free and re-validates on every
 call, so DOM mutation cannot dangle a JS-held handle.
 
-Each tab has its own QuickJS runtime and context; tabs do not share JS
-state. Within a single tab, navigating across origins (e.g. from
+All pages run in **one OS process** (single-process edition) — there is
+no per-page process or address-space isolation, so this is a
+JavaScript-state boundary, not a memory boundary. Each page/tab gets its
+own QuickJS runtime and context, and navigating across origins (e.g. from
 `news.example.com` to `evil.com`) tears down the runtime and starts a
 fresh one, so attacker-controlled globals (`window.foo = secret;`),
 prototype pollution, leftover module state, and any other in-memory
 JS residue from the previous origin cannot reach the new origin's
 scripts. Same-origin navigation reuses the existing runtime so
-sessionStorage and history work as expected.
+sessionStorage and history work as expected. Because everything shares
+one process, a memory-safety bug in the engine is **not** contained
+between pages the way it would be with per-tab processes; the runtime
+teardown defends against JS-level state leakage, not against native
+memory corruption.
 
 Iframes are rendered. An `<iframe src>` is fetched through the same
 hardened network pipeline as any other resource (TLS verification,
@@ -339,8 +335,8 @@ process per frame. The realm is a synthetic scope: the frame sees its own
 `window`, `document`, `location`, and `history`, and `top`/`parent`/`self`/
 `frames` are redirected to the frame itself rather than exposing the parent's
 real global. This is a best-effort JavaScript-level boundary for ordinary
-content, **not** a hard security boundary the way per-tab runtimes or the
-cross-origin top-level navigation teardown (above) are: a memory-safety bug
+content, **not** a hard security boundary the way the cross-origin
+top-level navigation runtime teardown (above) is: a memory-safety bug
 or a Proxy escape in one frame is not contained from the rest of the
 document's origin. Treat frame isolation as defence-in-depth, not as an
 origin sandbox.
@@ -390,8 +386,26 @@ The `document.cookie` setter:
 
 ## Known gaps
 
+- **No process isolation between pages — single-process edition.** The
+  engine parses and renders all untrusted content in the one browser
+  process; there is no per-tab, per-page, or per-origin renderer process.
+  A memory-safety bug in the engine is therefore not contained to a
+  subordinate process — the origin/cookie/CSP/cache boundaries are
+  enforced in-process by the engine's own logic, and the sandbox
+  (Landlock, and seccomp where applied) limits what the whole process can
+  reach, but neither is a substitute for the address-space isolation a
+  multi-process browser gives you. A per-page process sandbox is the
+  largest single hardening this edition does not have.
+- **seccomp is not applied to the interactive GUI.** As detailed under
+  *Linux sandbox*, the normal browsing process runs under Landlock and
+  `PR_SET_NO_NEW_PRIVS` but **without** the seccomp syscall allow-list,
+  because it must `execve` the `northstar-audio` helper and the filter
+  blocks `execve`. A memory-safety bug in the engine can therefore issue
+  syscalls the headless/helper processes would be denied. Applying the
+  filter to the GUI (e.g. via a pre-`execve` audio broker, or an
+  `execve`-permitting variant of the filter) is tracked as future work.
 - **Iframe isolation is JS-level, not a runtime or process boundary.**
-  A loaded frame shares the parent tab's QuickJS runtime and global
+  A loaded frame shares the parent page's QuickJS runtime and global
   prototypes; its separate `window`/`document`/`location` and redirected
   `top`/`parent` are a synthetic scope, not a true cross-origin sandbox.
   Cross-document `postMessage` is correspondingly limited. A
@@ -400,8 +414,8 @@ The `document.cookie` setter:
   from the embedding origin.
 - **No per-path filesystem sandbox on Windows.** The mitigation
   suite restricts the *process* (no remote DLL loads, no dynamic
-  code, no child processes, etc.) but does not allow-list the
-  files the renderer can read or write the way Landlock does on
+  code, etc.) but does not allow-list the files the process can
+  read or write the way Landlock does on
   Linux. AppContainer or Low-Integrity-Level drop would close
   this; both require additional integration work (manifest /
   capability declarations / re-routed config paths) and are
