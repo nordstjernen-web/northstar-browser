@@ -1,4 +1,7 @@
-/* Nordstjernen — local phishing/malware blocklist and warning interstitial. */
+/* Nordstjernen — local phishing/malware blocklist and warning interstitial.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #define _GNU_SOURCE
 #include "safebrowsing.h"

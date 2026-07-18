@@ -1,5 +1,8 @@
 /* Nordstjernen — single-process mode: serves every tab's renderer session on
-   the shell's main-context thread instead of per-tab renderer processes. */
+   the shell's main-context thread instead of per-tab renderer processes.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include "rproc_inproc.h"
 

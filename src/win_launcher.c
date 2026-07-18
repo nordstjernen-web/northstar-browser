@@ -1,4 +1,7 @@
-/* win_launcher.c - Windows bundle launcher and extraction guard. */
+/* win_launcher.c - Windows bundle launcher and extraction guard.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include <windows.h>
 #include <shellapi.h>

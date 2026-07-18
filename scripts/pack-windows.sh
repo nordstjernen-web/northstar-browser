@@ -205,7 +205,7 @@ fi
 # Per-application data: license text. The browser reads it relative to
 # the exe at runtime (see src/net.c::about_read_first).
 mkdir -p "$APP/share/nordstjernen"
-cp "$ROOT/License.md" "$APP/share/nordstjernen/"
+cp "$ROOT/LICENSE" "$APP/share/nordstjernen/"
 
 # Third-party copyright + license notices required by the libraries we ship.
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$OUT/"

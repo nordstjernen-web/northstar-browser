@@ -1,4 +1,7 @@
-/* Nordstjernen — demo driver for the HTTP-control + shm-frame renderer IPC. */
+/* Nordstjernen — demo driver for the HTTP-control + shm-frame renderer IPC.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include "rproc_http.h"
 

@@ -1,5 +1,8 @@
 /* Nordstjernen — UI string translation: picks the catalogue matching the
- * operating-system language and translates UI strings through it. */
+ * operating-system language and translates UI strings through it.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include "i18n.h"
 

@@ -3,7 +3,7 @@ Version:        0.8.1
 Release:        1%{?dist}
 Summary:        Clean-room, hardened web browser written from scratch in C
 
-License:        LicenseRef-NSL-1.0
+License:        GPL-3.0-or-later
 URL:            https://github.com/nordstjernen-web/nordstjernen
 Source0:        %{name}-%{version}.tar.gz
 
@@ -56,7 +56,7 @@ applications. It does not phone home and does not telemeter the user.
 %meson_install
 
 %files
-%license License.md
+%license LICENSE
 %doc README.md
 %{_bindir}/nordstjernen
 

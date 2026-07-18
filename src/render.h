@@ -1,6 +1,6 @@
 /* Nordstjernen — shared style/layout pipeline used by GUI and headless.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #ifndef NS_RENDER_H

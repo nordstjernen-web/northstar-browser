@@ -45,8 +45,8 @@ build() {
 
 package() {
 	DESTDIR="$pkgdir" meson install --no-rebuild -C output
-	install -Dm644 License.md \
-		"$pkgdir"/usr/share/licenses/$pkgname/License.md
+	install -Dm644 LICENSE \
+		"$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 # Regenerate with `abuild checksum` against the published 1.0.17 release

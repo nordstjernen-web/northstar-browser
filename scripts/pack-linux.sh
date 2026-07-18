@@ -153,7 +153,7 @@ fi
 
 cp "$ROOT/README.md" "$STAGE/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/"
-cp "$ROOT/License.md" "$STAGE/"
+cp "$ROOT/LICENSE" "$STAGE/"
 
 if [ "$WEBM" = 1 ]; then
     WEBM_REQ_NOTE='- FFmpeg libav* (libavformat / libavcodec / libavutil / libswscale /

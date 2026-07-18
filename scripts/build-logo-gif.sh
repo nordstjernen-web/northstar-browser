@@ -143,7 +143,10 @@ import base64, sys, textwrap
 gif, header = sys.argv[1], sys.argv[2]
 b64 = base64.b64encode(open(gif, "rb").read()).decode()
 lines = textwrap.wrap(b64, 96)
-out = ["/* about_logo_gif.h — the animated start-page/about logo, embedded. */",
+out = ["/* about_logo_gif.h — the animated start-page/about logo, embedded.",
+       " * Copyright 2026 Andreas Røsdal",
+       " * SPDX-License-Identifier: GPL-3.0-or-later",
+       " */",
        "#ifndef NS_ABOUT_LOGO_GIF_H", "#define NS_ABOUT_LOGO_GIF_H", "",
        "static const char about_logo_gif_b64[] ="]
 out += ['    "%s"%s' % (ln, ";" if i == len(lines) - 1 else "")

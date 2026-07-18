@@ -102,7 +102,7 @@ install -m644 data/nordstjernen.desktop \\
     %{buildroot}%{_datadir}/applications/org.nordstjernen.WebBrowser.desktop
 install -m644 README.md %{buildroot}%{_docdir}/%{name}/
 install -m644 THIRD-PARTY-LICENSES.md %{buildroot}%{_docdir}/%{name}/
-install -m644 License.md %{buildroot}%{_docdir}/%{name}/
+install -m644 LICENSE %{buildroot}%{_docdir}/%{name}/
 
 %files
 %{_bindir}/nordstjernen
@@ -111,7 +111,7 @@ install -m644 License.md %{buildroot}%{_docdir}/%{name}/
 %{_datadir}/applications/org.nordstjernen.WebBrowser.desktop
 %doc %{_docdir}/%{name}/README.md
 %doc %{_docdir}/%{name}/THIRD-PARTY-LICENSES.md
-%license %{_docdir}/%{name}/License.md
+%license %{_docdir}/%{name}/LICENSE
 
 %post
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then

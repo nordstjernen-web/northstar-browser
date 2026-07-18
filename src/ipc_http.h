@@ -1,4 +1,7 @@
-/* Nordstjernen — minimal HTTP/1.1 + JSON framing for the IPC experiment. */
+/* Nordstjernen — minimal HTTP/1.1 + JSON framing for the IPC experiment.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #ifndef NS_IPC_HTTP_H
 #define NS_IPC_HTTP_H

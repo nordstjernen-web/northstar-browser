@@ -1,4 +1,7 @@
-/* nordstjernen-audio: isolated MP3 / MPEG-1 audio playback helper driven over stdin/stdout. */
+/* nordstjernen-audio: isolated MP3 / MPEG-1 audio playback helper driven over stdin/stdout.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 #define _GNU_SOURCE
 #define SDL_MAIN_HANDLED
 #include <SDL.h>

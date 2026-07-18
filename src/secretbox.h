@@ -1,4 +1,7 @@
-/* Nordstjernen — authenticated secret sealing (PBKDF2-SHA256 + AES-256-GCM). */
+/* Nordstjernen — authenticated secret sealing (PBKDF2-SHA256 + AES-256-GCM).
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #ifndef NS_SECRETBOX_H
 #define NS_SECRETBOX_H

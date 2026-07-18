@@ -1,4 +1,7 @@
-/* about_logo_gif.h — the animated start-page/about logo, embedded. */
+/* about_logo_gif.h — the animated start-page/about logo, embedded.
+ * Copyright 2026 Andreas RÃ¸sdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 #ifndef NS_ABOUT_LOGO_GIF_H
 #define NS_ABOUT_LOGO_GIF_H
 

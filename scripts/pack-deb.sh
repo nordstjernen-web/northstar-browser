@@ -53,12 +53,12 @@ done
 # (otherwise the taskbar/dock icon is blank).
 install -m644 "$ROOT/data/nordstjernen.desktop" \
     "$PKGROOT/usr/share/applications/org.nordstjernen.WebBrowser.desktop"
-# about:license reads this at ../share/nordstjernen/License.md relative to the
+# about:license reads this at ../share/nordstjernen/LICENSE relative to the
 # binary (/usr/bin -> /usr/share/nordstjernen).
-install -m644 "$ROOT/License.md" "$PKGROOT/usr/share/nordstjernen/License.md"
+install -m644 "$ROOT/LICENSE" "$PKGROOT/usr/share/nordstjernen/LICENSE"
 install -m644 "$ROOT/README.md" "$PKGROOT/usr/share/doc/nordstjernen/"
 install -m644 "$ROOT/THIRD-PARTY-LICENSES.md" "$PKGROOT/usr/share/doc/nordstjernen/"
-install -m644 "$ROOT/License.md" "$PKGROOT/usr/share/doc/nordstjernen/copyright"
+install -m644 "$ROOT/LICENSE" "$PKGROOT/usr/share/doc/nordstjernen/copyright"
 
 # Bundle the volatile image-codec libraries (libavif and the AV1
 # codecs it pulls in) under /usr/lib/nordstjernen with an $ORIGIN rpath.

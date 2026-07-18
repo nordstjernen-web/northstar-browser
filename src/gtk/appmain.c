@@ -1,5 +1,8 @@
 /* Nordstjernen — application entry point: process bootstrap, headless render
- * driver dispatch, and the out-of-process (IPC) GTK browser shell. */
+ * driver dispatch, and the out-of-process (IPC) GTK browser shell.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include <gtk/gtk.h>
 #include <stdio.h>

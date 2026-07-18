@@ -1,6 +1,6 @@
 /* Nordstjernen — libcurl-backed async fetcher.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include "net.h"
@@ -2728,17 +2728,17 @@ static char *
 build_about_license(void)
 {
     static const char *const paths[] = {
-        "nordstjernen/License.md",
-        "share/nordstjernen/License.md",
-        "../share/nordstjernen/License.md",
-        "../../../License.md",
-        "../../License.md",
-        "License.md",
+        "nordstjernen/LICENSE",
+        "share/nordstjernen/LICENSE",
+        "../share/nordstjernen/LICENSE",
+        "../../../LICENSE",
+        "../../LICENSE",
+        "LICENSE",
         NULL,
     };
     return build_about_markdown_page(paths, "Nordstjernen Source License",
                                      "about:nordstjernen", "About Nordstjernen",
-                                     "License.md");
+                                     "LICENSE");
 }
 
 static char *

@@ -1,4 +1,7 @@
-/* about_splash_gif.h — the about:start release splash animation, embedded. */
+/* about_splash_gif.h — the about:start release splash animation, embedded.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 #ifndef NS_ABOUT_SPLASH_GIF_H
 #define NS_ABOUT_SPLASH_GIF_H
 

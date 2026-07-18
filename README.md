@@ -106,6 +106,7 @@ audio helper), Enchant (spell-checking), fontconfig / pangoft2.
 
 ## License
 
-See [License.md](License.md) for the current license terms.
+Nordstjernen is free software, licensed under the **GNU General Public
+License, version 3 or later** — see [LICENSE](LICENSE).
 
 Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.

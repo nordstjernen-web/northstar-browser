@@ -1,8 +1,8 @@
 project(
   'nordstjernen',
   ['c', 'cpp'],
-  version: '1.0.20-dev',
-  license: 'LicenseRef-NSL-1.0',
+  version: '1.0.0',
+  license: 'GPL-3.0-or-later',
   default_options: [
     'c_std=gnu2x,c2x,gnu11,c11',
     'cpp_std=c++17',
@@ -296,7 +296,7 @@ install_data(
 )
 
 install_data(
-  'License.md',
+  'LICENSE',
   'THIRD-PARTY-LICENSES.md',
   install_dir: get_option('datadir') / 'nordstjernen',
 )

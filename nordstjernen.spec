@@ -94,7 +94,7 @@ rmdir %{buildroot}%{_includedir}/nordstjernen 2>/dev/null || :
 
 %files
 %doc README.md
-%license %{_datadir}/nordstjernen/License.md
+%license %{_datadir}/nordstjernen/LICENSE
 %{_bindir}/nordstjernen
 %{_bindir}/nordstjernen-renderer
 %{_bindir}/nordstjernen-audio

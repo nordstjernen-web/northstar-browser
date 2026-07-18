@@ -1,6 +1,6 @@
 /* Nordstjernen — optional spell checking over the Enchant library.
  * Copyright 2026 Andreas Røsdal
- * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #ifndef NS_SPELLCHECK_H

@@ -1,4 +1,7 @@
-/* Nordstjernen — GTK thin client over the out-of-process renderer (rproc). */
+/* Nordstjernen — GTK thin client over the out-of-process renderer (rproc).
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include "procview.h"
 #include "i18n.h"

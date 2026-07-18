@@ -1,4 +1,7 @@
-/* Nordstjernen — per-process thread dump to stderr, incl. a SIGQUIT trigger. */
+/* Nordstjernen — per-process thread dump to stderr, incl. a SIGQUIT trigger.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #ifndef NS_THREADDUMP_H
 #define NS_THREADDUMP_H

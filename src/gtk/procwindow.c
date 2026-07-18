@@ -1,4 +1,7 @@
-/* Nordstjernen — GTK tabbed process-per-tab browser shell (IPC renderer). */
+/* Nordstjernen — GTK tabbed process-per-tab browser shell (IPC renderer).
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include "procwindow.h"
 #include <glib/gstdio.h>

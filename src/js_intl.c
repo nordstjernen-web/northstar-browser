@@ -1,4 +1,7 @@
-/* Nordstjernen — native ECMA-402 (Intl) implementation over QuickJS, ICU-free. */
+/* Nordstjernen — native ECMA-402 (Intl) implementation over QuickJS, ICU-free.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include "js_intl.h"
 
