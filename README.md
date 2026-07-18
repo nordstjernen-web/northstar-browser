@@ -105,3 +105,7 @@ Northstar is free software, licensed under the **GNU General Public
 License, version 3 or later** — see [LICENSE](LICENSE).
 
 Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.
+
+## Builds
+[![linux](https://github.com/nordstjernen-web/northstar-browser-gpl/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/northstar-browser-gpl/actions/workflows/linux.yml)
+[![windows](https://github.com/nordstjernen-web/northstar-browser-gpl/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/northstar-browser-gpl/actions/workflows/windows.yml)
