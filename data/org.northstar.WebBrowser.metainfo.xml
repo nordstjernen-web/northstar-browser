@@ -59,6 +59,15 @@
   </branding>
 
   <releases>
+    <release version="1.0.2" date="2026-07-19">
+      <description>
+        <p>Stability release fixing two memory-corruption bugs found with AddressSanitizer on live sites.</p>
+        <ul>
+          <li>Fixed a use-after-free when a page dropped its IntersectionObserver while the observer callback was running.</li>
+          <li>Fixed JS class-ID collisions between page sessions that ran the wrong finalizer on the wrong object, causing random crashes after navigating.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.1" date="2026-07-18">
       <description>
         <p>Rendering, stability, and packaging release.</p>
