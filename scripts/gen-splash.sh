@@ -54,25 +54,58 @@ magick field.png hp_full.png -fx "u+v-0.5" textured.png
 magick keepmask.png -negate -blur 0x1.5 holemask.png
 magick frame.png textured.png holemask.png -composite nocaption.png
 
-magick -size 940x320 xc:white -fill black -draw "rectangle 464,54 654,102" \
-  -fill white -draw "rectangle 545,40 600,61" \
-  -draw "rectangle 600,86 605,102" \
-  -draw "rectangle 642,42 662,58" vkeep.png
-magick nocaption.png -crop '3x49+459+54' +repage -resize '1x49!' colL.png
-magick nocaption.png -crop '3x49+655+54' +repage -resize '1x49!' colR.png
-magick colL.png colR.png +append -filter triangle -resize '191x49!' skylerp.png
-magick -size 940x320 xc:none skylerp.png -geometry +464+54 -composite skylayer.png
-magick vkeep.png -negate -blur 0x1.5 vholemask.png
-magick nocaption.png skylayer.png vholemask.png -composite noversion.png
+magick -size 940x320 xc:white -fill black \
+  -draw "rectangle 72,51 655,103" \
+  -draw "rectangle 75,118 388,158" \
+  -fill white \
+  -draw "rectangle 290,40 385,52" \
+  -draw "rectangle 233,96 292,103" \
+  -draw "rectangle 418,98 472,103" \
+  -draw "rectangle 233,118 292,122" \
+  -draw "rectangle 545,40 600,61" \
+  -draw "rectangle 600,86 605,103" \
+  -draw "rectangle 642,42 662,58" tkeep.png
+magick nocaption.png tkeep.png -alpha off -compose CopyOpacity -composite thole.png
+magick thole.png -crop '940x130+0+40' +repage tband.png
+magick tband.png -channel RGBA -filter box -resize '47x7!' -filter triangle -resize '940x130!' tfA.png
+magick tband.png -channel RGBA -filter box -resize '12x3!' -filter triangle -resize '940x130!' tfB.png
+magick tband.png -channel RGBA -filter box -resize '3x1!' -filter triangle -resize '940x130!' tfC.png
+magick tfC.png tfB.png -compose over -composite tf1.png
+magick tf1.png tfA.png -compose over -composite tbandfield.png
+magick -size 940x320 xc:black \( tbandfield.png -alpha off \) -geometry +0+40 -composite tfield.png
+magick tkeep.png -negate -blur 0x1.5 tholemask.png
+magick nocaption.png tfield.png tholemask.png -composite stripped.png
 
-VW=$(magick -font DejaVu-Sans -pointsize 56 label:"1.0.2" -format "%w" info:)
-VX=$((650 - VW))
-magick noversion.png \
+magick stripped.png -fuzz 22% -fill white -opaque 'srgb(10,40,64)' \
+  -fill black +opaque white -colorspace gray navyhits.png
+magick -size 940x320 xc:black -fill white \
+  -draw "rectangle 264,90 306,118 rectangle 386,118 420,158" tailboxes.png
+magick navyhits.png tailboxes.png -compose multiply -composite \
+  -morphology Dilate Disk:2 tailmask.png
+for pass in 1 2 3; do
+  magick stripped.png -statistic median 11x11 tmed.png
+  magick stripped.png tmed.png tailmask.png -composite stripped.png
+done
+
+HW=$(magick -font DejaVu-Sans -pointsize 56 label:"Northstar" -format "%w" info:)
+VX=$((80 + HW + 18))
+magick stripped.png \
   \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 56 -fill white \
-     -annotate +$VX+98 "1.0.2" -blur 0x2 -channel A -evaluate multiply 1.2 +channel \) \
+     -annotate +80+98 "Northstar" -annotate +$VX+98 "1.0.2" \
+     -blur 0x2 -channel A -evaluate multiply 1.2 +channel \) \
+  -compose over -composite \
+  \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 56 \
+     -fill 'rgb(14,39,57)' -annotate +80+98 "Northstar" \) \
   -compose over -composite \
   \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 56 \
      -fill 'rgb(196,104,8)' -annotate +$VX+98 "1.0.2" \) \
+  -compose over -composite \
+  \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 25 -fill white \
+     -annotate +80+147 "Northstar Web Browser" \
+     -blur 0x2 -channel A -evaluate multiply 1.4 +channel \) \
+  -compose over -composite \
+  \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 25 \
+     -fill 'rgb(7,41,72)' -annotate +80+147 "Northstar Web Browser" \) \
   -compose over -composite versioned.png
 
 magick versioned.png \
