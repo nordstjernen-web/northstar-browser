@@ -76,7 +76,7 @@ BUNDLE_DIR="$PKGROOT/usr/lib/northstar"
 SEED_RE='libavif\.so'
 # Never bundle the C/C++/OpenMP runtime: universally present and ABI-stable,
 # and a newer system copy stays backward-compatible with our older build.
-CORE_DENY='^(ld-linux|libc|libm|libdl|libpthread|librt|libgcc_s|libstdc\+\+|libgomp|libnuma|libatomic|libpthread)\.'
+CORE_DENY='^(ld-linux[^.]*|libc|libm|libdl|libpthread|librt|libgcc_s|libstdc\+\+|libgomp|libnuma|libatomic|libpthread)\.'
 # Package-name families to drop from Depends once their libs are bundled.
 # Matched against the dep name directly (not via dpkg -S, whose path lookup
 # is unreliable under usrmerge), so it tracks whatever ldd linked.
