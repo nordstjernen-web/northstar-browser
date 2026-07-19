@@ -21656,8 +21656,12 @@ ns_io_call_cb(JSContext *ctx, ns_io_observer *o, JSValue entries)
     gint64 io_saved = jsx ? jsx->eval_deadline_us : 0;
     if (jsx) jsx->eval_deadline_us =
         g_get_monotonic_time() + ns_js_eval_budget_us();
-    JSValueConst args[2] = { entries, o->wrapper };
-    JSValue ret = JS_Call(ctx, o->cb, o->wrapper, 2, args);
+    JSValue cb = JS_DupValue(ctx, o->cb);
+    JSValue self = JS_DupValue(ctx, o->wrapper);
+    JSValueConst args[2] = { entries, self };
+    JSValue ret = JS_Call(ctx, cb, self, 2, args);
+    JS_FreeValue(ctx, cb);
+    JS_FreeValue(ctx, self);
     if (jsx) jsx->eval_deadline_us = io_saved;
     if (JS_IsException(ret)) {
         JSValue ex = JS_GetException(ctx);
