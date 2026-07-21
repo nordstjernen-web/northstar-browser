@@ -186,7 +186,7 @@ endif
 # the executables' own symbols (it overrides --export-dynamic regardless of
 # link order); the only runtime dlsym we need (RAND_bytes for RNG warmup)
 # resolves through a dependency library, whose exports this leaves untouched.
-# Applies to the executables only; the shared libnorthstar keeps its API.
+# Applies to the executable, including its internal renderer interface.
 northstar_exe_link_args = northstar_link_args + \
   cc.get_supported_link_arguments(
     ['-Wl,--version-script=' + meson.current_source_dir() / 'exe-local.map'])

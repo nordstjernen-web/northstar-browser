@@ -1,4 +1,4 @@
-/* Northstar — public C embedding API implementation.
+/* Northstar — internal page-engine host for renderer and headless drivers.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -539,25 +539,6 @@ ns_browser_init(void)
     return 0;
 }
 
-void
-ns_browser_sandbox(const char *self_exe)
-{
-    ns_security_win32_mitigations_init(FALSE);
-    ns_security_sandbox_init(self_exe);
-    ns_security_seccomp_init();
-}
-
-void
-ns_browser_shutdown(void)
-{
-    ns_font_shutdown();
-    ns_bytecode_cache_shutdown();
-    ns_history_shutdown();
-    ns_cache_shutdown();
-    ns_net_shutdown();
-    ns_config_shutdown();
-}
-
 static char *
 resolve_local_path(const char *url)
 {
@@ -978,27 +959,11 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
 }
 
 ns_browser *
-ns_browser_open(const char *url, int viewport_width, int settle_ms)
-{
-    return browser_open_common(url, viewport_width, 0.0, settle_ms,
-                               NULL, 0, NULL);
-}
-
-ns_browser *
 ns_browser_open_viewport(const char *url, int viewport_width,
                          double viewport_height, int settle_ms)
 {
     return browser_open_common(url, viewport_width, viewport_height, settle_ms,
                                NULL, 0, NULL);
-}
-
-ns_browser *
-ns_browser_open_post(const char *url, int viewport_width, int settle_ms,
-                     const void *body, size_t body_len,
-                     const char *content_type)
-{
-    return browser_open_common(url, viewport_width, 0.0, settle_ms,
-                               body, body_len, content_type);
 }
 
 ns_browser *
@@ -1272,13 +1237,6 @@ ns_browser_set_viewport(ns_browser *browser, int css_width, double css_height)
 }
 
 int
-ns_browser_set_viewport_width(ns_browser *browser, int css_width)
-{
-    return ns_browser_set_viewport(browser, css_width,
-                                   (double)css_width * 0.75);
-}
-
-int
 ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height)
 {
     if (!browser || !browser->layout) return -1;
@@ -1295,69 +1253,6 @@ ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height)
     if (out_width)  *out_width  = (int)w;
     int ypad = (!hide_y && bottom > browser->vh + 0.5) ? 32 : 0;
     if (out_height) *out_height = (int)bottom + ypad;
-    return 0;
-}
-
-int
-ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
-                       int width, int height, double scale,
-                       unsigned char *out, int stride)
-{
-    if (!browser || !browser->layout || !out) return -1;
-    if (width <= 0 || height <= 0 || stride < width * 4) return -1;
-    if (!(scale > 0)) scale = 1.0;
-
-    browser->cur_scroll_x = (double)scroll_x;
-    browser->cur_scroll_y = (double)scroll_y;
-    browser->cur_viewport_h = (double)height / scale;
-    browser_ensure_images(browser);
-
-    cairo_surface_t *surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
-        return -1;
-    }
-    cairo_t *cr = cairo_create(surf);
-    cairo_set_tolerance(cr, scale > 0 ? 0.5 / scale : 0.5);
-    cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
-    cairo_rectangle(cr, 0, 0, width, height);
-    cairo_clip(cr);
-    cairo_scale(cr, scale, scale);
-    cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
-
-
-    ns_paint_set_js(browser->js);
-    ns_paint_set_anim(browser->anim);
-    ns_paint_set_search(browser->search_case, browser->search_active);
-    const char *highlight = browser->search_query;
-    if (ns_selection_has_range(&browser->selection))
-        ns_paint_with_selection(cr, browser->layout, highlight,
-                                &browser->selection);
-    else
-        ns_paint(cr, browser->layout, highlight);
-    ns_paint_set_search(FALSE, NULL);
-    ns_paint_set_anim(NULL);
-    ns_paint_set_js(NULL);
-
-    cairo_destroy(cr);
-    cairo_surface_flush(surf);
-
-    const unsigned char *src = cairo_image_surface_get_data(surf);
-    int src_stride = cairo_image_surface_get_stride(surf);
-    for (int y = 0; y < height; y++) {
-        const unsigned char *srow = src + (size_t)y * src_stride;
-        unsigned char *drow = out + (size_t)y * stride;
-        for (int x = 0; x < width; x++) {
-            uint32_t px;
-            memcpy(&px, srow + x * 4, sizeof px);
-            drow[x * 4 + 0] = (unsigned char)((px >> 16) & 0xFF);
-            drow[x * 4 + 1] = (unsigned char)((px >> 8) & 0xFF);
-            drow[x * 4 + 2] = (unsigned char)(px & 0xFF);
-            drow[x * 4 + 3] = (unsigned char)((px >> 24) & 0xFF);
-        }
-    }
-    cairo_surface_destroy(surf);
     return 0;
 }
 
@@ -2344,32 +2239,6 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     return nav;
 }
 
-int
-ns_browser_release(ns_browser *browser)
-{
-    int changed = 0;
-    char *nav = ns_browser_release_click(browser, &changed);
-    free(nav);
-    return changed;
-}
-
-char *
-ns_browser_click(ns_browser *browser, int x, int y, int mods)
-{
-    char *nav = ns_browser_press(browser, x, y, mods);
-    if (nav && *nav) {
-        if (browser) {
-            browser->press_node = NULL;
-            browser->press_active = FALSE;
-            ns_css_set_active_node(NULL);
-        }
-        return nav;
-    }
-    free(nav);
-    char *out = ns_browser_release_click(browser, NULL);
-    return out;
-}
-
 static void
 browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
                       gsize del_end, const char *insert)
@@ -2680,13 +2549,6 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
     return nav;
 }
 
-char *
-ns_browser_key(ns_browser *browser, int kind, const char *key,
-               const char *code, int keycode, int mods)
-{
-    return ns_browser_key_full(browser, kind, key, code, keycode, mods, NULL);
-}
-
 int
 ns_browser_focused_editable(ns_browser *browser)
 {
@@ -2835,103 +2697,6 @@ ns_browser_resolve_camera(ns_browser *browser, const char *origin, int allow)
             "camera-resolve");
         free(r);
     }
-}
-
-static void
-collect_links(const ns_node *node, const char *base, GString *out,
-              GHashTable *seen, int depth)
-{
-    if (!node || depth > 1024) return;
-    for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "a")) {
-            const char *href = ns_element_get_attr(c, "href");
-            if (href && *href && href[0] != '#' &&
-                !g_str_has_prefix(href, "javascript:")) {
-                char *abs = ns_url_resolve(base, href);
-                if (abs && *abs && !g_hash_table_contains(seen, abs)) {
-                    g_hash_table_add(seen, g_strdup(abs));
-                    if (out->len) g_string_append_c(out, '\n');
-                    g_string_append(out, abs);
-                }
-                g_free(abs);
-            }
-        }
-        collect_links(c, base, out, seen, depth + 1);
-    }
-}
-
-char *
-ns_browser_links(ns_browser *browser)
-{
-    if (!browser || !browser->doc) return NULL;
-    GString *out = g_string_new(NULL);
-    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                             g_free, NULL);
-    collect_links(browser->doc, browser->base_url, out, seen, 0);
-    g_hash_table_destroy(seen);
-    if (out->len == 0) { g_string_free(out, TRUE); return NULL; }
-    char *result = strdup(out->str);
-    g_string_free(out, TRUE);
-    return result;
-}
-
-static gboolean
-rel_token_is_icon(const char *rel)
-{
-    if (!rel)
-        return FALSE;
-    for (const char *p = rel; *p;) {
-        while (*p && g_ascii_isspace(*p))
-            p++;
-        const char *start = p;
-        while (*p && !g_ascii_isspace(*p))
-            p++;
-        if ((size_t)(p - start) == 4 &&
-            g_ascii_strncasecmp(start, "icon", 4) == 0)
-            return TRUE;
-    }
-    return FALSE;
-}
-
-static const char *
-find_icon_href(const ns_node *node, int depth)
-{
-    if (!node || depth > 1024) return NULL;
-    for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "link")) {
-            const char *href = ns_element_get_attr(c, "href");
-            if (href && *href && rel_token_is_icon(ns_element_get_attr(c, "rel")))
-                return href;
-        }
-        const char *found = find_icon_href(c, depth + 1);
-        if (found)
-            return found;
-    }
-    return NULL;
-}
-
-char *
-ns_browser_favicon_url(ns_browser *browser)
-{
-    if (!browser || !browser->doc)
-        return NULL;
-    const char *href = find_icon_href(browser->doc, 0);
-    char *abs = (href && *href) ? ns_url_resolve(browser->base_url, href) : NULL;
-    if (abs && *abs) {
-        char *out = strdup(abs);
-        g_free(abs);
-        return out;
-    }
-    g_free(abs);
-    char *origin = ns_url_origin_from(browser->base_url);
-    char *out = (origin && *origin) ? g_strconcat(origin, "/favicon.ico", NULL)
-                                    : NULL;
-    g_free(origin);
-    if (!out)
-        return NULL;
-    char *dup = strdup(out);
-    g_free(out);
-    return dup;
 }
 
 int
