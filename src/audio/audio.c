@@ -93,6 +93,7 @@ struct NsAudioContext {
 
 typedef enum {
     NS_AUDIO_COMMAND_LINE,
+    NS_AUDIO_COMMAND_BLOB,
     NS_AUDIO_COMMAND_RESET,
     NS_AUDIO_COMMAND_DESTROY,
     NS_AUDIO_COMMAND_QUIT,
@@ -103,6 +104,9 @@ typedef struct {
     NsAudioContext       *context;
     int                   generation;
     char                 *line;
+    char                 *token;
+    GBytes               *bytes;
+    gboolean              reload;
 } ns_audio_command;
 
 static SDL_AudioDeviceID g_dev;
@@ -974,11 +978,9 @@ resample_to_device(const float *src, size_t src_frames, int src_rate, int src_ch
 }
 
 static int
-load_audio(ns_audio_player *p, const char *path)
+load_audio_bytes(ns_audio_player *p, const unsigned char *bytes, size_t n)
 {
-    size_t n = 0;
-    unsigned char *bytes = read_file(path, &n);
-    if (!bytes) return 0;
+    if (!bytes || n == 0 || n > NS_AUDIO_MAX_BYTES) return 0;
 
     float *src = NULL;
     size_t src_frames = 0;
@@ -1004,7 +1006,6 @@ load_audio(ns_audio_player *p, const char *path)
     if (!ok)
         ok = decode_opus(bytes, n, &src, &src_frames, &src_rate, &src_ch);
 #endif
-    free(bytes);
     if (!ok) return 0;
 
     float *dev = NULL;
@@ -1022,6 +1023,17 @@ load_audio(ns_audio_player *p, const char *path)
     p->playing = 0;
     audio_unlock();
     return 1;
+}
+
+static int
+load_audio(ns_audio_player *p, const char *path)
+{
+    size_t n = 0;
+    unsigned char *bytes = read_file(path, &n);
+    if (!bytes) return 0;
+    int ok = load_audio_bytes(p, bytes, n);
+    free(bytes);
+    return ok;
 }
 
 typedef struct {
@@ -1328,6 +1340,78 @@ cmd_reload(NsAudioContext *context, const char *token, const char *url)
 }
 
 static void
+cmd_open_bytes(NsAudioContext *context, const char *token, GBytes *bytes)
+{
+    ns_audio_player *p = player_alloc(context, token);
+    if (!p) { emit("error %s too-many-players", token); return; }
+    audio_lock();
+    player_release(p);
+    audio_unlock();
+    p = player_alloc(context, token);
+
+    if (!g_dev_ok && !g_null_thread) {
+        emit("error %s no-audio-device", token);
+        return;
+    }
+
+    gsize size = 0;
+    const guint8 *data = g_bytes_get_data(bytes, &size);
+    if (!load_audio_bytes(p, data, size)) {
+        emit("error %s decode-failed", token);
+        audio_lock();
+        player_release(p);
+        audio_unlock();
+        return;
+    }
+    p->reload_size = (long)size;
+    p->reload_ticks = SDL_GetTicks();
+    emit("meta %s %.3f", token,
+         (double)p->frames / NS_AUDIO_DEVICE_RATE);
+}
+
+static void
+cmd_reload_bytes(NsAudioContext *context, const char *token, GBytes *bytes)
+{
+    ns_audio_player *p = player_find(context, token);
+    if (!p) { cmd_open_bytes(context, token, bytes); return; }
+
+    gsize size = 0;
+    const guint8 *data = g_bytes_get_data(bytes, &size);
+    if (size == 0) {
+        audio_lock();
+        player_release(p);
+        audio_unlock();
+        return;
+    }
+    Uint32 now = SDL_GetTicks();
+    if ((gsize)p->reload_size == size) return;
+
+    ns_audio_player fresh;
+    memset(&fresh, 0, sizeof fresh);
+    if (!load_audio_bytes(&fresh, data, size)) {
+        emit("error %s decode-failed", token);
+        return;
+    }
+
+    audio_lock();
+    float *old_pcm = p->pcm;
+    p->pcm = fresh.pcm;
+    p->frames = fresh.frames;
+    p->pcm_cap = fresh.frames * 2;
+    if (p->cursor > p->frames) p->cursor = p->frames;
+    if (p->reached_end && p->cursor < p->frames) {
+        p->reached_end = 0;
+        p->playing = 1;
+    }
+    p->reload_size = (long)size;
+    p->reload_ticks = now;
+    audio_unlock();
+    free(old_pcm);
+    emit("meta %s %.3f", token,
+         (double)p->frames / NS_AUDIO_DEVICE_RATE);
+}
+
+static void
 cmd_play(NsAudioContext *context, const char *token)
 {
     ns_audio_player *p = player_find(context, token);
@@ -1503,9 +1587,20 @@ audio_worker(gpointer data)
                    !g_atomic_int_get(&command->context->destroyed) &&
                    command->generation ==
                        g_atomic_int_get(&command->context->generation)) {
-            process_line(command->context, command->line);
+            if (command->type == NS_AUDIO_COMMAND_BLOB) {
+                if (command->reload)
+                    cmd_reload_bytes(command->context, command->token,
+                                     command->bytes);
+                else
+                    cmd_open_bytes(command->context, command->token,
+                                   command->bytes);
+            } else {
+                process_line(command->context, command->line);
+            }
         }
         g_free(command->line);
+        g_free(command->token);
+        if (command->bytes) g_bytes_unref(command->bytes);
         g_free(command);
     }
     return NULL;
@@ -1573,6 +1668,28 @@ ns_audio_context_dispatch(NsAudioContext *context, const char *command)
         return;
     }
     queue_command(NS_AUDIO_COMMAND_LINE, context, command);
+}
+
+void
+ns_audio_context_dispatch_blob(NsAudioContext *context,
+                               const char *token, GBytes *bytes,
+                               gboolean reload)
+{
+    if (!context || !token || !*token || !bytes ||
+        g_atomic_int_get(&context->destroyed))
+        return;
+    if (!audio_start()) {
+        g_printerr("northstar: audio playback could not initialize\n");
+        return;
+    }
+    ns_audio_command *command = g_new0(ns_audio_command, 1);
+    command->type = NS_AUDIO_COMMAND_BLOB;
+    command->context = context;
+    command->generation = g_atomic_int_get(&context->generation);
+    command->token = g_strdup(token);
+    command->bytes = g_bytes_ref(bytes);
+    command->reload = reload;
+    g_async_queue_push(g_commands, command);
 }
 
 void

@@ -5430,13 +5430,22 @@ ns_net_set_blob_resolver(ns_net_blob_resolver resolver, gpointer user_data)
     g_blob_resolver_ud = user_data;
 }
 
+GBytes *
+ns_net_resolve_blob(const char *url, char **out_type)
+{
+    if (out_type) *out_type = NULL;
+    if (!g_blob_resolver || !url || !g_str_has_prefix(url, "blob:"))
+        return NULL;
+    return g_blob_resolver(url, out_type, g_blob_resolver_ud);
+}
+
 static gboolean
 ns_net_complete_blob(const char *url, GCancellable *cancellable,
                      GAsyncReadyCallback callback, gpointer user_data)
 {
     if (!g_blob_resolver || !g_str_has_prefix(url, "blob:")) return FALSE;
     char *type = NULL;
-    GBytes *bytes = g_blob_resolver(url, &type, g_blob_resolver_ud);
+    GBytes *bytes = ns_net_resolve_blob(url, &type);
     GTask *task = g_task_new(NULL, cancellable, callback, user_data);
     g_task_set_source_tag(task, ns_net_fetch_async);
     ns_response *resp = g_new0(ns_response, 1);

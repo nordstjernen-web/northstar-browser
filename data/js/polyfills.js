@@ -490,12 +490,21 @@
         this._start = start || 0;
         this._end = end || 0;
     }
+    function ndMseError(name, message) {
+        try {
+            if (typeof global.DOMException === 'function')
+                return new global.DOMException(message || name, name);
+        } catch (e) {}
+        var error = new Error(message || name);
+        error.name = name;
+        return error;
+    }
     ndTimeRanges.prototype.start = function (index) {
-        if (index !== 0 || this.length === 0) throw new Error('IndexSizeError');
+        if (index !== 0 || this.length === 0) throw ndMseError('IndexSizeError');
         return this._start;
     };
     ndTimeRanges.prototype.end = function (index) {
-        if (index !== 0 || this.length === 0) throw new Error('IndexSizeError');
+        if (index !== 0 || this.length === 0) throw ndMseError('IndexSizeError');
         return this._end;
     };
     if (typeof global.TimeRanges === 'function' && global.TimeRanges.prototype) {
@@ -546,35 +555,9 @@
         if (probe && typeof probe.canPlayType === 'function' &&
             probe.canPlayType(raw))
             return true;
-        if (mime === 'audio/mpeg' || mime === 'audio/mp3' ||
-            mime === 'video/mpeg')
+        if (mime === 'audio/mpeg' || mime === 'audio/mp3')
             return true;
         return false;
-    }
-
-    function ndRetargetMediaSourceUrl(from, to, audioUrl) {
-        if (!from || !to || from === to ||
-            !global.document || !global.document.querySelectorAll)
-            return;
-        var nodes;
-        try { nodes = global.document.querySelectorAll('video,audio,source'); }
-        catch (e) { nodes = []; }
-        for (var i = 0; i < nodes.length; i++) {
-            var node = nodes[i];
-            var attr = '';
-            try { attr = node.getAttribute && node.getAttribute('src'); } catch (e) {}
-            var prop = '';
-            try { prop = node.src || ''; } catch (e) {}
-            if (attr === from || prop === from) {
-                try {
-                    if (audioUrl && node.setAttribute)
-                        node.setAttribute('data-audio-src', audioUrl);
-                    if (node.setAttribute) node.setAttribute('src', to);
-                    else node.src = to;
-                    if (typeof node.load === 'function') node.load();
-                } catch (e) {}
-            }
-        }
     }
 
     var ndMseNative = typeof global.__ndMseAppend === 'function' &&
@@ -592,8 +575,6 @@
         this._ndDuration = NaN;
         this._ndUrl = '';
         this._ndObjectURL = '';
-        this._ndVersion = 0;
-        this._ndBytes = 0;
         this._ndMseId = 0;
     }
     ndEventMethods(MediaSource.prototype);
@@ -606,7 +587,7 @@
             if (isNaN(value) || value < 0)
                 throw new TypeError('invalid duration');
             if (this.readyState !== 'open')
-                throw new Error('InvalidStateError');
+                throw ndMseError('InvalidStateError');
             this._ndDuration = value;
             var url = this._ndUrl;
             if (!url || !global.document ||
@@ -634,9 +615,11 @@
         }
     });
     MediaSource.prototype.addSourceBuffer = function (type) {
+        if (this.readyState !== 'open')
+            throw ndMseError('InvalidStateError');
         type = String(type || '');
         if (!MediaSource.isTypeSupported(type))
-            throw new Error('NotSupportedError');
+            throw ndMseError('NotSupportedError');
         var buffer = new SourceBuffer(this, type);
         this.sourceBuffers._push(buffer);
         this.activeSourceBuffers._push(buffer);
@@ -644,16 +627,20 @@
         return buffer;
     };
     MediaSource.prototype.removeSourceBuffer = function (buffer) {
-        if (!this.sourceBuffers._remove(buffer)) throw new Error('NotFoundError');
+        if (this.readyState !== 'open')
+            throw ndMseError('InvalidStateError');
+        if (!this.sourceBuffers._remove(buffer))
+            throw ndMseError('NotFoundError');
+        if (buffer.updating) buffer.abort();
         this.activeSourceBuffers._remove(buffer);
         buffer._removed = true;
         this._ndRefreshBlob();
     };
     MediaSource.prototype.endOfStream = function () {
-        if (this.readyState !== 'open') throw new Error('InvalidStateError');
+        if (this.readyState !== 'open') throw ndMseError('InvalidStateError');
         for (var i = 0; i < this.sourceBuffers.length; i++) {
             var b = this.sourceBuffers.item(i);
-            if (b && b.updating) throw new Error('InvalidStateError');
+            if (b && b.updating) throw ndMseError('InvalidStateError');
         }
         this.readyState = 'ended';
         if (ndMseNative && this._ndMseId)
@@ -662,8 +649,6 @@
             this._ndRefreshBlob();
         ndFireEvent(this, 'sourceended');
     };
-    MediaSource.prototype.setLiveSeekableRange = function () {};
-    MediaSource.prototype.clearLiveSeekableRange = function () {};
     MediaSource.prototype._ndOpen = function () {
         if (this.readyState !== 'closed') return;
         this.readyState = 'open';
@@ -675,7 +660,6 @@
             return false;
         var parts = [];
         var type = '';
-        var bytes = 0;
         var selected = null;
         for (var i = 0; i < this.sourceBuffers.length; i++) {
             var buffer = this.sourceBuffers.item(i);
@@ -687,66 +671,14 @@
         }
         if (selected) {
             type = selected._type || '';
-            bytes = selected._bytes || 0;
             for (var j = 0; j < selected._parts.length; j++)
                 parts.push(selected._parts[j]);
         }
         var blob = new Blob(parts, { type: type || 'application/octet-stream' });
-        var audioSel = null;
-        for (var ai = 0; ai < this.sourceBuffers.length; ai++) {
-            var ab = this.sourceBuffers.item(ai);
-            if (ab && ab !== selected && ab._type.indexOf('audio/') === 0) {
-                audioSel = ab;
-                break;
-            }
-        }
-        var oldUrl = this._ndUrl;
-        var eos = this.readyState === 'ended';
-        if (this._ndObjectURL &&
-            (bytes !== this._ndBytes ||
-             (eos && this._ndUrl.indexOf('&eos') < 0))) {
-            this._ndBytes = bytes;
-            this._ndVersion++;
-            this._ndUrl = this._ndObjectURL + '#ndms=' + this._ndVersion +
-                          (eos ? '&eos=1' : '');
-        }
         var ok = !!global.__ndUpdateBlobURL(this._ndUrl, blob);
         if (this._ndObjectURL && this._ndObjectURL !== this._ndUrl)
             global.__ndUpdateBlobURL(this._ndObjectURL, blob);
-        if (audioSel && audioSel._parts.length && this._ndObjectURL) {
-            var audioBlob = new Blob(audioSel._parts,
-                                     { type: audioSel._type });
-            this._ndAudioUrl = this._ndObjectURL + '#ndmsa=' + this._ndVersion;
-            global.__ndUpdateBlobURL(this._ndAudioUrl, audioBlob);
-        }
-        this._ndScheduleRetarget(oldUrl);
         return ok;
-    };
-    MediaSource.prototype._ndScheduleRetarget = function (oldUrl) {
-        var self = this;
-        var now = Date.now();
-        var last = this._ndLastRetarget || 0;
-        var wait = 2500 - (now - last);
-        if (this.readyState === 'ended' || !last || wait <= 0) {
-            if (this._ndRetargetTimer) {
-                clearTimeout(this._ndRetargetTimer);
-                this._ndRetargetTimer = 0;
-            }
-            var from = this._ndRetargetFrom || oldUrl;
-            this._ndRetargetFrom = '';
-            this._ndLastRetarget = now;
-            ndRetargetMediaSourceUrl(from, this._ndUrl, this._ndAudioUrl);
-            return;
-        }
-        if (!this._ndRetargetFrom) this._ndRetargetFrom = oldUrl;
-        if (this._ndRetargetTimer) return;
-        this._ndRetargetTimer = setTimeout(function () {
-            self._ndRetargetTimer = 0;
-            var deferredFrom = self._ndRetargetFrom;
-            self._ndRetargetFrom = '';
-            self._ndLastRetarget = Date.now();
-            ndRetargetMediaSourceUrl(deferredFrom, self._ndUrl, self._ndAudioUrl);
-        }, wait);
     };
 
     function SourceBuffer(mediaSource, type) {
@@ -769,7 +701,6 @@
         this._bytes = 0;
         this._buffered = new ndTimeRanges(0, 0);
         this._taskSeq = 0;
-        this._quotaFull = false;
     }
     ndEventMethods(SourceBuffer.prototype);
     Object.defineProperty(SourceBuffer.prototype, 'buffered', {
@@ -788,12 +719,7 @@
     SourceBuffer.prototype.appendBuffer = function (data) {
         if (this._removed || !this._mediaSource ||
             this._mediaSource.readyState === 'closed' || this.updating)
-            throw new Error('InvalidStateError');
-        if (this._quotaFull) {
-            var qe = new Error('QuotaExceededError');
-            qe.name = 'QuotaExceededError';
-            throw qe;
-        }
+            throw ndMseError('InvalidStateError');
         if (this._mediaSource.readyState === 'ended') {
             this._mediaSource.readyState = 'open';
             ndFireEvent(this._mediaSource, 'sourceopen');
@@ -801,6 +727,8 @@
         var bytes = blobPartBytes(data);
         var copy = new Uint8Array(bytes.length);
         copy.set(bytes);
+        if (this._bytes + copy.length > 64 * 1024 * 1024)
+            throw ndMseError('QuotaExceededError');
         this.updating = true;
         ndFireEvent(this, 'updatestart');
         var self = this;
@@ -817,7 +745,6 @@
             }
             self.updating = false;
             if (!ok) {
-                self._quotaFull = true;
                 ndFireEvent(self, 'error');
                 ndFireEvent(self, 'updateend');
                 return;
@@ -852,14 +779,19 @@
         });
     };
     SourceBuffer.prototype.remove = function (start, end) {
-        if (this._removed || this.updating) throw new Error('InvalidStateError');
+        if (this._removed || !this._mediaSource ||
+            this._mediaSource.readyState === 'closed' || this.updating)
+            throw ndMseError('InvalidStateError');
         var ms = this._mediaSource;
         if (ms && ms.readyState === 'ended') {
             ms.readyState = 'open';
             ndFireEvent(ms, 'sourceopen');
         }
-        start = +start || 0;
-        end = +end || 0;
+        start = Number(start);
+        end = Number(end);
+        if (!isFinite(start) || isNaN(end)) throw new TypeError('invalid range');
+        if (start < 0 || end <= start)
+            throw new TypeError('invalid range');
         this.updating = true;
         ndFireEvent(this, 'updatestart');
         var self = this;
@@ -902,7 +834,7 @@
     SourceBuffer.prototype.abort = function () {
         if (!this._mediaSource ||
             this._mediaSource.readyState === 'closed')
-            throw new Error('InvalidStateError');
+            throw ndMseError('InvalidStateError');
         this._taskSeq++;
         if (this.updating) {
             this.updating = false;
@@ -911,8 +843,11 @@
         }
     };
     SourceBuffer.prototype.changeType = function (type) {
+        if (this._removed || !this._mediaSource ||
+            this._mediaSource.readyState === 'closed' || this.updating)
+            throw ndMseError('InvalidStateError');
         type = String(type || '');
-        if (!MediaSource.isTypeSupported(type)) throw new Error('NotSupportedError');
+        if (!MediaSource.isTypeSupported(type)) throw ndMseError('NotSupportedError');
         this._fullType = type;
         this._type = type.split(';')[0].trim().toLowerCase();
         if (this._mediaSource) this._mediaSource._ndRefreshBlob();

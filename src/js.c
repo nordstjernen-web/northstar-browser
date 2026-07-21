@@ -192,6 +192,7 @@ static void ns_input_resanitize_value(ns_node *el);
 static char *ns_input_sanitize_value(const ns_node *el, const char *value);
 static void ns_js_process_pending_iframes(ns_js *js);
 static GBytes *ns_js_blob_url_lookup(ns_js *js, const char *url, char **out_type);
+static void ns_media_blob_updated(ns_js *js, const char *url);
 static void ns_js_record_child_change(ns_js *js, ns_node *parent,
                                       ns_node *added, ns_node *removed,
                                       ns_node *previous_sibling, ns_node *next_sibling);
@@ -242,12 +243,6 @@ static JSValue ns_event_initKeyboardEvent(JSContext *ctx, JSValueConst this_val,
 static JSValue ns_element_get_list_ref(JSContext *ctx, JSValueConst this_val);
 static JSValue ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
-static JSValue ns_window_mse_append(JSContext *ctx, JSValueConst this_val,
-                                    int argc, JSValueConst *argv);
-static JSValue ns_window_mse_eos(JSContext *ctx, JSValueConst this_val,
-                                 int argc, JSValueConst *argv);
-static JSValue ns_window_mse_buffered(JSContext *ctx, JSValueConst this_val,
-                                      int argc, JSValueConst *argv);
 static JSValue ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
 static const char *ns_http_status_text(int status);
@@ -16980,6 +16975,7 @@ ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
                                               g_free, ns_blob_entry_free);
     g_hash_table_replace(js->blob_urls, g_strdup(url),
                          ns_blob_entry_new_for_object(ctx, argv[1]));
+    ns_media_blob_updated(js, url);
     js->mutated = TRUE;
     JS_FreeCString(ctx, url);
     return JS_TRUE;
@@ -35143,7 +35139,6 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
     gboolean container_ok =
         strcmp(container, "audio/mpeg") == 0 ||
         strcmp(container, "audio/mp3") == 0 ||
-        strcmp(container, "video/mpeg") == 0 ||
         (native_ogg && (strcmp(container, "audio/ogg") == 0 ||
                         strcmp(container, "application/ogg") == 0)) ||
         (native_opus && strcmp(container, "audio/opus") == 0);
@@ -35236,25 +35231,45 @@ ns_media_resolve_src(JSContext *ctx, ns_node *node)
                                    : g_strdup(src);
 }
 
-static gboolean
-ns_media_src_is_mp3(const char *url)
+static void
+ns_media_blob_updated_node(ns_js *js, ns_node *node, const char *url,
+                           int depth)
 {
-    if (!url) return FALSE;
-    const char *q = strchr(url, '?');
-    size_t len = q ? (size_t)(q - url) : strlen(url);
-    static const char *const exts[] = {
-        ".mp3",
-#ifdef NS_HAVE_LIBAV
-        ".opus", ".weba", ".webm", ".ogg", ".oga",
-#endif
-        NULL,
-    };
-    for (int i = 0; exts[i]; i++) {
-        size_t el = strlen(exts[i]);
-        if (len >= el && g_ascii_strncasecmp(url + len - el, exts[i], el) == 0)
-            return TRUE;
+    if (!node || depth >= 512) return;
+    if (ns_node_is_element_named(node, "audio")) {
+        char *src = ns_media_resolve_src(js->ctx, node);
+        gboolean matches = src && strcmp(src, url) == 0;
+        g_free(src);
+        if (matches) {
+            JSValue element = ns_make_element(js->ctx, node);
+            JSValue opened = JS_GetPropertyStr(js->ctx, element,
+                                               "_nd_audio_opened");
+            if (JS_ToBool(js->ctx, opened)) {
+                JSValue token = JS_GetPropertyStr(js->ctx, element,
+                                                  "_nd_audio_token");
+                if (JS_IsString(token)) {
+                    const char *value = JS_ToCString(js->ctx, token);
+                    if (value) {
+                        ns_js_emit_audio(js, "reload %s %s", value, url);
+                        JS_FreeCString(js->ctx, value);
+                    }
+                }
+                JS_FreeValue(js->ctx, token);
+            }
+            JS_FreeValue(js->ctx, opened);
+            JS_FreeValue(js->ctx, element);
+        }
     }
-    return FALSE;
+    for (ns_node *child = node->first_child; child;
+         child = child->next_sibling)
+        ns_media_blob_updated_node(js, child, url, depth + 1);
+}
+
+static void
+ns_media_blob_updated(ns_js *js, const char *url)
+{
+    if (!js || !js->current_doc || !url) return;
+    ns_media_blob_updated_node(js, js->current_doc, url, 0);
 }
 
 static char *
@@ -35292,8 +35307,8 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
         if (js->media_play_cb)
             js->media_play_cb(el, TRUE, js->media_play_user_data);
         char *url = ns_media_resolve_src(ctx, el);
-        gboolean inline_video = FALSE;
-        if (url && js->audio_cb && !inline_video && ns_media_src_is_mp3(url)) {
+        gboolean audio_element = ns_node_is_element_named(el, "audio");
+        if (url && js->audio_cb && audio_element) {
             char *token = ns_media_token(ctx, el);
             JSValue opened = JS_GetPropertyStr(ctx, this_val, "_nd_audio_opened");
             gboolean already = JS_ToBool(ctx, opened);
@@ -41074,9 +41089,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
     ns_bind_fn(ctx, global, "__ndUrlSet",            ns_window_url_set_internal,       3);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
-    ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
-    ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);
-    ns_bind_fn(ctx, global, "__ndMseBuffered",       ns_window_mse_buffered,           2);
 
     ns_bind_ctor(ctx, global, "Event",        ns_event_ctor,        2);
     {
@@ -47895,83 +47907,12 @@ ns_js_set_media_muted_cb(ns_js *js, ns_js_media_muted_cb cb, gpointer user_data)
 }
 
 void
-ns_js_set_mse_cb(ns_js *js, ns_js_mse_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->mse_cb = cb;
-    js->mse_user_data = user_data;
-}
-
-void
-ns_js_set_mse_buffered_cb(ns_js *js, ns_js_mse_buffered_cb cb,
-                          gpointer user_data)
-{
-    if (!js) return;
-    js->mse_buffered_cb = cb;
-    js->mse_buffered_user_data = user_data;
-}
-
-void
 ns_js_set_media_volume_cb(ns_js *js, ns_js_media_volume_cb cb,
                           gpointer user_data)
 {
     if (!js) return;
     js->media_volume_cb = cb;
     js->media_volume_user_data = user_data;
-}
-
-static JSValue
-ns_window_mse_append(JSContext *ctx, JSValueConst this_val,
-                     int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->mse_cb || argc < 3) return JS_FALSE;
-    guint32 id = 0;
-    JS_ToUint32(ctx, &id, argv[0]);
-    const char *kind_s = JS_ToCString(ctx, argv[1]);
-    char kind = kind_s && kind_s[0] == 'a' ? 'a' : 'v';
-    if (kind_s) JS_FreeCString(ctx, kind_s);
-    const uint8_t *data = NULL;
-    size_t len = 0;
-    JSValue holder = JS_UNDEFINED;
-    if (!ns_js_bytes_view(ctx, argv[2], &data, &len, &holder) || !id)
-        return JS_FALSE;
-    gboolean ok = js->mse_cb(id, kind, data, len, FALSE, js->mse_user_data);
-    JS_FreeValue(ctx, holder);
-    return ok ? JS_TRUE : JS_FALSE;
-}
-
-static JSValue
-ns_window_mse_eos(JSContext *ctx, JSValueConst this_val,
-                  int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->mse_cb || argc < 1) return JS_FALSE;
-    guint32 id = 0;
-    JS_ToUint32(ctx, &id, argv[0]);
-    if (!id) return JS_FALSE;
-    js->mse_cb(id, 'v', NULL, 0, TRUE, js->mse_user_data);
-    return JS_TRUE;
-}
-
-static JSValue
-ns_window_mse_buffered(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->mse_buffered_cb || argc < 2)
-        return JS_NewFloat64(ctx, 0.0);
-    guint32 id = 0;
-    JS_ToUint32(ctx, &id, argv[0]);
-    const char *kind_s = JS_ToCString(ctx, argv[1]);
-    char kind = kind_s && kind_s[0] == 'a' ? 'a' : 'v';
-    if (kind_s) JS_FreeCString(ctx, kind_s);
-    if (!id) return JS_NewFloat64(ctx, 0.0);
-    double end = js->mse_buffered_cb(id, kind, js->mse_buffered_user_data);
-    return JS_NewFloat64(ctx, end);
 }
 
 static void

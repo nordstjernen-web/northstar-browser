@@ -538,6 +538,35 @@ ns_proc_renderer_path(void)
     return g_strdup(name);
 }
 
+static gboolean
+pv_media_blob_command(NsProcView *v, const char *line)
+{
+    gboolean reload;
+    const char *cursor;
+    if (g_str_has_prefix(line, "open ")) {
+        reload = FALSE;
+        cursor = line + 5;
+    } else if (g_str_has_prefix(line, "reload ")) {
+        reload = TRUE;
+        cursor = line + 7;
+    } else {
+        return FALSE;
+    }
+    while (*cursor == ' ') cursor++;
+    const char *token_end = strchr(cursor, ' ');
+    if (!token_end) return FALSE;
+    g_autofree char *token = g_strndup(cursor, token_end - cursor);
+    const char *url = token_end + 1;
+    while (*url == ' ') url++;
+    if (!g_str_has_prefix(url, "blob:")) return FALSE;
+    GBytes *bytes = ns_net_resolve_blob(url, NULL);
+    if (bytes) {
+        ns_audio_context_dispatch_blob(v->audio, token, bytes, reload);
+        g_bytes_unref(bytes);
+    }
+    return TRUE;
+}
+
 static void
 pv_media_pump(NsProcView *v, const char *commands)
 {
@@ -549,7 +578,8 @@ pv_media_pump(NsProcView *v, const char *commands)
         if (!*lines[i]) continue;
         if (g_getenv("NS_DBG_AUDIO"))
             g_printerr("[audio-pump] cmd: %s\n", lines[i]);
-        ns_audio_context_dispatch(v->audio, lines[i]);
+        if (!pv_media_blob_command(v, lines[i]))
+            ns_audio_context_dispatch(v->audio, lines[i]);
     }
     g_strfreev(lines);
 }
