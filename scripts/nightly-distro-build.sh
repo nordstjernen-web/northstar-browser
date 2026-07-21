@@ -18,17 +18,10 @@ install_apt() {
     apt-get install -y --no-install-recommends \
         build-essential clang pkg-config ninja-build cmake git zip unzip curl \
         python3-pip dpkg-dev patchelf ca-certificates \
-        libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev libpsl-dev \
-        libsqlite3-dev librsvg2-dev libseccomp-dev libwebp-dev libavif-dev libsdl2-dev
+        libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev libpsl-dev \
+        libsqlite3-dev librsvg2-dev libseccomp-dev libavif-dev libsdl2-dev
     apt-get install -y --no-install-recommends \
-        libpoppler-glib-dev \
-        libfontconfig-dev libpango1.0-dev libavif-dev || true
-    # FFmpeg libav* enables the auto-detected inline WebM path (VP9/VP8 video +
-    # Opus/Vorbis audio). Optional and on its own line so its absence skips
-    # WebM rather than dropping the other optional dev packages.
-    apt-get install -y --no-install-recommends \
-        libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
-        || echo "nightly-distro-build($DISTRO): FFmpeg dev libs unavailable; WebM skipped" >&2
+        libfontconfig-dev libpango1.0-dev || true
     pip3 install --break-system-packages --upgrade 'meson>=1.4' \
         || pip3 install --upgrade 'meson>=1.4'
 }
@@ -51,38 +44,20 @@ install_zypper() {
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         gcc gcc-c++ clang pkgconf-pkg-config meson ninja cmake git zip unzip curl \
         rpm-build patchelf ca-certificates \
-        gtk4-devel libepoxy-devel libcurl-devel libopenssl-devel libuchardet-devel libpsl-devel \
-        sqlite3-devel librsvg-devel libseccomp-devel libwebp-devel libavif-devel
-    # SDL2 backs auto-detected in-process audio; keep it out of the required
-    # set so an unavailable/mid-sync package degrades to no audio, not a failed
-    # nightly. Its own line (not the optional group) so it is independent of
-    # poppler availability.
+        gtk4-devel libcurl-devel libopenssl-devel libuchardet-devel libpsl-devel \
+        sqlite3-devel librsvg-devel libseccomp-devel libavif-devel libSDL2-devel
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        libSDL2-devel \
-        || echo "nightly-distro-build(opensuse): SDL2 unavailable; audio playback skipped" >&2
-    zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        libpoppler-glib-devel \
-        fontconfig-devel pango-devel libavif-devel || true
-    # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). openSUSE ships these
-    # via Packman, not the default repos, so this commonly degrades to no WebM.
-    zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        libavformat-devel libavcodec-devel libavutil-devel libswscale-devel libswresample-devel \
-        || echo "nightly-distro-build(opensuse): FFmpeg dev libs unavailable (Packman not enabled?); WebM skipped" >&2
+        fontconfig-devel pango-devel || true
 }
 
 install_apk() {
     apk update -q
     apk add --no-cache \
         build-base clang pkgconf meson ninja cmake git zip alpine-sdk \
-        linux-headers gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
-        librsvg-dev libseccomp-dev libwebp-dev sdl2-dev
+        linux-headers gtk4.0-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
+        librsvg-dev libseccomp-dev libavif-dev sdl2-dev
     apk add --no-cache \
-        poppler-dev \
-        fontconfig-dev pango-dev libavif-dev || true
-    # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). ffmpeg-dev provides
-    # all of libavformat/libavcodec/libavutil/libswscale/libswresample.
-    apk add --no-cache ffmpeg-dev \
-        || echo "nightly-distro-build(alpine): ffmpeg-dev unavailable; WebM skipped" >&2
+        fontconfig-dev pango-dev || true
 }
 
 case "$DISTRO" in

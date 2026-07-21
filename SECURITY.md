@@ -23,6 +23,7 @@ trusted.
   use-after-free, integer overflow, format-string.
 - Linux sandbox escapes — both layers: the Landlock filesystem
   allow-list and the seccomp-bpf syscall allow-list.
+- macOS Seatbelt write-confinement bypass.
 - Windows process-mitigation bypass — the policies set via
   `SetProcessMitigationPolicy` at startup (ASLR, strict handle
   checks, extension-point disable, image-load restrictions,
@@ -36,7 +37,7 @@ trusted.
 - Bugs in third-party libraries (libcurl, GTK 4, GLib, lexbor, QuickJS,
   Wuffs, librsvg, …). Report upstream; we update when fixes ship.
 - Features we deliberately don't implement: WebGL, WebGPU, WebRTC,
-  MSE/EME/DRM, service workers, browser extensions, JIT, "AI" web APIs.
+  video MSE, EME/DRM, JIT, and "AI" web APIs.
 - CPU-level side channels (Spectre-class).
 - Attacks that already require local code execution as the same user.
 
@@ -135,22 +136,24 @@ syscall allow-list as headless/tooling mode.
   `opusfile`/`vorbisfile` are present, Ogg Opus/Vorbis, and outputs through
   SDL2. On Linux the worker inherits the browser's Landlock + seccomp
   restrictions, but codec memory corruption is no longer isolated from
-  the browser address space. `<video>` lays out but is **not** decoded in
-  this edition, so there is no video codec attack surface.
+  the browser address space. Audio Media Source buffers stay in process:
+  the page engine resolves their opaque blob URL to bytes and queues those
+  bytes directly to the same mixer worker. `<video>` lays out but is **not**
+  decoded in this edition, so there is no video codec attack surface.
 
 The sandbox can be disabled for debugging with `NS_NO_SANDBOX=1` (Landlock)
 / `NS_NO_SECCOMP=1` (seccomp). Don't use those in normal operation.
 
-### macOS
+### macOS sandbox
 
-macOS is **not a supported target** in this minimalist edition — the build
-targets Linux (primary) and Windows only. A macOS Seatbelt
-(`sandbox_init(3)`) path still exists in the `__APPLE__` arm of
-`ns_security_sandbox_init` (`src/security.c`), but it is not compiled or
-exercised by either shipped build, so it is not part of this edition's
-security posture. If macOS support is ever restored, that code (and this
-section) must be reviewed against the single-process model described above
-before being relied on.
+The supported macOS build applies a Seatbelt profile with
+`sandbox_init(3)`. It allows normal reads and system interaction but denies
+filesystem writes by default, then permits writes to the temporary and
+runtime directories, Northstar's config/data/cache directories, Downloads,
+and any directory explicitly selected by the user. This is write
+confinement, not the Linux profile's read allow-list or syscall filter; all
+engine and audio code still shares the browser process. Set
+`NS_NO_SANDBOX=1` only for debugging.
 
 ### Windows process mitigations
 
@@ -248,12 +251,23 @@ cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
   combinations (Japanese / Traditional Chinese / Korean). Anything
   else is shown as punycode in the URL bar, defeating most
   Latin-look-alike homograph attacks.
+- Service-worker registrations and interception are restricted to the
+  script's origin and declared scope; a worker cannot control an unrelated
+  origin or an out-of-scope page.
+- WebExtensions are explicitly installed local code, not capabilities
+  granted to web pages. Packaged-resource paths are canonicalized beneath
+  the extension root before loading, and extension storage is separated by
+  extension identity.
 
 ### On-disk state
 
-Config, cookies, cache, HSTS, Alt-Svc, and bookmarks live under the
-XDG dirs above with owner-only permissions (`0700` directories, `0600`
-files on Unix; ACL-tightened on Windows). The HTTP cache is keyed on
+Config, cookies, cache, HSTS, Alt-Svc, bookmarks, service-worker
+registrations, and WebExtension local storage live under the application
+data directories with owner-only permissions (`0700` directories, `0600`
+files on Unix; ACL-tightened on Windows). Service-worker registrations are
+keyed by origin and scope and are not persisted in private mode. Extension
+storage is keyed by extension identity and stays memory-only in private
+mode. The HTTP cache is keyed on
 `SHA-256(URL || partition)`, so cache filenames never embed
 attacker-controlled bytes and no path-traversal is possible.
 
@@ -288,8 +302,8 @@ call, so DOM mutation cannot dangle a JS-held handle.
 
 All pages run in **one OS process** (single-process edition) — there is
 no per-page process or address-space isolation, so this is a
-JavaScript-state boundary, not a memory boundary. Each page/tab gets its
-own QuickJS runtime and context, and navigating across origins (e.g. from
+JavaScript-state boundary, not a memory boundary. The current top-level
+page has one QuickJS runtime and context, and navigating across origins (e.g. from
 `news.example.com` to `evil.com`) tears down the runtime and starts a
 fresh one, so attacker-controlled globals (`window.foo = secret;`),
 prototype pollution, leftover module state, and any other in-memory
@@ -297,7 +311,7 @@ JS residue from the previous origin cannot reach the new origin's
 scripts. Same-origin navigation reuses the existing runtime so
 sessionStorage and history work as expected. Because everything shares
 one process, a memory-safety bug in the engine is **not** contained
-between pages the way it would be with per-tab processes; the runtime
+between pages the way it would be with separate renderer processes; the runtime
 teardown defends against JS-level state leakage, not against native
 memory corruption.
 
@@ -307,7 +321,7 @@ hardened network pipeline as any other resource (TLS verification,
 cap, CSP `frame-src`); `srcdoc` is parsed inline. The content document is
 parsed by lexbor and laid out in place.
 
-A loaded frame gets a JavaScript realm, but **within the parent tab's
+A loaded frame gets a JavaScript realm, but **within the parent page's
 single QuickJS runtime** — there is no separate runtime, context, or OS
 process per frame. The realm is a synthetic scope: the frame sees its own
 `window`, `document`, `location`, and `history`, and `top`/`parent`/`self`/
@@ -353,7 +367,7 @@ The `document.cookie` setter:
 
 - Caps input length at 4 KiB.
 - Requires a non-empty `name`.
-- Maintains a per-tab in-memory mirror for synchronous read-back, then
+- Maintains an in-memory mirror for synchronous read-back, then
   persists to the network jar.
 - Parses attributes after the first `;`. `Max-Age` (seconds) and
   `Expires` (HTTP-date, via `curl_getdate`) set the jar expiry;

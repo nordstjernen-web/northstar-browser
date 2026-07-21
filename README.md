@@ -3,7 +3,7 @@ Northstar web browser (open source GPL edition)
 
 Northstar is a web browser, written from scratch in C,
 focused on supporting the HTML and CSS standards. 
-The browser runs on the platforms Linux, MacOs and Windows.
+The browser runs on Linux, macOS and Windows.
 
 Northstar is open source software, licensed under the GNU General Public License, version 3 or later. 
 
@@ -32,7 +32,8 @@ This edition strips Northstar down to a single-window, single-page,
 single-process desktop browser, based on the
 [Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
 
-Audio still plays in-process (MP3, MP2, Ogg Opus/Vorbis), images still
+Audio still plays in-process (MP3, MP2, Ogg Opus/Vorbis), including audio
+streams assembled through Media Source Extensions. Images still
 decode (PNG/GIF/BMP/JPEG via Wuffs, plus AVIF and
 SVG), and the JavaScript, CSS, networking, WebAssembly and WebCrypto
 engines are unchanged.
@@ -46,6 +47,10 @@ engines are unchanged.
   (`crypto.subtle` over OpenSSL).
 - **Custom elements** — autonomous and customized built-in elements.
 - **Navigation API** — `window.navigation` for single-page routing.
+- **Service workers** — origin-scoped registration, persistence and
+  controlled-page fetch interception.
+- **WebExtensions** — installed local extensions with manifest content
+  scripts, safe packaged resources, local storage and runtime messaging.
 - **Networking** over HTTP/2 with libcurl — HTTP/3 when the linked
   libcurl provides it — HSTS, CSP, subresource-integrity (SRI) checks,
   partitioned cookies.
@@ -53,8 +58,8 @@ engines are unchanged.
   is checked against a local SHA-256 blocklist. The check runs entirely
   on-device.
 - **Media** — images (PNG, GIF, BMP, JPEG, AVIF, SVG); audio (`<audio>`)
-  decodes and plays in the browser process. `<video>` lays out but
-  does not decode in this edition.
+  decodes and plays in the browser process, including audio MSE streams.
+  `<video>` lays out but does not decode in this edition.
 - **MathML** — a minimalist presentation-MathML renderer.
 - **Spell checking** — optional, via the Enchant library.
 - **WebAssembly** — the full JS API over a vendored WAMR interpreter.
@@ -67,7 +72,7 @@ engines are unchanged.
 ## Build
 
 ```sh
-sudo apt install build-essential pkg-config meson ninja-build \
+sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
 meson setup builddir && meson compile -C builddir

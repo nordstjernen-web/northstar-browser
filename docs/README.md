@@ -26,7 +26,7 @@ libcurl, carrying no upstream browser engine.
 ## Scope of this edition
 
 This is the minimalist GPL desktop edition. It is single-process (the
-engine runs in the shell process), targets Linux (primary) and Windows, and
+engine runs in the shell process), targets Linux (primary), macOS and Windows, and
 deliberately omits tabs-as-processes, WebGL/WebGPU, inline video decoding,
 the PDF viewer, local-AI features, and the embeddable-library API. See
 [../CLAUDE.md](../CLAUDE.md) for the authoritative scope statement.

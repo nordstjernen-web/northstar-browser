@@ -16,9 +16,9 @@ per-origin renderer process; every page shares one address space.
     │  spawns + restarts on crash/hang
     ▼
  browser process  (src/gtk/ shell + engine, single-process)
-    │   ├─ GTK 4 UI: window, tabs, omnibox, menus   (src/gtk/*.c)
+    │   ├─ GTK 4 UI: one page view, omnibox, menus  (src/gtk/*.c)
     │   ├─ engine: fetch → parse → style → layout → paint
-    │   ├─ QuickJS runtime(s), one per page/tab
+    │   ├─ QuickJS runtime for the current top-level page
     │   └─ asynchronous audio worker           (src/audio/audio.c)
     │          <audio> decode (minimp3 / pl_mpeg / opus / vorbis) → SDL2
     │
@@ -69,6 +69,8 @@ and headless drivers share the same path).
 | `crypto.subtle` (WebCrypto over OpenSSL) | `webcrypto.c` |
 | WebAssembly JS API (over vendored WAMR) | `wasm.c` |
 | `WebSocket`, `EventSource` (SSE) | `ws.c`, `eventsource.c` |
+| Service worker registration, persistence and worker host | `js.c` |
+| WebExtension manifests, resources, storage and messaging | `ext.c`, `js.c` |
 | Forms: validation, serialization, submission | `forms.c` |
 | Text selection on the rendered page | `selection.c` |
 
@@ -86,6 +88,8 @@ embedded at build time (`src/meson.build`).
 | IndexedDB | `idb.c` |
 | Browsing history | `history.c` |
 | Bookmarks | `bookmarks.c` |
+| Service worker registrations | `js.c` |
+| WebExtension local storage | `ext.c` |
 | Sealed secrets (PBKDF2-SHA256 + AES-256-GCM) | `secretbox.c` |
 
 On-disk state lives under the XDG config/data/cache directories with
@@ -107,16 +111,16 @@ partitioning and permission model.
 
 | File | Role |
 |------|------|
-| `security.c` | Refuse privileged startup, Linux Landlock + seccomp sandbox, Windows process mitigations. |
+| `security.c` | Refuse privileged startup, Linux Landlock + seccomp sandbox, macOS Seatbelt profile, Windows process mitigations. |
 | `csp.c` | Content-Security-Policy parse and enforcement. |
 | `safebrowsing.c` | Local phishing/malware blocklist + interstitial. |
 | `secretbox.c` | Authenticated secret sealing. |
 
 ## Third-party components
 
-Fetched by `meson setup` as pinned subprojects: **lexbor** (HTML/CSS/URL),
-**quickjs-ng** (JS), **Wuffs** (images), **pl_mpeg** (MP2 audio).
-Vendored in-tree: **WAMR** (WebAssembly, `src/wamr/`), **minimp3** (MP3,
+Fetched by `meson setup` as pinned subprojects: **lexbor** (HTML/CSS/URL)
+and **quickjs-ng** (JS). Vendored in-tree: **Wuffs** (images), **pl_mpeg**
+(MP2 audio), **WAMR** (WebAssembly, `src/wamr/`) and **minimp3** (MP3,
 `src/audio/minimp3.h`). See [`../THIRD-PARTY-LICENSES.md`](../THIRD-PARTY-LICENSES.md).
 
 ## UI translation

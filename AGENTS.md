@@ -1,8 +1,8 @@
 # Northstar — Codex operating guide
 
 Northstar is a web browser written from scratch in **C**, using **GTK 4**
-for the UI and **libcurl** for networking. Targets **Linux** (primary) and
-**Windows**.
+for the UI and **libcurl** for networking. Targets **Linux** (primary),
+**macOS** and **Windows**.
 
 See `README.md` for the product vision. Northstar is the GPL /
 open-source edition of the [Nordstjernen
@@ -18,9 +18,10 @@ tabs and the process-per-tab architecture (rendering is always
 single-process, in the shell process), a per-tab renderer executable,
 WebGL, WebGPU, inline video decoding and the video helpers, the local-AI
 (llama.cpp) feature, the inline PDF viewer (poppler), in-tree WebP
-decoding, and the Android, Java, macOS and iOS builds and the embeddable
-`libnorthstar` library API. The build targets Linux (primary) and Windows;
-only the `linux.yml` (gcc) and `windows.yml` CI workflows remain.
+decoding, and the Android, Java and iOS builds and the embeddable
+`libnorthstar` library API. The build targets Linux (primary), macOS and
+Windows; the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang),
+`macos.yml` and `windows.yml`.
 
 ## Design constraints
 
@@ -86,14 +87,14 @@ This repo is driven by Codex in long uninterrupted sessions.
   external blockers. When stopping: one line on what's blocked.
 - **Never ask the user to run the build.** Run it yourself.
 - **Local machine is the build *and* run oracle.** The repo can be
-  driven from either a Linux box (GTK 4 / libcurl / meson / clang +
-  an X session at `DISPLAY=:0`) or a Windows 11 box via MSYS2
-  MINGW64 (same toolchain, same meson/ninja invocation; the binary
-  is `./builddir/src/gtk/northstar.exe`). Every commit must pass
+  driven from Linux (GTK 4 / libcurl / meson / clang and an X session at
+  `DISPLAY=:0`), macOS with Homebrew, or Windows 11 via MSYS2 MINGW64.
+  All use the same meson/ninja invocation; the Windows binary is
+  `./builddir/src/gtk/northstar.exe`. Every commit must pass
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
   — that's the per-change correctness gate, not CI.
-- **CI is enabled.** The Linux (gcc) and Windows workflows run on
+- **CI is enabled.** The Linux (gcc), musl (Alpine), macOS and Windows workflows run on
   every push to `main` and every PR targeting `main`, plus manual
   `workflow_dispatch`. Local Linux is still the primary correctness
   gate before pushing; CI provides cross-platform sanity coverage.
@@ -111,7 +112,7 @@ meson compile -C builddir
 The JavaScript engine is
 [quickjs-ng](https://github.com/quickjs-ng/quickjs), consumed as an
 **upstream meson subproject** pinned to a release
-(`subprojects/quickjs-ng.wrap`, currently v0.9.0) — no in-tree fork.
+(`subprojects/quickjs-ng.wrap`, currently v0.15.1) — no in-tree fork.
 `meson setup` fetches it and exposes it as the `libquickjs` dependency.
 The browser includes only the public `<quickjs.h>`; a few browser-side
 entry points quickjs-ng does not expose are provided as thin compatibility
@@ -136,7 +137,7 @@ interpreter at `src/wamr/`.
 System packages required on Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential pkg-config meson ninja-build \
+sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
 ```
@@ -146,7 +147,7 @@ enables on-screen spell-checking; `opusfile` / `vorbisfile` add native Ogg
 Opus/Vorbis decode to the in-process mixer. Both are auto-detected.
 
 `libseccomp` is required on Linux — `meson setup` fails without it.
-On Windows it is not used and the syscall filter is a no-op.
+On macOS and Windows it is not used and the syscall filter is a no-op.
 
 `ccache` is picked up automatically and is the biggest build-time win.
 `./scripts/dev.sh build` runs `meson setup` (only if needed) and

@@ -1,8 +1,8 @@
 # Northstar — Claude operating guide
 
 Northstar is a web browser written from scratch in **C**, using **GTK 4**
-for the UI and **libcurl** for networking. Targets **Linux** (primary) and
-**Windows**.
+for the UI and **libcurl** for networking. Targets **Linux** (primary),
+**macOS** and **Windows**.
 
 See `README.md` for the product vision. Northstar is the GPL /
 open-source edition of the [Nordstjernen
@@ -18,10 +18,10 @@ tabs and the process-per-tab architecture (rendering is always
 single-process, in the shell process), a per-tab renderer executable,
 WebGL, WebGPU, inline video decoding and the video helpers, the local-AI
 (llama.cpp) feature, the inline PDF viewer (poppler), in-tree WebP
-decoding, and the Android, Java, macOS and iOS builds and the embeddable
-`libnorthstar` library API. The build targets Linux (primary) and Windows;
-the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang) and
-`windows.yml`.
+decoding, and the Android, Java and iOS builds and the embeddable
+`libnorthstar` library API. The build targets Linux (primary), macOS and
+Windows; the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang),
+`macos.yml` and `windows.yml`.
 
 ## Design constraints
 
@@ -41,7 +41,7 @@ the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang) and
   (WASAPI/CoreAudio/ALSA), mixing and resampling itself. The renderer
   emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands that
   ride the render-response `X-Audio` side-channel to the shell, which
-  spawns and pumps the helper (`src/gtk/procview.c`).
+  queues them to the in-process mixer (`src/gtk/procview.c`).
 - Images decode in-tree: PNG, GIF, BMP and JPEG through
   [Wuffs](https://github.com/google/wuffs); AVIF through libavif; SVG
   through librsvg; any other format a GdkPixbuf loader is installed for as
@@ -89,14 +89,14 @@ This repo is driven by Claude in long uninterrupted sessions.
   external blockers. When stopping: one line on what's blocked.
 - **Never ask the user to run the build.** Run it yourself.
 - **Local machine is the build *and* run oracle.** The repo can be
-  driven from either a Linux box (GTK 4 / libcurl / meson / clang +
-  an X session at `DISPLAY=:0`) or a Windows 11 box via MSYS2
-  MINGW64 (same toolchain, same meson/ninja invocation; the binary
-  is `./builddir/src/gtk/northstar.exe`). Every commit must pass
+  driven from Linux (GTK 4 / libcurl / meson / clang and an X session at
+  `DISPLAY=:0`), macOS with Homebrew, or Windows 11 via MSYS2 MINGW64.
+  All use the same meson/ninja invocation; the Windows binary is
+  `./builddir/src/gtk/northstar.exe`. Every commit must pass
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
   — that's the per-change correctness gate, not CI.
-- **CI is enabled.** The Linux (gcc), musl (Alpine) and Windows workflows run on
+- **CI is enabled.** The Linux (gcc), musl (Alpine), macOS and Windows workflows run on
   every push to `main` and every PR targeting `main`, plus manual
   `workflow_dispatch`. Local Linux is still the primary correctness
   gate before pushing; CI provides cross-platform sanity coverage.
@@ -183,7 +183,7 @@ depends on `libcrypto` explicitly so the headers resolve.
 System packages required on Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential pkg-config meson ninja-build \
+sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
 ```
@@ -197,7 +197,7 @@ Opus/Vorbis decode to the in-process mixer.
 On Fedora/RHEL:
 
 ```sh
-sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libcurl-devel \
+sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
     openssl-devel uchardet-devel librsvg2-devel libpsl-devel sqlite-devel \
     libseccomp-devel libavif-devel SDL2-devel
 ```
@@ -205,13 +205,13 @@ sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libcurl-devel \
 On openSUSE:
 
 ```sh
-sudo zypper install gcc pkgconf meson ninja gtk4-devel libcurl-devel \
+sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
     libopenssl-devel libuchardet-devel librsvg-devel libpsl-devel sqlite3-devel \
     libseccomp-devel libavif-devel libSDL2-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.
-On Windows it is not used and the syscall filter is a no-op.
+On macOS and Windows it is not used and the syscall filter is a no-op.
 
 ### Fast iteration (recommended for AI/Claude loops)
 

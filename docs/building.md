@@ -1,14 +1,14 @@
 # Building and running Northstar
 
 Northstar builds with **meson + ninja** and a C compiler (GCC or Clang).
-The primary target is Linux; Windows is supported via MSYS2 MINGW64.
+The primary target is Linux; macOS and Windows are also supported.
 
 ## Linux dependencies
 
 Debian / Ubuntu:
 
 ```sh
-sudo apt install build-essential pkg-config meson ninja-build \
+sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
 ```
@@ -16,7 +16,7 @@ sudo apt install build-essential pkg-config meson ninja-build \
 Fedora / RHEL:
 
 ```sh
-sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libcurl-devel \
+sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
     openssl-devel uchardet-devel librsvg2-devel libpsl-devel sqlite-devel \
     libseccomp-devel libavif-devel SDL2-devel
 ```
@@ -24,18 +24,37 @@ sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libcurl-devel \
 openSUSE:
 
 ```sh
-sudo zypper install gcc pkgconf meson ninja gtk4-devel libcurl-devel \
+sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
     libopenssl-devel libuchardet-devel librsvg-devel libpsl-devel sqlite3-devel \
     libseccomp-devel libavif-devel libSDL2-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it. On
-Windows it is unused and the syscall filter is a no-op.
+macOS and Windows it is unused and the syscall filter is a no-op.
 
 **Optional, auto-detected:** `libenchant-2-dev` (+ a dictionary such as
 `hunspell-en-us`) enables on-screen spell-checking; `opusfile` /
-`vorbisfile` dev packages add native Ogg Opus/Vorbis decode to the audio
-helper. The build works without them.
+`vorbisfile` dev packages add native Ogg Opus/Vorbis decode to the
+in-process mixer. The build works without them.
+
+## macOS dependencies
+
+With Homebrew:
+
+```sh
+brew install meson ninja pkg-config cmake gtk4 curl openssl@3 uchardet libpsl \
+    sqlite librsvg libavif sdl2
+```
+
+Export `PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig"`
+before configuring. The macOS build uses the same setup and compile commands
+shown below.
+
+## Windows dependencies
+
+Install MSYS2 MINGW64, then install the packages listed by
+`.github/workflows/windows.yml`. Run Meson from the MINGW64 shell so its
+compiler and `pkg-config` resolve the MinGW libraries.
 
 ## Build
 
@@ -67,7 +86,6 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 | `gtk` | `auto` | Build the GTK 4 desktop shell. Disable for an engine-only build. |
 | `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL2). |
-| `ipc_experiment` | `false` | Build the HTTP-vs-binary IPC comparison benchmark. |
 | `build_date` | *(configure date)* | Build-date stamp shown in the About dialog. |
 
 Set with `-Dname=value`, e.g. `meson setup builddir -Dwasm=disabled`.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Stage a portable Northstar BSD release zip: the northstar binary, the
-# sandboxed renderer, runtime data, and an INSTALL.md naming the pkg runtime
+# Stage a portable Northstar BSD release zip: the northstar binary,
+# runtime data, and an INSTALL.md naming the pkg runtime
 # dependencies, zipped under dist/. OS label via $1 or NS_PACK_OS.
 set -euo pipefail
 
@@ -23,13 +23,10 @@ if [ ! -x "$BUILDDIR/src/gtk/northstar" ]; then
 fi
 
 strip "$BUILDDIR/src/gtk/northstar" 2>/dev/null || true
-strip "$BUILDDIR/src/northstar-renderer" 2>/dev/null || true
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/data/icons/hicolor/scalable/apps"
 cp "$BUILDDIR/src/gtk/northstar" "$STAGE/"
-[ -f "$BUILDDIR/src/northstar-renderer" ] && \
-    cp "$BUILDDIR/src/northstar-renderer" "$STAGE/"
 cp "$ROOT"/data/icons/hicolor/scalable/apps/northstar*.svg \
    "$STAGE/data/icons/hicolor/scalable/apps/" 2>/dev/null || true
 cp "$ROOT"/data/icons/hicolor/scalable/apps/northstar.gif \
@@ -41,9 +38,9 @@ cp "$ROOT/LICENSE" "$STAGE/" 2>/dev/null || true
 
 case "$OS" in
     freebsd)
-        RUNTIME='    pkg install gtk4 libcurl uchardet librsvg2 webp sqlite3 libpsl libepoxy' ;;
+        RUNTIME='    pkg install gtk4 libcurl uchardet librsvg2 sqlite3 libpsl libavif sdl2' ;;
     netbsd)
-        RUNTIME='    pkgin install gtk4 curl uchardet librsvg sqlite3 libwebp libpsl libepoxy' ;;
+        RUNTIME='    pkgin install gtk4 curl uchardet librsvg sqlite3 libpsl libavif SDL2' ;;
     *)
         RUNTIME='    install gtk4 and the other runtime libraries with your package manager' ;;
 esac
