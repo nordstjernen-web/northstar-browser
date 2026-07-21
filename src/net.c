@@ -7,7 +7,6 @@
 #include "cache.h"
 #include "config.h"
 #include "history.h"
-#include "mobile.h"
 #include "csp.h"
 #include "debuglog.h"
 #include "ext.h"
@@ -501,41 +500,6 @@ ns_query_param_is_tracking(const char *key, size_t key_len)
     return FALSE;
 }
 
-static gboolean
-ns_url_is_google_search(const char *url)
-{
-    char *host = ns_url_host_from(url);
-    gboolean google_host = host &&
-        (g_str_equal(host, "google.com") ||
-         g_str_has_prefix(host, "www.google."));
-    g_free(host);
-    if (!google_host)
-        return FALSE;
-
-    const char *scheme = strstr(url, "://");
-    const char *path = scheme ? strchr(scheme + 3, '/') : NULL;
-    if (!path)
-        return FALSE;
-    const char *path_end = strpbrk(path, "?#");
-    size_t path_len = path_end ? (size_t)(path_end - path) : strlen(path);
-    return path_len == strlen("/search") &&
-           memcmp(path, "/search", path_len) == 0;
-}
-
-static gboolean
-ns_google_search_param_is_tracking(const char *key, size_t key_len)
-{
-    static const char *const exact[] = {
-        "sca_esv", "source", "ei", "iflsig", "ved", "uact", "oq",
-        "gs_lp", "sclient", "sei",
-    };
-    for (gsize i = 0; i < G_N_ELEMENTS(exact); i++)
-        if (strlen(exact[i]) == key_len &&
-            g_ascii_strncasecmp(key, exact[i], key_len) == 0)
-            return TRUE;
-    return FALSE;
-}
-
 char *
 ns_url_strip_tracking_params(const char *url)
 {
@@ -553,15 +517,12 @@ ns_url_strip_tracking_params(const char *url)
 
     GString *kept = g_string_new(NULL);
     gboolean removed = FALSE;
-    gboolean google_search = ns_url_is_google_search(url);
     for (const char *p = query + 1; ; ) {
         const char *amp = memchr(p, '&', (size_t)(query_end - p));
         const char *tok_end = amp ? amp : query_end;
         const char *eq = memchr(p, '=', (size_t)(tok_end - p));
         size_t key_len = (size_t)((eq ? eq : tok_end) - p);
-        if (ns_query_param_is_tracking(p, key_len) ||
-            (google_search &&
-             ns_google_search_param_is_tracking(p, key_len))) {
+        if (ns_query_param_is_tracking(p, key_len)) {
             removed = TRUE;
         } else {
             if (kept->len)
@@ -4518,9 +4479,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_free(idn_ascii);
     }
 
-    char *url_host = ns_url_host_from(url);
-    gboolean mobile_ua = ns_mobile_force_host(url_host);
-    g_free(url_host);
     gboolean request_http = ns_url_is_http_or_https(url);
     gboolean request_ftp = ns_url_is_ftp(url);
     if (request_ftp && top_url && *top_url && !is_navigation &&
@@ -4535,8 +4493,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     const char *configured_ua =
         (cfg && cfg->user_agent && *cfg->user_agent) ? cfg->user_agent
             : ns_user_agent_for_mode(cfg ? cfg->compat_mode : NULL);
-    const char *effective_ua = mobile_ua ? ns_mobile_user_agent()
-                                         : configured_ua;
+    const char *effective_ua = configured_ua;
     const char *accept_language = ns_net_effective_accept_language();
     const char *effective_top_url = top_url ? top_url : url;
     char *top_origin = ns_url_origin_from(effective_top_url);
@@ -4641,7 +4598,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, max_redirs);
 
     long fetch_timeout = (long)NS_DEFAULT_TIMEOUT_S;
-    if (mobile_ua) fetch_timeout = NS_MAX_TIMEOUT_S;
     if (extra_headers) {
         for (guint i = 0; i < extra_headers->len; i++) {
             const char *h = g_ptr_array_index(extra_headers, i);
@@ -4771,7 +4727,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
 
         const char *platform = "\"" NS_UA_HINT_PLATFORM "\"";
         gboolean chromium_ua = ns_user_agent_has_client_hints(effective_ua);
-        if (!mobile_ua && chromium_ua) {
+        if (chromium_ua) {
             char chrome_major[16];
             const char *cp = strstr(effective_ua, "Chrome/");
             if (cp) {
