@@ -41,7 +41,6 @@ typedef struct ns_config {
     char  *compat_mode;
     char  *accept_language;
     char  *search_engine;
-    char  *ai_model_mirror;
     char  *http_proxy;
     char  *https_proxy;
     char  *no_proxy;

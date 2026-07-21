@@ -4274,7 +4274,7 @@ synthesize_about_response(const char *url, const char *top_url,
 {
     if (!g_str_has_prefix(url, "about:")) return FALSE;
     const char *what = url + strlen("about:");
-    if ((g_str_has_prefix(what, "ai") || g_str_equal(what, "history") ||
+    if ((g_str_equal(what, "history") ||
          g_str_has_prefix(what, "settings")) &&
         !about_request_from_chrome(top_url)) {
         resp->status = 403;

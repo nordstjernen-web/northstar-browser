@@ -137,7 +137,6 @@ static const cfg_field cfg_fields[] = {
     FS(compat_mode,           "chrome"),
     FS(accept_language,       ""),
     FS(search_engine,         "https://lite.duckduckgo.com/lite/?q=%s"),
-    FS(ai_model_mirror,       ""),
     FS(http_proxy,            ""),
     FS(https_proxy,           ""),
     FS(no_proxy,              ""),
@@ -294,7 +293,6 @@ ns_config_shutdown(void)
     g_free(g_cfg.user_agent);
     g_free(g_cfg.accept_language);
     g_free(g_cfg.search_engine);
-    g_free(g_cfg.ai_model_mirror);
     g_free(g_cfg.http_proxy);
     g_free(g_cfg.https_proxy);
     g_free(g_cfg.no_proxy);
@@ -465,9 +463,6 @@ ns_config_dump(void)
         g_string_append_printf(s, "accept_language       = (auto: %s)\n",
                                ns_net_default_accept_language());
     g_string_append_printf(s, "search_engine         = %s\n", c->search_engine);
-    if (c->ai_model_mirror && *c->ai_model_mirror)
-        g_string_append_printf(s, "ai_model_mirror       = %s\n",
-                               c->ai_model_mirror);
     g_string_append_printf(s, "gsk_renderer          = %s\n",
                            c->gsk_renderer && *c->gsk_renderer
                                ? c->gsk_renderer : "auto");
