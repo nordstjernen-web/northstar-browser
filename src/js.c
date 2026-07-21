@@ -3509,6 +3509,16 @@ ns_element_get_tagName(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_element_get_accessKeyLabel(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    const char *key = n ? ns_element_get_attr(n, "accesskey") : NULL;
+    if (!key || !g_utf8_validate(key, -1, NULL) || g_utf8_strlen(key, -1) != 1)
+        return JS_NewString(ctx, "");
+    return JS_NewString(ctx, key);
+}
+
+static JSValue
 ns_element_get_localName(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
@@ -13750,6 +13760,23 @@ ns_computed_getPropertyValue(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_computed_getPropertyPriority(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return JS_NewString(ctx, "");
+}
+
+static JSValue
+ns_computed_readonly(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_throw_dom_exception(ctx, "NoModificationAllowedError", 7,
+                                  "Computed styles are read-only.");
+}
+
+static JSValue
 ns_css_supported_property(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
@@ -13768,6 +13795,9 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     JSValue cs = JS_NewObject(ctx);
+    JSValue proto = JS_GetClassProto(ctx, ns_style_class_id);
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, cs, proto);
+    JS_FreeValue(ctx, proto);
     if (argc >= 1) JS_SetPropertyStr(ctx, cs, "_node", JS_DupValue(ctx, argv[0]));
     if (argc >= 2 && JS_IsString(argv[1])) {
         const char *praw = JS_ToCString(ctx, argv[1]);
@@ -13783,6 +13813,9 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
         if (praw) JS_FreeCString(ctx, praw);
     }
     ns_bind_fn(ctx, cs, "getPropertyValue", ns_computed_getPropertyValue, 1);
+    ns_bind_fn(ctx, cs, "getPropertyPriority", ns_computed_getPropertyPriority, 1);
+    ns_bind_fn(ctx, cs, "setProperty", ns_computed_readonly, 2);
+    ns_bind_fn(ctx, cs, "removeProperty", ns_computed_readonly, 1);
     JS_SetPropertyStr(ctx, cs, "length",
                       JS_NewInt32(ctx, ns_css_computed_count()));
     ns_bind_fn(ctx, cs, "item", ns_computed_item, 1);
@@ -13796,12 +13829,13 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
             " return new Proxy(t, {"
             "  get: function(o, k) {"
             "   if (typeof k !== 'string') return Reflect.get(o, k);"
-            "   if (k === '_node' || k === '_pseudo' || k === 'getPropertyValue' || k === 'length' || k === 'item' || k in Object.prototype)"
-            "    return Reflect.get(o, k);"
+            "   if (Reflect.has(o, k)) return Reflect.get(o, k);"
             "   if (/^[0-9]+$/.test(k)) return o.item(+k);"
             "   var v = o.getPropertyValue(kebab(k));"
             "   return v == null ? '' : v;"
             "  },"
+            "  set: function(o, k, v) { o.setProperty(kebab(String(k)), v); return false; },"
+            "  deleteProperty: function(o, k) { o.removeProperty(kebab(String(k))); return false; },"
             "  has: function(o, k) {"
             "   if (typeof k !== 'string') return Reflect.has(o, k);"
             "   if (Reflect.has(o, k)) return true;"
@@ -36540,6 +36574,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("ariaSelected",   ns_element_attr_getter, ns_element_attr_setter, 66),
     JS_CGETSET_MAGIC_DEF("nonce",          ns_element_attr_getter, ns_element_attr_setter, 72),
     JS_CGETSET_MAGIC_DEF("accessKey",      ns_element_attr_getter, ns_element_attr_setter, 73),
+    JS_CGETSET_DEF("accessKeyLabel",       ns_element_get_accessKeyLabel, ns_element_noop_set),
     JS_CGETSET_MAGIC_DEF("dateTime",       ns_element_attr_getter, ns_element_attr_setter, 74),
     JS_CGETSET_MAGIC_DEF("srcdoc",         ns_element_attr_getter, ns_element_attr_setter, 75),
     JS_CGETSET_MAGIC_DEF("popoverTargetAction", ns_element_attr_getter, ns_element_attr_setter, 77),
