@@ -1,4 +1,4 @@
-/* Northstar — GTK tabbed browser window over the out-of-process renderer.
+/* Northstar — GTK single-page browser window over the renderer protocol.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -10,10 +10,10 @@
 
 G_BEGIN_DECLS
 
-/* Run the process-per-tab GTK browser (IPC renderer). Owns its own
+/* Run the single-page GTK browser. Owns its own
  * GtkApplication; returns the application's exit status. When run under the
- * watchdog supervisor, session_path is where the window records its open tab
- * URLs (NULL when unsupervised), and recover requests reopening that session
+ * watchdog supervisor, session_path is where the window records its current
+ * URL (NULL when unsupervised), and recover requests reopening that page
  * after a crash. */
 int ns_procapp_run(const char *startup_url, const char *session_path,
                    gboolean recover, gboolean private_mode);

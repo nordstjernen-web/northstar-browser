@@ -1,4 +1,4 @@
-/* Northstar — GTK tabbed process-per-tab browser shell (IPC renderer).
+/* Northstar — GTK single-page browser shell over the renderer protocol.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -39,9 +39,7 @@ ns_procapp_set_window_size(int width, int height)
 typedef struct {
     GtkApplication *app;
     GtkWidget      *window;
-    GtkWidget      *notebook;
-    GtkWidget      *tabstrip;
-    GtkWidget      *newtab_btn;
+    NsProcView     *view;
     GtkWidget      *security_icon;
     GtkWidget      *address;
     GtkWidget      *back;
@@ -131,22 +129,7 @@ install_status_css(void)
         ".ns-sec-icon { margin-left: 2px; margin-right: 2px; }"
         ".ns-sec-secure { color: #2e9e44; }"
         ".ns-sec-invalid { color: #e01b24; }"
-        ".ns-sec-warn { color: #e5a50a; }"
-        ".ns-tabstrip { padding: 0; }"
-        ".ns-tab { padding: 0; }"
-        ".ns-tab button { min-height: 0; padding: 2px 4px; }"
-        ".ns-tab > button.ns-tab-label {"
-        "  padding: 2px 8px;"
-        "  border-bottom: 2px solid transparent;"
-        "}"
-        ".ns-tab > button.ns-tab-label.ns-tab-active {"
-        "  background-color: alpha(white, 0.65);"
-        "  border-bottom-color: @accent_color;"
-        "  border-top-left-radius: 5px;"
-        "  border-top-right-radius: 5px;"
-        "  font-weight: bold;"
-        "}"
-        ".ns-newtab { min-height: 0; padding: 2px 6px; }");
+        ".ns-sec-warn { color: #e5a50a; }");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -173,19 +156,9 @@ toolbar_button(const char *icon, const char *tooltip, GCallback cb,
 }
 
 static NsProcView *
-view_for_page(GtkWidget *page)
-{
-    return page ? g_object_get_data(G_OBJECT(page), "ns-proc-view") : NULL;
-}
-
-static NsProcView *
 current_view(ProcWindow *pw)
 {
-    int idx = gtk_notebook_get_current_page(GTK_NOTEBOOK(pw->notebook));
-    if (idx < 0)
-        return NULL;
-    return view_for_page(
-        gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx));
+    return pw->view;
 }
 
 static char *
@@ -331,8 +304,7 @@ update_chrome(ProcWindow *pw)
     update_security_indicator(pw, v);
 }
 
-static void proc_window_add_tab(ProcWindow *pw, const char *url,
-                                gboolean foreground);
+static void proc_window_load(ProcWindow *pw, const char *url);
 
 typedef struct {
     char      *url;
@@ -610,56 +582,33 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
                gpointer user_data)
 {
     ProcWindow *pw = user_data;
-    GtkWidget *page = ns_proc_view_widget(v);
-    int idx = page ? gtk_notebook_page_num(GTK_NOTEBOOK(pw->notebook), page)
-                   : -1;
-    gboolean is_current = (v == current_view(pw));
 
     switch (evt) {
-    case NS_PROC_EVT_TITLE: {
+    case NS_PROC_EVT_TITLE:
         if (!ns_proc_view_is_private(v))
             ns_history_record(ns_proc_view_url(v), text);
-        if (idx >= 0) {
-            GtkWidget *p =
-                gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
-            GtkWidget *label = g_object_get_data(G_OBJECT(p), "ns-tab-label");
-            const char *t = text && *text ? text : ns_i18n("Untitled");
-            char *clip = g_strndup(t, 40);
-            if (label)
-                gtk_label_set_text(GTK_LABEL(label), clip);
-            g_free(clip);
-        }
-        if (is_current)
-            update_chrome(pw);
+        update_chrome(pw);
         break;
-    }
     case NS_PROC_EVT_URL:
-        if (is_current) {
-            set_address_text(pw, text);
-            g_clear_pointer(&pw->status_base, g_free);
-            pw_render_status(pw);
-        }
+        set_address_text(pw, text);
+        g_clear_pointer(&pw->status_base, g_free);
+        pw_render_status(pw);
         break;
     case NS_PROC_EVT_STATUS:
-        if (is_current) {
-            g_free(pw->status_base);
-            pw->status_base = g_strdup(text ? text : "");
-            pw_render_status(pw);
-        }
+        g_free(pw->status_base);
+        pw->status_base = g_strdup(text ? text : "");
+        pw_render_status(pw);
         break;
     case NS_PROC_EVT_HISTORY:
-        if (is_current) {
-            gtk_widget_set_sensitive(pw->back, ns_proc_view_can_back(v));
-            gtk_widget_set_sensitive(pw->forward, ns_proc_view_can_forward(v));
-        }
+        gtk_widget_set_sensitive(pw->back, ns_proc_view_can_back(v));
+        gtk_widget_set_sensitive(pw->forward, ns_proc_view_can_forward(v));
         break;
     case NS_PROC_EVT_NEWTAB:
         if (text && *text)
-            proc_window_add_tab(pw, text, FALSE);
+            proc_window_load(pw, text);
         break;
     case NS_PROC_EVT_LOADING:
-        if (is_current)
-            set_loading_ui(pw, text && *text == '1');
+        set_loading_ui(pw, text && *text == '1');
         break;
     case NS_PROC_EVT_DOWNLOAD:
         if (text && *text) {
@@ -670,150 +619,17 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         }
         break;
     case NS_PROC_EVT_FAVICON:
-        if (idx >= 0 && !ns_proc_view_is_private(v)) {
-            GtkWidget *p =
-                gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
-            GtkWidget *icon = g_object_get_data(G_OBJECT(p), "ns-tab-icon");
-            GdkPaintable *fav = ns_proc_view_favicon(v);
-            if (icon && fav)
-                gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
-            else if (icon)
-                gtk_image_set_from_icon_name(GTK_IMAGE(icon),
-                                             "text-x-generic-symbolic");
-            if (icon)
-                gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
-        }
         break;
     }
 }
 
 static void
-update_active_tab(ProcWindow *pw)
+proc_window_load(ProcWindow *pw, const char *url)
 {
-    GtkWidget *current = NULL;
-    int idx = gtk_notebook_get_current_page(GTK_NOTEBOOK(pw->notebook));
-    if (idx >= 0)
-        current = gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
-    for (GtkWidget *w = gtk_widget_get_first_child(pw->tabstrip);
-         w; w = gtk_widget_get_next_sibling(w)) {
-        GtkWidget *page = g_object_get_data(G_OBJECT(w), "ns-page");
-        GtkWidget *btn = g_object_get_data(G_OBJECT(w), "ns-tab-button");
-        if (!page || !btn)
-            continue;
-        if (page == current)
-            gtk_widget_add_css_class(btn, "ns-tab-active");
-        else
-            gtk_widget_remove_css_class(btn, "ns-tab-active");
-    }
-}
-
-static void
-on_tab_clicked(GtkButton *button, gpointer user_data)
-{
-    ProcWindow *pw = g_object_get_data(G_OBJECT(button), "ns-pw");
-    GtkWidget *page = user_data;
-    int idx = gtk_notebook_page_num(GTK_NOTEBOOK(pw->notebook), page);
-    if (idx >= 0)
-        gtk_notebook_set_current_page(GTK_NOTEBOOK(pw->notebook), idx);
-}
-
-static void
-on_tab_close(GtkButton *button, gpointer user_data)
-{
-    ProcWindow *pw = g_object_get_data(G_OBJECT(button), "ns-pw");
-    GtkWidget *page = user_data;
-    GtkWidget *wrapper = g_object_get_data(G_OBJECT(page), "ns-strip-tab");
-    int idx = gtk_notebook_page_num(GTK_NOTEBOOK(pw->notebook), page);
-    if (idx >= 0)
-        gtk_notebook_remove_page(GTK_NOTEBOOK(pw->notebook), idx);
-    if (wrapper)
-        gtk_box_remove(GTK_BOX(pw->tabstrip), wrapper);
-    if (gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) == 0)
-        gtk_window_close(GTK_WINDOW(pw->window));
-}
-
-static void
-proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
-                         gboolean private_mode)
-{
-    if (!private_mode && ns_rproc_single_process_enabled() &&
-        gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) > 0) {
-        NsProcView *cur = current_view(pw);
-        if (cur) {
-            char *r = normalize_url(url);
-            gtk_editable_set_text(GTK_EDITABLE(pw->address), r);
-            ns_proc_view_load(cur, r);
-            g_free(r);
-            return;
-        }
-    }
-
-    NsProcView *v = ns_proc_view_new();
-    if (private_mode)
-        ns_proc_view_set_private(v, TRUE);
-    ns_proc_view_set_notify(v, on_view_notify, pw);
-    GtkWidget *page = ns_proc_view_widget(v);
-    g_object_set_data(G_OBJECT(page), "ns-proc-view", v);
-
-    GtkWidget *wrapper = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(wrapper, "ns-tab");
-
-    GtkWidget *tabbtn = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(tabbtn), FALSE);
-    gtk_widget_add_css_class(tabbtn, "ns-tab-label");
-    GtkWidget *tabcontent = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    GtkWidget *icon = gtk_image_new_from_icon_name(
-        private_mode ? "user-not-tracked-symbolic" : "text-x-generic-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
-    if (private_mode)
-        gtk_widget_set_tooltip_text(tabbtn, ns_i18n("Private tab"));
-    GtkWidget *label = gtk_label_new(
-        private_mode ? ns_i18n("Private tab") : ns_i18n("New Tab"));
-    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-    gtk_label_set_width_chars(GTK_LABEL(label), 16);
-    gtk_box_append(GTK_BOX(tabcontent), icon);
-    gtk_box_append(GTK_BOX(tabcontent), label);
-    gtk_button_set_child(GTK_BUTTON(tabbtn), tabcontent);
-    g_object_set_data(G_OBJECT(tabbtn), "ns-pw", pw);
-    g_signal_connect(tabbtn, "clicked", G_CALLBACK(on_tab_clicked), page);
-    gtk_box_append(GTK_BOX(wrapper), tabbtn);
-
-    GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
-    gtk_button_set_has_frame(GTK_BUTTON(close), FALSE);
-    gtk_widget_set_tooltip_text(close, ns_i18n("Close tab"));
-    set_accessible_label(close, ns_i18n("Close tab"));
-    g_object_set_data(G_OBJECT(close), "ns-pw", pw);
-    g_signal_connect(close, "clicked", G_CALLBACK(on_tab_close), page);
-    gtk_box_append(GTK_BOX(wrapper), close);
-
-    g_object_set_data(G_OBJECT(wrapper), "ns-page", page);
-    g_object_set_data(G_OBJECT(wrapper), "ns-tab-button", tabbtn);
-    g_object_set_data(G_OBJECT(page), "ns-tab-label", label);
-    g_object_set_data(G_OBJECT(page), "ns-tab-icon", icon);
-    g_object_set_data(G_OBJECT(page), "ns-strip-tab", wrapper);
-
-    GtkWidget *blank = gtk_label_new(NULL);
-    int idx = gtk_notebook_append_page(GTK_NOTEBOOK(pw->notebook), page, blank);
-
-    g_object_ref(pw->newtab_btn);
-    gtk_box_remove(GTK_BOX(pw->tabstrip), pw->newtab_btn);
-    gtk_box_append(GTK_BOX(pw->tabstrip), wrapper);
-    gtk_box_append(GTK_BOX(pw->tabstrip), pw->newtab_btn);
-    g_object_unref(pw->newtab_btn);
-
-    if (foreground)
-        gtk_notebook_set_current_page(GTK_NOTEBOOK(pw->notebook), idx);
-    update_active_tab(pw);
-
     char *resolved = normalize_url(url);
-    ns_proc_view_load(v, resolved);
+    gtk_editable_set_text(GTK_EDITABLE(pw->address), resolved);
+    ns_proc_view_load(pw->view, resolved);
     g_free(resolved);
-}
-
-static void
-proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
-{
-    proc_window_add_tab_full(pw, url, foreground, FALSE);
 }
 
 static gboolean
@@ -842,13 +658,8 @@ on_address_activate(GtkEntry *entry, gpointer user_data)
         g_free(resolved);
         return;
     }
-    if (!v) {
-        proc_window_add_tab(pw, resolved, TRUE);
-        v = current_view(pw);
-    } else {
-        gtk_editable_set_text(GTK_EDITABLE(pw->address), resolved);
-        ns_proc_view_load(v, resolved);
-    }
+    gtk_editable_set_text(GTK_EDITABLE(pw->address), resolved);
+    ns_proc_view_load(v, resolved);
     if (v)
         ns_proc_view_focus(v);
     g_free(resolved);
@@ -906,24 +717,6 @@ on_go_clicked(GtkButton *b, gpointer ud)
     (void)b;
     ProcWindow *pw = ud;
     on_address_activate(GTK_ENTRY(pw->address), pw);
-}
-
-static void
-on_newtab_clicked(GtkButton *b, gpointer ud)
-{
-    (void)b;
-    proc_window_add_tab(ud, "about:start", TRUE);
-}
-
-
-static void
-on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer ud)
-{
-    (void)nb;
-    (void)page;
-    (void)num;
-    update_active_tab(ud);
-    update_chrome(ud);
 }
 
 static void
@@ -1231,22 +1024,7 @@ task_mgr_refresh(NsTaskMgr *tm)
     }
 
     {
-        int gpid = ns_rproc_self_pid();
-        char gstate[32] = "";
-        long grss = -1;
-        ns_rproc_http_proc_info(gpid, gstate, sizeof gstate, &grss);
-        char *gname = g_strdup_printf("%s (GTK frontend)",
-                                      ns_i18n("Northstar"));
-        task_mgr_add_row(tm, "web-browser-symbolic", gname, gpid, gstate,
-                         grss, NULL);
-        g_free(gname);
-    }
-
-    int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(tm->pw->notebook));
-    for (int i = 0; i < n; i++) {
-        NsProcView *v = view_for_page(
-            gtk_notebook_get_nth_page(GTK_NOTEBOOK(tm->pw->notebook), i));
-        if (!v) continue;
+        NsProcView *v = tm->pw->view;
 
         int pid = ns_proc_view_renderer_pid(v);
         char state[32] = "starting";
@@ -1563,12 +1341,16 @@ on_window_key_pressed(GtkEventControllerKey *controller, guint keyval,
 }
 
 static ProcWindow *
-proc_window_new(GtkApplication *app, const char *home_url)
+proc_window_new(GtkApplication *app, const char *home_url,
+                gboolean private_mode)
 {
     ProcWindow *pw = g_new0(ProcWindow, 1);
     pw->app = app;
     pw->home_url = g_strdup(home_url && *home_url ? home_url : "about:start");
     pw->bookmarks = ns_bookmarks_load();
+    pw->view = ns_proc_view_new();
+    ns_proc_view_set_private(pw->view, private_mode);
+    ns_proc_view_set_notify(pw->view, on_view_notify, pw);
     pw->window = gtk_application_window_new(app);
     g_object_set_data_full(G_OBJECT(pw->window), "ns-procwindow", pw,
                            (GDestroyNotify)procwindow_free);
@@ -1589,21 +1371,6 @@ proc_window_new(GtkApplication *app, const char *home_url)
 
     GtkWidget *header = gtk_header_bar_new();
     gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(header), TRUE);
-    pw->tabstrip = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
-    gtk_widget_add_css_class(pw->tabstrip, "ns-tabstrip");
-    gtk_widget_set_hexpand(pw->tabstrip, TRUE);
-    pw->newtab_btn = gtk_button_new_from_icon_name("tab-new-symbolic");
-    gtk_button_set_has_frame(GTK_BUTTON(pw->newtab_btn), FALSE);
-    gtk_widget_add_css_class(pw->newtab_btn, "ns-newtab");
-    gtk_widget_set_tooltip_text(pw->newtab_btn, ns_i18n("New tab"));
-    set_accessible_label(pw->newtab_btn, ns_i18n("New tab"));
-    g_signal_connect(pw->newtab_btn, "clicked",
-                     G_CALLBACK(on_newtab_clicked), pw);
-    gtk_box_append(GTK_BOX(pw->tabstrip), pw->newtab_btn);
-    if (ns_rproc_single_process_enabled())
-        gtk_widget_set_visible(pw->newtab_btn, FALSE);
-    gtk_header_bar_pack_start(GTK_HEADER_BAR(header), pw->tabstrip);
-    gtk_widget_set_visible(pw->tabstrip, FALSE);
     gtk_window_set_titlebar(GTK_WINDOW(pw->window), header);
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1695,15 +1462,10 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(toolbar), logo_button);
     gtk_box_append(GTK_BOX(vbox), toolbar);
 
-    pw->notebook = gtk_notebook_new();
-    gtk_notebook_set_show_tabs(GTK_NOTEBOOK(pw->notebook), FALSE);
-    gtk_notebook_set_show_border(GTK_NOTEBOOK(pw->notebook), FALSE);
-    gtk_notebook_set_scrollable(GTK_NOTEBOOK(pw->notebook), TRUE);
-    gtk_widget_set_hexpand(pw->notebook, TRUE);
-    gtk_widget_set_vexpand(pw->notebook, TRUE);
-    g_signal_connect(pw->notebook, "switch-page",
-                     G_CALLBACK(on_switch_page), pw);
-    gtk_box_append(GTK_BOX(vbox), pw->notebook);
+    GtkWidget *page = ns_proc_view_widget(pw->view);
+    gtk_widget_set_hexpand(page, TRUE);
+    gtk_widget_set_vexpand(page, TRUE);
+    gtk_box_append(GTK_BOX(vbox), page);
 
     pw->status = gtk_label_new("");
     gtk_widget_set_halign(pw->status, GTK_ALIGN_START);
@@ -1890,21 +1652,12 @@ write_session_cb(gpointer data)
     ProcWindow *pw = data;
     if (!pw->session_path)
         return G_SOURCE_REMOVE;
-    GString *s = g_string_new(NULL);
-    int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook));
-    for (int i = 0; i < n; i++) {
-        NsProcView *v = view_for_page(
-            gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), i));
-        if (v && ns_proc_view_is_private(v))
-            continue;
-        const char *u = v ? ns_proc_view_url(v) : NULL;
-        if (session_url_recoverable(u)) {
-            g_string_append(s, u);
-            g_string_append_c(s, '\n');
-        }
-    }
-    g_file_set_contents(pw->session_path, s->str, (gssize)s->len, NULL);
-    g_string_free(s, TRUE);
+    const char *url = ns_proc_view_url(pw->view);
+    char *contents = !ns_proc_view_is_private(pw->view) &&
+                     session_url_recoverable(url)
+                   ? g_strconcat(url, "\n", NULL) : g_strdup("");
+    g_file_set_contents(pw->session_path, contents, -1, NULL);
+    g_free(contents);
     return G_SOURCE_CONTINUE;
 }
 
@@ -1915,31 +1668,31 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
     install_icon_search_paths();
     gtk_window_set_default_icon_name("northstar");
     install_status_css();
-    ProcWindow *pw = proc_window_new(app, "about:start");
+    ProcWindow *pw = proc_window_new(app, "about:start", ctx->private_mode);
     pw->session_path = g_strdup(ctx->session_path);
 
-    gboolean opened = FALSE;
-    if (ctx->recover && ctx->session_path) {
+    char *recovered_url = NULL;
+    if (ctx->recover && !ctx->private_mode && ctx->session_path) {
         char *contents = NULL;
         if (g_file_get_contents(ctx->session_path, &contents, NULL, NULL)) {
             char **lines = g_strsplit(contents, "\n", -1);
             for (int i = 0; lines && lines[i]; i++) {
                 if (session_url_recoverable(lines[i])) {
-                    proc_window_add_tab(pw, lines[i], !opened);
-                    opened = TRUE;
+                    g_free(recovered_url);
+                    recovered_url = g_strdup(lines[i]);
                 }
             }
             g_strfreev(lines);
         }
         g_free(contents);
-        if (opened)
-            gtk_label_set_text(GTK_LABEL(pw->status),
-                               ns_i18n("Recovered the previous session after "
-                                       "an unexpected exit"));
     }
-    if (!opened)
-        proc_window_add_tab_full(pw, ctx->url ? ctx->url : "about:start", TRUE,
-                                 ctx->private_mode);
+    proc_window_load(pw, recovered_url ? recovered_url
+                                      : ctx->url ? ctx->url : "about:start");
+    if (recovered_url)
+        gtk_label_set_text(GTK_LABEL(pw->status),
+                           ns_i18n("Recovered the previous session after "
+                                   "an unexpected exit"));
+    g_free(recovered_url);
 
     if (pw->session_path)
         pw->session_timer = g_timeout_add_seconds(4, write_session_cb, pw);
