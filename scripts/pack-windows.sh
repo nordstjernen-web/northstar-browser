@@ -187,7 +187,9 @@ fi
 mkdir -p "$APP/share/northstar"
 cp "$ROOT/LICENSE" "$APP/share/northstar/"
 
-# Third-party copyright + license notices required by the libraries we ship.
+# Northstar's own GPL text plus the third-party copyright + license notices
+# required by the libraries we ship, both at the root of the bundle.
+cp "$ROOT/LICENSE" "$OUT/LICENSE.txt"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$OUT/"
 
 # CA certificate bundle for libcurl HTTPS verification.
