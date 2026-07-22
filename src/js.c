@@ -31559,6 +31559,26 @@ ns_strip_newlines(const char *s)
     return g_string_free(o, FALSE);
 }
 
+static char *
+ns_sanitize_email_value(const ns_node *el, const char *value)
+{
+    char *nl = ns_strip_newlines(value);
+    if (!ns_element_get_attr(el, "multiple")) {
+        char *out = g_strdup(g_strstrip(nl));
+        g_free(nl);
+        return out;
+    }
+    char **tokens = g_strsplit(nl, ",", -1);
+    GString *out = g_string_new(NULL);
+    for (int i = 0; tokens[i]; i++) {
+        if (i > 0) g_string_append_c(out, ',');
+        g_string_append(out, g_strstrip(tokens[i]));
+    }
+    g_strfreev(tokens);
+    g_free(nl);
+    return g_string_free(out, FALSE);
+}
+
 static gboolean
 ns_is_simple_color(const char *s)
 {
@@ -31577,7 +31597,9 @@ ns_input_sanitize_value(const ns_node *el, const char *value)
     const char *t = ns_element_get_attr(el, "type");
     char *type = t ? g_ascii_strdown(t, -1) : g_strdup("text");
     char *out = NULL;
-    if (!strcmp(type, "url") || !strcmp(type, "email")) {
+    if (!strcmp(type, "email")) {
+        out = ns_sanitize_email_value(el, value);
+    } else if (!strcmp(type, "url")) {
         char *nl = ns_strip_newlines(value);
         out = g_strdup(g_strstrip(nl));
         g_free(nl);
@@ -45912,6 +45934,23 @@ ns_js_make_json_module(JSContext *ctx, const char *module_name,
     return m;
 }
 
+static void
+ns_js_set_import_meta_url(JSContext *ctx, JSValueConst module,
+                          const char *module_name)
+{
+    if (JS_VALUE_GET_TAG(module) != JS_TAG_MODULE) return;
+    JSModuleDef *m = JS_VALUE_GET_PTR(module);
+    JSValue meta = JS_GetImportMeta(ctx, m);
+    if (JS_IsException(meta)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    JS_DefinePropertyValueStr(ctx, meta, "url",
+                              JS_NewString(ctx, module_name ? module_name : ""),
+                              JS_PROP_C_W_E);
+    JS_FreeValue(ctx, meta);
+}
+
 static JSValue
 ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
                             const char *module_name)
@@ -45930,6 +45969,7 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
             JSValue m = JS_ReadObject(ctx, bc, bc_len, JS_READ_OBJ_BYTECODE);
             g_free(bc);
             if (!JS_IsException(m) && JS_VALUE_GET_TAG(m) == JS_TAG_MODULE) {
+                ns_js_set_import_meta_url(ctx, m, module_name);
                 g_free(key);
                 return m;
             }
@@ -45942,6 +45982,7 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
                                JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
     if (!JS_IsException(func_val) && len >= 1024 &&
         JS_VALUE_GET_TAG(func_val) == JS_TAG_MODULE) {
+        ns_js_set_import_meta_url(ctx, func_val, module_name);
         size_t bc_size = 0;
         uint8_t *bc = JS_WriteObject(ctx, &bc_size, func_val,
                                      JS_WRITE_OBJ_BYTECODE);
@@ -45949,6 +45990,9 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
             if (bc_size > 0) ns_bytecode_cache_put(key, key_len, bc, bc_size);
             js_free(ctx, bc);
         }
+    } else if (!JS_IsException(func_val) &&
+               JS_VALUE_GET_TAG(func_val) == JS_TAG_MODULE) {
+        ns_js_set_import_meta_url(ctx, func_val, module_name);
     }
     g_free(key);
     return func_val;
