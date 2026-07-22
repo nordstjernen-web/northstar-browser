@@ -266,7 +266,7 @@ static char *
 rdrv_tick_take_nav(ns_rproc_http *r, int vw, int vh)
 {
     ns_rproc_http_frame fr;
-    if (ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, &fr) != 0) return NULL;
+    if (ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, 0, &fr) != 0) return NULL;
     char *nav = (fr.nav && *fr.nav) ? g_strdup(fr.nav) : NULL;
     free(fr.nav);
     free(fr.camera);
@@ -347,7 +347,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
             ns_rproc_http_frame fr;
             char *inv = ns_rproc_http_eval(r, "0");
             free(inv);
-            int shot_rc = *path ? ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, &fr)
+            int shot_rc = *path ? ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, 0, &fr)
                                 : -2;
             if (shot_rc == 0) {
                 if (fr.ok && fr.pixels && fr.width > 0 && fr.height > 0) {
@@ -382,7 +382,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                 ns_rproc_http_page pg;
                 ns_rproc_http_set_viewport(r, vw, vh, &pg);
                 ns_rproc_http_frame fr;
-                if (ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, &fr) == 0) {
+                if (ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, 0, &fr) == 0) {
                     free(fr.nav);
                     free(fr.camera);
                     free(fr.download);
@@ -395,7 +395,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
             gint64 end = g_get_monotonic_time() + ms * 1000;
             while (g_get_monotonic_time() < end) {
                 ns_rproc_http_frame fr;
-                if (ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, &fr) == 0) {
+                if (ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, 0, &fr) == 0) {
                     char *nav = (fr.nav && *fr.nav) ? g_strdup(fr.nav) : NULL;
                     free(fr.nav);
                     free(fr.camera);

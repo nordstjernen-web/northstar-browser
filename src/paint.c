@@ -36,6 +36,12 @@ static ns_anim       *g_paint_anim;
 static gboolean       g_search_case_sensitive;
 static const ns_box  *g_search_active_box;
 
+void
+ns_paint_set_caret_visible(gboolean visible)
+{
+    g_caret_visible = visible;
+}
+
 static cairo_surface_t *texture_surface_cached(ns_texture *tex,
                                                const char *filter_kw);
 

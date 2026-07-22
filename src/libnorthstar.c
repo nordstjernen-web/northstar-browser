@@ -73,6 +73,12 @@ struct ns_browser {
     char           *pending_post_ct;
     gsize           caret_byte;
     gsize           sel_anchor_byte;
+    const ns_node  *caret_blink_node;
+    gsize           caret_blink_byte;
+    gsize           caret_blink_anchor;
+    gint64          caret_blink_epoch_us;
+    gboolean        caret_blink_active;
+    gboolean        caret_paint_visible;
     ns_selection    selection;
     const ns_node  *hover_node;
     const ns_node  *open_select;
@@ -105,6 +111,9 @@ struct ns_browser {
 #define NS_LAYOUT_OSC_THRESHOLD 6
 #define NS_LAYOUT_RAPID_US (100 * 1000)
 #define NS_LAYOUT_DAMP_US (700 * 1000)
+#define NS_LAYOUT_EXPENSIVE_US (250 * 1000)
+#define NS_LAYOUT_DAMP_MAX_US (5 * G_USEC_PER_SEC)
+#define NS_CARET_BLINK_US (530 * 1000)
 
 static gboolean
 browser_doc_has_node(const ns_node *root, const ns_node *target)
@@ -213,6 +222,9 @@ static void
 browser_relayout(ns_browser *b)
 {
     if (b->relaying) { b->dirty = TRUE; return; }
+    gint64 relayout_t0 = g_get_monotonic_time();
+    gboolean rapid = b->last_layout_us > 0 &&
+                     relayout_t0 - b->last_layout_us < NS_LAYOUT_RAPID_US;
     b->relaying = TRUE;
     if (b->js)
         (void)ns_js_consume_mutated(b->js);
@@ -245,7 +257,6 @@ browser_relayout(ns_browser *b)
                            ns_element_get_attr(fn, "list") != NULL;
         ns_layout_set_datalist_open(dl_open);
     }
-    gint64 relayout_t0 = g_get_monotonic_time();
     b->styles = ns_engine_relayout(b->doc, b->base_url, b->vw, b->vh,
                                    b->images, b->anim, b->js,
                                    b->css_cache,
@@ -253,7 +264,6 @@ browser_relayout(ns_browser *b)
                                    b->hover_node,
                                    b->caret_byte, b->sel_anchor_byte,
                                    &b->layout);
-    b->relayout_cost_us = g_get_monotonic_time() - relayout_t0;
     b->relaying = FALSE;
     if (g_hash_table_size(scroll_save) > 0)
         browser_restore_scroll(b->layout, scroll_save);
@@ -266,16 +276,25 @@ browser_relayout(ns_browser *b)
     }
 
     gint64 now = g_get_monotonic_time();
-    gboolean rapid = now - b->last_layout_us < NS_LAYOUT_RAPID_US;
+    b->relayout_cost_us = now - relayout_t0;
     b->last_layout_us = now;
     guint64 sig = layout_signature(b->layout);
     if (sig == b->layout_sig[0] || sig == b->layout_sig[1]) {
-        if (rapid && b->layout_osc < G_MAXINT) b->layout_osc++;
+        if (rapid && b->relayout_cost_us >= NS_LAYOUT_EXPENSIVE_US)
+            b->layout_osc = NS_LAYOUT_OSC_THRESHOLD;
+        else if (rapid && b->layout_osc < G_MAXINT)
+            b->layout_osc++;
     } else {
         browser_damp_reset(b);
     }
     b->layout_sig[1] = b->layout_sig[0];
     b->layout_sig[0] = sig;
+    if (b->layout_osc >= NS_LAYOUT_OSC_THRESHOLD) {
+        gint64 damp_us = b->relayout_cost_us * 2;
+        if (damp_us < NS_LAYOUT_DAMP_US) damp_us = NS_LAYOUT_DAMP_US;
+        if (damp_us > NS_LAYOUT_DAMP_MAX_US) damp_us = NS_LAYOUT_DAMP_MAX_US;
+        b->damp_until_us = now + damp_us;
+    }
 }
 
 static gboolean
@@ -283,15 +302,14 @@ browser_relayout_from_mutation(ns_browser *b)
 {
     if (b->layout && b->layout_osc >= NS_LAYOUT_OSC_THRESHOLD) {
         gint64 now = g_get_monotonic_time();
-        if (now < b->damp_until_us) {
-            b->dirty = TRUE;
-            return FALSE;
-        }
-        b->damp_until_us = now + NS_LAYOUT_DAMP_US;
         if (!b->damp_logged) {
             b->damp_logged = TRUE;
             g_message("northstar: layout dampener engaged "
                       "(script reflow loop with no user input)");
+        }
+        if (now < b->damp_until_us) {
+            b->dirty = TRUE;
+            return FALSE;
         }
     }
     browser_relayout(b);
@@ -1321,6 +1339,7 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     ns_paint_set_js(browser->js);
     ns_paint_set_anim(browser->anim);
     ns_paint_set_search(browser->search_case, browser->search_active);
+    ns_paint_set_caret_visible(browser->caret_paint_visible);
     const char *highlight = browser->search_query;
     gint64 paint_t0 = g_get_monotonic_time();
     if (ns_selection_has_range(&browser->selection))
@@ -2589,6 +2608,39 @@ ns_browser_focused_editable(ns_browser *browser)
         return 0;
     const ns_node *f = ns_js_focused_node(browser->js);
     return f && ns_node_editable_value(f) ? 1 : 0;
+}
+
+int
+ns_browser_set_caret_blink_active(ns_browser *browser, int active)
+{
+    if (!browser) return 0;
+    const ns_node *focused = active && ns_browser_focused_editable(browser)
+                           ? ns_js_focused_node(browser->js) : NULL;
+    gsize caret = focused ? browser->caret_byte : 0;
+    gsize anchor = focused ? browser->sel_anchor_byte : 0;
+    gint64 now = g_get_monotonic_time();
+    if (focused != browser->caret_blink_node ||
+        caret != browser->caret_blink_byte ||
+        anchor != browser->caret_blink_anchor) {
+        browser->caret_blink_epoch_us = now;
+        browser->caret_blink_node = focused;
+        browser->caret_blink_byte = caret;
+        browser->caret_blink_anchor = anchor;
+    }
+    gboolean visible = focused &&
+        ((now - browser->caret_blink_epoch_us) / NS_CARET_BLINK_US) % 2 == 0;
+    gboolean changed = browser->caret_blink_active != (focused != NULL) ||
+                       browser->caret_paint_visible != visible;
+    browser->caret_blink_active = focused != NULL;
+    browser->caret_paint_visible = visible;
+    if (!focused) browser->caret_blink_epoch_us = 0;
+    return changed ? 1 : 0;
+}
+
+int
+ns_browser_caret_blinking(ns_browser *browser)
+{
+    return browser && browser->caret_blink_active ? 1 : 0;
 }
 
 static gsize

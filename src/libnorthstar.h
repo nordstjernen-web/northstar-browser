@@ -74,6 +74,8 @@ char *ns_browser_take_pending_download(ns_browser *browser);
 
 int ns_browser_tick(ns_browser *browser, int budget_ms);
 int ns_browser_animating(ns_browser *browser);
+int ns_browser_set_caret_blink_active(ns_browser *browser, int active);
+int ns_browser_caret_blinking(ns_browser *browser);
 char *ns_browser_title(ns_browser *browser);
 char *ns_browser_url(ns_browser *browser);
 void ns_browser_set_next_referrer(const char *url);
