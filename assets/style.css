@@ -162,25 +162,6 @@
     font-style: italic;
   }
 
-  /* Animated about:start splash: overlay a looping GIF of the "Manifest
-     Destiny" start-page banner exactly over its spot in the static
-     screenshot, so the browser chrome stays crisp while the splash lives.
-     Positioned as a share of the 1012x754 shot (banner at 148,126, 684x233,
-     border included). */
-  .shot a[href="screenshots/screenshot.png"] { position: relative; }
-  .shot a[href="screenshots/screenshot.png"]::after {
-    content: "";
-    position: absolute;
-    left: 14.66%; top: 16.76%;
-    width: 67.46%; height: 30.91%;
-    background: url(about-start-splash.gif) center center / 100% 100% no-repeat;
-    pointer-events: none;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    /* respect reduced-motion: fall back to the static screenshot */
-    .shot a[href="screenshots/screenshot.png"]::after { display: none; }
-  }
-
   ul.news { list-style: none; margin: 0; padding: 0; }
   ul.news li { margin: 0 0 10px 0; }
   .news .date {
@@ -195,6 +176,19 @@
   table.spec th, table.spec td { text-align: left; padding: 3px 18px 3px 0; vertical-align: top; }
   table.spec th { color: #666666; font-weight: normal; white-space: nowrap; }
   table.spec td { overflow-wrap: anywhere; word-break: break-word; }
+
+  /* Two-browser comparison table (Nordstjernen vs Northstar) */
+  table.spec.compare th[scope="col"] {
+    color: #003366; font-weight: bold;
+    border-bottom: 2px solid #e3e7f0;
+    padding-bottom: 5px;
+  }
+  table.spec.compare td { width: 42%; }
+  table.spec.compare tr:nth-child(even) td { background: #f7f8fb; }
+  table.spec.compare td, table.spec.compare th[scope="row"] {
+    border-bottom: 1px solid #eef1f7;
+    padding-top: 5px; padding-bottom: 5px;
+  }
 
   .sr-only {
     position: absolute;
