@@ -87,18 +87,19 @@ for pass in 1 2 3; do
   magick stripped.png tmed.png tailmask.png -composite stripped.png
 done
 
+VERSION=$(sed -n "s/^  version: '\([0-9.]*\).*/\1/p" "$REPO/meson.build" | head -1)
 HW=$(magick -font DejaVu-Sans -pointsize 56 label:"Northstar" -format "%w" info:)
 VX=$((80 + HW + 18))
 magick stripped.png \
   \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 56 -fill white \
-     -annotate +80+98 "Northstar" -annotate +$VX+98 "1.0.3" \
+     -annotate +80+98 "Northstar" -annotate +$VX+98 "$VERSION" \
      -blur 0x2 -channel A -evaluate multiply 1.2 +channel \) \
   -compose over -composite \
   \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 56 \
      -fill 'rgb(14,39,57)' -annotate +80+98 "Northstar" \) \
   -compose over -composite \
   \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 56 \
-     -fill 'rgb(196,104,8)' -annotate +$VX+98 "1.0.3" \) \
+     -fill 'rgb(196,104,8)' -annotate +$VX+98 "$VERSION" \) \
   -compose over -composite \
   \( -size 940x320 xc:none -font DejaVu-Sans -pointsize 25 -fill white \
      -annotate +80+147 "Northstar Web Browser" \
