@@ -59,6 +59,11 @@
   </branding>
 
   <releases>
+    <release version="1.0.4" date="2026-07-23">
+      <description>
+        <p>Debian packaging and portability release, adding Debian 13 and sid CI builds.</p>
+      </description>
+    </release>
     <release version="1.0.3" date="2026-07-22">
       <description>
         <p>Rendering and stability release.</p>
