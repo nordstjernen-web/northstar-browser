@@ -1,0 +1,5 @@
+northstar (1.0.4-1) UNRELEASED; urgency=medium
+
+  * Initial Debian packaging.
+
+ -- Andreas Røsdal <andreas.rosdal@gmail.com>  Thu, 23 Jul 2026 19:43:00 +0200

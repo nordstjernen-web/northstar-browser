@@ -1,0 +1,20 @@
+Building northstar for Debian
+-----------------------------
+
+The upstream build uses two meson wrap subprojects that `meson setup`
+normally downloads at configure time: lexbor (HTML/URL engine) and
+quickjs-ng (JavaScript engine). Debian builds run without network
+access, and debhelper's meson buildsystem passes
+--wrap-mode=nodownload, so the orig tarball must already contain the
+subproject sources.
+
+To produce a suitable orig tarball from a git checkout:
+
+    meson subprojects download lexbor quickjs-ng
+    tar --exclude-vcs --exclude='subprojects/*/.git' \
+        --exclude='builddir' \
+        -czf ../northstar_<version>.orig.tar.gz .
+
+The wuffs and plmpeg subprojects are vendored directly in the tree and
+need no download. After that, `dpkg-buildpackage -us -uc` builds the
+package the normal debhelper way.

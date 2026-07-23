@@ -1,0 +1,25 @@
+.TH NORTHSTAR 1 "July 2026" "northstar" "User Commands"
+.SH NAME
+northstar \- minimalist GTK 4 web browser with an original engine
+.SH SYNOPSIS
+.B northstar
+.RI [ options ]
+.RI [ URL ]
+.SH DESCRIPTION
+Northstar is a web browser written from scratch in C, with a GTK 4
+user interface and a libcurl network stack. Its HTML, CSS, and
+JavaScript engine is an original implementation \(em it is not based
+on Gecko, WebKit, or Blink. Pages render in a sandboxed renderer
+process; the browser supports HTML5, modern CSS, modern JavaScript,
+WebAssembly, and inline MPEG-1 video playback.
+.PP
+When started without arguments, Northstar opens its start page.
+Passing a URL opens that page in a new tab.
+.SH OPTIONS
+Northstar accepts the standard GTK 4 command-line options.
+.SH SEE ALSO
+Project homepage:
+.UR https://github.com/nordstjernen-web/northstar-browser
+.UE
+.SH AUTHOR
+Andreas R\(/osdal

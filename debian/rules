@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/architecture.mk
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	meson install -C obj-$(DEB_HOST_GNU_TYPE) \
+		--destdir $(CURDIR)/debian/northstar --skip-subprojects
