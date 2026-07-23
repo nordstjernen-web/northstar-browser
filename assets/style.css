@@ -372,6 +372,34 @@
       margin-top: 2px;
       line-height: 1.45;
     }
+    /* Comparison table: the two columns stack, so hide the column-header
+       row and label each cell with its browser name instead. */
+    table.spec.compare tr:first-child { display: none; }
+    table.spec.compare th[scope="row"] {
+      border-bottom: 0;
+      padding: 0;
+    }
+    table.spec.compare td {
+      width: 100%;
+      margin: 5px 0 0;
+      padding: 6px 10px;
+      background: #f7f8fb;
+      border: 1px solid #e3e7f0;
+      border-left: 3px solid #003366;
+      border-radius: 0 4px 4px 0;
+    }
+    table.spec.compare td:nth-of-type(2) { border-left-color: #666699; }
+    table.spec.compare td::before {
+      display: block;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #003366;
+    }
+    table.spec.compare td:nth-of-type(1)::before { content: "Nordstjernen"; }
+    table.spec.compare td:nth-of-type(2)::before { content: "Northstar"; color: #666699; }
     .footer {
       border-top-width: 2px;
       line-height: 1.45;
