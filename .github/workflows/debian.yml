@@ -1,0 +1,120 @@
+name: debian
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debian-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: gcc on debian-${{ matrix.debian }}
+    runs-on: ubuntu-26.04
+    container: debian:${{ matrix.debian }}
+    timeout-minutes: 40
+
+    strategy:
+      fail-fast: false
+      matrix:
+        debian: ['13']
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential ccache pkg-config meson ninja-build cmake git \
+            libgtk-4-dev libcurl4-openssl-dev libssl-dev \
+            libuchardet-dev librsvg2-dev libpsl-dev libsqlite3-dev \
+            libseccomp-dev libavif-dev libsdl2-dev libenchant-2-dev \
+            fontconfig fonts-dejavu-core ca-certificates file
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Restore ccache
+        uses: actions/cache@v5
+        with:
+          path: /root/.cache/ccache
+          key: ccache-debian-${{ matrix.debian }}-${{ github.sha }}
+          restore-keys: |
+            ccache-debian-${{ matrix.debian }}-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=200M
+          ccache --zero-stats
+
+      - name: Show toolchain versions
+        run: |
+          gcc --version | head -1
+          meson --version
+          ninja --version
+          pkg-config --modversion gtk4
+          pkg-config --modversion libcurl
+
+      - name: Build
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          meson setup builddir --werror
+          meson compile -C builddir 2>&1 | tee build.log
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Smoke test (binary present and executable)
+        run: |
+          test -x builddir/src/gtk/northstar
+          file builddir/src/gtk/northstar
+          ldd builddir/src/gtk/northstar | head -20
+
+      - name: Headless smoke (about:start)
+        env:
+          NS_ALLOW_ROOT: '1'
+        run: |
+          set -o pipefail
+          ./builddir/src/gtk/northstar --headless --dump=text about:start > about.txt
+          head -3 about.txt
+          grep -q Northstar about.txt
+
+      - name: Upload build log
+        if: always() && hashFiles('build.log') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-log-debian-${{ matrix.debian }}-gcc
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload northstar binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: northstar-debian-${{ matrix.debian }}-gcc
+          path: builddir/src/gtk/northstar
+          if-no-files-found: error
+          retention-days: 14
