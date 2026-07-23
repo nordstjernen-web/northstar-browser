@@ -16,8 +16,8 @@
   img { border: 0; max-width: 100%; height: auto; }
   a:link    { color: #003366; }
   a:visited { color: #666699; }
-  a:hover   { color: #cc0000; }
-  a:focus-visible { outline: 2px solid #cc0000; outline-offset: 2px; }
+  a:hover   { color: #006633; }
+  a:focus-visible { outline: 2px solid #006633; outline-offset: 2px; }
 
   .frame {
     margin: 10px;
@@ -92,7 +92,7 @@
     white-space: nowrap;
   }
   .nav a:hover,
-  .nav-more-btn:hover { color: #cc0000; border-color: #cc0000; }
+  .nav-more-btn:hover { color: #006633; border-color: #006633; }
 
   /* Secondary links: one set of markup for all screen sizes. On desktop
      .nav-sec shows inline and the "More" toggle is hidden; on mobile the
@@ -103,8 +103,8 @@
     opacity: 0;
   }
   .nav-more-btn { display: none; cursor: pointer; gap: 6px; }
-  .nav-more-toggle:focus-visible + .nav-more-btn { outline: 2px solid #cc0000; outline-offset: 2px; }
-  .nav-more-toggle:checked + .nav-more-btn { color: #cc0000; border-color: #cc0000; }
+  .nav-more-toggle:focus-visible + .nav-more-btn { outline: 2px solid #006633; outline-offset: 2px; }
+  .nav-more-toggle:checked + .nav-more-btn { color: #006633; border-color: #006633; }
   .nav-sec {
     display: flex;
     flex-wrap: wrap;
@@ -117,14 +117,14 @@
   .content h1 {
     font-family: Arial, Helvetica, sans-serif;
     font-size: 24px;
-    color: #cc0000;
+    color: #006633;
     margin: 0 0 10px 0;
     font-weight: bold;
   }
   .content h2 {
     font-family: Arial, Helvetica, sans-serif;
     font-size: 17px;
-    color: #cc0000;
+    color: #006633;
     margin: 26px 0 8px 0;
     font-weight: bold;
   }
@@ -147,7 +147,7 @@
     padding: 9px 14px;
     background: #f7f8fb;
     border: 1px solid #e3e7f0;
-    border-left: 3px solid #cc0000;
+    border-left: 3px solid #006633;
     border-radius: 0 4px 4px 0;
   }
   .feature:last-child { margin-bottom: 0; }
@@ -167,7 +167,7 @@
   .news .date {
     font-family: Arial, Helvetica, sans-serif;
     font-size: 13px;
-    color: #cc0000;
+    color: #006633;
     font-weight: bold;
     letter-spacing: 1px;
   }
@@ -363,7 +363,7 @@
       font-family: Arial, Helvetica, sans-serif;
       font-size: 12px;
       line-height: 1.35;
-      color: #cc0000;
+      color: #006633;
       font-weight: bold;
       text-transform: uppercase;
       white-space: normal;
