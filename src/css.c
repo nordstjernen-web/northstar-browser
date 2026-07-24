@@ -2191,15 +2191,19 @@ parse_pseudo_keyword(const char *name, gsize n,
         return TRUE;
     }
     if (arg && n == 3 && g_ascii_strncasecmp(name, "dir", 3) == 0) {
-        char *dir = css_trim_dup_range(arg, arg + alen);
-        char *lo = g_ascii_strdown(dir ? dir : "", -1);
-        g_free(dir);
-        if (strcmp(lo, "ltr") != 0 && strcmp(lo, "rtl") != 0) {
-            g_free(lo);
+        const char *end = arg + alen;
+        const char *p = css_skip_ws_comments(arg, end);
+        if (p >= end || (!is_ident_start(*p) && *p != '\\'))
+            return FALSE;
+        char *dir = read_css_ident(&p, end);
+        p = css_skip_ws_comments(p, end);
+        if (!*dir || p != end) {
+            g_free(dir);
             return FALSE;
         }
         out->kind = NS_CSS_PC_DIR;
-        out->arg = lo;
+        out->arg = g_ascii_strdown(dir, -1);
+        g_free(dir);
         return TRUE;
     }
     return FALSE;

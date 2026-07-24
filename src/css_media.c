@@ -174,10 +174,12 @@ typedef enum { MQOP_EQ, MQOP_LT, MQOP_LE, MQOP_GT, MQOP_GE } mq_op;
 typedef struct {
     mq_feature_type kind;
     double num;
+    double serialized_num;
     double denom;
     char   unit[8];
     char   ident[24];
     gboolean is_ident;
+    gboolean calculated;
 } mq_value;
 
 typedef enum {
@@ -522,6 +524,8 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
             double v = 0;
             if (!mq_parse_calc(s, e, mq_resolution_unit_dppx, &v)) return FALSE;
             out->num = v;
+            out->serialized_num = v;
+            out->calculated = TRUE;
             g_strlcpy(out->unit, "dppx", sizeof out->unit);
             return TRUE;
         }
@@ -538,6 +542,7 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
         double dppx = mq_resolution_unit_dppx(v, unit);
         if (isnan(dppx)) return FALSE;
         out->num = dppx;
+        out->serialized_num = v;
         g_strlcpy(out->unit, unit, sizeof out->unit);
         return TRUE;
     }
@@ -546,6 +551,8 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
         double v = 0;
         if (!mq_parse_calc(s, e, mq_length_unit_px, &v)) return FALSE;
         out->num = v;
+        out->serialized_num = v;
+        out->calculated = TRUE;
         g_strlcpy(out->unit, "px", sizeof out->unit);
         return TRUE;
     }
@@ -561,12 +568,14 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
     if (u == 0) {
         if (v != 0) return FALSE;
         out->num = 0;
+        out->serialized_num = 0;
         g_strlcpy(out->unit, "px", sizeof out->unit);
         return TRUE;
     }
     double px = mq_length_unit_px(v, unit);
     if (isnan(px)) return FALSE;
     out->num = px;
+    out->serialized_num = v;
     g_strlcpy(out->unit, unit, sizeof out->unit);
     return TRUE;
 }
@@ -1090,10 +1099,17 @@ mq_serialize_value(GString *out, const mq_value *v, mq_feature_type type)
         return;
     }
     if (type == MQF_RESOLUTION) {
-        g_string_append_printf(out, "%gdppx", v->num);
+        if (v->calculated)
+            g_string_append_printf(out, "calc(%g%s)", v->serialized_num,
+                                   v->unit);
+        else
+            g_string_append_printf(out, "%g%s", v->serialized_num, v->unit);
         return;
     }
-    g_string_append_printf(out, "%gpx", v->num);
+    if (v->calculated)
+        g_string_append_printf(out, "calc(%g%s)", v->serialized_num, v->unit);
+    else
+        g_string_append_printf(out, "%g%s", v->serialized_num, v->unit);
 }
 
 static const char *
@@ -1210,6 +1226,10 @@ ns_css_media_list_serialize(const char *query)
         mq_serialize_query(out, &q);
         mq_query_clear(&q);
         first = FALSE;
+        if (next == end && seg_end < end) {
+            g_string_append(out, ", not all");
+            break;
+        }
         p = next;
     }
     return g_string_free(out, FALSE);
