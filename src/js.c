@@ -230,6 +230,17 @@ static void ns_js_record_attr_change(ns_js *js, ns_node *target,
 static void ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value);
 static void ns_node_iters_pre_remove(ns_js *js, ns_node *removed);
 static gboolean ns_mut_target_covers(const ns_mut_target *t, ns_node *node);
+static void ns_slot_reconcile_child_change(ns_js *js, ns_node *parent,
+                                           ns_node *added, ns_node *removed);
+static void ns_slot_reconcile_child_change_arrays(ns_js *js, ns_node *parent,
+                                                  GPtrArray *added,
+                                                  GPtrArray *removed);
+static void ns_slot_reconcile_attr_change(ns_js *js, ns_node *target,
+                                          const char *name,
+                                          const char *old_value);
+static ns_node *ns_node_assigned_slot_node(const ns_node *node);
+static ns_node *ns_slot_root_ancestor(const ns_node *node);
+static gboolean ns_node_is_shadow_root(const ns_node *node);
 static void ns_nodelist_decorate(JSContext *ctx, JSValueConst arr);
 static JSValue ns_nodelist_from_array(JSContext *ctx, JSValue arr);
 static char *ns_js_doc_base_url(ns_js *js);
@@ -6452,6 +6463,10 @@ ns_element_clear_children(ns_node *n)
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
+        if (ns_node_is_shadow_root(c)) {
+            c = next;
+            continue;
+        }
         ns_node_remove(c);
         if (doc && doc != c) {
             ns_doc_id_index_subtree_removed(doc, c);
@@ -6461,8 +6476,6 @@ ns_element_clear_children(ns_node *n)
         ns_node_free(c);
         c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
 }
 
 static void
@@ -6486,13 +6499,15 @@ ns_js_clear_children(ns_js *js, ns_node *n)
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
+        if (ns_node_is_shadow_root(c)) {
+            c = next;
+            continue;
+        }
         ns_node_remove(c);
         ns_js_index_child_change(js, n, NULL, c);
         g_hash_table_add(js->orphan_nodes, c);
         c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
 }
 
 static void
@@ -6522,14 +6537,16 @@ ns_js_orphan_children(ns_js *js, ns_node *n)
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
+        if (ns_node_is_shadow_root(c)) {
+            c = next;
+            continue;
+        }
         ns_js_orphan_prune_rec(js, c, 0);
         ns_node_remove(c);
         ns_js_index_child_change(js, n, NULL, c);
         ns_js_orphan_node(js, c);
         c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
 }
 
 static void
@@ -6544,6 +6561,10 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
+        if (ns_node_is_shadow_root(c)) {
+            c = next;
+            continue;
+        }
         ns_ce_disconnect_subtree(js, c);
         ns_node_remove(c);
         g_hash_table_add(js->orphan_nodes, c);
@@ -6551,8 +6572,6 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         g_ptr_array_add(removed, c);
         c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
     GPtrArray *add_arr = NULL;
     if (added) {
         ns_node_append_child(n, added);
@@ -6576,14 +6595,16 @@ ns_element_clear_children_collect(ns_js *js, ns_node *n)
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
+        if (ns_node_is_shadow_root(c)) {
+            c = next;
+            continue;
+        }
         if (js) ns_ce_disconnect_subtree(js, c);
         ns_node_remove(c);
         if (js) g_hash_table_add(js->orphan_nodes, c);
         g_ptr_array_add(removed, c);
         c = next;
     }
-    n->first_child = NULL;
-    n->last_child  = NULL;
     return removed;
 }
 
@@ -8496,17 +8517,78 @@ ns_event_composed_path(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     gboolean active = JS_ToBool(ctx, dispatching) ? TRUE : FALSE;
     JS_FreeValue(ctx, dispatching);
     if (!active) return arr;
-    JSValue target = JS_GetPropertyStr(ctx, this_val, "target");
-    const ns_node *n = ns_unwrap_element(target);
-    JS_FreeValue(ctx, target);
+    JSValue stored = JS_GetPropertyStr(ctx, this_val, "__nd_path");
+    JSValue closed_paths = JS_GetPropertyStr(
+        ctx, this_val, "__nd_path_closed");
+    JSValue current_value = JS_GetPropertyStr(ctx, this_val, "currentTarget");
     uint32_t idx = 0;
-    gboolean saw_document = FALSE;
-    for (const ns_node *cur = n; cur; cur = cur->parent) {
-        JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, cur));
-        if (cur->kind == NS_NODE_DOCUMENT) saw_document = TRUE;
+    if (JS_IsArray(stored)) {
+        uint32_t length = ns_js_array_length(ctx, stored);
+        JSValue current_closed = JS_NewArray(ctx);
+        if (JS_IsArray(closed_paths))
+            for (uint32_t i = 0; i < length; i++) {
+                JSValue item = JS_GetPropertyUint32(ctx, stored, i);
+                gboolean same = JS_VALUE_GET_TAG(item) ==
+                                    JS_VALUE_GET_TAG(current_value) &&
+                                JS_VALUE_GET_PTR(item) ==
+                                    JS_VALUE_GET_PTR(current_value);
+                JS_FreeValue(ctx, item);
+                if (same) {
+                    JS_FreeValue(ctx, current_closed);
+                    current_closed = JS_GetPropertyUint32(
+                        ctx, closed_paths, i);
+                    break;
+                }
+            }
+        for (uint32_t i = 0; i < length; i++) {
+            JSValue item = JS_GetPropertyUint32(ctx, stored, i);
+            gboolean hidden = FALSE;
+            JSValue item_closed = JS_IsArray(closed_paths)
+                ? JS_GetPropertyUint32(ctx, closed_paths, i)
+                : JS_NewArray(ctx);
+            uint32_t item_depth = JS_IsArray(item_closed)
+                ? ns_js_array_length(ctx, item_closed) : 0;
+            uint32_t current_depth = JS_IsArray(current_closed)
+                ? ns_js_array_length(ctx, current_closed) : 0;
+            for (uint32_t ci = 0; ci < item_depth && !hidden; ci++) {
+                JSValue closed_root = JS_GetPropertyUint32(
+                    ctx, item_closed, ci);
+                gboolean shared = FALSE;
+                for (uint32_t cj = 0; cj < current_depth; cj++) {
+                    JSValue current_root = JS_GetPropertyUint32(
+                        ctx, current_closed, cj);
+                    shared = JS_VALUE_GET_TAG(closed_root) ==
+                                 JS_VALUE_GET_TAG(current_root) &&
+                             JS_VALUE_GET_PTR(closed_root) ==
+                                 JS_VALUE_GET_PTR(current_root);
+                    JS_FreeValue(ctx, current_root);
+                    if (shared) break;
+                }
+                JS_FreeValue(ctx, closed_root);
+                if (!shared) {
+                    hidden = TRUE;
+                    break;
+                }
+            }
+            JS_FreeValue(ctx, item_closed);
+            if (!hidden)
+                JS_SetPropertyUint32(ctx, arr, idx++, JS_DupValue(ctx, item));
+            JS_FreeValue(ctx, item);
+        }
+        JS_FreeValue(ctx, current_closed);
+        JS_FreeValue(ctx, current_value);
+        JS_FreeValue(ctx, closed_paths);
+        JS_FreeValue(ctx, stored);
+        return arr;
     }
-    if (saw_document)
-        JS_SetPropertyUint32(ctx, arr, idx++, JS_GetGlobalObject(ctx));
+    JS_FreeValue(ctx, current_value);
+    JS_FreeValue(ctx, closed_paths);
+    JS_FreeValue(ctx, stored);
+    JSValue target = JS_GetPropertyStr(ctx, this_val, "target");
+    const ns_node *node = ns_unwrap_element(target);
+    JS_FreeValue(ctx, target);
+    for (const ns_node *cur = node; cur; cur = cur->parent)
+        JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, cur));
     return arr;
 }
 
@@ -21824,25 +21906,39 @@ ns_mut_record_free(gpointer p)
 static void
 ns_mut_scrub_node(ns_js *js, ns_node *n)
 {
-    if (!js || !js->mutation_observers || !n) return;
-    for (guint oi = 0; oi < js->mutation_observers->len; oi++) {
-        ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, oi);
-        if (!o) continue;
-        if (o->targets) {
-            for (guint ti = 0; ti < o->targets->len; ti++) {
-                ns_mut_target *t = &g_array_index(o->targets, ns_mut_target, ti);
-                if (t->target == n) t->target = NULL;
+    if (!js || !n) return;
+    if (js->slot_assignments)
+        g_hash_table_remove(js->slot_assignments, n);
+    if (js->slot_roots) {
+        g_hash_table_remove(js->slot_roots, n);
+        GHashTableIter iter;
+        gpointer key, value;
+        g_hash_table_iter_init(&iter, js->slot_roots);
+        while (g_hash_table_iter_next(&iter, &key, &value))
+            if (value == n) g_hash_table_iter_remove(&iter);
+    }
+    if (js->signaled_slots)
+        g_ptr_array_remove_fast(js->signaled_slots, n);
+    if (js->mutation_observers) {
+        for (guint oi = 0; oi < js->mutation_observers->len; oi++) {
+            ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, oi);
+            if (!o) continue;
+            if (o->targets) {
+                for (guint ti = 0; ti < o->targets->len; ti++) {
+                    ns_mut_target *t = &g_array_index(o->targets, ns_mut_target, ti);
+                    if (t->target == n) t->target = NULL;
+                }
             }
-        }
-        if (o->records) {
-            for (guint ri = 0; ri < o->records->len; ri++) {
-                ns_mut_record_data *rd = g_ptr_array_index(o->records, ri);
-                if (!rd) continue;
-                if (rd->target == n)           rd->target = NULL;
-                if (rd->previous_sibling == n) rd->previous_sibling = NULL;
-                if (rd->next_sibling == n)     rd->next_sibling = NULL;
-                if (rd->added)   g_ptr_array_remove_fast(rd->added, n);
-                if (rd->removed) g_ptr_array_remove_fast(rd->removed, n);
+            if (o->records) {
+                for (guint ri = 0; ri < o->records->len; ri++) {
+                    ns_mut_record_data *rd = g_ptr_array_index(o->records, ri);
+                    if (!rd) continue;
+                    if (rd->target == n)           rd->target = NULL;
+                    if (rd->previous_sibling == n) rd->previous_sibling = NULL;
+                    if (rd->next_sibling == n)     rd->next_sibling = NULL;
+                    if (rd->added)   g_ptr_array_remove_fast(rd->added, n);
+                    if (rd->removed) g_ptr_array_remove_fast(rd->removed, n);
+                }
             }
         }
     }
@@ -21907,10 +22003,19 @@ ns_mut_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->mutation_observers) return JS_UNDEFINED;
+    if (!js) return JS_UNDEFINED;
     js->mutation_drain_scheduled = FALSE;
-    for (guint oi = 0; oi < js->mutation_observers->len; oi++) {
-        ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, oi);
+    GPtrArray *pending_observers = g_ptr_array_new();
+    if (js->mutation_observers)
+        for (guint oi = 0; oi < js->mutation_observers->len; oi++) {
+            ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, oi);
+            if (o && !o->disconnected && o->records && o->records->len > 0)
+                g_ptr_array_add(pending_observers, o);
+        }
+    GPtrArray *pending_slots = js->signaled_slots;
+    js->signaled_slots = NULL;
+    for (guint oi = 0; oi < pending_observers->len; oi++) {
+        ns_mut_observer *o = g_ptr_array_index(pending_observers, oi);
         if (!o || o->disconnected || !o->records || o->records->len == 0) continue;
         GPtrArray *recs = o->records;
         o->records = g_ptr_array_new_with_free_func(ns_mut_record_free);
@@ -21939,6 +22044,19 @@ ns_mut_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
         JS_FreeValue(ctx, arr);
         JS_FreeValue(ctx, (JSValue)call_args[1]);
     }
+    g_ptr_array_free(pending_observers, TRUE);
+    if (pending_slots) {
+        for (guint i = 0; i < pending_slots->len; i++) {
+            ns_node *slot = g_ptr_array_index(pending_slots, i);
+            if (!slot || js->halted) continue;
+            JSValue event = ns_make_event(ctx, "slotchange", slot);
+            JS_SetPropertyStr(ctx, event, "bubbles", JS_TRUE);
+            JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
+            JS_SetPropertyStr(ctx, event, "composed", JS_FALSE);
+            ns_js_dispatch_built_event(js, slot, "slotchange", event, NULL);
+        }
+        g_ptr_array_free(pending_slots, TRUE);
+    }
     return JS_UNDEFINED;
 }
 
@@ -21948,6 +22066,20 @@ ns_mut_schedule_drain(ns_js *js)
     if (!js || !js->ctx || js->mutation_drain_scheduled) return;
     js->mutation_drain_scheduled = TRUE;
     JS_EnqueueJob(js->ctx, ns_mut_drain_job, 0, NULL);
+}
+
+static void
+ns_slot_signal(ns_js *js, ns_node *slot)
+{
+    if (!js || !js->ctx || !slot) return;
+    if (!js->signaled_slots)
+        js->signaled_slots = g_ptr_array_new();
+    for (guint i = 0; i < js->signaled_slots->len; i++)
+        if (g_ptr_array_index(js->signaled_slots, i) == slot) return;
+    JSValue wrapper = ns_make_element(js->ctx, slot);
+    JS_FreeValue(js->ctx, wrapper);
+    g_ptr_array_add(js->signaled_slots, slot);
+    ns_mut_schedule_drain(js);
 }
 
 static gboolean
@@ -22160,6 +22292,7 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
     ns_js_index_child_change(js, parent, added, removed);
     ns_css_mark_childlist_change(parent, added, removed,
                                  previous_sibling, next_sibling);
+    ns_slot_reconcile_child_change(js, parent, added, removed);
     ns_mut_record_emit(js, "childList", parent, added, removed,
                        previous_sibling, next_sibling, NULL, NULL, NULL);
 }
@@ -22232,6 +22365,7 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
                                          ? g_ptr_array_index(removed, 0) : NULL,
                                      NULL, NULL);
     }
+    ns_slot_reconcile_child_change_arrays(js, parent, added, removed);
     ns_mut_record_emit_child_list_arrays(js, parent, added, removed,
                                          previous_sibling, next_sibling);
 }
@@ -22264,6 +22398,7 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
             ns_doc_class_index_register(doc, new_cls, target);
     }
     ns_css_mark_attr_dirty(target, name, old_value);
+    ns_slot_reconcile_attr_change(js, target, name, old_value);
     ns_mut_record_emit(js, "attributes", target, NULL, NULL,
                        NULL, NULL, name, namespace_uri, old_value);
 }
@@ -24591,6 +24726,19 @@ ns_node_in_shadow_tree(const ns_node *n)
     return FALSE;
 }
 
+static const ns_node *
+ns_event_retarget_node(const ns_node *target, const ns_node *current)
+{
+    const ns_node *visible = target;
+    while (visible) {
+        ns_node *root = ns_slot_root_ancestor(visible);
+        if (!root || (current && ns_node_ancestor_or_self(current, root)))
+            return visible;
+        visible = root->parent;
+    }
+    return target;
+}
+
 static gboolean
 ns_run_listener_array_full(ns_js *js, GPtrArray *to_call,
                            JSValue current_target, const char *type,
@@ -24700,6 +24848,21 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
                             gboolean at_target, gboolean in_shadow,
                             gboolean *fired)
 {
+    const ns_node *visible_target = ns_event_retarget_node(target, cur);
+    JS_SetPropertyStr(js->ctx, event, "target",
+                      ns_make_element(js->ctx, visible_target));
+    JSValue original_related_value = JS_GetPropertyStr(
+        js->ctx, event, "__nd_related_target");
+    if (!JS_IsUndefined(original_related_value)) {
+        const ns_node *original_related = ns_unwrap_element(
+            original_related_value);
+        const ns_node *visible_related = ns_event_retarget_node(
+            original_related, cur);
+        JS_SetPropertyStr(js->ctx, event, "relatedTarget",
+            visible_related ? ns_make_element(js->ctx, visible_related)
+                            : JS_NULL);
+    }
+    JS_FreeValue(js->ctx, original_related_value);
     if (g_str_has_prefix(type, "webkit")) {
         JSValue basev = JS_GetPropertyStr(js->ctx, event, "__ns_alias_base");
         if (JS_IsString(basev)) {
@@ -24820,6 +24983,22 @@ ns_invoke_window_listeners_full(ns_js *js, const ns_node *target,
                                 gboolean capture_phase, gboolean at_target,
                                 gboolean *fired)
 {
+    const ns_node *visible_target = ns_event_retarget_node(
+        target, js->current_doc);
+    JS_SetPropertyStr(js->ctx, event, "target",
+                      ns_make_element(js->ctx, visible_target));
+    JSValue original_related_value = JS_GetPropertyStr(
+        js->ctx, event, "__nd_related_target");
+    if (!JS_IsUndefined(original_related_value)) {
+        const ns_node *original_related = ns_unwrap_element(
+            original_related_value);
+        const ns_node *visible_related = ns_event_retarget_node(
+            original_related, js->current_doc);
+        JS_SetPropertyStr(js->ctx, event, "relatedTarget",
+            visible_related ? ns_make_element(js->ctx, visible_related)
+                            : JS_NULL);
+    }
+    JS_FreeValue(js->ctx, original_related_value);
     if (!capture_phase &&
         ns_fire_window_property_handlers(js, target, type, event))
         *fired = TRUE;
@@ -24900,10 +25079,43 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
 
     JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_TRUE);
 
+    JSValue composed_value = JS_GetPropertyStr(js->ctx, event, "composed");
+    gboolean composed = JS_ToBool(js->ctx, composed_value) ? TRUE : FALSE;
+    JS_FreeValue(js->ctx, composed_value);
+    ns_node *target_shadow_root = ns_slot_root_ancestor(target);
+    const ns_node *post_target = composed
+        ? ns_event_retarget_node(target, js->current_doc)
+        : (target_shadow_root ? NULL : target);
+    JSValue original_related_value = JS_GetPropertyStr(
+        js->ctx, event, "relatedTarget");
+    gboolean has_related_target = !JS_IsUndefined(original_related_value);
+    const ns_node *original_related = has_related_target
+        ? ns_unwrap_element(original_related_value) : NULL;
+    const ns_node *post_related = !has_related_target ? NULL
+        : composed ? ns_event_retarget_node(original_related, js->current_doc)
+                   : (target_shadow_root ? NULL : original_related);
+    gboolean clear_post_targets = original_related &&
+        post_target == post_related;
+    if (has_related_target)
+        JS_SetPropertyStr(js->ctx, event, "__nd_related_target",
+                          JS_DupValue(js->ctx, original_related_value));
+    JS_FreeValue(js->ctx, original_related_value);
+
     GPtrArray *path = g_ptr_array_new();
-    for (const ns_node *cur = target; cur; cur = cur->parent) {
+    for (const ns_node *cur = target; cur;) {
+        const ns_node *visible_target = ns_event_retarget_node(target, cur);
+        const ns_node *visible_related = original_related
+            ? ns_event_retarget_node(original_related, cur) : NULL;
+        if (visible_related && visible_target == visible_related &&
+            (target_shadow_root
+                ? !ns_node_ancestor_or_self(cur, target_shadow_root)
+                : original_related != target))
+            break;
         g_ptr_array_add(path, (gpointer)cur);
         if (cur->kind == NS_NODE_DOCUMENT) break;
+        if (!composed && cur == target_shadow_root) break;
+        ns_node *assigned = ns_node_assigned_slot_node(cur);
+        cur = assigned ? assigned : cur->parent;
     }
     GArray *shadow_flags = g_array_sized_new(FALSE, FALSE, sizeof(gboolean),
                                              path->len);
@@ -24917,6 +25129,51 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     gboolean window_in_path = path_tail &&
         path_tail->kind == NS_NODE_DOCUMENT &&
         !(path_tail->flags & NS_NODE_FRAGMENT);
+
+    JSValue event_path = JS_NewArray(js->ctx);
+    JSValue event_closed_paths = JS_UNDEFINED;
+    for (guint i = 0; i < path->len; i++) {
+        ns_node *path_node = g_ptr_array_index(path, i);
+        JS_SetPropertyUint32(js->ctx, event_path, i,
+            ns_make_element(js->ctx, path_node));
+        JSValue closed_roots = JS_UNDEFINED;
+        uint32_t closed_index = 0;
+        for (ns_node *ancestor = path_node; ancestor;
+             ancestor = ancestor->parent) {
+            if (!ns_node_is_shadow_root(ancestor)) continue;
+            const char *mode = ns_element_get_attr(
+                ancestor, NS_SHADOW_ATTR);
+            if (mode && strcmp(mode, "closed") == 0) {
+                if (JS_IsUndefined(closed_roots))
+                    closed_roots = JS_NewArray(js->ctx);
+                JS_SetPropertyUint32(js->ctx, closed_roots, closed_index++,
+                                     ns_make_element(js->ctx, ancestor));
+            }
+        }
+        if (!JS_IsUndefined(closed_roots)) {
+            if (JS_IsUndefined(event_closed_paths)) {
+                event_closed_paths = JS_NewArray(js->ctx);
+                for (guint prior = 0; prior < i; prior++)
+                    JS_SetPropertyUint32(js->ctx, event_closed_paths, prior,
+                                         JS_NewArray(js->ctx));
+            }
+            JS_SetPropertyUint32(js->ctx, event_closed_paths, i, closed_roots);
+        } else if (!JS_IsUndefined(event_closed_paths)) {
+            JS_SetPropertyUint32(js->ctx, event_closed_paths, i,
+                                 JS_NewArray(js->ctx));
+        }
+    }
+    if (window_in_path) {
+        JS_SetPropertyUint32(js->ctx, event_path, path->len,
+                             JS_GetGlobalObject(js->ctx));
+        if (!JS_IsUndefined(event_closed_paths))
+            JS_SetPropertyUint32(js->ctx, event_closed_paths, path->len,
+                                 JS_NewArray(js->ctx));
+    }
+    JS_SetPropertyStr(js->ctx, event, "__nd_path", event_path);
+    if (!JS_IsUndefined(event_closed_paths))
+        JS_SetPropertyStr(js->ctx, event, "__nd_path_closed",
+                          event_closed_paths);
 
     JSValue bub0 = JS_GetPropertyStr(js->ctx, event, "bubbles");
     gboolean bubbles = JS_ToBool(js->ctx, bub0) ? TRUE : FALSE;
@@ -24964,11 +25221,27 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     g_ptr_array_free(path, TRUE);
     g_array_free(shadow_flags, TRUE);
 
+    if (!post_target || clear_post_targets) {
+        JS_SetPropertyStr(js->ctx, event, "target", JS_NULL);
+    } else {
+        JS_SetPropertyStr(js->ctx, event, "target",
+                          ns_make_element(js->ctx, post_target));
+    }
+    if (has_related_target) {
+        if (!post_related || clear_post_targets)
+            JS_SetPropertyStr(js->ctx, event, "relatedTarget", JS_NULL);
+        else
+            JS_SetPropertyStr(js->ctx, event, "relatedTarget",
+                              ns_make_element(js->ctx, post_related));
+    }
     JS_SetPropertyStr(js->ctx, event, "currentTarget", JS_NULL);
     JS_SetPropertyStr(js->ctx, event, "eventPhase", JS_NewInt32(js->ctx, 0));
     JS_SetPropertyStr(js->ctx, event, "_propagation_stopped", JS_FALSE);
     JS_SetPropertyStr(js->ctx, event, "_immediate_stopped", JS_FALSE);
     JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_FALSE);
+    JS_SetPropertyStr(js->ctx, event, "__nd_path", JS_UNDEFINED);
+    JS_SetPropertyStr(js->ctx, event, "__nd_path_closed", JS_UNDEFINED);
+    JS_SetPropertyStr(js->ctx, event, "__nd_related_target", JS_UNDEFINED);
 
     if (default_prevented) {
         JSValue dp = JS_GetPropertyStr(js->ctx, event, "defaultPrevented");
@@ -25445,6 +25718,20 @@ ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
     if (!js || !target || !type) return FALSE;
     if (js->halted || js->in_pump) return FALSE;
     JSValue event = ns_make_event(js->ctx, type, target);
+    static const char *const composed_types[] = {
+        "auxclick", "beforeinput", "blur", "click", "compositionend",
+        "compositionstart", "compositionupdate", "contextmenu", "dblclick",
+        "focus", "focusin", "focusout", "input", "keydown", "keypress",
+        "keyup", "mousedown", "mousemove", "mouseout", "mouseover",
+        "mouseup", "pointercancel", "pointerdown", "pointermove",
+        "pointerout", "pointerover", "pointerup", "touchcancel",
+        "touchend", "touchmove", "touchstart", "wheel",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(composed_types); i++)
+        if (strcmp(type, composed_types[i]) == 0) {
+            JS_SetPropertyStr(js->ctx, event, "composed", JS_TRUE);
+            break;
+        }
     if (g_ascii_strcasecmp(type, "invalid") == 0)
         JS_SetPropertyStr(js->ctx, event, "bubbles", JS_FALSE);
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
@@ -25616,6 +25903,7 @@ ns_js_dispatch_key_event_full(ns_js *js, const ns_node *target, const char *type
     if (!js || !target || !type) return FALSE;
     if (js->halted || js->in_pump) return FALSE;
     JSValue event = ns_make_event(js->ctx, type, target);
+    JS_SetPropertyStr(js->ctx, event, "composed", JS_TRUE);
     JS_SetPropertyStr(js->ctx, event, "key",     JS_NewString(js->ctx, key  ? key  : ""));
     JS_SetPropertyStr(js->ctx, event, "code",    JS_NewString(js->ctx, code ? code : ""));
     JS_SetPropertyStr(js->ctx, event, "keyCode", JS_NewInt32 (js->ctx, key_code));
@@ -25653,6 +25941,7 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
     if (js->halted || js->in_pump) return FALSE;
     JSContext *ctx = js->ctx;
     JSValue event = ns_make_event(ctx, type, target);
+    JS_SetPropertyStr(ctx, event, "composed", JS_TRUE);
     if (g_str_has_suffix(type, "enter") || g_str_has_suffix(type, "leave")) {
         JS_SetPropertyStr(ctx, event, "bubbles",    JS_FALSE);
         JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
@@ -28033,8 +28322,6 @@ ns_element_activate_popover_target(JSContext *ctx, const ns_node *el)
         ns_node_set_popover_open(ctx, target, !open);
     return TRUE;
 }
-
-static gboolean ns_node_is_shadow_root(const ns_node *n);
 
 static const ns_node *
 next_element_sibling(const ns_node *n)
@@ -31700,6 +31987,254 @@ ns_slot_collect_flattened(GPtrArray *nodes, const ns_node *slot,
     g_ptr_array_free(direct, TRUE);
 }
 
+static ns_node *
+ns_slot_root_ancestor(const ns_node *node)
+{
+    for (const ns_node *n = node; n; n = n->parent)
+        if (ns_node_is_shadow_root(n)) return (ns_node *)n;
+    return NULL;
+}
+
+static ns_node *
+ns_node_assigned_slot_node(const ns_node *node)
+{
+    if (!node || !node->parent ||
+        ns_node_is_shadow_root(node) ||
+        (node->kind != NS_NODE_ELEMENT && node->kind != NS_NODE_TEXT))
+        return NULL;
+    ns_node *root = ns_element_find_shadow_child(node->parent);
+    if (!root) return NULL;
+    const char *name = node->kind == NS_NODE_ELEMENT
+        ? ns_element_get_attr(node, "slot") : NULL;
+    return ns_slot_first_named(root, name ? name : "", 0);
+}
+
+static gboolean
+ns_slot_snapshots_equal(const GPtrArray *a, const GPtrArray *b)
+{
+    if (!a || !b || a->len != b->len) return FALSE;
+    for (guint i = 0; i < a->len; i++)
+        if (g_ptr_array_index(a, i) != g_ptr_array_index(b, i)) return FALSE;
+    return TRUE;
+}
+
+static GPtrArray *
+ns_slot_snapshot(ns_node *slot)
+{
+    static guint8 flat_marker;
+    GPtrArray *snapshot = g_ptr_array_new();
+    ns_slot_collect_direct(snapshot, slot, FALSE);
+    g_ptr_array_add(snapshot, &flat_marker);
+    ns_slot_collect_flattened(snapshot, slot, FALSE, 0);
+    return snapshot;
+}
+
+static gboolean
+ns_slot_snapshot_has_content(const GPtrArray *snapshot)
+{
+    return snapshot && snapshot->len > 1;
+}
+
+static void
+ns_slot_register_root(ns_js *js, ns_node *root)
+{
+    if (!js || !root || !root->parent) return;
+    if (!js->slot_roots)
+        js->slot_roots = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_insert(js->slot_roots, root->parent, root);
+    ns_node_arm_js_invalidate(root->parent);
+    ns_node_arm_js_invalidate(root);
+}
+
+static void
+ns_slot_collect_tree_slots(ns_node *root, ns_node *node,
+                           GPtrArray *slots, int depth)
+{
+    if (!node || depth >= 512) return;
+    if (node != root && ns_node_is_shadow_root(node)) return;
+    if (ns_node_is_slot(node)) g_ptr_array_add(slots, node);
+    for (ns_node *child = node->first_child; child;
+         child = child->next_sibling)
+        ns_slot_collect_tree_slots(root, child, slots, depth + 1);
+}
+
+static void
+ns_slot_store_snapshot(ns_js *js, ns_node *slot, GPtrArray *snapshot)
+{
+    if (!js->slot_assignments)
+        js->slot_assignments = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL,
+            (GDestroyNotify)g_ptr_array_unref);
+    ns_node_arm_js_invalidate(slot);
+    g_hash_table_replace(js->slot_assignments, slot, snapshot);
+}
+
+static void
+ns_slot_reconcile_root_internal(ns_js *js, ns_node *root,
+                                GHashTable *visited)
+{
+    if (!js || !root || !ns_node_is_shadow_root(root) ||
+        g_hash_table_contains(visited, root))
+        return;
+    g_hash_table_add(visited, root);
+    ns_slot_register_root(js, root);
+    GPtrArray *slots = g_ptr_array_new();
+    GPtrArray *changed = g_ptr_array_new();
+    ns_slot_collect_tree_slots(root, root, slots, 0);
+    for (guint i = 0; i < slots->len; i++) {
+        ns_node *slot = g_ptr_array_index(slots, i);
+        GPtrArray *before = js->slot_assignments
+            ? g_hash_table_lookup(js->slot_assignments, slot) : NULL;
+        GPtrArray *after = ns_slot_snapshot(slot);
+        gboolean differs = before
+            ? !ns_slot_snapshots_equal(before, after)
+            : ns_slot_snapshot_has_content(after);
+        ns_slot_store_snapshot(js, slot, after);
+        if (differs) g_ptr_array_add(changed, slot);
+    }
+    for (guint i = 0; i < changed->len; i++) {
+        ns_node *assigned = ns_node_assigned_slot_node(
+            g_ptr_array_index(changed, i));
+        ns_node *dependent_root = ns_slot_root_ancestor(assigned);
+        if (dependent_root)
+            ns_slot_reconcile_root_internal(js, dependent_root, visited);
+    }
+    for (guint i = 0; i < changed->len; i++)
+        ns_slot_signal(js, g_ptr_array_index(changed, i));
+    g_ptr_array_free(changed, TRUE);
+    g_ptr_array_free(slots, TRUE);
+}
+
+static void
+ns_slot_collect_affected_roots(ns_js *js, ns_node *parent, GPtrArray *roots)
+{
+    if (!js || !parent) return;
+    if (js->slot_roots) {
+        ns_node *host_root = g_hash_table_lookup(js->slot_roots, parent);
+        if (host_root) g_ptr_array_add(roots, host_root);
+    }
+    for (ns_node *node = parent; node; node = node->parent) {
+        if (!ns_node_is_shadow_root(node)) continue;
+        gboolean present = FALSE;
+        for (guint i = 0; i < roots->len; i++)
+            if (g_ptr_array_index(roots, i) == node) present = TRUE;
+        if (!present) g_ptr_array_add(roots, node);
+    }
+}
+
+static void
+ns_slot_reconcile_removed_subtree(ns_js *js, ns_node *node, int depth)
+{
+    if (!js || !node || depth >= 512) return;
+    if (ns_node_is_slot(node) && js->slot_assignments) {
+        GPtrArray *before = g_hash_table_lookup(js->slot_assignments, node);
+        if (before) {
+            GPtrArray *after = ns_slot_snapshot(node);
+            gboolean differs = !ns_slot_snapshots_equal(before, after);
+            ns_slot_store_snapshot(js, node, after);
+            if (differs) ns_slot_signal(js, node);
+        }
+    }
+    for (ns_node *child = node->first_child; child;
+         child = child->next_sibling)
+        ns_slot_reconcile_removed_subtree(js, child, depth + 1);
+}
+
+static gboolean
+ns_slot_removed_subtree_is_tracked(ns_js *js, ns_node *node, int depth)
+{
+    if (!js || !js->slot_assignments || !node || depth >= 512) return FALSE;
+    if (ns_node_is_slot(node) &&
+        g_hash_table_contains(js->slot_assignments, node))
+        return TRUE;
+    for (ns_node *child = node->first_child; child;
+         child = child->next_sibling)
+        if (ns_slot_removed_subtree_is_tracked(js, child, depth + 1))
+            return TRUE;
+    return FALSE;
+}
+
+static void
+ns_slot_reconcile_changes(ns_js *js, ns_node *parent,
+                          GPtrArray *removed, ns_node *removed_one)
+{
+    if (!js || !parent) return;
+    gboolean affects_root = js->slot_roots &&
+        g_hash_table_contains(js->slot_roots, parent);
+    for (ns_node *node = parent; node && !affects_root; node = node->parent)
+        affects_root = ns_node_is_shadow_root(node);
+    gboolean removes_tracked_slot = removed_one &&
+        ns_slot_removed_subtree_is_tracked(js, removed_one, 0);
+    if (removed)
+        for (guint i = 0; i < removed->len && !removes_tracked_slot; i++)
+            removes_tracked_slot = ns_slot_removed_subtree_is_tracked(
+                js, g_ptr_array_index(removed, i), 0);
+    if (!affects_root && !removes_tracked_slot) return;
+    GPtrArray *roots = g_ptr_array_new();
+    ns_slot_collect_affected_roots(js, parent, roots);
+    GHashTable *visited = g_hash_table_new(g_direct_hash, g_direct_equal);
+    for (guint i = 0; i < roots->len; i++)
+        ns_slot_reconcile_root_internal(js, g_ptr_array_index(roots, i),
+                                        visited);
+    if (removed)
+        for (guint i = 0; i < removed->len; i++)
+            ns_slot_reconcile_removed_subtree(
+                js, g_ptr_array_index(removed, i), 0);
+    if (removed_one)
+        ns_slot_reconcile_removed_subtree(js, removed_one, 0);
+    g_hash_table_destroy(visited);
+    g_ptr_array_free(roots, TRUE);
+}
+
+static void
+ns_slot_reconcile_child_change(ns_js *js, ns_node *parent,
+                               ns_node *added, ns_node *removed)
+{
+    (void)added;
+    ns_slot_reconcile_changes(js, parent, NULL, removed);
+}
+
+static void
+ns_slot_reconcile_child_change_arrays(ns_js *js, ns_node *parent,
+                                      GPtrArray *added, GPtrArray *removed)
+{
+    (void)added;
+    ns_slot_reconcile_changes(js, parent, removed, NULL);
+}
+
+static void
+ns_slot_reconcile_attr_change(ns_js *js, ns_node *target,
+                              const char *name, const char *old_value)
+{
+    if (!js || !target || !name) return;
+    if (g_ascii_strcasecmp(name, "slot") != 0 &&
+        !(ns_node_is_slot(target) &&
+          g_ascii_strcasecmp(name, "name") == 0))
+        return;
+    const char *current = ns_element_get_attr(target, name);
+    if (g_strcmp0(old_value, current) == 0) return;
+    ns_slot_reconcile_changes(js, target->parent, NULL, NULL);
+}
+
+static void
+ns_slot_prime_subtree(ns_js *js, ns_node *node, int depth)
+{
+    if (!js || !node || depth >= 512) return;
+    if (ns_node_is_shadow_root(node)) {
+        ns_slot_register_root(js, node);
+        GPtrArray *slots = g_ptr_array_new();
+        ns_slot_collect_tree_slots(node, node, slots, 0);
+        for (guint i = 0; i < slots->len; i++) {
+            ns_node *slot = g_ptr_array_index(slots, i);
+            ns_slot_store_snapshot(js, slot, ns_slot_snapshot(slot));
+        }
+        g_ptr_array_free(slots, TRUE);
+    }
+    for (ns_node *child = node->first_child; child;
+         child = child->next_sibling)
+        ns_slot_prime_subtree(js, child, depth + 1);
+}
+
 static void
 ns_slot_collect_assigned(JSContext *ctx, JSValue arr, const ns_node *slot,
                          gboolean elements_only, gboolean flatten)
@@ -31753,31 +32288,11 @@ static JSValue
 ns_element_get_assignedSlot(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
-    if (!el || !el->parent) return JS_NULL;
-    const ns_node *host = el->parent;
-    ns_node *root = ns_element_find_shadow_child(host);
-    if (!root) return JS_NULL;
+    ns_node *found = ns_node_assigned_slot_node(el);
+    if (!found) return JS_NULL;
+    ns_node *root = ns_slot_root_ancestor(found);
     const char *mode = ns_element_get_attr(root, NS_SHADOW_ATTR);
     if (mode && strcmp(mode, "closed") == 0) return JS_NULL;
-    const char *want = (el->kind == NS_NODE_ELEMENT)
-                         ? ns_element_get_attr(el, "slot") : NULL;
-    if (!want) want = "";
-
-    GQueue stack = G_QUEUE_INIT;
-    g_queue_push_tail(&stack, root);
-    ns_node *found = NULL;
-    while (!g_queue_is_empty(&stack)) {
-        ns_node *n = g_queue_pop_head(&stack);
-        if (ns_node_is_slot(n)) {
-            const char *sn = ns_element_get_attr(n, "name");
-            if (!sn) sn = "";
-            if (strcmp(sn, want) == 0) { found = n; break; }
-        }
-        for (ns_node *c = n->first_child; c; c = c->next_sibling)
-            if (c->kind == NS_NODE_ELEMENT) g_queue_push_tail(&stack, c);
-    }
-    g_queue_clear(&stack);
-    if (!found) return JS_NULL;
     return ns_make_element(ctx, found);
 }
 
@@ -46272,6 +46787,15 @@ ns_js_reset_runtime_state(ns_js *js)
     js->focused_node = NULL;
     ns_storage_free_deferred_events(js);
 
+    if (js->slot_assignments)
+        g_hash_table_remove_all(js->slot_assignments);
+    if (js->slot_roots)
+        g_hash_table_remove_all(js->slot_roots);
+    if (js->signaled_slots) {
+        g_ptr_array_free(js->signaled_slots, TRUE);
+        js->signaled_slots = NULL;
+    }
+
     if (js->pending_scrollend) {
         g_ptr_array_free(js->pending_scrollend, TRUE);
         js->pending_scrollend = NULL;
@@ -46532,6 +47056,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
         ns_doc_id_index_build(doc);
         ns_doc_class_index_build(doc);
         ns_doc_tag_index_build(doc);
+        ns_slot_prime_subtree(js, doc, 0);
     }
 
     ns_debug_log_emit(NS_DLOG_JS, "install", "document %s",
@@ -47117,6 +47642,18 @@ ns_js_free(ns_js *js)
         }
         g_ptr_array_free(js->mutation_observers, TRUE);
         js->mutation_observers = NULL;
+    }
+    if (js->slot_assignments) {
+        g_hash_table_destroy(js->slot_assignments);
+        js->slot_assignments = NULL;
+    }
+    if (js->slot_roots) {
+        g_hash_table_destroy(js->slot_roots);
+        js->slot_roots = NULL;
+    }
+    if (js->signaled_slots) {
+        g_ptr_array_free(js->signaled_slots, TRUE);
+        js->signaled_slots = NULL;
     }
     if (js->intersection_observers) {
         for (guint i = 0; i < js->intersection_observers->len; i++) {

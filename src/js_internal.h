@@ -184,6 +184,9 @@ struct ns_js {
     int           callback_depth;
     GPtrArray    *mutation_observers;
     gboolean      mutation_drain_scheduled;
+    GHashTable   *slot_assignments;
+    GHashTable   *slot_roots;
+    GPtrArray    *signaled_slots;
     GPtrArray    *intersection_observers;
     GPtrArray    *media_query_lists;
     GPtrArray    *resize_observers;
