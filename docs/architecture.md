@@ -1,5 +1,7 @@
 # Northstar architecture
 
+![Northstar architecture diagram](architecture.png)
+
 This document maps the Northstar codebase: the process model, the
 page-load pipeline, and which source file owns which job. It describes the
 **minimalist GPL edition**, which is single-process and hand-written (no
