@@ -10699,6 +10699,22 @@ abs_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
     return find_abs_containing_block_dom(e->dom, styles);
 }
 
+static const ns_style *
+abs_entry_style(const ns_abs_entry *e, GHashTable *styles)
+{
+    return e->pseudo ? e->pseudo : g_hash_table_lookup(styles, e->dom);
+}
+
+static gboolean
+abs_entry_uses_static_axis(const ns_abs_entry *e, GHashTable *styles,
+                           ns_css_prop start, ns_css_prop end)
+{
+    const ns_style *s = abs_entry_style(e, styles);
+    const ns_css_value *sv = s ? s->values[start] : NULL;
+    const ns_css_value *ev = s ? s->values[end] : NULL;
+    return (!sv || length_is_auto(sv)) && (!ev || length_is_auto(ev));
+}
+
 static void
 abs_calc_array_free(gpointer a)
 {
@@ -10713,6 +10729,9 @@ static_abs_y_precompute(ns_box *root, GHashTable *box_map, GHashTable *styles,
                                               NULL, abs_calc_array_free);
     for (guint i = 0; i < g_abs_pending->len; i++) {
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
+        if (!abs_entry_uses_static_axis(&e, styles, NS_CSS_TOP,
+                                        NS_CSS_BOTTOM))
+            continue;
         ns_abs_static *st = (g_abs_static && !e.pseudo)
             ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
         if (st && st->run) continue;
@@ -10963,7 +10982,25 @@ static void
 process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
 {
     if (!g_abs_pending || g_abs_pending->len == 0) return;
-    {
+    static int profile_env = -1;
+    if (profile_env < 0)
+        profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
+    gint64 profile_start = profile_env ? g_get_monotonic_time() : 0;
+    gint64 build_us = 0;
+    gint64 static_us = 0;
+    gint64 flow_us = 0;
+    gint64 position_us = 0;
+    guint static_y_count = 0;
+    for (guint i = 0; i < g_abs_pending->len; i++) {
+        ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
+        ns_abs_static *st = (g_abs_static && !e.pseudo)
+            ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
+        if ((!st || !st->run) &&
+            abs_entry_uses_static_axis(&e, styles, NS_CSS_TOP,
+                                       NS_CSS_BOTTOM))
+            static_y_count++;
+    }
+    if (static_y_count > 0) {
         const ns_node *order_root =
             g_array_index(g_abs_pending, ns_abs_entry, 0).dom;
         while (order_root->parent) order_root = order_root->parent;
@@ -10974,7 +11011,10 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     guint batch_len = g_abs_pending->len;
     double *batch_y = g_new0(double, batch_len);
     gboolean *batch_resolved = g_new0(gboolean, batch_len);
-    static_abs_y_precompute(root, box_map, styles, batch_y, batch_resolved);
+    if (static_y_count > 0)
+        static_abs_y_precompute(root, box_map, styles, batch_y,
+                                batch_resolved);
+    gint64 loop_start = profile_env ? g_get_monotonic_time() : 0;
     for (guint i = 0; i < g_abs_pending->len; i++) {
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
         const ns_node *cb_dom = e.fixed
@@ -10997,6 +11037,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             if (++pp_depth >= NS_LAYOUT_MAX_DEPTH) break;
         if (pp_depth >= NS_LAYOUT_MAX_DEPTH) continue;
 
+        gint64 phase_start = profile_env ? g_get_monotonic_time() : 0;
         ns_box *abox;
         if (e.pseudo) {
             abox = box_new(NS_BOX_BLOCK);
@@ -11011,6 +11052,11 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             g_abs_force_build = FALSE;
         }
         if (!abox) continue;
+        if (profile_env) {
+            gint64 now = g_get_monotonic_time();
+            build_us += now - phase_start;
+            phase_start = now;
+        }
 
         box_append_child(paint_parent, abox);
         abs_box_map_build(box_map, abox);
@@ -11023,19 +11069,37 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         const ns_style *cs = cb->style;
         ns_abs_static *st = (g_abs_static && !e.pseudo)
             ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
-        if (st && st->run) {
-            abox->x = st->run->x + st->rel_x;
-            abox->y = st->run->y + st->rel_y;
-        } else {
-            double static_y = cb->y + cb->margin.top + cb->border.top + cb->padding.top;
-            if (i < batch_len && batch_resolved[i])
-                static_y = batch_y[i];
-            else
-                static_abs_y_walk(cb, e.dom, &static_y);
-            double base_x = cb->x + cb->margin.left + cb->border.left +
-                            cb->padding.left;
-            abox->x = static_abs_x_from_ancestors(cb, e.dom, box_map, base_x);
-            abox->y = static_y;
+        gboolean uses_static_x = abs_entry_uses_static_axis(
+            &e, styles, NS_CSS_LEFT, NS_CSS_RIGHT);
+        gboolean uses_static_y = abs_entry_uses_static_axis(
+            &e, styles, NS_CSS_TOP, NS_CSS_BOTTOM);
+        if (uses_static_x) {
+            if (st && st->run) {
+                abox->x = st->run->x + st->rel_x;
+            } else {
+                double base_x = cb->x + cb->margin.left + cb->border.left +
+                                cb->padding.left;
+                abox->x = static_abs_x_from_ancestors(cb, e.dom, box_map,
+                                                       base_x);
+            }
+        }
+        if (uses_static_y) {
+            if (st && st->run) {
+                abox->y = st->run->y + st->rel_y;
+            } else {
+                double static_y_position = cb->y + cb->margin.top +
+                    cb->border.top + cb->padding.top;
+                if (i < batch_len && batch_resolved[i])
+                    static_y_position = batch_y[i];
+                else
+                    static_abs_y_walk(cb, e.dom, &static_y_position);
+                abox->y = static_y_position;
+            }
+        }
+        if (profile_env) {
+            gint64 now = g_get_monotonic_time();
+            static_us += now - phase_start;
+            phase_start = now;
         }
         const ns_css_value *awv = abox->style
             ? abox->style->values[NS_CSS_WIDTH] : NULL;
@@ -11072,11 +11136,11 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                 abox->definite_height = pre_h;
             }
         }
-        layout_box(abox, layout_w, cs);
         if (!stretch_w && !has_explicit_width && abox->kind == NS_BOX_BLOCK) {
             double fit = estimate_natural_width(abox, avail);
-            if (fit >= 0 && fit < avail) layout_box(abox, fit, cs);
+            if (fit >= 0 && fit < avail) layout_w = fit;
         }
+        layout_box(abox, layout_w, cs);
         if (has_explicit_height) {
             double explicit_h = resolve_height_with_basis(ahv, avail,
                                                           cb_h,
@@ -11115,9 +11179,26 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             layout_box(abox, layout_w, cs);
             abox->content_height = stretched_h;
         }
+        if (profile_env) {
+            gint64 now = g_get_monotonic_time();
+            flow_us += now - phase_start;
+            phase_start = now;
+        }
         apply_position_offsets(abox, avail, cb_h);
         position_absolute_box(abox, cb, cb_is_icb);
+        if (profile_env)
+            position_us += g_get_monotonic_time() - phase_start;
     }
+    if (profile_env)
+        g_printerr("[profile] absolute setup=%.2fms build=%.2fms "
+                   "static=%.2fms flow=%.2fms position=%.2fms other=%.2fms "
+                   "entries=%u static-y=%u\n",
+                   (loop_start - profile_start) / 1000.0,
+                   build_us / 1000.0, static_us / 1000.0,
+                   flow_us / 1000.0, position_us / 1000.0,
+                   (g_get_monotonic_time() - loop_start - build_us -
+                    static_us - flow_us - position_us) / 1000.0,
+                   batch_len, static_y_count);
     g_free(batch_y);
     g_free(batch_resolved);
     g_hash_table_destroy(box_map);
@@ -11176,6 +11257,10 @@ compute_paint_bounds(ns_box *b)
 static ns_box *
 ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
 {
+    static int profile_env = -1;
+    if (profile_env < 0)
+        profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
+    gint64 t0 = profile_env ? g_get_monotonic_time() : 0;
     g_abs_pending = g_array_new(FALSE, FALSE, sizeof(ns_abs_entry));
     g_abs_seen = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_abs_ph_set = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -11185,6 +11270,8 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     g_cq_seen_container = FALSE;
     ns_css_set_container_dims(0, 0);
     ns_box *root = build_block(doc, styles);
+    guint absolute_count = g_abs_pending ? g_abs_pending->len : 0;
+    gint64 t1 = profile_env ? g_get_monotonic_time() : 0;
     if (!root) {
         g_array_free(g_abs_pending, TRUE);
         g_abs_pending = NULL;
@@ -11199,9 +11286,20 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     root->y = 0;
 
     layout_block(root, viewport_width, NULL);
+    gint64 t2 = profile_env ? g_get_monotonic_time() : 0;
     apply_position_offsets(root, viewport_width, root->content_height);
+    gint64 t3 = profile_env ? g_get_monotonic_time() : 0;
     process_absolute_boxes(root, styles, viewport_width);
+    gint64 t4 = profile_env ? g_get_monotonic_time() : 0;
     compute_paint_bounds(root);
+    gint64 t5 = profile_env ? g_get_monotonic_time() : 0;
+
+    if (profile_env)
+        g_printerr("[profile] layout tree=%.2fms flow=%.2fms offsets=%.2fms "
+                   "absolute=%.2fms/%u bounds=%.2fms\n",
+                   (t1 - t0) / 1000.0, (t2 - t1) / 1000.0,
+                   (t3 - t2) / 1000.0, (t4 - t3) / 1000.0,
+                   absolute_count, (t5 - t4) / 1000.0);
 
     g_array_free(g_abs_pending, TRUE);
     g_abs_pending = NULL;

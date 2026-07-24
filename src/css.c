@@ -17539,6 +17539,13 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
         incr_collect_struct_keys(author[i]);
     g_struct_sig = sig;
     g_struct_ready = TRUE;
+    if (g_getenv("NS_PROFILE"))
+        g_printerr("[profile] restyle-index structural=%u ancestors=%u "
+                   "sibling=%u loose=%d nth-last=%d\n",
+                   g_hash_table_size(g_struct_keys),
+                   g_hash_table_size(g_struct_anc_keys),
+                   g_hash_table_size(g_sib_keys), g_struct_loose,
+                   g_struct_nth_last);
 }
 
 static gboolean
