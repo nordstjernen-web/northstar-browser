@@ -61,6 +61,53 @@ xml_read_name(xml_parser *xp)
     return g_strndup(s, (gsize)(xp->p - s));
 }
 
+static gboolean
+xml_qname_valid(const char *name)
+{
+    const char *colon = name ? strchr(name, ':') : NULL;
+    return !colon || (colon != name && colon[1] != '\0' &&
+                      strchr(colon + 1, ':') == NULL);
+}
+
+static const char *
+xml_skip_space_range(const char *p, const char *end)
+{
+    while (p < end && xml_is_space(*p)) p++;
+    return p;
+}
+
+static gboolean
+xml_skip_quoted_range(const char **cursor, const char *end)
+{
+    const char *p = *cursor;
+    if (p >= end || (*p != '"' && *p != '\'')) return FALSE;
+    char quote = *p++;
+    while (p < end && *p != quote) p++;
+    if (p >= end) return FALSE;
+    *cursor = p + 1;
+    return TRUE;
+}
+
+static gboolean
+xml_doctype_tail_valid(const char *p, const char *end)
+{
+    p = xml_skip_space_range(p, end);
+    if (p == end || *p == '[') return TRUE;
+    gboolean public_id = end - p >= 6 && strncmp(p, "PUBLIC", 6) == 0 &&
+                         p + 6 < end && xml_is_space(p[6]);
+    gboolean system_id = end - p >= 6 && strncmp(p, "SYSTEM", 6) == 0 &&
+                         p + 6 < end && xml_is_space(p[6]);
+    if (!public_id && !system_id) return FALSE;
+    p = xml_skip_space_range(p + 6, end);
+    if (!xml_skip_quoted_range(&p, end)) return FALSE;
+    p = xml_skip_space_range(p, end);
+    if (public_id) {
+        if (!xml_skip_quoted_range(&p, end)) return FALSE;
+        p = xml_skip_space_range(p, end);
+    }
+    return p == end || *p == '[';
+}
+
 static void
 xml_append_codepoint(GString *out, guint64 cp)
 {
@@ -271,9 +318,17 @@ xml_skip_misc_and_doctype(xml_parser *xp, ns_node *doc)
                     while (t < e && xml_is_space(*t)) t++;
                     const char *tn = t;
                     while (tn < e && !xml_is_space(*tn) && *tn != '>' && *tn != '[') tn++;
+                    char *doctype_name = tn > t
+                        ? g_strndup(t, (gsize)(tn - t)) : NULL;
+                    if (!doctype_name || !xml_qname_valid(doctype_name) ||
+                        !xml_doctype_tail_valid(tn, e)) {
+                        g_free(doctype_name);
+                        xp->ok = FALSE;
+                        return;
+                    }
                     if (tn > t) {
                         ns_node *dt = ns_node_new_element(NULL);
-                        ns_node_set_name_owned(dt, g_strndup(t, (gsize)(tn - t)));
+                        ns_node_set_name_owned(dt, doctype_name);
                         ns_element_set_attr(dt, "publicId", "");
                         ns_element_set_attr(dt, "systemId", "");
                         dt->kind = NS_NODE_DOCTYPE;
@@ -298,7 +353,11 @@ xml_parse_attributes(xml_parser *xp,
         if (xp->p >= xp->end) { xp->ok = FALSE; return FALSE; }
         if (*xp->p == '>' || *xp->p == '/') return TRUE;
         char *aname = xml_read_name(xp);
-        if (!aname) { xp->ok = FALSE; return FALSE; }
+        if (!aname || !xml_qname_valid(aname)) {
+            g_free(aname);
+            xp->ok = FALSE;
+            return FALSE;
+        }
         xml_skip_space(xp);
         if (xp->p >= xp->end || *xp->p != '=') { g_free(aname); xp->ok = FALSE; return FALSE; }
         xp->p++;
@@ -315,6 +374,25 @@ xml_parse_attributes(xml_parser *xp,
         if (!xp->ok) {
             g_free(aname);
             g_free(aval);
+            return FALSE;
+        }
+
+        gboolean default_decl = strcmp(aname, "xmlns") == 0;
+        gboolean prefix_decl = strncmp(aname, "xmlns:", 6) == 0;
+        const char *decl_prefix = prefix_decl ? aname + 6 : NULL;
+        gboolean invalid_decl =
+            (prefix_decl && strcmp(decl_prefix, "xmlns") == 0) ||
+            (prefix_decl && strcmp(decl_prefix, "xml") == 0 &&
+             strcmp(aval, XML_NS_XML) != 0) ||
+            (prefix_decl && strcmp(decl_prefix, "xml") != 0 &&
+             (!*aval || strcmp(aval, XML_NS_XML) == 0 ||
+              strcmp(aval, XML_NS_XMLNS) == 0)) ||
+            (default_decl && (strcmp(aval, XML_NS_XML) == 0 ||
+                              strcmp(aval, XML_NS_XMLNS) == 0));
+        if (invalid_decl) {
+            g_free(aname);
+            g_free(aval);
+            xp->ok = FALSE;
             return FALSE;
         }
 
@@ -366,7 +444,12 @@ xml_parse_element(xml_parser *xp, ns_node *parent, int depth)
     if (depth > XML_MAX_DEPTH) { xp->ok = FALSE; return FALSE; }
     xp->p++;
     char *qname = xml_read_name(xp);
-    if (!qname) { xp->ok = FALSE; return FALSE; }
+    if (!qname || !xml_qname_valid(qname) ||
+        g_str_has_prefix(qname, "xmlns:")) {
+        g_free(qname);
+        xp->ok = FALSE;
+        return FALSE;
+    }
 
     GPtrArray *anames = g_ptr_array_new_with_free_func(g_free);
     GPtrArray *avals  = g_ptr_array_new_with_free_func(g_free);
@@ -444,6 +527,7 @@ xml_parse_element(xml_parser *xp, ns_node *parent, int depth)
             if (xp->end - xp->p >= 2 && xp->p[1] == '/') {
                 xp->p += 2;
                 char *ename = xml_read_name(xp);
+                if (ename && !xml_qname_valid(ename)) xp->ok = FALSE;
                 xml_skip_space(xp);
                 if (xp->p < xp->end && *xp->p == '>') xp->p++;
                 else xp->ok = FALSE;

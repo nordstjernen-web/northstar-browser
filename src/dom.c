@@ -2431,6 +2431,26 @@ xml_prefix_for_namespace(const ns_node *n, const char *uri)
     return NULL;
 }
 
+static gboolean
+xml_has_namespace_declaration(const ns_node *n)
+{
+    for (const ns_node *cur = n; cur; cur = cur->parent)
+        if (cur->kind == NS_NODE_ELEMENT)
+            for (const ns_attr *a = cur->attrs; a; a = a->next)
+                if (xml_attr_is_namespace_decl(a)) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+xml_has_empty_prefixed_declaration(const ns_node *n)
+{
+    for (const ns_attr *a = n ? n->attrs : NULL; a; a = a->next)
+        if (xml_attr_is_namespace_decl(a) && a->prefix &&
+            strcmp(a->prefix, "xmlns") == 0 && a->value && !*a->value)
+            return TRUE;
+    return FALSE;
+}
+
 static char *
 xml_element_prefix(const ns_node *n)
 {
@@ -2548,9 +2568,10 @@ xml_serialize_node(const ns_node *n, GString *out, const char *parent_ns,
     for (const ns_attr *a = n->attrs; a; a = a->next) {
         if (ns_attr_name_is_internal(a->name)) continue;
         if (xml_attr_is_namespace_decl(a)) {
-            if (!a->prefix) {
-                if (!prefix) continue;
-            }
+            if (!a->prefix &&
+                (emit_element_namespace ||
+                 (!prefix && !xml_has_empty_prefixed_declaration(n))))
+                continue;
             g_string_append_c(out, ' ');
             g_string_append(out, a->name);
             g_string_append(out, "=\"");
@@ -2570,11 +2591,12 @@ xml_serialize_node(const ns_node *n, GString *out, const char *parent_ns,
                 attr_prefix = xml_prefix_for_namespace(n, a->namespace_uri);
                 if (!attr_prefix && a->prefix && *a->prefix) {
                     const char *binding = xml_declared_namespace(n, a->prefix);
-                    if (!binding) {
+                    if (binding && strcmp(binding, a->namespace_uri) == 0) {
+                        attr_prefix = g_strdup(a->prefix);
+                    } else if (!binding &&
+                               !xml_has_namespace_declaration(n)) {
                         attr_prefix = g_strdup(a->prefix);
                         declare_attr_prefix = TRUE;
-                    } else if (strcmp(binding, a->namespace_uri) == 0) {
-                        attr_prefix = g_strdup(a->prefix);
                     }
                 }
                 if (!attr_prefix) {
