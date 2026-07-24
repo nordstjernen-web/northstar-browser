@@ -36724,17 +36724,28 @@ ns_text_selection_invalid_state(JSContext *ctx)
         "The element does not support text selection.");
 }
 
-static char *
+typedef struct ns_text_selection {
+    uint32_t start;
+    uint32_t end;
+    int      direction;
+} ns_text_selection;
+
+static ns_text_selection
 ns_text_selection_snapshot(JSContext *ctx, JSValueConst this_val)
 {
-    uint32_t start = ns_text_selection_position(ctx, this_val, "_selStart");
-    uint32_t end   = ns_text_selection_position(ctx, this_val, "_selEnd");
+    ns_text_selection state = {
+        .start = ns_text_selection_position(ctx, this_val, "_selStart"),
+        .end   = ns_text_selection_position(ctx, this_val, "_selEnd"),
+    };
     JSValue dir_v = JS_GetPropertyStr(ctx, this_val, "_selDir");
     const char *dir = JS_IsString(dir_v) ? JS_ToCString(ctx, dir_v) : NULL;
-    char *out = g_strdup_printf("%u:%u:%s", start, end, dir ? dir : "none");
-    if (dir) JS_FreeCString(ctx, dir);
+    if (dir) {
+        state.direction = strcmp(dir, "forward") == 0 ? 1
+                        : strcmp(dir, "backward") == 0 ? 2 : 0;
+        JS_FreeCString(ctx, dir);
+    }
     JS_FreeValue(ctx, dir_v);
-    return out;
+    return state;
 }
 
 typedef struct ns_select_event_task {
@@ -36769,13 +36780,14 @@ ns_text_selection_fire(gpointer user_data)
 
 static void
 ns_text_selection_dispatch(JSContext *ctx, JSValueConst this_val,
-                           char *previous)
+                           ns_text_selection before)
 {
     ns_js *js = js_from_ctx(ctx);
-    g_autofree char *before = previous;
-    g_autofree char *after = ns_text_selection_snapshot(ctx, this_val);
     if (!js || js->halted || !ns_unwrap_element(this_val)) return;
-    if (before && after && strcmp(before, after) == 0) return;
+    ns_text_selection after = ns_text_selection_snapshot(ctx, this_val);
+    if (before.start == after.start && before.end == after.end &&
+        before.direction == after.direction)
+        return;
     ns_select_event_task *task = g_new0(ns_select_event_task, 1);
     task->js = js;
     task->target = JS_DupValue(ctx, this_val);
@@ -36797,7 +36809,7 @@ ns_element_set_selection_start(JSContext *ctx, JSValueConst this_val,
     position = MIN(position, ns_text_control_value_length(ctx, this_val));
     uint32_t end = ns_text_selection_position(ctx, this_val, "_selEnd");
     if (position > end) end = position;
-    char *previous = ns_text_selection_snapshot(ctx, this_val);
+    ns_text_selection previous = ns_text_selection_snapshot(ctx, this_val);
     JS_SetPropertyStr(ctx, this_val, "_selStart", JS_NewUint32(ctx, position));
     JS_SetPropertyStr(ctx, this_val, "_selEnd", JS_NewUint32(ctx, end));
     ns_text_selection_dispatch(ctx, this_val, previous);
@@ -36816,7 +36828,7 @@ ns_element_set_selection_end(JSContext *ctx, JSValueConst this_val,
     position = MIN(position, ns_text_control_value_length(ctx, this_val));
     uint32_t start = ns_text_selection_position(ctx, this_val, "_selStart");
     if (position < start) start = position;
-    char *previous = ns_text_selection_snapshot(ctx, this_val);
+    ns_text_selection previous = ns_text_selection_snapshot(ctx, this_val);
     JS_SetPropertyStr(ctx, this_val, "_selStart", JS_NewUint32(ctx, start));
     JS_SetPropertyStr(ctx, this_val, "_selEnd", JS_NewUint32(ctx, position));
     ns_text_selection_dispatch(ctx, this_val, previous);
@@ -36832,7 +36844,7 @@ ns_element_set_selection_dir(JSContext *ctx, JSValueConst this_val,
         return ns_text_selection_invalid_state(ctx);
     char *direction = ns_text_selection_direction_arg(ctx, value);
     if (!direction) return JS_EXCEPTION;
-    char *previous = ns_text_selection_snapshot(ctx, this_val);
+    ns_text_selection previous = ns_text_selection_snapshot(ctx, this_val);
     JS_SetPropertyStr(ctx, this_val, "_selDir",
                       JS_NewString(ctx, direction));
     g_free(direction);
@@ -36858,7 +36870,7 @@ ns_input_select(JSContext *ctx, JSValueConst this_val,
     const ns_node *el = ns_unwrap_element(this_val);
     if (!ns_text_selection_applies(el)) return JS_UNDEFINED;
     uint32_t length = ns_text_control_value_length(ctx, this_val);
-    char *previous = ns_text_selection_snapshot(ctx, this_val);
+    ns_text_selection previous = ns_text_selection_snapshot(ctx, this_val);
     ns_text_selection_set_state(ctx, this_val, 0, length, "none");
     ns_text_selection_dispatch(ctx, this_val, previous);
     return JS_UNDEFINED;
@@ -36885,7 +36897,7 @@ ns_input_setSelectionRange(JSContext *ctx, JSValueConst this_val,
     char *direction = argc >= 3
         ? ns_text_selection_direction_arg(ctx, argv[2]) : g_strdup("none");
     if (!direction) return JS_EXCEPTION;
-    char *previous = ns_text_selection_snapshot(ctx, this_val);
+    ns_text_selection previous = ns_text_selection_snapshot(ctx, this_val);
     ns_text_selection_set_state(ctx, this_val, start, end, direction);
     g_free(direction);
     ns_text_selection_dispatch(ctx, this_val, previous);
@@ -37075,7 +37087,7 @@ ns_input_setRangeText(JSContext *ctx, JSValueConst this_val,
     g_free(mode);
     new_start = MIN(new_start, new_length);
     new_end = MIN(new_end, new_length);
-    char *previous = ns_text_selection_snapshot(ctx, this_val);
+    ns_text_selection previous = ns_text_selection_snapshot(ctx, this_val);
     ns_text_selection_set_state(ctx, this_val, new_start, new_end, "none");
     ns_text_selection_dispatch(ctx, this_val, previous);
     return JS_UNDEFINED;
