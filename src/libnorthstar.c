@@ -109,11 +109,11 @@ struct ns_browser {
     char           *remote_ip;
 };
 
-#define NS_LAYOUT_OSC_THRESHOLD 6
+#define NS_LAYOUT_OSC_THRESHOLD 12
 #define NS_LAYOUT_RAPID_US (100 * 1000)
-#define NS_LAYOUT_DAMP_US (700 * 1000)
-#define NS_LAYOUT_EXPENSIVE_US (250 * 1000)
-#define NS_LAYOUT_DAMP_MAX_US (5 * G_USEC_PER_SEC)
+#define NS_LAYOUT_DAMP_US (400 * 1000)
+#define NS_LAYOUT_EXPENSIVE_US (1000 * 1000)
+#define NS_LAYOUT_DAMP_MAX_US (1 * G_USEC_PER_SEC)
 #define NS_CARET_BLINK_US (530 * 1000)
 
 static gboolean
