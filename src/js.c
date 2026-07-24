@@ -42888,6 +42888,7 @@ ns_proto_delete_names(JSContext *ctx, JSValueConst proto,
 
 static const char *const ns_element_only_methods[] = {
     "matches", "closest", "webkitMatchesSelector",
+    "hasAttributes", "attributes", "namespaceURI", "prefix", "localName",
 };
 
 static void
@@ -42925,6 +42926,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
         "attachShadow", "querySelector", "querySelectorAll",
         "getElementsByTagName", "getElementsByClassName",
         "insertAdjacentElement", "insertAdjacentHTML", "insertAdjacentText",
+        "hasAttributes",
         "getBoundingClientRect", "getClientRects", "scrollIntoView",
         "append", "prepend", "before", "after", "remove", "replaceWith",
         "replaceChildren",
@@ -42944,7 +42946,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
         "children", "firstElementChild", "lastElementChild",
         "childElementCount", "nextElementSibling", "previousElementSibling",
         "innerHTML", "outerHTML", "id", "className", "classList",
-        "attributes", "tagName", "localName", "namespaceURI",
+        "attributes", "tagName", "localName", "namespaceURI", "prefix",
         "scrollTop", "scrollLeft", "scrollWidth", "scrollHeight",
         "clientTop", "clientLeft", "clientWidth", "clientHeight",
         "shadowRoot", "assignedSlot",
