@@ -7587,6 +7587,12 @@ estimate_natural_width(const ns_box *b, double cap)
         w = b->content_width > 0 ? b->content_width : 0;
     } else {
         int flow_children = 0;
+        gboolean column_flex = b->style &&
+            style_is_flex_container(b->style) &&
+            (strcmp(keyword_or(b->style, NS_CSS_FLEX_DIRECTION, "row"),
+                    "column") == 0 ||
+             strcmp(keyword_or(b->style, NS_CSS_FLEX_DIRECTION, "row"),
+                    "column-reverse") == 0);
         for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
             if (c->style && c->style != b->style &&
                 style_is_absolute_or_fixed(c->style)) continue;
@@ -7600,7 +7606,11 @@ estimate_natural_width(const ns_box *b, double cap)
                 edges_from_style(c->style, 0, &m, &pd, &bd);
                 cw_child += m.left + m.right;
             }
-            w += cw_child;
+            if (column_flex) {
+                if (cw_child > w) w = cw_child;
+            } else {
+                w += cw_child;
+            }
             flow_children++;
         }
         if (flow_children > 1 && style_is_flex_container(b->style) &&

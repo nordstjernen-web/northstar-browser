@@ -1073,13 +1073,26 @@ ns_js_run_due_timers(ns_js *js)
     GHashTableIter it;
     gpointer k, v;
     g_hash_table_iter_init(&it, js->timers);
-    while (n_due < 8 && g_hash_table_iter_next(&it, &k, &v)) {
+    while (g_hash_table_iter_next(&it, &k, &v)) {
         ns_timer *t = v;
         if (!t->immediate || t->firing || !t->glib_source || t->due_us > now)
             continue;
-        due_ids[n_due++] = t->id;
+        if (n_due < 8) {
+            due_ids[n_due++] = t->id;
+        } else {
+            int max_i = 0;
+            for (int i = 1; i < n_due; i++)
+                if (due_ids[i] > due_ids[max_i]) max_i = i;
+            if (t->id < due_ids[max_i]) due_ids[max_i] = t->id;
+        }
     }
     if (n_due == 0) return;
+    for (int i = 1; i < n_due; i++)
+        for (int j = i; j > 0 && due_ids[j] < due_ids[j - 1]; j--) {
+            int tmp = due_ids[j];
+            due_ids[j] = due_ids[j - 1];
+            due_ids[j - 1] = tmp;
+        }
     js->running_due_timers = TRUE;
     for (int i = 0; i < n_due; i++) {
         ns_timer *t = g_hash_table_lookup(js->timers,
@@ -23339,7 +23352,7 @@ ns_window_requestAnimationFrame(JSContext *ctx, JSValueConst this_val,
     if (!js->raf_pending)
         js->raf_pending = g_array_new(FALSE, FALSE, sizeof(ns_raf_entry));
     ns_raf_entry e = {
-        .id = ++js->next_raf_id,
+        .id = 0x40000000 + (++js->next_raf_id),
         .cb = JS_DupValue(ctx, argv[0]),
         .video_frame = FALSE,
         .frame = js->raf_frame_ctx
@@ -37119,7 +37132,7 @@ ns_media_request_video_frame_callback(JSContext *ctx, JSValueConst this_val,
     if (!js->raf_pending)
         js->raf_pending = g_array_new(FALSE, FALSE, sizeof(ns_raf_entry));
     ns_raf_entry e = {
-        .id = ++js->next_raf_id,
+        .id = 0x40000000 + (++js->next_raf_id),
         .cb = JS_DupValue(ctx, argv[0]),
         .video_frame = TRUE,
         .frame = js->raf_frame_ctx
