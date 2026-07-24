@@ -144,6 +144,7 @@ struct ns_js {
     GPtrArray    *pending_ws;
     GPtrArray    *pending_aborts;
     GPtrArray    *filereader_idles;
+    GPtrArray    *select_event_tasks;
     GHashTable   *local_storage;
     GHashTable   *session_storage;
     char         *local_storage_origin;
