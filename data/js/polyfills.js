@@ -7047,6 +7047,10 @@
         };
 
         NdRange.prototype.createContextualFragment = function (html) {
+            if (arguments.length === 0)
+                throw new TypeError('Range.createContextualFragment requires an argument');
+            if (typeof global.__ndRangeContextualFragment === 'function')
+                return global.__ndRangeContextualFragment.call(this, html);
             var node = this._sc;
             var el = node.nodeType === 1 ? node
                    : isCharData(node) ? node.parentNode : null;

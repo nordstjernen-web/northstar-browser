@@ -39963,35 +39963,29 @@ static JSValue
 ns_range_createContextualFragment(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_NULL;
-    const char *src = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
-    ns_node *frag = ns_node_new_document();
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx,
+            "Range.createContextualFragment requires an argument");
+    const char *src = JS_ToCString(ctx, argv[0]);
+    if (!src) return JS_EXCEPTION;
+    JSValue start_value = JS_GetPropertyStr(ctx, this_val, "startContainer");
+    ns_node *context = ns_unwrap_element_mut(start_value);
+    if (context && context->kind != NS_NODE_ELEMENT)
+        context = context->parent;
+    const char *context_tag = context && context->name ? context->name : "body";
+    if (g_ascii_strcasecmp(context_tag, "html") == 0)
+        context_tag = "body";
+    const ns_node *root = context ? ns_node_root(context) : NULL;
+    gboolean scripting = !root ||
+        !(root->flags & NS_NODE_SCRIPTING_DISABLED);
+    ns_node *frag = ns_html_parse_fragment_with_scripting(
+        context_tag, src, -1, scripting);
+    JS_FreeValue(ctx, start_value);
+    JS_FreeCString(ctx, src);
+    if (!frag) frag = ns_node_new_document();
     frag->flags |= NS_NODE_FRAGMENT;
-    if (src && *src) {
-        ns_node *parsed = ns_html_parse(src, -1);
-        if (parsed) {
-            ns_node *body = NULL;
-            for (ns_node *c = parsed->first_child; c && !body; c = c->next_sibling)
-                if (c->kind == NS_NODE_ELEMENT && c->name &&
-                    g_ascii_strcasecmp(c->name, "html") == 0)
-                    for (ns_node *cc = c->first_child; cc && !body; cc = cc->next_sibling)
-                        if (cc->kind == NS_NODE_ELEMENT && cc->name &&
-                            g_ascii_strcasecmp(cc->name, "body") == 0)
-                            body = cc;
-            if (body) {
-                while (body->first_child) {
-                    ns_node *child = body->first_child;
-                    ns_node_remove(child);
-                    ns_node_own_strings_deep(child);
-                    ns_node_append_child(frag, child);
-                }
-            }
-            ns_node_free(parsed);
-        }
-    }
-    if (src) JS_FreeCString(ctx, src);
     g_hash_table_add(js->orphan_nodes, frag);
     return ns_make_element(ctx, frag);
 }
@@ -47529,6 +47523,8 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
     ns_bind_fn(ctx, global, "__ns_zlib_push",   ns_zlib_push,   2);
     ns_bind_fn(ctx, global, "__ns_zlib_finish", ns_zlib_finish, 1);
     ns_bind_fn(ctx, global, "__ndNativeRange",  ns_native_range, 0);
+    ns_bind_fn(ctx, global, "__ndRangeContextualFragment",
+               ns_range_createContextualFragment, 1);
 
     ns_install_hasinstance(ctx, global);
     ns_install_tostringtag(ctx, global);
@@ -49212,13 +49208,6 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
         g_ptr_array_free(sheets, TRUE);
         return;
     }
-    if (js->eval_depth > 0) {
-        if (!js->deferred_script_roots)
-            js->deferred_script_roots = g_ptr_array_new();
-        g_ptr_array_add(js->deferred_script_roots, root);
-        g_ptr_array_free(sheets, TRUE);
-        return;
-    }
     const char *origin = (js->current_url && *js->current_url)
                        ? js->current_url : "inline";
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
@@ -49235,6 +49224,14 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
             have_external = TRUE;
     }
     ns_ce_upgrade_subtree_all(js, js->current_doc);
+    if (js->eval_depth > 0 && (have_external || sheets->len > 0)) {
+        if (!js->deferred_script_roots)
+            js->deferred_script_roots = g_ptr_array_new();
+        g_ptr_array_add(js->deferred_script_roots, root);
+        g_array_free(tasks, TRUE);
+        g_ptr_array_free(sheets, TRUE);
+        return;
+    }
     if (have_external)
         ns_js_schedule_async_script_root(js, root);
     g_array_free(tasks, TRUE);
