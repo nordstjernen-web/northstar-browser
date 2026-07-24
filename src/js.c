@@ -44381,6 +44381,20 @@ ns_realmdoc_getElementById(JSContext *ctx, JSValueConst this_val,
     return found ? ns_make_element(ctx, found) : JS_NULL;
 }
 
+static JSValue
+ns_realmdoc_get_activeElement(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *root = ns_unwrap_element_mut(this_val);
+    if (!js || !root) return JS_NULL;
+    if (js->focused_node && ns_js_node_contains(root, js->focused_node))
+        return ns_make_element(ctx, js->focused_node);
+    ns_node *body = ns_node_find_first_element(root, "body");
+    return body ? ns_make_element(ctx, body) : JS_NULL;
+}
+
 static JSValue ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv);
 static JSValue ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
@@ -44459,6 +44473,10 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     ns_bind_fn(ctx, w, "importNode",         ns_document_import_node, 2);
     ns_bind_fn(ctx, w, "adoptNode",          ns_document_adopt_node, 1);
     ns_bind_fn(ctx, w, "getElementById",     ns_realmdoc_getElementById, 1);
+    ns_bind_fn(ctx, w, "getSelection",       ns_window_get_selection, 0);
+    ns_bind_fn(ctx, w, "hasFocus",           ns_document_has_focus, 0);
+    ns_synthdoc_define_getter(ctx, w, "activeElement",
+                              ns_realmdoc_get_activeElement);
     JS_DefinePropertyValueStr(ctx, w, "open",
         JS_NewCFunction(ctx, ns_realmdoc_open, "open", 0),
         JS_PROP_C_W_E);
@@ -47498,15 +47516,16 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
 static void
 ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
 {
+    JSContext *ctx = js->module_ctx ? js->module_ctx : js->ctx;
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
     js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
     js->eval_depth++;
-    JSValue fn = ns_js_compile_module_cached(js->ctx, copy, len,
+    JSValue fn = ns_js_compile_module_cached(ctx, copy, len,
                                              origin ? origin : "module");
     js->ignore_destructive_writes++;
-    JSValue v = JS_IsException(fn) ? fn : JS_EvalFunction(js->ctx, fn);
+    JSValue v = JS_IsException(fn) ? fn : JS_EvalFunction(ctx, fn);
     js->ignore_destructive_writes--;
     g_free(copy);
     js->eval_deadline_us = 0;
@@ -47520,21 +47539,21 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
                    (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,
                    origin ? origin : "module");
     if (JS_IsException(v)) {
-        JSValue ex = JS_GetException(js->ctx);
-        const char *msg = JS_ToCString(js->ctx, ex);
+        JSValue ex = JS_GetException(ctx);
+        const char *msg = JS_ToCString(ctx, ex);
         if (msg && js->log_cb) {
             char *line = g_strdup_printf("JS module error in %s: %s",
                                          origin ? origin : "module", msg);
             js->log_cb(line, js->log_user_data);
             g_free(line);
         }
-        if (msg) JS_FreeCString(js->ctx, msg);
-        JS_FreeValue(js->ctx, ex);
+        if (msg) JS_FreeCString(ctx, msg);
+        JS_FreeValue(ctx, ex);
     } else {
-        JSPromiseStateEnum st = JS_PromiseState(js->ctx, v);
+        JSPromiseStateEnum st = JS_PromiseState(ctx, v);
         if (st == JS_PROMISE_REJECTED) {
-            JSValue reason = JS_PromiseResult(js->ctx, v);
-            const char *msg = JS_ToCString(js->ctx, reason);
+            JSValue reason = JS_PromiseResult(ctx, v);
+            const char *msg = JS_ToCString(ctx, reason);
             if (msg && js->log_cb) {
                 char *line = g_strdup_printf(
                     "JS module rejected in %s: %s",
@@ -47542,11 +47561,11 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
                 js->log_cb(line, js->log_user_data);
                 g_free(line);
             }
-            if (msg) JS_FreeCString(js->ctx, msg);
-            JS_FreeValue(js->ctx, reason);
+            if (msg) JS_FreeCString(ctx, msg);
+            JS_FreeValue(ctx, reason);
         }
     }
-    JS_FreeValue(js->ctx, v);
+    JS_FreeValue(ctx, v);
     ns_drain_microtasks(js);
 }
 
@@ -48936,11 +48955,11 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
 
     JSContext *fctx = NULL;
     JSValue fwin = JS_NULL, floc = JS_NULL, fhist = JS_NULL;
-    if (concat->len > 0)
+    if (concat->len > 0 || modules->len > 0)
         fctx = ns_iframe_make_realm_context(js, iframe_doc, origin, sandbox,
                                             &fwin, &floc, &fhist);
 
-    if (concat->len > 0 && fctx && JS_IsObject(fwin)) {
+    if (fctx && JS_IsObject(fwin)) {
         if (JS_IsObject(iframe_doc))
             JS_SetPropertyStr(js->ctx, iframe_doc, "defaultView",
                               JS_DupValue(js->ctx, fwin));
@@ -48950,6 +48969,9 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             JS_SetPropertyStr(js->ctx, iw, "__ndRealmWindow",
                               JS_DupValue(js->ctx, fwin));
         }
+    }
+
+    if (concat->len > 0 && fctx && JS_IsObject(fwin)) {
         js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
         js->eval_depth++;
         JSValue v = JS_Eval(fctx, concat->str, concat->len,
@@ -49042,13 +49064,12 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         JS_FreeValue(js->ctx, fn);
     }
 
-    if (modules->len > 0 && JS_IsObject(fwin)) {
-        JSValue mscope = JS_NewObject(js->ctx);
-        JS_SetPropertyStr(js->ctx, mscope, "window", JS_DupValue(js->ctx, fwin));
-        JS_SetPropertyStr(js->ctx, mscope, "location", JS_DupValue(js->ctx, floc));
-        JS_SetPropertyStr(js->ctx, mscope, "history", JS_DupValue(js->ctx, fhist));
-        ns_js_run_iframe_modules(js, modules, origin, iframe_doc, mscope, sandbox);
-        JS_FreeValue(js->ctx, mscope);
+    if (modules->len > 0 && fctx && JS_IsObject(fwin)) {
+        JSContext *prev_mctx = js->module_ctx;
+        js->module_ctx = fctx;
+        for (guint i = 0; i < modules->len; i++)
+            ns_js_run_script_element(js, g_ptr_array_index(modules, i), origin);
+        js->module_ctx = prev_mctx;
     } else {
         ns_js_run_iframe_modules(js, modules, origin, iframe_doc, iframe_scope,
                                  sandbox);
