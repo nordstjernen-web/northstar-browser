@@ -3226,6 +3226,127 @@ ns_ctx_draw_focus_if_needed(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static const char *const ns_ctx_attr_names[] = {
+    "fillStyle", "strokeStyle", "font", "textAlign", "textBaseline",
+    "direction", "globalAlpha", "globalCompositeOperation",
+    "shadowColor", "shadowBlur", "shadowOffsetX", "shadowOffsetY",
+    "imageSmoothingEnabled", "imageSmoothingQuality",
+    "lineWidth", "lineCap", "lineJoin", "miterLimit", "lineDashOffset",
+    "filter", "letterSpacing", "wordSpacing",
+    "fontKerning", "fontStretch", "fontVariantCaps", "textRendering",
+};
+
+static JSValue
+ns_ctx_attr_slot(JSContext *ctx, JSValueConst this_val, int magic,
+                 JSValueConst *set)
+{
+    if (magic < 0 || magic >= (int)G_N_ELEMENTS(ns_ctx_attr_names))
+        return JS_UNDEFINED;
+    char key[64];
+    g_snprintf(key, sizeof key, "\xff%s", ns_ctx_attr_names[magic]);
+    if (!set) return JS_GetPropertyStr(ctx, this_val, key);
+    JS_SetPropertyStr(ctx, this_val, key, JS_DupValue(ctx, *set));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_ctx_attr_get(JSContext *ctx, JSValueConst this_val, int argc,
+                JSValueConst *argv, int magic)
+{
+    (void)argc; (void)argv;
+    return ns_ctx_attr_slot(ctx, this_val, magic, NULL);
+}
+
+static JSValue
+ns_ctx_attr_set(JSContext *ctx, JSValueConst this_val, int argc,
+                JSValueConst *argv, int magic)
+{
+    if (argc < 1) return JS_UNDEFINED;
+    return ns_ctx_attr_slot(ctx, this_val, magic, &argv[0]);
+}
+
+static JSValue
+ns_ctx_prototype(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "CanvasRenderingContext2D");
+    JSValue proto = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    gboolean fresh = !JS_IsObject(proto);
+    if (fresh) {
+        JS_FreeValue(ctx, proto);
+        proto = JS_NewObject(ctx);
+    }
+    JSValue probe = JS_GetPropertyStr(ctx, proto, "fillRect");
+    gboolean ready = JS_IsFunction(ctx, probe);
+    JS_FreeValue(ctx, probe);
+    if (ready) {
+        JS_FreeValue(ctx, global);
+        return proto;
+    }
+
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_attr_names); i++) {
+        JSAtom atom = JS_NewAtom(ctx, ns_ctx_attr_names[i]);
+        JS_DefinePropertyGetSet(ctx, proto, atom,
+            JS_NewCFunctionMagic(ctx, ns_ctx_attr_get, ns_ctx_attr_names[i],
+                                 0, JS_CFUNC_generic_magic, (int)i),
+            JS_NewCFunctionMagic(ctx, ns_ctx_attr_set, ns_ctx_attr_names[i],
+                                 1, JS_CFUNC_generic_magic, (int)i),
+            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeAtom(ctx, atom);
+    }
+    ns_bind_fn(ctx, proto, "fillRect", ns_ctx_fillRect, 4);
+    ns_bind_fn(ctx, proto, "strokeRect", ns_ctx_strokeRect, 4);
+    ns_bind_fn(ctx, proto, "clearRect", ns_ctx_clearRect, 4);
+    ns_bind_fn(ctx, proto, "beginPath", ns_ctx_beginPath, 0);
+    ns_bind_fn(ctx, proto, "closePath", ns_ctx_closePath, 0);
+    ns_bind_fn(ctx, proto, "moveTo", ns_ctx_moveTo, 2);
+    ns_bind_fn(ctx, proto, "lineTo", ns_ctx_lineTo, 2);
+    ns_bind_fn(ctx, proto, "arc", ns_ctx_arc, 6);
+    ns_bind_fn(ctx, proto, "rect", ns_ctx_rect, 4);
+    ns_bind_fn(ctx, proto, "roundRect", ns_ctx_roundRect, 5);
+    ns_bind_fn(ctx, proto, "fill", ns_ctx_fill, 2);
+    ns_bind_fn(ctx, proto, "stroke", ns_ctx_stroke, 1);
+    ns_bind_fn(ctx, proto, "save", ns_ctx_save, 0);
+    ns_bind_fn(ctx, proto, "restore", ns_ctx_restore, 0);
+    ns_bind_fn(ctx, proto, "reset", ns_ctx_reset, 0);
+    ns_bind_fn(ctx, proto, "translate", ns_ctx_translate, 2);
+    ns_bind_fn(ctx, proto, "scale", ns_ctx_scale, 2);
+    ns_bind_fn(ctx, proto, "rotate", ns_ctx_rotate, 1);
+    ns_bind_fn(ctx, proto, "fillText", ns_ctx_fillText, 4);
+    ns_bind_fn(ctx, proto, "strokeText", ns_ctx_strokeText, 4);
+    ns_bind_fn(ctx, proto, "measureText", ns_ctx_measureText, 1);
+    ns_bind_fn(ctx, proto, "clip", ns_ctx_clip, 2);
+    ns_bind_fn(ctx, proto, "isPointInPath", ns_ctx_isPointInPath, 4);
+    ns_bind_fn(ctx, proto, "isPointInStroke", ns_ctx_isPointInStroke, 3);
+    ns_bind_fn(ctx, proto, "drawImage", ns_ctx_drawImage, 9);
+    ns_bind_fn(ctx, proto, "arcTo", ns_ctx_arcTo, 5);
+    ns_bind_fn(ctx, proto, "quadraticCurveTo", ns_ctx_quadraticCurveTo, 4);
+    ns_bind_fn(ctx, proto, "bezierCurveTo", ns_ctx_bezierCurveTo, 6);
+    ns_bind_fn(ctx, proto, "ellipse", ns_ctx_ellipse, 8);
+    ns_bind_fn(ctx, proto, "setTransform", ns_ctx_setTransform, 6);
+    ns_bind_fn(ctx, proto, "transform", ns_ctx_transform, 6);
+    ns_bind_fn(ctx, proto, "resetTransform", ns_ctx_resetTransform, 0);
+    ns_bind_fn(ctx, proto, "getTransform", ns_ctx_getTransform, 0);
+    ns_bind_fn(ctx, proto, "setLineDash", ns_ctx_setLineDash, 1);
+    ns_bind_fn(ctx, proto, "getLineDash", ns_ctx_getLineDash, 0);
+    ns_bind_fn(ctx, proto, "createLinearGradient", ns_ctx_createLinearGradient, 4);
+    ns_bind_fn(ctx, proto, "createRadialGradient", ns_ctx_createRadialGradient, 6);
+    ns_bind_fn(ctx, proto, "createConicGradient", ns_ctx_createConicGradient, 3);
+    ns_bind_fn(ctx, proto, "createPattern", ns_ctx_createPattern, 2);
+    ns_bind_fn(ctx, proto, "createImageData", ns_ctx_createImageData, 2);
+    ns_bind_fn(ctx, proto, "getImageData", ns_ctx_getImageData, 4);
+    ns_bind_fn(ctx, proto, "putImageData", ns_ctx_putImageData, 7);
+    ns_bind_fn(ctx, proto, "getContextAttributes", ns_ctx_get_attrs, 0);
+    ns_bind_fn(ctx, proto, "isContextLost", ns_ctx_is_context_lost, 0);
+    ns_bind_fn(ctx, proto, "drawFocusIfNeeded", ns_ctx_draw_focus_if_needed, 2);
+    if (fresh)
+        ns_make_interface_object(ctx, global, "CanvasRenderingContext2D", proto);
+    JS_FreeValue(ctx, global);
+    return proto;
+}
+
 JSValue
 ns_element_getContext(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -3270,7 +3391,10 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
         cairo_paint(cr);
         cairo_destroy(cr);
     }
-    JSValue obj = JS_NewObject(ctx);
+    JSValue proto = ns_ctx_prototype(ctx);
+    JSValue obj = JS_IsObject(proto) ? JS_NewObjectProto(ctx, proto)
+                                     : JS_NewObject(ctx);
+    JS_FreeValue(ctx, proto);
     JS_SetPropertyStr(ctx, obj, "_node", JS_DupValue(ctx, this_val));
     JS_SetPropertyStr(ctx, obj, "_attrs", attrs);
     JS_SetPropertyStr(ctx, obj, "canvas", JS_DupValue(ctx, this_val));
@@ -3295,51 +3419,6 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, obj, "direction", JS_NewString(ctx, "ltr"));
     JS_SetPropertyStr(ctx, obj, "filter", JS_NewString(ctx, "none"));
     JS_SetPropertyStr(ctx, obj, "_dashes", JS_NewArray(ctx));
-    ns_bind_fn(ctx, obj, "fillRect",    ns_ctx_fillRect,    4);
-    ns_bind_fn(ctx, obj, "strokeRect",  ns_ctx_strokeRect,  4);
-    ns_bind_fn(ctx, obj, "clearRect",   ns_ctx_clearRect,   4);
-    ns_bind_fn(ctx, obj, "beginPath",   ns_ctx_beginPath,   0);
-    ns_bind_fn(ctx, obj, "closePath",   ns_ctx_closePath,   0);
-    ns_bind_fn(ctx, obj, "moveTo",      ns_ctx_moveTo,      2);
-    ns_bind_fn(ctx, obj, "lineTo",      ns_ctx_lineTo,      2);
-    ns_bind_fn(ctx, obj, "arc",         ns_ctx_arc,         6);
-    ns_bind_fn(ctx, obj, "rect",        ns_ctx_rect,        4);
-    ns_bind_fn(ctx, obj, "roundRect",   ns_ctx_roundRect,   5);
-    ns_bind_fn(ctx, obj, "fill",        ns_ctx_fill,        2);
-    ns_bind_fn(ctx, obj, "stroke",      ns_ctx_stroke,      1);
-    ns_bind_fn(ctx, obj, "save",        ns_ctx_save,        0);
-    ns_bind_fn(ctx, obj, "restore",     ns_ctx_restore,     0);
-    ns_bind_fn(ctx, obj, "reset",       ns_ctx_reset,       0);
-    ns_bind_fn(ctx, obj, "translate",   ns_ctx_translate,   2);
-    ns_bind_fn(ctx, obj, "scale",       ns_ctx_scale,       2);
-    ns_bind_fn(ctx, obj, "rotate",      ns_ctx_rotate,      1);
-    ns_bind_fn(ctx, obj, "fillText",    ns_ctx_fillText,    4);
-    ns_bind_fn(ctx, obj, "strokeText",  ns_ctx_strokeText,  4);
-    ns_bind_fn(ctx, obj, "measureText", ns_ctx_measureText, 1);
-    ns_bind_fn(ctx, obj, "clip",        ns_ctx_clip,        2);
-    ns_bind_fn(ctx, obj, "isPointInPath",   ns_ctx_isPointInPath,   4);
-    ns_bind_fn(ctx, obj, "isPointInStroke", ns_ctx_isPointInStroke, 3);
-    ns_bind_fn(ctx, obj, "drawImage",   ns_ctx_drawImage,   9);
-    ns_bind_fn(ctx, obj, "arcTo",          ns_ctx_arcTo,           5);
-    ns_bind_fn(ctx, obj, "quadraticCurveTo", ns_ctx_quadraticCurveTo, 4);
-    ns_bind_fn(ctx, obj, "bezierCurveTo",  ns_ctx_bezierCurveTo,   6);
-    ns_bind_fn(ctx, obj, "ellipse",        ns_ctx_ellipse,         8);
-    ns_bind_fn(ctx, obj, "setTransform",   ns_ctx_setTransform,    6);
-    ns_bind_fn(ctx, obj, "transform",      ns_ctx_transform,       6);
-    ns_bind_fn(ctx, obj, "resetTransform", ns_ctx_resetTransform,  0);
-    ns_bind_fn(ctx, obj, "getTransform",   ns_ctx_getTransform,    0);
-    ns_bind_fn(ctx, obj, "setLineDash",    ns_ctx_setLineDash,     1);
-    ns_bind_fn(ctx, obj, "getLineDash",    ns_ctx_getLineDash,     0);
-    ns_bind_fn(ctx, obj, "createLinearGradient", ns_ctx_createLinearGradient, 4);
-    ns_bind_fn(ctx, obj, "createRadialGradient", ns_ctx_createRadialGradient, 6);
-    ns_bind_fn(ctx, obj, "createConicGradient", ns_ctx_createConicGradient, 3);
-    ns_bind_fn(ctx, obj, "createPattern",        ns_ctx_createPattern, 2);
-    ns_bind_fn(ctx, obj, "createImageData",      ns_ctx_createImageData, 2);
-    ns_bind_fn(ctx, obj, "getImageData",         ns_ctx_getImageData,    4);
-    ns_bind_fn(ctx, obj, "putImageData",         ns_ctx_putImageData,    7);
-    ns_bind_fn(ctx, obj, "getContextAttributes", ns_ctx_get_attrs,       0);
-    ns_bind_fn(ctx, obj, "isContextLost",        ns_ctx_is_context_lost, 0);
-    ns_bind_fn(ctx, obj, "drawFocusIfNeeded",    ns_ctx_draw_focus_if_needed, 2);
     return obj;
 }
 

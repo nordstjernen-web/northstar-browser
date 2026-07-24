@@ -42541,6 +42541,31 @@ ns_chain_proto(JSContext *ctx, JSValueConst global, const char *child_ctor,
     JS_FreeValue(ctx, proto);
 }
 
+void
+ns_make_interface_object(JSContext *ctx, JSValueConst global,
+                         const char *name, JSValueConst proto)
+{
+    JSValue ctor = JS_NewCFunction2(ctx, ns_illegal_constructor, name, 0,
+                                    JS_CFUNC_constructor_or_func, 0);
+    JS_DefinePropertyValueStr(ctx, ctor, "prototype",
+                              JS_DupValue(ctx, proto), 0);
+    JS_DefinePropertyValueStr(ctx, (JSValue)proto, "constructor",
+                              JS_DupValue(ctx, ctor),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JSValue sym = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue tst = JS_GetPropertyStr(ctx, sym, "toStringTag");
+    JSAtom tag = JS_ValueToAtom(ctx, tst);
+    if (tag != JS_ATOM_NULL) {
+        JS_DefinePropertyValue(ctx, (JSValue)proto, tag,
+                               JS_NewString(ctx, name), JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, tag);
+    }
+    JS_FreeValue(ctx, tst);
+    JS_FreeValue(ctx, sym);
+    JS_DefinePropertyValueStr(ctx, (JSValue)global, name, ctor,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+}
+
 static gboolean
 ns_value_is_interface_object(JSContext *ctx, JSValueConst v, JSAtom proto_atom)
 {

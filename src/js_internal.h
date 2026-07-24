@@ -637,6 +637,9 @@ ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
 void ns_canvas_register_image_bitmap_class(JSRuntime *rt);
 void ns_canvas_register_path2d_class(JSRuntime *rt);
 
+void ns_make_interface_object(JSContext *ctx, JSValueConst global,
+                              const char *name, JSValueConst proto);
+
 /* Performance API (js_perf.c) and the js.c helpers it shares. */
 void ns_bind_fn_if_not_callable(JSContext *ctx, JSValueConst obj, const char *name,
                                 JSCFunction *fn, int argc);
