@@ -3200,11 +3200,21 @@ static const char *const ns_body_window_reflected_handlers[] = {
     "onunhandledrejection", "onunload",
 };
 
+static gboolean
+ns_body_has_browsing_context(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue owner = JS_GetPropertyStr(ctx, this_val, "__ndOwnerDoc");
+    gboolean foreign = JS_IsObject(owner);
+    JS_FreeValue(ctx, owner);
+    return !foreign;
+}
+
 static JSValue
 ns_body_reflected_get(JSContext *ctx, JSValueConst this_val, int argc,
                       JSValueConst *argv, int magic, JSValueConst *func_data)
 {
-    (void)this_val; (void)argc; (void)argv; (void)magic;
+    (void)argc; (void)argv; (void)magic;
+    if (!ns_body_has_browsing_context(ctx, this_val)) return JS_NULL;
     const char *name = JS_ToCString(ctx, func_data[0]);
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue v = name ? JS_GetPropertyStr(ctx, global, name) : JS_NULL;
@@ -3217,7 +3227,8 @@ static JSValue
 ns_body_reflected_set(JSContext *ctx, JSValueConst this_val, int argc,
                       JSValueConst *argv, int magic, JSValueConst *func_data)
 {
-    (void)this_val; (void)magic;
+    (void)magic;
+    if (!ns_body_has_browsing_context(ctx, this_val)) return JS_UNDEFINED;
     const char *name = JS_ToCString(ctx, func_data[0]);
     JSValue global = JS_GetGlobalObject(ctx);
     if (name) {
