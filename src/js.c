@@ -25337,6 +25337,9 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         (strcmp(type, "load") == 0 || strcmp(type, "error") == 0);
     if (resource_load)
         window_in_path = FALSE;
+    gboolean window_is_target = !bubbles && window_in_path &&
+        target == (const ns_node *)js->current_doc &&
+        (strcmp(type, "load") == 0 || strcmp(type, "unload") == 0);
 
     gboolean stopped = ns_event_propagation_is_stopped(js, event);
     if (window_in_path && !stopped)
@@ -25368,7 +25371,8 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
                                                             gboolean, i),
                                               &fired);
     }
-    if (window_in_path && !stopped && bubbles && bubble_len == path->len)
+    if (window_in_path && !stopped && (bubbles || window_is_target) &&
+        bubble_len == path->len)
         stopped = ns_invoke_window_listeners(js, target, type, event, FALSE,
                                              &fired);
     g_ptr_array_free(path, TRUE);
@@ -25886,8 +25890,15 @@ ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
             JS_SetPropertyStr(js->ctx, event, "composed", JS_TRUE);
             break;
         }
-    if (g_ascii_strcasecmp(type, "invalid") == 0)
-        JS_SetPropertyStr(js->ctx, event, "bubbles", JS_FALSE);
+    static const char *const non_bubbling_types[] = {
+        "abort", "error", "invalid", "load", "unload",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(non_bubbling_types); i++)
+        if (g_ascii_strcasecmp(type, non_bubbling_types[i]) == 0) {
+            JS_SetPropertyStr(js->ctx, event, "bubbles", JS_FALSE);
+            JS_SetPropertyStr(js->ctx, event, "cancelable", JS_FALSE);
+            break;
+        }
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
 }
 
@@ -50494,8 +50505,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 JS_FreeValue(js->ctx, rloc);
             JS_FreeValue(js->ctx, win);
         }
-        if (iframe->js_wrapper && JS_IsObject(realm_doc)) {
-            JSValue iw = JS_MKPTR(JS_TAG_OBJECT, iframe->js_wrapper);
+        if (JS_IsObject(realm_doc)) {
+            JSValue iw = ns_make_element(js->ctx, iframe);
             JS_SetPropertyStr(js->ctx, iw, "__ndRealmDoc",
                               JS_DupValue(js->ctx, realm_doc));
             if (JS_IsObject(realm_scope)) {
@@ -50505,6 +50516,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                                       JS_DupValue(js->ctx, win));
                 JS_FreeValue(js->ctx, win);
             }
+            JS_FreeValue(js->ctx, iw);
         }
 
         char *prev_url = js->current_url;
