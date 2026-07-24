@@ -31024,11 +31024,25 @@ ns_element_get_ownerDocument(JSContext *ctx, JSValueConst this_val)
     if (el) {
         if (el->kind == NS_NODE_DOCUMENT && !(el->flags & NS_NODE_FRAGMENT))
             return JS_NULL;
+        const ns_node *doc_anc = NULL;
+        for (const ns_node *p = el->parent; p; p = p->parent)
+            if (p->kind == NS_NODE_DOCUMENT && !(p->flags & NS_NODE_FRAGMENT)) {
+                doc_anc = p;
+                break;
+            }
+        if (doc_anc && doc_anc != js->current_doc) {
+            const ns_node *host = doc_anc->parent;
+            if (host && host->js_wrapper &&
+                (ns_node_is_element_named(host, "iframe") ||
+                 ns_node_is_element_named(host, "object"))) {
+                JSValue hw = JS_MKPTR(JS_TAG_OBJECT, host->js_wrapper);
+                JSValue realm = JS_GetPropertyStr(ctx, hw, "__ndRealmDoc");
+                if (JS_IsObject(realm)) return realm;
+                JS_FreeValue(ctx, realm);
+            }
+            return ns_make_element(ctx, doc_anc);
+        }
         const ns_node *root = ns_node_root(el);
-        if (root && root != js->current_doc &&
-            root->kind == NS_NODE_DOCUMENT &&
-            !(root->flags & NS_NODE_FRAGMENT))
-            return ns_make_element(ctx, root);
         if (root && root != js->current_doc) {
             JSValue own = JS_GetPropertyStr(ctx, this_val, "__ndOwnerDoc");
             if (JS_IsObject(own)) return own;
