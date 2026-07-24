@@ -43,6 +43,15 @@
         } catch (e) { proto[name] = fn; }
     }
 
+    function defineConstant(target, name, value) {
+        try {
+            Object.defineProperty(target, name, {
+                value: value, writable: false, configurable: false,
+                enumerable: true
+            });
+        } catch (e) { target[name] = value; }
+    }
+
     function encodeKV(s) {
         return encodeURIComponent(String(s == null ? '' : s)).replace(/%20/g, '+');
     }
@@ -7091,8 +7100,8 @@
             END_TO_END: 2, END_TO_START: 3
         };
         for (var rk in rangeConstants) {
-            NdRange[rk] = rangeConstants[rk];
-            NdRange.prototype[rk] = rangeConstants[rk];
+            defineConstant(NdRange, rk, rangeConstants[rk]);
+            defineConstant(NdRange.prototype, rk, rangeConstants[rk]);
         }
 
         (function wrapCharacterDataMutations() {

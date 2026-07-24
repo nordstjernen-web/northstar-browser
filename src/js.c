@@ -31919,36 +31919,6 @@ ns_shadow_root_get_active_element(JSContext *ctx, JSValueConst this_val,
     return ns_make_element(ctx, js->focused_node);
 }
 
-static JSValue
-ns_element_get_sheet(JSContext *ctx, JSValueConst this_val)
-{
-    ns_js *js = js_from_ctx(ctx);
-    const ns_node *element = ns_unwrap_element(this_val);
-    if (!js || !js->current_doc ||
-        !ns_node_is_element_named(element, "style") ||
-        !ns_node_ancestor_or_self(element, js->current_doc))
-        return JS_NULL;
-    JSValue cached = JS_GetPropertyStr(ctx, this_val, "\xffsheet");
-    if (JS_IsObject(cached)) return cached;
-    JS_FreeValue(ctx, cached);
-
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, "CSSStyleSheet");
-    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
-    JSValue sheet = JS_IsObject(proto) ? JS_NewObjectProto(ctx, proto)
-                                       : JS_NewObject(ctx);
-    JS_FreeValue(ctx, proto);
-    JS_FreeValue(ctx, ctor);
-    JS_FreeValue(ctx, global);
-    JS_SetPropertyStr(ctx, sheet, "ownerNode", JS_DupValue(ctx, this_val));
-    JS_SetPropertyStr(ctx, sheet, "href", JS_NULL);
-    JS_SetPropertyStr(ctx, sheet, "disabled", JS_FALSE);
-    JS_SetPropertyStr(ctx, sheet, "cssRules", JS_NewArray(ctx));
-    JS_DefinePropertyValueStr(ctx, this_val, "\xffsheet",
-                              JS_DupValue(ctx, sheet), 0);
-    return sheet;
-}
-
 static void
 ns_collect_style_sheets(JSContext *ctx, const ns_node *root,
                         const ns_node *node, JSValue list, uint32_t *index,
@@ -31958,7 +31928,7 @@ ns_collect_style_sheets(JSContext *ctx, const ns_node *root,
     if (node != root && ns_node_is_shadow_root(node)) return;
     if (ns_node_is_element_named(node, "style")) {
         JSValue wrapper = ns_make_element(ctx, node);
-        JSValue sheet = ns_element_get_sheet(ctx, wrapper);
+        JSValue sheet = JS_GetPropertyStr(ctx, wrapper, "sheet");
         JS_FreeValue(ctx, wrapper);
         if (JS_IsObject(sheet))
             JS_SetPropertyUint32(ctx, list, (*index)++, sheet);
@@ -42571,6 +42541,84 @@ ns_chain_proto(JSContext *ctx, JSValueConst global, const char *child_ctor,
     JS_FreeValue(ctx, proto);
 }
 
+static gboolean
+ns_value_is_interface_object(JSContext *ctx, JSValueConst v, JSAtom proto_atom)
+{
+    if (!JS_IsFunction(ctx, v)) return FALSE;
+    JSValue proto = JS_GetProperty(ctx, v, proto_atom);
+    gboolean ok = FALSE;
+    if (JS_IsObject(proto)) {
+        JSValue ctor = JS_GetPropertyStr(ctx, proto, "constructor");
+        ok = JS_VALUE_GET_PTR(ctor) == JS_VALUE_GET_PTR(v);
+        JS_FreeValue(ctx, ctor);
+    }
+    JS_FreeValue(ctx, proto);
+    return ok;
+}
+
+static void
+ns_expose_interface_members(JSContext *ctx, JSValueConst proto)
+{
+    JSPropertyEnum *tab = NULL;
+    uint32_t len = 0;
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, proto, JS_GPN_STRING_MASK) != 0)
+        return;
+    for (uint32_t i = 0; i < len; i++) {
+        JSPropertyDescriptor d;
+        if (JS_GetOwnProperty(ctx, &d, proto, tab[i].atom) > 0) {
+            const char *name = JS_AtomToCString(ctx, tab[i].atom);
+            gboolean internal = !name || strcmp(name, "constructor") == 0 ||
+                                (name[0] == '_' && name[1] == '_');
+            gboolean member = (d.flags & JS_PROP_GETSET) ||
+                              JS_IsFunction(ctx, d.value);
+            if (!internal && member && (d.flags & JS_PROP_CONFIGURABLE) &&
+                !(d.flags & JS_PROP_ENUMERABLE)) {
+                if (d.flags & JS_PROP_GETSET)
+                    JS_DefinePropertyGetSet(ctx, proto, tab[i].atom,
+                                            JS_DupValue(ctx, d.getter),
+                                            JS_DupValue(ctx, d.setter),
+                                            d.flags | JS_PROP_ENUMERABLE);
+                else
+                    JS_DefinePropertyValue(ctx, proto, tab[i].atom,
+                                           JS_DupValue(ctx, d.value),
+                                           d.flags | JS_PROP_ENUMERABLE);
+            }
+            if (name) JS_FreeCString(ctx, name);
+            JS_FreeValue(ctx, d.value);
+            JS_FreeValue(ctx, d.getter);
+            JS_FreeValue(ctx, d.setter);
+        }
+        JS_FreeAtom(ctx, tab[i].atom);
+    }
+    js_free(ctx, tab);
+}
+
+static void
+ns_seal_interface_objects(JSContext *ctx, JSValueConst global)
+{
+    JSPropertyEnum *tab = NULL;
+    uint32_t len = 0;
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, global,
+                               JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0)
+        return;
+    JSAtom proto_atom = JS_NewAtom(ctx, "prototype");
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue v = JS_GetProperty(ctx, global, tab[i].atom);
+        if (ns_value_is_interface_object(ctx, v, proto_atom)) {
+            JSValue proto = JS_GetProperty(ctx, v, proto_atom);
+            ns_expose_interface_members(ctx, proto);
+            JS_DefinePropertyValue(ctx, v, proto_atom, proto, 0);
+            JS_DefinePropertyValue(ctx, global, tab[i].atom,
+                                   JS_DupValue(ctx, v),
+                                   JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        }
+        JS_FreeValue(ctx, v);
+        JS_FreeAtom(ctx, tab[i].atom);
+    }
+    JS_FreeAtom(ctx, proto_atom);
+    js_free(ctx, tab);
+}
+
 static void
 ns_install_tostringtag(JSContext *ctx, JSValueConst global)
 {
@@ -42736,7 +42784,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
         if (JS_IsFunction(ctx, fn))
             JS_DefinePropertyValueStr(ctx, elem_proto,
                                       element_spec_methods[i], fn,
-                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+                                      JS_PROP_C_W_E);
         else
             JS_FreeValue(ctx, fn);
     }
@@ -42758,11 +42806,11 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
             if (d.flags & JS_PROP_GETSET)
                 JS_DefinePropertyGetSet(ctx, elem_proto, atom,
                                         d.getter, d.setter,
-                                        JS_PROP_CONFIGURABLE);
+                                        JS_PROP_CONFIGURABLE |
+                                        JS_PROP_ENUMERABLE);
             else
                 JS_DefinePropertyValue(ctx, elem_proto, atom, d.value,
-                                       JS_PROP_WRITABLE |
-                                       JS_PROP_CONFIGURABLE);
+                                       JS_PROP_C_W_E);
         }
         JS_FreeAtom(ctx, atom);
     }
@@ -42933,14 +42981,6 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
             g_hash_table_insert(js->per_tag_protos,
                                 g_strdup(tag_props[i].tag), entry);
         }
-    }
-    static const char *const sheet_tags[] = { "style", "link" };
-    for (gsize i = 0; i < G_N_ELEMENTS(sheet_tags); i++) {
-        JSValue *slot = g_hash_table_lookup(js->per_tag_protos, sheet_tags[i]);
-        if (slot)
-            ns_proto_define_getset(ctx, *slot, "sheet",
-                                   ns_element_get_sheet,
-                                   ns_element_noop_set);
     }
     if (JS_IsObject(chardata_proto))
         ns_proto_define_getset(ctx, chardata_proto, "data",
@@ -43976,10 +44016,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             JSValue proto = JS_GetPropertyStr(ctx, ev_carrier, "prototype");
             for (gsize i = 0; i < G_N_ELEMENTS(evph); i++) {
                 JS_DefinePropertyValueStr(ctx, ev_carrier, evph[i].name,
-                    JS_NewInt32(ctx, evph[i].value), 0);
+                    JS_NewInt32(ctx, evph[i].value), JS_PROP_ENUMERABLE);
                 if (JS_IsObject(proto))
                     JS_DefinePropertyValueStr(ctx, proto, evph[i].name,
-                        JS_NewInt32(ctx, evph[i].value), 0);
+                        JS_NewInt32(ctx, evph[i].value), JS_PROP_ENUMERABLE);
             }
             JS_FreeValue(ctx, proto);
         }
@@ -47591,6 +47631,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
         JSValue doc_val = JS_GetPropertyStr(ctx, g, "document");
         ns_document_lift_methods_to_proto(ctx, doc_val);
         JS_FreeValue(ctx, doc_val);
+        ns_seal_interface_objects(ctx, g);
         JS_FreeValue(ctx, g);
     }
 }
