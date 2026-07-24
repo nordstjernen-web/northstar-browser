@@ -1616,11 +1616,26 @@ ns_wasm_link_import_symbols(JSContext *ctx, ns_wasm_module *mod)
     return TRUE;
 }
 
+static void
+ns_wasm_freeze(JSContext *ctx, JSValueConst obj)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue object_ctor = JS_GetPropertyStr(ctx, global, "Object");
+    JSValue freeze = JS_GetPropertyStr(ctx, object_ctor, "freeze");
+    if (JS_IsFunction(ctx, freeze)) {
+        JSValueConst args[1] = { obj };
+        JS_FreeValue(ctx, JS_Call(ctx, freeze, object_ctor, 1, args));
+    }
+    JS_FreeValue(ctx, freeze);
+    JS_FreeValue(ctx, object_ctor);
+    JS_FreeValue(ctx, global);
+}
+
 static JSValue
 ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
                       ns_wasm_instance *wi, ns_wasm_module *mod)
 {
-    JSValue exports = JS_NewObject(ctx);
+    JSValue exports = JS_NewObjectProto(ctx, JS_NULL);
     if (JS_IsException(exports))
         return exports;
     int32_t n = wasm_runtime_get_export_count(mod->module);
@@ -1713,6 +1728,7 @@ ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
             break;
         }
     }
+    ns_wasm_freeze(ctx, exports);
     return exports;
 }
 
