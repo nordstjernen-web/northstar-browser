@@ -3594,7 +3594,11 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
         return JS_FALSE;
     }
     const ns_node *n = ns_unwrap_element(argv[0]);
-    if (!n) return JS_FALSE;
+    if (!n) {
+        if (d->special == NS_INSTOF_NODE)
+            return ns_ctor_ordinary_has_instance(ctx, this_val, argv[0]);
+        return JS_FALSE;
+    }
     switch (d->special) {
     case NS_INSTOF_NODE:
         return JS_NewBool(ctx, TRUE);
@@ -26372,6 +26376,28 @@ ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
 }
 
+static gboolean
+ns_value_is_attr_node(JSContext *ctx, JSValueConst v)
+{
+    if (!JS_IsObject(v)) return FALSE;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "Attr");
+    gboolean is_attr = JS_IsObject(ctor) &&
+                       JS_IsInstanceOf(ctx, v, ctor) > 0;
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+    return is_attr;
+}
+
+static JSValue
+ns_throw_not_a_node(JSContext *ctx, JSValueConst v, const char *what)
+{
+    if (ns_value_is_attr_node(ctx, v))
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "an Attr cannot be inserted into a node");
+    return JS_ThrowTypeError(ctx, "%s is not an object / Node", what);
+}
+
 static JSValue
 ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -26381,7 +26407,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
         return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
     ns_node *child = ns_unwrap_element_mut(argv[0]);
     if (!child)
-        return JS_ThrowTypeError(ctx, "Argument 1 is not an object / Node");
+        return ns_throw_not_a_node(ctx, argv[0], "Argument 1");
     {
         JSValue verr = ns_pre_insert_validity(ctx, parent, child, NULL, TRUE);
         if (JS_IsException(verr)) return verr;
@@ -26454,7 +26480,7 @@ ns_element_removeChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
         return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
     ns_node *child = ns_unwrap_element_mut(argv[0]);
     if (!child)
-        return JS_ThrowTypeError(ctx, "Argument 1 is not an object / Node");
+        return ns_throw_not_a_node(ctx, argv[0], "Argument 1");
     if (child->parent != parent)
         return ns_throw_dom_exception(ctx, "NotFoundError", 8,
             "the node to be removed is not a child of this node");
@@ -26594,11 +26620,11 @@ ns_element_moveBefore(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "2 arguments required, but fewer present");
     ns_node *node = ns_unwrap_element_mut(argv[0]);
     if (!node)
-        return JS_ThrowTypeError(ctx, "Argument 1 is not an object / Node");
+        return ns_throw_not_a_node(ctx, argv[0], "Argument 1");
     gboolean child_is_null = JS_IsNull(argv[1]) || JS_IsUndefined(argv[1]);
     ns_node *child = child_is_null ? NULL : ns_unwrap_element_mut(argv[1]);
     if (!child_is_null && !child)
-        return JS_ThrowTypeError(ctx, "Argument 2 is not an object / Node");
+        return ns_throw_not_a_node(ctx, argv[1], "Argument 2");
 
     if (ns_node_root(node) != ns_node_root(parent))
         return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
@@ -26656,11 +26682,11 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "2 arguments required, but fewer present");
     ns_node *newc = ns_unwrap_element_mut(argv[0]);
     if (!newc)
-        return JS_ThrowTypeError(ctx, "Argument 1 is not an object / Node");
+        return ns_throw_not_a_node(ctx, argv[0], "Argument 1");
     gboolean child_is_null = JS_IsNull(argv[1]) || JS_IsUndefined(argv[1]);
     ns_node *ref_arg = child_is_null ? NULL : ns_unwrap_element_mut(argv[1]);
     if (!child_is_null && !ref_arg)
-        return JS_ThrowTypeError(ctx, "Argument 2 is not an object / Node");
+        return ns_throw_not_a_node(ctx, argv[1], "Argument 2");
     {
         JSValue verr = ns_pre_insert_validity(ctx, parent, newc, ref_arg,
                                               child_is_null);
@@ -26803,7 +26829,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     ns_node *newc = ns_unwrap_element_mut(argv[0]);
     ns_node *oldc = ns_unwrap_element_mut(argv[1]);
     if (!newc || !oldc)
-        return JS_ThrowTypeError(ctx, "Argument is not an object / Node");
+        return ns_throw_not_a_node(ctx, argv[0], "Argument");
     {
         JSValue verr = ns_pre_replace_validity(ctx, parent, newc, oldc);
         if (JS_IsException(verr)) return verr;
@@ -43015,6 +43041,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
                                ns_element_noop_set);
     if (JS_IsObject(doctype_proto)) JS_SetPrototype(ctx, doctype_proto, node_proto);
     if (JS_IsObject(docfrag_proto)) JS_SetPrototype(ctx, docfrag_proto, node_proto);
+    ns_chain_proto(ctx, global, "Attr", node_proto);
     JSValue shadow_proto = ns_proto_of(ctx, global, "ShadowRoot");
     if (JS_IsObject(shadow_proto) && JS_IsObject(docfrag_proto))
         JS_SetPrototype(ctx, shadow_proto, docfrag_proto);
