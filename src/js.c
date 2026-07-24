@@ -26873,6 +26873,8 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
         ? ((self->parent && self->parent->kind == NS_NODE_ELEMENT)
            ? self->parent->name : NULL)
         : self->name;
+    if (ctx_tag && g_ascii_strcasecmp(ctx_tag, "html") == 0)
+        ctx_tag = "body";
     const ns_node *root = ns_node_root(self);
     gboolean scripting = !root ||
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
