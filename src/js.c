@@ -42283,12 +42283,31 @@ ns_element_on_get(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     if (magic < 0 || magic >= (int)G_N_ELEMENTS(ns_event_handler_names))
         return JS_NULL;
+    const char *name = ns_event_handler_names[magic];
     char key[48];
-    g_snprintf(key, sizeof key, "\xff%s", ns_event_handler_names[magic]);
+    g_snprintf(key, sizeof key, "\xff%s", name);
     JSValue v = JS_GetPropertyStr(ctx, this_val, key);
     if (JS_IsFunction(ctx, v)) return v;
+    gboolean cleared = JS_IsNull(v);
     JS_FreeValue(ctx, v);
-    return JS_NULL;
+    if (cleared) return JS_NULL;
+    const ns_node *el = ns_unwrap_element(this_val);
+    const char *body = el ? ns_element_get_attr(el, name) : NULL;
+    if (!body) return JS_NULL;
+    ns_js *js = js_from_ctx(ctx);
+    if (js && !ns_csp_inline_event_handler_allowed(js->csp)) return JS_NULL;
+    GString *src = g_string_new("(function(event){\n");
+    g_string_append(src, body);
+    g_string_append(src, "\n})");
+    JSValue fn = JS_Eval(ctx, src->str, src->len, "<inline>",
+                         JS_EVAL_TYPE_GLOBAL);
+    g_string_free(src, TRUE);
+    if (JS_IsException(fn)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return JS_NULL;
+    }
+    JS_SetPropertyStr(ctx, this_val, key, JS_DupValue(ctx, fn));
+    return fn;
 }
 
 static JSValue
