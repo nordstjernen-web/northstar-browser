@@ -14,7 +14,7 @@
 #include "image.h"
 #include "security.h"
 #include "about_logo_gif.h"
-#include "about_splash_png.h"
+#include "about_splash_gif.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -2511,12 +2511,12 @@ about_logo_markup(void)
 static char *
 about_splash_markup(void)
 {
-    char *uri = g_strconcat("data:image/png;base64,", about_splash_png_b64, NULL);
+    char *uri = g_strconcat("data:image/gif;base64,", about_splash_gif_b64, NULL);
     char *markup = g_strdup_printf(
         "<img class=\"splash\" src=\"%s\" "
         "alt=\"Northstar " NS_VERSION " splash\" "
         "style=\"display:block;width:auto;max-width:96%%;height:auto;"
-        "margin:2px auto 36px;border-radius:14px;\">",
+        "margin:2px auto 36px;border-radius:4px;\">",
         uri);
     g_free(uri);
     return markup;
