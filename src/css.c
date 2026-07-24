@@ -7783,6 +7783,36 @@ ns_var_map_lookup(const ns_var_map *m, const char *name)
     return NULL;
 }
 
+static gint
+ns_var_name_compare(gconstpointer a, gconstpointer b)
+{
+    const char *left = *(const char *const *)a;
+    const char *right = *(const char *const *)b;
+    return strcmp(left, right);
+}
+
+GPtrArray *
+ns_var_map_names(const ns_var_map *m)
+{
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    GHashTable *seen = g_hash_table_new(g_str_hash, g_str_equal);
+    for (; m; m = m->parent) {
+        if (!m->own) continue;
+        GHashTableIter iter;
+        gpointer key, value;
+        g_hash_table_iter_init(&iter, m->own);
+        while (g_hash_table_iter_next(&iter, &key, &value)) {
+            if (g_hash_table_contains(seen, key)) continue;
+            g_hash_table_add(seen, key);
+            if (value && g_ascii_strcasecmp(value, "initial") != 0)
+                g_ptr_array_add(names, g_strdup(key));
+        }
+    }
+    g_hash_table_destroy(seen);
+    g_ptr_array_sort(names, ns_var_name_compare);
+    return names;
+}
+
 #define NS_CSS_VAR_EXPAND_MAX   ((gsize)1024 * 1024)
 #define NS_CSS_VAR_EXPAND_CALLS ((guint)100000)
 
@@ -15242,7 +15272,11 @@ ns_css_value_serialize(const ns_css_value *v)
             return g_strdup_printf("%gpx", v->u.calc.px);
         if (v->u.calc.px == 0)
             return g_strdup_printf("%g%%", v->u.calc.pct);
-        return g_strdup_printf("calc(%gpx + %g%%)", v->u.calc.px, v->u.calc.pct);
+        if (v->u.calc.px < 0)
+            return g_strdup_printf("calc(%g%% - %gpx)", v->u.calc.pct,
+                                   -v->u.calc.px);
+        return g_strdup_printf("calc(%g%% + %gpx)", v->u.calc.pct,
+                               v->u.calc.px);
     case NS_CSS_V_SHADOW: {
         GString *s = g_string_new(NULL);
         for (int i = 0; i < v->u.shadow.n; i++) {

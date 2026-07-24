@@ -14315,11 +14315,20 @@ ns_css_computed_count(void)
 static JSValue
 ns_computed_item(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)this_val;
     int32_t i = 0;
     if (argc >= 1) JS_ToInt32(ctx, &i, argv[0]);
-    if (i < 0 || i >= ns_css_computed_count())
+    JSValue length_value = JS_GetPropertyStr(ctx, this_val, "length");
+    int32_t length = 0;
+    JS_ToInt32(ctx, &length, length_value);
+    JS_FreeValue(ctx, length_value);
+    if (i < 0 || i >= length)
         return JS_NewString(ctx, "");
+    if (i >= ns_css_computed_count()) {
+        JSValue value = JS_GetPropertyUint32(ctx, this_val, (uint32_t)i);
+        if (JS_IsString(value)) return value;
+        JS_FreeValue(ctx, value);
+        return JS_NewString(ctx, "");
+    }
     return JS_NewString(ctx, ns_css_computed_props[i]);
 }
 
@@ -14484,10 +14493,30 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
     JSValue empty_v = JS_GetPropertyStr(ctx, cs, "_empty");
     gboolean empty = JS_ToBool(ctx, empty_v);
     JS_FreeValue(ctx, empty_v);
+    GPtrArray *custom_names = NULL;
+    if (!empty && argc >= 1) {
+        const ns_node *node = ns_unwrap_element(argv[0]);
+        ns_js *style_js = js_from_ctx(ctx);
+        if (node && style_js) {
+            ns_js_flush_style(style_js);
+            const ns_style *style = style_js->style_table
+                ? g_hash_table_lookup(style_js->style_table, node) : NULL;
+            if (style && style->vars)
+                custom_names = ns_var_map_names(style->vars);
+        }
+    }
+    int custom_count = custom_names ? (int)custom_names->len : 0;
     JS_DefinePropertyValueStr(ctx, cs, "length",
                               JS_NewInt32(ctx, empty ? 0 :
-                                         ns_css_computed_count()),
+                                         ns_css_computed_count() +
+                                         custom_count),
                               JS_PROP_CONFIGURABLE);
+    for (int i = 0; i < custom_count; i++)
+        JS_DefinePropertyValueUint32(
+            ctx, cs, (uint32_t)(ns_css_computed_count() + i),
+            JS_NewString(ctx, g_ptr_array_index(custom_names, (guint)i)),
+            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    if (custom_names) g_ptr_array_free(custom_names, TRUE);
     ns_bind_fn(ctx, cs, "item", ns_computed_item, 1);
 
     ns_js *jsx = js_from_ctx(ctx);
