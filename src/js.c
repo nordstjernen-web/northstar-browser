@@ -186,10 +186,14 @@ static JSValue ns_sw_unregister(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv);
 static void ns_js_flush_document_write(ns_js *js);
 static void ns_js_flush_layout(ns_js *js);
+static void ns_js_flush_style(ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_schedule_pending_script_drain(ns_js *js);
 static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
+static void ns_subtree_scan_special(const ns_node *n, int depth,
+                                    gboolean *script, gboolean *link,
+                                    gboolean *frame);
 static void ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
 static void ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe,
@@ -7037,10 +7041,20 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         if (_j) ns_js_index_child_change(_j, self, a, NULL);
     }
     if (_j) {
-        if (added->len > 0 || removed->len > 0)
+        if (added->len > 0 || removed->len > 0) {
+            ns_node *lead = NULL;
+            for (guint k = 0; k < added->len && !lead; k++) {
+                ns_node *a = g_ptr_array_index(added, k);
+                if (a->kind == NS_NODE_ELEMENT) lead = a;
+            }
+            if (!lead && added->len > 0) lead = g_ptr_array_index(added, 0);
+            ns_css_mark_childlist_change(self, lead,
+                removed->len ? g_ptr_array_index(removed, 0) : NULL,
+                NULL, NULL);
             ns_mut_record_emit_child_list_arrays(_j, self,
                 added->len ? added : NULL, removed->len ? removed : NULL,
                 NULL, NULL);
+        }
         _j->mutated = TRUE;
     }
     g_ptr_array_free(added, FALSE);
@@ -13707,6 +13721,22 @@ ns_computed_anim_lookup(ns_js *js, const ns_node *n, const char *name)
     return NULL;
 }
 
+static gboolean
+ns_computed_prop_needs_layout(const char *name)
+{
+    static const char *const geometry[] = {
+        "width", "height", "top", "right", "bottom", "left",
+        "block-size", "inline-size", "transform", "transform-origin",
+        "perspective-origin", "line-height",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(geometry); i++)
+        if (strcmp(name, geometry[i]) == 0) return TRUE;
+    return g_str_has_prefix(name, "margin") ||
+           g_str_has_prefix(name, "padding") ||
+           g_str_has_prefix(name, "inset") ||
+           (g_str_has_prefix(name, "border") && strstr(name, "width") != NULL);
+}
+
 static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 {
@@ -13751,7 +13781,10 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     }
 
     ns_js *js = js_from_ctx(ctx);
-    if (js) ns_js_flush_layout(js);
+    if (js) {
+        if (ns_computed_prop_needs_layout(name)) ns_js_flush_layout(js);
+        else ns_js_flush_style(js);
+    }
     const char *style = ns_element_get_attr(n, "style");
     const struct ns_box *lbox = (js && js->layout_root)
         ? ns_box_find_by_dom(js->layout_root, n) : NULL;
@@ -22144,7 +22177,8 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
                           ns_node *previous_sibling, ns_node *next_sibling)
 {
     ns_js_index_child_change(js, parent, added, removed);
-    ns_css_mark_childlist_dirty(parent, added);
+    ns_css_mark_childlist_change(parent, added, removed,
+                                 previous_sibling, next_sibling);
     ns_mut_record_emit(js, "childList", parent, added, removed,
                        previous_sibling, next_sibling, NULL, NULL);
 }
@@ -22187,6 +22221,36 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
                 ns_doc_tag_index_subtree_added  (js->current_doc, n);
             }
     }
+    gboolean removed_any = removed && removed->len > 0;
+    gboolean survivors = FALSE;
+    if (removed_any) {
+        GHashTable *fresh = g_hash_table_new(g_direct_hash, g_direct_equal);
+        if (added)
+            for (guint i = 0; i < added->len; i++)
+                g_hash_table_add(fresh, g_ptr_array_index(added, i));
+        for (ns_node *c = parent->first_child; c && !survivors;
+             c = c->next_sibling)
+            if (c->kind == NS_NODE_ELEMENT &&
+                !g_hash_table_contains(fresh, c))
+                survivors = TRUE;
+        g_hash_table_destroy(fresh);
+    }
+    if (removed_any && survivors) {
+        ns_css_mark_restyle_dirty(parent);
+    } else {
+        ns_node *lead_added = NULL;
+        if (added)
+            for (guint i = 0; i < added->len && !lead_added; i++) {
+                ns_node *n = g_ptr_array_index(added, i);
+                if (n->kind == NS_NODE_ELEMENT) lead_added = n;
+            }
+        if (!lead_added && added && added->len > 0)
+            lead_added = g_ptr_array_index(added, 0);
+        ns_css_mark_childlist_change(parent, lead_added,
+                                     removed_any
+                                         ? g_ptr_array_index(removed, 0) : NULL,
+                                     NULL, NULL);
+    }
     ns_mut_record_emit_child_list_arrays(js, parent, added, removed,
                                          previous_sibling, next_sibling);
 }
@@ -22225,7 +22289,6 @@ ns_js_record_attr_change(ns_js *js, ns_node *target,
 static void
 ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value)
 {
-    ns_css_mark_restyle_dirty(target && target->parent ? target->parent : target);
     ns_mut_record_emit(js, "characterData", target, NULL, NULL,
                        NULL, NULL, NULL, old_value);
 }
@@ -25849,9 +25912,16 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
             g_ptr_array_add(moved, c);
             c = next;
         }
-        if (_j && moved->len > 0)
+        if (_j && moved->len > 0) {
+            ns_node *lead = g_ptr_array_index(moved, 0);
+            for (guint i = 0; i < moved->len; i++) {
+                ns_node *m = g_ptr_array_index(moved, i);
+                if (m->kind == NS_NODE_ELEMENT) { lead = m; break; }
+            }
+            ns_css_mark_childlist_change(parent, lead, NULL, NULL, NULL);
             ns_mut_record_emit_child_list_arrays(_j, parent, moved, NULL,
                                                  batch_prev, NULL);
+        }
         if (_j) {
             _j->mutated = TRUE;
             if (!inert_parent) {
@@ -47956,6 +48026,23 @@ ns_js_run_script_schedule(ns_js *js, GArray *tasks, ns_script_schedule schedule,
     ns_ce_upgrade_subtree_all(js, js->current_doc);
 }
 
+static void
+ns_subtree_scan_special(const ns_node *n, int depth, gboolean *script,
+                        gboolean *link, gboolean *frame)
+{
+    if (!n || depth >= 512) return;
+    if (n->kind == NS_NODE_ELEMENT && n->name) {
+        if (ns_node_is_element_named(n, "script")) *script = TRUE;
+        else if (ns_node_is_element_named(n, "link")) *link = TRUE;
+        else if (ns_node_is_element_named(n, "iframe") ||
+                 ns_node_is_element_named(n, "object")) *frame = TRUE;
+        else if (ns_node_is_element_named(n, "template")) return;
+        if (*script && *link && *frame) return;
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_subtree_scan_special(c, depth + 1, script, link, frame);
+}
+
 static gboolean
 ns_subtree_has_pending_script_rec(const ns_node *n, int depth)
 {
@@ -48148,11 +48235,15 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
         ns_js_rescan_subtree_images(js, root, 0);
     if (js->in_pump) return;
     if (js->ce_upgrading) return;
+    gboolean has_script = FALSE, has_link = FALSE, has_frame = FALSE;
+    ns_subtree_scan_special(root, 0, &has_script, &has_link, &has_frame);
+    if (!has_script && !has_link && !has_frame) return;
     if (!ns_js_root_connected(js, root)) return;
-    ns_js_schedule_static_iframes(js, root);
+    if (has_frame) ns_js_schedule_static_iframes(js, root);
     GPtrArray *sheets = g_ptr_array_new();
-    ns_js_collect_pending_stylesheets(root, sheets);
-    if (!ns_subtree_has_pending_script(root) && sheets->len == 0) {
+    if (has_link) ns_js_collect_pending_stylesheets(root, sheets);
+    if ((!has_script || !ns_subtree_has_pending_script(root)) &&
+        sheets->len == 0) {
         g_ptr_array_free(sheets, TRUE);
         return;
     }
@@ -49788,6 +49879,27 @@ ns_js_flush_layout(ns_js *js)
     if (!js || !js->layout_flush_cb || js->in_layout_flush) return;
     js->in_layout_flush = TRUE;
     js->layout_flush_cb(js->layout_flush_user_data);
+    js->in_layout_flush = FALSE;
+}
+
+void
+ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->style_flush_cb = cb;
+    js->style_flush_user_data = user_data;
+}
+
+static void
+ns_js_flush_style(ns_js *js)
+{
+    if (!js || js->in_layout_flush) return;
+    if (!js->style_flush_cb) {
+        ns_js_flush_layout(js);
+        return;
+    }
+    js->in_layout_flush = TRUE;
+    js->style_flush_cb(js->style_flush_user_data);
     js->in_layout_flush = FALSE;
 }
 

@@ -87,6 +87,8 @@ struct ns_js {
     gpointer      repaint_user_data;
     ns_js_layout_flush_cb layout_flush_cb;
     gpointer      layout_flush_user_data;
+    ns_js_layout_flush_cb style_flush_cb;
+    gpointer      style_flush_user_data;
     gboolean      in_layout_flush;
     ns_js_clipboard_write_cb clipboard_write_cb;
     gpointer      clipboard_write_user_data;

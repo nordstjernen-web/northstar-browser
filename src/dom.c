@@ -736,18 +736,18 @@ void
 ns_node_own_strings_deep(ns_node *n)
 {
     if (!n) return;
-    GPtrArray *stack = g_ptr_array_new();
-    g_ptr_array_add(stack, n);
-    while (stack->len > 0) {
-        ns_node *cur = g_ptr_array_index(stack, stack->len - 1);
-        g_ptr_array_set_size(stack, stack->len - 1);
+    ns_node *cur = n;
+    for (;;) {
         ns_node_own_strings_one(cur);
-        if (cur->tpl_content)
-            g_ptr_array_add(stack, cur->tpl_content);
-        for (ns_node *c = cur->first_child; c; c = c->next_sibling)
-            g_ptr_array_add(stack, c);
+        if (cur->tpl_content) ns_node_own_strings_deep(cur->tpl_content);
+        if (cur->first_child) {
+            cur = cur->first_child;
+            continue;
+        }
+        while (cur != n && !cur->next_sibling) cur = cur->parent;
+        if (cur == n) break;
+        cur = cur->next_sibling;
     }
-    g_ptr_array_free(stack, TRUE);
 }
 
 void
@@ -906,6 +906,10 @@ ns_node_free(ns_node *node)
         if (cur->id_index) {
             g_hash_table_destroy(cur->id_index);
             cur->id_index = NULL;
+        }
+        if (cur->id_counts) {
+            g_hash_table_destroy(cur->id_counts);
+            cur->id_counts = NULL;
         }
         if (cur->class_index) {
             g_hash_table_destroy(cur->class_index);
@@ -1353,17 +1357,51 @@ ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
 }
 
 static void
-ns_doc_id_index_register_subtree(GHashTable *map, ns_node *n, int depth)
+ns_doc_id_index_count(ns_node *doc, const char *id, int delta)
+{
+    if (!doc->id_counts)
+        doc->id_counts = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                               g_free, NULL);
+    guint cur = GPOINTER_TO_UINT(g_hash_table_lookup(doc->id_counts, id));
+    if (delta > 0)
+        g_hash_table_insert(doc->id_counts, g_strdup(id),
+                            GUINT_TO_POINTER(cur + 1));
+    else if (cur <= 1)
+        g_hash_table_remove(doc->id_counts, id);
+    else
+        g_hash_table_insert(doc->id_counts, g_strdup(id),
+                            GUINT_TO_POINTER(cur - 1));
+}
+
+void
+ns_doc_id_index_register(ns_node *doc, const char *id, ns_node *node)
+{
+    if (!doc || !doc->id_index || !id || !*id || !node) return;
+    ns_doc_id_index_count(doc, id, 1);
+    if (g_hash_table_contains(doc->id_index, id)) return;
+    g_hash_table_insert(doc->id_index, g_strdup(id), node);
+}
+
+void
+ns_doc_id_index_unregister(ns_node *doc, const char *id, const ns_node *node)
+{
+    if (!doc || !doc->id_index || !id || !*id) return;
+    ns_doc_id_index_count(doc, id, -1);
+    gpointer cur = g_hash_table_lookup(doc->id_index, id);
+    if (cur == node) g_hash_table_remove(doc->id_index, id);
+}
+
+static void
+ns_doc_id_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(n, "id");
-        if (eid && *eid && !g_hash_table_contains(map, eid))
-            g_hash_table_insert(map, g_strdup(eid), n);
+        if (eid && *eid) ns_doc_id_index_register(doc, eid, n);
     }
     if (ns_node_is_element_named(n, "template")) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_id_index_register_subtree(map, c, depth + 1);
+        ns_doc_id_index_add_subtree(doc, c, depth + 1);
 }
 
 void
@@ -1376,37 +1414,9 @@ ns_doc_id_index_build(ns_node *doc)
         doc->id_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
     }
-    ns_doc_id_index_register_subtree(doc->id_index, doc, 0);
-}
-
-void
-ns_doc_id_index_register(ns_node *doc, const char *id, ns_node *node)
-{
-    if (!doc || !doc->id_index || !id || !*id || !node) return;
-    if (g_hash_table_contains(doc->id_index, id)) return;
-    g_hash_table_insert(doc->id_index, g_strdup(id), node);
-}
-
-void
-ns_doc_id_index_unregister(ns_node *doc, const char *id, const ns_node *node)
-{
-    if (!doc || !doc->id_index || !id || !*id) return;
-    gpointer cur = g_hash_table_lookup(doc->id_index, id);
-    if (cur == node) g_hash_table_remove(doc->id_index, id);
-}
-
-static void
-ns_doc_id_index_add_subtree(ns_node *doc, ns_node *n, int depth)
-{
-    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(n, "id");
-        if (eid && *eid && !g_hash_table_contains(doc->id_index, eid))
-            g_hash_table_insert(doc->id_index, g_strdup(eid), n);
-    }
-    if (ns_node_is_element_named(n, "template")) return;
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_doc_id_index_add_subtree(doc, c, depth + 1);
+    if (doc->id_counts)
+        g_hash_table_remove_all(doc->id_counts);
+    ns_doc_id_index_add_subtree(doc, doc, 0);
 }
 
 static void
@@ -1415,10 +1425,7 @@ ns_doc_id_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(n, "id");
-        if (eid && *eid) {
-            gpointer cur = g_hash_table_lookup(doc->id_index, eid);
-            if (cur == n) g_hash_table_remove(doc->id_index, eid);
-        }
+        if (eid && *eid) ns_doc_id_index_unregister(doc, eid, n);
     }
     if (ns_node_is_element_named(n, "template")) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
@@ -1766,6 +1773,9 @@ ns_node_find_by_id(const ns_node *root, const char *id)
             if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
                 return hit;
         }
+        if (!hit && root->id_counts &&
+            !g_hash_table_contains(root->id_counts, id))
+            return NULL;
         ns_node *found = ns_node_find_by_id_depth(root, id, 0);
         if (found)
             g_hash_table_replace(root->id_index, g_strdup(id), found);

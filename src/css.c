@@ -17130,6 +17130,12 @@ static gboolean       g_struct_loose;
 static gboolean       g_sib_loose;
 static guint64        g_struct_sig;
 static gboolean       g_struct_ready;
+static gboolean       g_struct_nth_last;
+static gboolean       g_state_sib;
+static gboolean       g_state_has_focus;
+static gboolean       g_state_has_focus_within;
+static gboolean       g_state_has_hover;
+static gboolean       g_state_has_active;
 
 void
 ns_css_set_render_zoom(double zoom)
@@ -17202,6 +17208,55 @@ incr_selector_has_structural(const ns_css_selector *sel, int d)
         if (incr_simple_has_structural(g_ptr_array_index(sel->compounds, i), d))
             return TRUE;
     return FALSE;
+}
+
+static void incr_scan_selector_flags(const ns_css_selector *sel, int d);
+
+static void
+incr_scan_simple_flags(const ns_css_simple *c, int d)
+{
+    if (!c) return;
+    if (d > 6) {
+        g_struct_nth_last = TRUE;
+        return;
+    }
+    if (c->pseudos)
+        for (guint i = 0; i < c->pseudos->len; i++) {
+            const ns_css_pseudo_pred *p =
+                &g_array_index(c->pseudos, ns_css_pseudo_pred, i);
+            switch (p->kind) {
+            case NS_CSS_PC_NTH_LAST_CHILD:
+            case NS_CSS_PC_NTH_LAST_OF_TYPE:
+                g_struct_nth_last = TRUE;
+                break;
+            case NS_CSS_PC_FOCUS:        g_state_has_focus = TRUE; break;
+            case NS_CSS_PC_FOCUS_WITHIN: g_state_has_focus_within = TRUE; break;
+            case NS_CSS_PC_HOVER:        g_state_has_hover = TRUE; break;
+            case NS_CSS_PC_ACTIVE:       g_state_has_active = TRUE; break;
+            default: break;
+            }
+            if (p->of_group)
+                for (guint gi = 0; gi < p->of_group->len; gi++)
+                    incr_scan_selector_flags(
+                        g_ptr_array_index(p->of_group, gi), d + 1);
+        }
+    GPtrArray *gls[3] = { c->matches_any, c->matches_none, c->has_groups };
+    for (int g = 0; g < 3; g++) {
+        if (!gls[g]) continue;
+        for (guint gi = 0; gi < gls[g]->len; gi++) {
+            const GPtrArray *grp = g_ptr_array_index(gls[g], gi);
+            for (guint si = 0; grp && si < grp->len; si++)
+                incr_scan_selector_flags(g_ptr_array_index(grp, si), d + 1);
+        }
+    }
+}
+
+static void
+incr_scan_selector_flags(const ns_css_selector *sel, int d)
+{
+    if (!sel || !sel->compounds) return;
+    for (guint i = 0; i < sel->compounds->len; i++)
+        incr_scan_simple_flags(g_ptr_array_index(sel->compounds, i), d);
 }
 
 static gboolean
@@ -17290,6 +17345,11 @@ incr_collect_sib_left(const ns_css_simple *c)
             const char *attr = incr_state_pseudo_attr(p->kind);
             if (attr == NULL) { g_sib_loose = TRUE; }
             else if (*attr) { g_hash_table_add(g_sib_attrs, g_strdup(attr)); }
+            if (p->kind == NS_CSS_PC_FOCUS ||
+                p->kind == NS_CSS_PC_FOCUS_WITHIN ||
+                p->kind == NS_CSS_PC_HOVER ||
+                p->kind == NS_CSS_PC_ACTIVE)
+                g_state_sib = TRUE;
             handled = TRUE;
         }
     if (c->matches_any || c->matches_none || c->has_groups)
@@ -17363,6 +17423,7 @@ incr_collect_struct_keys(const ns_css_stylesheet *sh)
             const ns_css_selector *sel = g_ptr_array_index(r->selectors, si);
             if (!sel || !sel->compounds) continue;
             incr_collect_attr_keys_selector(sel, 0);
+            incr_scan_selector_flags(sel, 0);
             guint nc = sel->compounds->len;
             for (guint ci = 0; ci < nc; ci++) {
                 const ns_css_simple *c = g_ptr_array_index(sel->compounds, ci);
@@ -17429,6 +17490,12 @@ incr_ensure_struct_keys(const ns_css_stylesheet *ua,
                                              g_free, NULL);
     g_struct_loose = FALSE;
     g_sib_loose = FALSE;
+    g_struct_nth_last = FALSE;
+    g_state_sib = FALSE;
+    g_state_has_focus = FALSE;
+    g_state_has_focus_within = FALSE;
+    g_state_has_hover = FALSE;
+    g_state_has_active = FALSE;
     incr_collect_struct_keys(ua);
     for (gsize i = 0; i < n; i++)
         incr_collect_struct_keys(author[i]);
@@ -17460,33 +17527,149 @@ incr_node_matches_keys(const ns_node *n, GHashTable *keyset)
     return FALSE;
 }
 
-static gboolean
-incr_childlist_needs_flood(const ns_node *parent)
+static ns_node *
+incr_prev_element_from(ns_node *from)
 {
-    if (g_struct_loose) return TRUE;
-    if (incr_node_matches_keys(parent, g_struct_keys)) return TRUE;
-    int scanned = 0;
-    for (const ns_node *c = parent->first_child; c; c = c->next_sibling) {
-        if (++scanned > 64) return TRUE;
-        if (c->kind == NS_NODE_ELEMENT &&
-            incr_node_matches_keys(c, g_struct_keys))
-            return TRUE;
-    }
-    for (const ns_node *a = parent; a; a = a->parent)
-        if (incr_node_matches_keys(a, g_struct_anc_keys))
-            return TRUE;
+    for (ns_node *s = from; s; s = s->prev_sibling)
+        if (s->kind == NS_NODE_ELEMENT) return s;
+    return NULL;
+}
+
+static ns_node *
+incr_prev_same_type_from(ns_node *from, const char *tag)
+{
+    if (!tag) return NULL;
+    for (ns_node *s = from; s; s = s->prev_sibling)
+        if (s->kind == NS_NODE_ELEMENT && s->name &&
+            g_ascii_strcasecmp(s->name, tag) == 0)
+            return s;
+    return NULL;
+}
+
+static gboolean
+incr_mark_following_siblings(ns_node *from)
+{
+    int marked = 0;
+    for (ns_node *s = from; s; s = s->next_sibling)
+        if (s->kind == NS_NODE_ELEMENT) {
+            if (++marked > 256) return FALSE;
+            ns_css_mark_restyle_dirty(s);
+        }
+    return TRUE;
+}
+
+static void
+incr_mark_small_family(ns_node *parent)
+{
+    int elements = 0;
+    for (const ns_node *c = parent->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT && ++elements > 2) return;
+    for (ns_node *c = parent->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT) ns_css_mark_restyle_dirty(c);
+}
+
+static void
+incr_mark_state_node(const ns_node *n)
+{
+    if (!n) return;
+    ns_css_mark_restyle_dirty((ns_node *)n);
+    if (!g_state_sib) return;
+    for (ns_node *s = n->next_sibling; s; s = s->next_sibling)
+        if (s->kind == NS_NODE_ELEMENT)
+            ns_css_mark_restyle_dirty(s);
+}
+
+static gboolean
+incr_chain_contains(const ns_node *chain, const ns_node *n)
+{
+    for (const ns_node *a = chain; a; a = a->parent)
+        if (a == n) return TRUE;
     return FALSE;
 }
 
+static void
+incr_mark_state_chain(const ns_node *oldn, const ns_node *newn,
+                      gboolean relevant)
+{
+    if (oldn == newn || !relevant) return;
+    for (const ns_node *a = oldn; a; a = a->parent)
+        if (!incr_chain_contains(newn, a)) incr_mark_state_node(a);
+    for (const ns_node *b = newn; b; b = b->parent)
+        if (!incr_chain_contains(oldn, b)) incr_mark_state_node(b);
+}
+
+static void
+incr_mark_state_focus(const ns_node *oldn, const ns_node *newn)
+{
+    if (oldn == newn) return;
+    if (g_state_has_focus_within) {
+        incr_mark_state_chain(oldn, newn, TRUE);
+        return;
+    }
+    if (!g_state_has_focus) return;
+    incr_mark_state_node(oldn);
+    incr_mark_state_node(newn);
+}
+
+static void
+incr_mark_empty_transition(ns_node *parent, ns_node *added, ns_node *removed)
+{
+    gboolean became_single = added && parent->first_child == added &&
+                             parent->last_child == added;
+    gboolean became_empty = removed && !parent->first_child;
+    if (!became_single && !became_empty) return;
+    for (const ns_node *a = parent; a; a = a->parent)
+        if (incr_node_matches_keys(a, g_struct_anc_keys)) {
+            ns_css_mark_restyle_dirty(parent);
+            return;
+        }
+}
+
 void
-ns_css_mark_childlist_dirty(ns_node *parent, ns_node *added)
+ns_css_mark_childlist_change(ns_node *parent, ns_node *added, ns_node *removed,
+                             ns_node *prev_sibling, ns_node *next_sibling)
 {
     if (!parent) return;
-    if (!g_struct_ready || incr_childlist_needs_flood(parent))
+    if (!g_struct_ready || g_struct_loose || g_struct_nth_last ||
+        incr_node_matches_keys(parent, g_struct_keys)) {
         ns_css_mark_restyle_dirty(parent);
-    else if (added)
+        return;
+    }
+    if (added && added->kind == NS_NODE_ELEMENT) {
         ns_css_mark_restyle_dirty(added);
+        ns_node *prev_el = incr_prev_element_from(added->prev_sibling);
+        if (added->next_sibling) {
+            if (!incr_mark_following_siblings(added->next_sibling)) {
+                ns_css_mark_restyle_dirty(parent);
+                return;
+            }
+        } else if (prev_el) {
+            ns_css_mark_restyle_dirty(prev_el);
+        }
+        ns_node *prev_type =
+            incr_prev_same_type_from(added->prev_sibling, added->name);
+        if (prev_type && prev_type != prev_el)
+            ns_css_mark_restyle_dirty(prev_type);
+        incr_mark_small_family(parent);
+    }
+    if (removed && removed->kind == NS_NODE_ELEMENT) {
+        if (next_sibling) {
+            if (!incr_mark_following_siblings(next_sibling)) {
+                ns_css_mark_restyle_dirty(parent);
+                return;
+            }
+        } else {
+            ns_node *new_last = incr_prev_element_from(prev_sibling);
+            if (new_last) ns_css_mark_restyle_dirty(new_last);
+        }
+        ns_node *prev_type =
+            incr_prev_same_type_from(prev_sibling, removed->name);
+        if (prev_type) ns_css_mark_restyle_dirty(prev_type);
+        incr_mark_small_family(parent);
+    }
+    incr_mark_empty_transition(parent, added, removed);
 }
+
 
 static gboolean
 incr_old_class_is_sib(const char *old_value)
@@ -18623,14 +18806,18 @@ ns_css_compute(ns_node *doc,
     g_incr_pass_active = incr_want
         && g_incr_prev_styles != NULL
         && g_incr_prev_doc == doc
-        && g_incr_prev_sig == sig
-        && g_css_focus_node == g_incr_prev_focus
-        && g_css_hover_node == g_incr_prev_hover
-        && g_css_active_node == g_incr_prev_active;
+        && g_incr_prev_sig == sig;
     g_incr_reused = 0;
     g_incr_recomputed = 0;
 
     incr_ensure_struct_keys(cached_ua, author_sheets, n_sheets, sig);
+    if (g_incr_pass_active) {
+        incr_mark_state_focus(g_incr_prev_focus, g_css_focus_node);
+        incr_mark_state_chain(g_incr_prev_hover, g_css_hover_node,
+                              g_state_has_hover);
+        incr_mark_state_chain(g_incr_prev_active, g_css_active_node,
+                              g_state_has_active);
+    }
 
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, &root_px,
                  layer_ranks, out, FALSE);

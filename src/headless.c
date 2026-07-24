@@ -86,6 +86,7 @@ headless_js_log(const char *line, gpointer user_data)
 }
 
 static gboolean g_headless_layout_dirty;
+static gboolean g_headless_styles_stale;
 
 static void
 headless_js_mutated(gpointer user_data) { (void)user_data; g_headless_layout_dirty = TRUE; }
@@ -563,6 +564,7 @@ headless_relayout(headless_flush_ctx *c)
                                     c->image_cache, c->anim, c->js,
                                     c->css_cache, c->focused, NULL, c->caret,
                                     c->anchor, c->layout);
+    g_headless_styles_stale = FALSE;
 }
 
 static void
@@ -575,6 +577,30 @@ headless_flush_layout(gpointer ud)
     if (!dirty) return;
     g_headless_layout_dirty = FALSE;
     headless_relayout(c);
+}
+
+static void
+headless_flush_style(gpointer ud)
+{
+    headless_flush_ctx *c = ud;
+    if (!c || !c->js) return;
+    if (ns_js_consume_mutated(c->js)) {
+        g_headless_layout_dirty = TRUE;
+        g_headless_styles_stale = TRUE;
+    }
+    if (*c->styles && !g_headless_styles_stale) return;
+    if (!*c->layout) {
+        headless_flush_layout(ud);
+        return;
+    }
+    if (*c->styles) {
+        ns_js_set_style_table(c->js, NULL);
+        g_hash_table_destroy(*c->styles);
+        *c->styles = NULL;
+    }
+    *c->styles = ns_engine_compute_cascade(c->doc, c->base, c->css_cache);
+    ns_js_set_style_table(c->js, *c->styles);
+    g_headless_styles_stale = FALSE;
 }
 
 typedef struct {
@@ -593,8 +619,10 @@ settle_raf_tick(gpointer user_data)
     if (fc->anim) ns_anim_tick(fc->anim, now);
     if (fc->anim && fc->js) ns_js_dispatch_anim_events(fc->js, fc->anim);
     if (fc->js) ns_js_run_animation_frame(fc->js);
-    if (fc->js && ns_js_consume_mutated(fc->js))
+    if (fc->js && ns_js_consume_mutated(fc->js)) {
         s->pending_mutation = TRUE;
+        g_headless_styles_stale = TRUE;
+    }
     if (g_headless_layout_dirty) {
         g_headless_layout_dirty = FALSE;
         s->pending_mutation = TRUE;
@@ -1793,6 +1821,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_style_table(js, styles);
         ns_js_set_image_cache(js, image_cache);
         ns_js_set_layout_flush_cb(js, headless_flush_layout, &flush_ctx);
+        ns_js_set_style_flush_cb(js, headless_flush_style, &flush_ctx);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
         ns_js_run_scripts_in_doc(js, doc, resp->final_url,
                                  g_headless_doc_charset);
@@ -1822,7 +1851,10 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                 next_post_body ? " POST" : "", next);
         g_free(nav_cap.pending_url);
         nav_cap.pending_url = NULL;
-        if (js)            ns_js_set_layout_flush_cb(js, NULL, NULL);
+        if (js) {
+            ns_js_set_layout_flush_cb(js, NULL, NULL);
+            ns_js_set_style_flush_cb(js, NULL, NULL);
+        }
         if (js)            ns_js_set_layout_root(js, NULL);
         if (js)            ns_js_set_style_table(js, NULL);
         if (anim)          ns_anim_free(anim);

@@ -83,6 +83,7 @@ struct ns_node {
     void (*backing_free)(void *);
 
     GHashTable *id_index;
+    GHashTable *id_counts;
     GHashTable *class_index;
     GHashTable *tag_index;
 

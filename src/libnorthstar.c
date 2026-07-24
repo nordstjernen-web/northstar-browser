@@ -428,6 +428,28 @@ browser_flush(gpointer user_data)
     }
 }
 
+static void
+browser_flush_style(gpointer user_data)
+{
+    ns_browser *b = user_data;
+    if (!b || !b->js) return;
+    if (ns_js_consume_mutated(b->js)) b->dirty = TRUE;
+    if (b->styles && !b->dirty) return;
+    if (!b->layout || b->relaying) {
+        browser_flush(user_data);
+        return;
+    }
+    if (b->styles) {
+        ns_js_set_style_table(b->js, NULL);
+        g_hash_table_destroy(b->styles);
+        b->styles = NULL;
+    }
+    ns_css_set_viewport((double)b->vw, b->vh);
+    ns_css_set_doc_language(b->doc_language);
+    b->styles = ns_engine_compute_cascade(b->doc, b->base_url, b->css_cache);
+    ns_js_set_style_table(b->js, b->styles);
+}
+
 static gboolean
 settle_quit_cb(gpointer user_data)
 {
@@ -818,6 +840,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_image_cache(b->js, b->images);
         ns_js_set_form_submit_cb(b->js, browser_js_form_submit, b);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
+        ns_js_set_style_flush_cb(b->js, browser_flush_style, b);
         ns_js_set_download_cb(b->js, browser_js_download, b);
         ns_js_set_audio_cb(b->js, browser_js_audio, b);
         ns_js_add_csp_header(b->js, csp_header);
