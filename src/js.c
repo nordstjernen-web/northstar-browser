@@ -3251,6 +3251,18 @@ ns_name_is_body_reflected_handler(const char *name)
     return FALSE;
 }
 
+static JSValue
+ns_compile_inline_handler(JSContext *ctx, const char *body)
+{
+    GString *src = g_string_new("(function(event){\n");
+    g_string_append(src, body);
+    g_string_append(src, "\n})");
+    JSValue fn = JS_Eval(ctx, src->str, src->len, "<inline>",
+                         JS_EVAL_TYPE_GLOBAL);
+    g_string_free(src, TRUE);
+    return fn;
+}
+
 static void
 ns_body_forward_content_handler(JSContext *ctx, const ns_node *n,
                                 const char *name, const char *code)
@@ -3260,12 +3272,7 @@ ns_body_forward_content_handler(JSContext *ctx, const ns_node *n,
     if (!ns_name_is_body_reflected_handler(name)) return;
     JSValue fn = JS_NULL;
     if (code && *code) {
-        GString *src = g_string_new("(function(event){\n");
-        g_string_append(src, code);
-        g_string_append(src, "\n})");
-        JSValue c = JS_Eval(ctx, src->str, src->len, "<inline>",
-                            JS_EVAL_TYPE_GLOBAL);
-        g_string_free(src, TRUE);
+        JSValue c = ns_compile_inline_handler(ctx, code);
         if (JS_IsException(c)) { JS_FreeValue(ctx, JS_GetException(ctx)); }
         else fn = c;
     }
@@ -24728,13 +24735,7 @@ ns_fire_inline_on_handler(ns_js *js, const ns_node *target, const char *type,
         return FALSE;
     }
 
-    GString *src = g_string_new("(function(event){\n");
-    g_string_append(src, body);
-    g_string_append(src, "\n})");
-    JSValue fn = JS_Eval(js->ctx, src->str, src->len, "<inline>",
-                         JS_EVAL_TYPE_GLOBAL);
-    g_string_free(src, TRUE);
-
+    JSValue fn = ns_compile_inline_handler(js->ctx, body);
     if (JS_IsException(fn)) {
         JSValue ex = JS_GetException(js->ctx);
         const char *m = JS_ToCString(js->ctx, ex);
@@ -42319,12 +42320,7 @@ ns_element_on_get(JSContext *ctx, JSValueConst this_val,
     if (!body) return JS_NULL;
     ns_js *js = js_from_ctx(ctx);
     if (js && !ns_csp_inline_event_handler_allowed(js->csp)) return JS_NULL;
-    GString *src = g_string_new("(function(event){\n");
-    g_string_append(src, body);
-    g_string_append(src, "\n})");
-    JSValue fn = JS_Eval(ctx, src->str, src->len, "<inline>",
-                         JS_EVAL_TYPE_GLOBAL);
-    g_string_free(src, TRUE);
+    JSValue fn = ns_compile_inline_handler(ctx, body);
     if (JS_IsException(fn)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         return JS_NULL;
