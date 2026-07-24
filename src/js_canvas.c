@@ -1537,7 +1537,7 @@ ns_ctx_stroke(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     return JS_UNDEFINED;
 }
 
-static const char *ns_ctx_savable_props[] = {
+static const char *const ns_ctx_attr_names[] = {
     "fillStyle", "strokeStyle", "font", "textAlign", "textBaseline",
     "direction", "globalAlpha", "globalCompositeOperation",
     "shadowColor", "shadowBlur", "shadowOffsetX", "shadowOffsetY",
@@ -1545,6 +1545,9 @@ static const char *ns_ctx_savable_props[] = {
     "lineWidth", "lineCap", "lineJoin", "miterLimit", "lineDashOffset",
     "filter", "letterSpacing", "wordSpacing",
     "fontKerning", "fontStretch", "fontVariantCaps", "textRendering",
+};
+
+static const char *ns_ctx_savable_props[] = {
     "_dashes",
 };
 
@@ -1562,6 +1565,10 @@ ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         JS_SetPropertyStr(ctx, this_val, "_stateStack", JS_DupValue(ctx, stack));
     }
     JSValue snap = JS_NewObject(ctx);
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_attr_names); i++) {
+        JSValue v = JS_GetPropertyStr(ctx, this_val, ns_ctx_attr_names[i]);
+        JS_SetPropertyStr(ctx, snap, ns_ctx_attr_names[i], v);
+    }
     for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_savable_props); i++) {
         JSValue v = JS_GetPropertyStr(ctx, this_val, ns_ctx_savable_props[i]);
         JS_SetPropertyStr(ctx, snap, ns_ctx_savable_props[i], v);
@@ -1583,6 +1590,10 @@ ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     uint32_t n = ns_js_array_length(ctx, stack);
     if (n == 0) { JS_FreeValue(ctx, stack); return JS_UNDEFINED; }
     JSValue snap = JS_GetPropertyUint32(ctx, stack, n - 1);
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_attr_names); i++) {
+        JSValue v = JS_GetPropertyStr(ctx, snap, ns_ctx_attr_names[i]);
+        JS_SetPropertyStr(ctx, this_val, ns_ctx_attr_names[i], v);
+    }
     for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_savable_props); i++) {
         JSValue v = JS_GetPropertyStr(ctx, snap, ns_ctx_savable_props[i]);
         JS_SetPropertyStr(ctx, this_val, ns_ctx_savable_props[i], v);
@@ -3225,16 +3236,6 @@ ns_ctx_draw_focus_if_needed(JSContext *ctx, JSValueConst this_val,
     (void)ctx; (void)this_val; (void)argc; (void)argv;
     return JS_UNDEFINED;
 }
-
-static const char *const ns_ctx_attr_names[] = {
-    "fillStyle", "strokeStyle", "font", "textAlign", "textBaseline",
-    "direction", "globalAlpha", "globalCompositeOperation",
-    "shadowColor", "shadowBlur", "shadowOffsetX", "shadowOffsetY",
-    "imageSmoothingEnabled", "imageSmoothingQuality",
-    "lineWidth", "lineCap", "lineJoin", "miterLimit", "lineDashOffset",
-    "filter", "letterSpacing", "wordSpacing",
-    "fontKerning", "fontStretch", "fontVariantCaps", "textRendering",
-};
 
 static JSValue
 ns_ctx_attr_slot(JSContext *ctx, JSValueConst this_val, int magic,
