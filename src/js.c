@@ -26829,7 +26829,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     ns_node *newc = ns_unwrap_element_mut(argv[0]);
     ns_node *oldc = ns_unwrap_element_mut(argv[1]);
     if (!newc || !oldc)
-        return ns_throw_not_a_node(ctx, argv[0], "Argument");
+        return ns_throw_not_a_node(ctx, newc ? argv[1] : argv[0], "Argument");
     {
         JSValue verr = ns_pre_replace_validity(ctx, parent, newc, oldc);
         if (JS_IsException(verr)) return verr;
