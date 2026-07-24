@@ -3355,34 +3355,36 @@ ns_window_named_lookup(ns_js *js, const char *name)
     return ns_node_find_by_id(js->current_doc, name);
 }
 
-static gboolean
-ns_name_is_array_index(const char *name, uint32_t *out)
-{
-    if (!name || !*name) return FALSE;
-    if (name[0] == '0' && name[1]) return FALSE;
-    guint64 value = 0;
-    for (const char *p = name; *p; p++) {
-        if (!g_ascii_isdigit(*p)) return FALSE;
-        value = value * 10 + (guint64)(*p - '0');
-        if (value >= 4294967295u) return FALSE;
-    }
-    *out = (uint32_t)value;
-    return TRUE;
-}
+static gboolean ns_live_is_array_index(const char *name);
+static JSValue ns_element_get_contentWindow(JSContext *ctx,
+                                            JSValueConst this_val);
 
-static void ns_collect_frames_walk(JSContext *ctx, const ns_node *n,
-                                   JSValue arr, uint32_t *i, int depth);
+static const ns_node *
+ns_frame_at_index(const ns_node *n, uint32_t *index, int depth)
+{
+    if (!n || depth >= 256) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            (g_ascii_strcasecmp(c->name, "iframe") == 0 ||
+             g_ascii_strcasecmp(c->name, "frame") == 0)) {
+            if ((*index)-- == 0) return c;
+            continue;
+        }
+        const ns_node *hit = ns_frame_at_index(c, index, depth + 1);
+        if (hit) return hit;
+    }
+    return NULL;
+}
 
 static JSValue
 ns_window_indexed_frame(JSContext *ctx, ns_js *js, uint32_t index)
 {
-    JSValue arr = JS_NewArray(ctx);
-    uint32_t count = 0;
-    ns_collect_frames_walk(ctx, js->current_doc, arr, &count, 0);
-    JSValue frame = index < count ? JS_GetPropertyUint32(ctx, arr, index)
-                                  : JS_UNDEFINED;
-    JS_FreeValue(ctx, arr);
-    return frame;
+    const ns_node *frame = ns_frame_at_index(js->current_doc, &index, 0);
+    if (!frame) return JS_UNDEFINED;
+    JSValue el = ns_make_element(ctx, frame);
+    JSValue win = ns_element_get_contentWindow(ctx, el);
+    JS_FreeValue(ctx, el);
+    return win;
 }
 
 static int
@@ -3394,8 +3396,8 @@ ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
     if (!js || !js->current_doc) return 0;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return 0;
-    uint32_t index = 0;
-    if (ns_name_is_array_index(name, &index)) {
+    if (ns_live_is_array_index(name)) {
+        uint32_t index = (uint32_t)strtoul(name, NULL, 10);
         JS_FreeCString(ctx, name);
         JSValue frame = ns_window_indexed_frame(ctx, js, index);
         if (JS_IsUndefined(frame)) return 0;
@@ -33794,8 +33796,6 @@ ns_live_named(JSContext *ctx, ns_live_back *b, JSValueConst snap, uint32_t len,
 }
 
 static gboolean ns_live_is_supported_index(const char *name, uint32_t len);
-static gboolean ns_live_is_array_index(const char *name);
-
 static int
 ns_live_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
                 JSValueConst obj, JSAtom prop)
