@@ -161,7 +161,7 @@ static const cfg_field cfg_fields[] = {
     FB(tls_allow_insecure_override, FALSE),
     FB(watchdog_enabled,      TRUE),
     FI(cache_cap_mb,          256),
-    FI(js_eval_budget_ms,     60000),
+    FI(js_eval_budget_ms,     2000),
     FI(js_memory_cap_mb,      2048),
     FI(max_redirects,         NS_MAX_REDIRECTS),
     FI(window_width_px,       1280),

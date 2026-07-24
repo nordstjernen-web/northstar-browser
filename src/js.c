@@ -453,8 +453,8 @@ static gint64
 ns_js_eval_budget_us(void)
 {
     const ns_config *c = ns_config_get();
-    int ms = c ? c->js_eval_budget_ms : 5000;
-    if (ms <= 0) ms = 5000;
+    int ms = c ? c->js_eval_budget_ms : 2000;
+    if (ms <= 0) ms = 2000;
     if (ms > NS_JS_EVAL_BUDGET_MAX_MS) ms = NS_JS_EVAL_BUDGET_MAX_MS;
     return (gint64)ms * 1000LL;
 }
@@ -1021,22 +1021,53 @@ ns_js_attach_idle(ns_js *js, GSourceFunc func, gpointer data)
 static void ns_storage_drain_deferred_events(ns_js *js);
 static void ns_js_report_pending_rejections(ns_js *js);
 static void ns_js_drop_pending_rejections(ns_js *js);
+static void ns_drain_microtasks(ns_js *js);
+
+#define NS_MICROTASK_SLICE_US 8000
+#define NS_MICROTASK_SLICE_JOBS 256
+
+static gboolean
+ns_microtask_drain_idle(gpointer data)
+{
+    ns_js *js = data;
+    js->microtask_source = 0;
+    ns_drain_microtasks(js);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_schedule_microtask_drain(ns_js *js)
+{
+    if (!js || js->halted || js->microtask_source ||
+        !JS_IsJobPending(js->rt))
+        return;
+    js->microtask_source =
+        ns_js_attach_idle(js, ns_microtask_drain_idle, js);
+}
 
 static void
 ns_drain_microtasks(ns_js *js)
 {
-    if (!js) return;
+    if (!js || js->halted || js->draining_microtasks) return;
+    js->draining_microtasks = TRUE;
     ns_budget_guard g = {0};
     ns_js_budget_push(js, &g);
     JSContext *ctx_out = NULL;
     int r = 0;
+    int jobs = 0;
+    gint64 slice_deadline =
+        g_get_monotonic_time() + NS_MICROTASK_SLICE_US;
     js->callback_depth++;
     for (;;) {
         if (js->eval_deadline_us != 0 &&
             g_get_monotonic_time() > js->eval_deadline_us)
             break;
+        if (jobs >= NS_MICROTASK_SLICE_JOBS ||
+            g_get_monotonic_time() >= slice_deadline)
+            break;
         if ((r = JS_ExecutePendingJob(js->rt, &ctx_out)) <= 0)
             break;
+        jobs++;
     }
     js->callback_depth--;
     if (r < 0 && js->log_cb) {
@@ -1061,9 +1092,14 @@ ns_drain_microtasks(ns_js *js)
         g_free(msg);
     }
     ns_js_budget_pop(js, &g);
-    ns_storage_drain_deferred_events(js);
-    if (js->callback_depth == 0)
-        ns_js_report_pending_rejections(js);
+    js->draining_microtasks = FALSE;
+    if (JS_IsJobPending(js->rt)) {
+        ns_schedule_microtask_drain(js);
+    } else {
+        ns_storage_drain_deferred_events(js);
+        if (js->callback_depth == 0)
+            ns_js_report_pending_rejections(js);
+    }
 }
 
 static void ns_storage_flush(ns_js *js);
@@ -25530,6 +25566,7 @@ gboolean
 ns_js_has_pending_work(const ns_js *js)
 {
     if (!js) return FALSE;
+    if (js->microtask_source || JS_IsJobPending(js->rt)) return TRUE;
     if (js->timers && g_hash_table_size(js->timers) > 0) {
         GHashTableIter it;
         gpointer k, v;
@@ -46868,6 +46905,11 @@ ns_js_reset_runtime_state(ns_js *js)
         g_source_remove(js->async_script_source);
         js->async_script_source = 0;
     }
+    if (js->microtask_source) {
+        ns_js_source_remove(js, js->microtask_source);
+        js->microtask_source = 0;
+    }
+    js->draining_microtasks = FALSE;
     if (js->async_script_roots)
         g_ptr_array_set_size(js->async_script_roots, 0);
 
@@ -47368,6 +47410,10 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    if (js->microtask_source) {
+        ns_js_source_remove(js, js->microtask_source);
+        js->microtask_source = 0;
+    }
     ns_js_blob_registry_remove(js);
     ns_storage_flush(js);
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);

@@ -166,6 +166,8 @@ struct ns_js {
     GPtrArray    *pending_scrollend;
     gboolean      pending_scrollend_doc;
     int           eval_depth;
+    guint         microtask_source;
+    gboolean      draining_microtasks;
     GString      *document_write_buffer;
     ns_node      *document_write_script;
     gboolean      document_write_parser_open;
