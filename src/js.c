@@ -3344,6 +3344,36 @@ ns_window_named_lookup(ns_js *js, const char *name)
     return ns_node_find_by_id(js->current_doc, name);
 }
 
+static gboolean
+ns_name_is_array_index(const char *name, uint32_t *out)
+{
+    if (!name || !*name) return FALSE;
+    if (name[0] == '0' && name[1]) return FALSE;
+    guint64 value = 0;
+    for (const char *p = name; *p; p++) {
+        if (!g_ascii_isdigit(*p)) return FALSE;
+        value = value * 10 + (guint64)(*p - '0');
+        if (value >= 4294967295u) return FALSE;
+    }
+    *out = (uint32_t)value;
+    return TRUE;
+}
+
+static void ns_collect_frames_walk(JSContext *ctx, const ns_node *n,
+                                   JSValue arr, uint32_t *i, int depth);
+
+static JSValue
+ns_window_indexed_frame(JSContext *ctx, ns_js *js, uint32_t index)
+{
+    JSValue arr = JS_NewArray(ctx);
+    uint32_t count = 0;
+    ns_collect_frames_walk(ctx, js->current_doc, arr, &count, 0);
+    JSValue frame = index < count ? JS_GetPropertyUint32(ctx, arr, index)
+                                  : JS_UNDEFINED;
+    JS_FreeValue(ctx, arr);
+    return frame;
+}
+
 static int
 ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
                     JSValueConst obj, JSAtom prop)
@@ -3351,12 +3381,23 @@ ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
     (void)obj;
     ns_js *js = js_from_ctx(ctx);
     if (!js || !js->current_doc) return 0;
-    JSValue keyv = JS_AtomToValue(ctx, prop);
-    int is_str = JS_IsString(keyv);
-    JS_FreeValue(ctx, keyv);
-    if (!is_str) return 0;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return 0;
+    uint32_t index = 0;
+    if (ns_name_is_array_index(name, &index)) {
+        JS_FreeCString(ctx, name);
+        JSValue frame = ns_window_indexed_frame(ctx, js, index);
+        if (JS_IsUndefined(frame)) return 0;
+        if (desc) {
+            desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
+            desc->value  = frame;
+            desc->getter = JS_UNDEFINED;
+            desc->setter = JS_UNDEFINED;
+        } else {
+            JS_FreeValue(ctx, frame);
+        }
+        return 1;
+    }
     ns_node *el = ns_window_named_lookup(js, name);
     JS_FreeCString(ctx, name);
     if (!el) return 0;
