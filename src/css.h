@@ -397,14 +397,38 @@ typedef enum ns_css_unit {
     NS_CSS_UNIT_PX,
     NS_CSS_UNIT_EM,
     NS_CSS_UNIT_REM,
+    NS_CSS_UNIT_LH,
+    NS_CSS_UNIT_RLH,
     NS_CSS_UNIT_PERCENT,
     NS_CSS_UNIT_NUMBER,
     NS_CSS_UNIT_VW,
+    NS_CSS_UNIT_SVW,
+    NS_CSS_UNIT_LVW,
+    NS_CSS_UNIT_DVW,
     NS_CSS_UNIT_VH,
+    NS_CSS_UNIT_SVH,
+    NS_CSS_UNIT_LVH,
+    NS_CSS_UNIT_DVH,
+    NS_CSS_UNIT_VI,
+    NS_CSS_UNIT_SVI,
+    NS_CSS_UNIT_LVI,
+    NS_CSS_UNIT_DVI,
+    NS_CSS_UNIT_VB,
+    NS_CSS_UNIT_SVB,
+    NS_CSS_UNIT_LVB,
+    NS_CSS_UNIT_DVB,
     NS_CSS_UNIT_VMIN,
+    NS_CSS_UNIT_SVMIN,
+    NS_CSS_UNIT_LVMIN,
+    NS_CSS_UNIT_DVMIN,
     NS_CSS_UNIT_VMAX,
+    NS_CSS_UNIT_SVMAX,
+    NS_CSS_UNIT_LVMAX,
+    NS_CSS_UNIT_DVMAX,
     NS_CSS_UNIT_CQW,
     NS_CSS_UNIT_CQH,
+    NS_CSS_UNIT_CQI,
+    NS_CSS_UNIT_CQB,
     NS_CSS_UNIT_CQMIN,
     NS_CSS_UNIT_CQMAX,
     NS_CSS_UNIT_EX,
@@ -447,7 +471,14 @@ typedef struct ns_css_value {
         struct { double v; ns_css_unit unit; } length;
         struct { double w, h; ns_css_unit w_unit, h_unit; gboolean w_auto, h_auto; } size;
         struct { guint8 r, g, b, a; } color;
-        struct { double pct; double px; double em; double rem; } calc;
+        struct {
+            double pct;
+            double px;
+            double em;
+            double rem;
+            double lh;
+            double rlh;
+        } calc;
         ns_css_shadow_list shadow;
         ns_css_gradient  gradient;
         ns_css_tracks    tracks;

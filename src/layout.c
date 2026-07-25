@@ -43,11 +43,13 @@ length_resolve(const ns_css_value *v, double basis, double fallback)
         double m = MAX(ns_css_viewport_w(), ns_css_viewport_h());
         return v->u.length.v * m / 100.0;
     }
-    if (v->u.length.unit == NS_CSS_UNIT_CQW) {
+    if (v->u.length.unit == NS_CSS_UNIT_CQW ||
+        v->u.length.unit == NS_CSS_UNIT_CQI) {
         double cw = ns_css_container_w();
         return v->u.length.v * (cw > 0 ? cw : ns_css_viewport_w()) / 100.0;
     }
-    if (v->u.length.unit == NS_CSS_UNIT_CQH) {
+    if (v->u.length.unit == NS_CSS_UNIT_CQH ||
+        v->u.length.unit == NS_CSS_UNIT_CQB) {
         double ch = ns_css_container_h();
         return v->u.length.v * (ch > 0 ? ch : ns_css_viewport_h()) / 100.0;
     }
@@ -1596,8 +1598,10 @@ control_dim_px_basis(const ns_css_value *v, double font_size, double basis)
     case NS_CSS_UNIT_VMAX:
         return v->u.length.v * MAX(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
     case NS_CSS_UNIT_CQW:
+    case NS_CSS_UNIT_CQI:
         return v->u.length.v * (ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w()) / 100.0;
     case NS_CSS_UNIT_CQH:
+    case NS_CSS_UNIT_CQB:
         return v->u.length.v * (ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h()) / 100.0;
     case NS_CSS_UNIT_CQMIN: {
         double cw = ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w();
@@ -1616,6 +1620,8 @@ control_dim_px_basis(const ns_css_value *v, double font_size, double basis)
         return v->u.length.v * font_size * 0.7;
     case NS_CSS_UNIT_IC:
         return v->u.length.v * font_size;
+    default:
+        break;
     }
     return 0;
 }

@@ -14,6 +14,7 @@
 
 static double g_viewport_w = 1000;
 static double g_viewport_h = 800;
+static __thread double g_root_line_px;
 
 static GHashTable *g_defined_elements;
 
@@ -75,13 +76,35 @@ static double
 viewport_resolve(double v, ns_css_unit unit)
 {
     switch (unit) {
-    case NS_CSS_UNIT_VW:  return v * g_viewport_w / 100.0;
-    case NS_CSS_UNIT_VH:  return v * g_viewport_h / 100.0;
-    case NS_CSS_UNIT_VMIN: {
+    case NS_CSS_UNIT_VW:
+    case NS_CSS_UNIT_SVW:
+    case NS_CSS_UNIT_LVW:
+    case NS_CSS_UNIT_DVW:
+    case NS_CSS_UNIT_VI:
+    case NS_CSS_UNIT_SVI:
+    case NS_CSS_UNIT_LVI:
+    case NS_CSS_UNIT_DVI:
+        return v * g_viewport_w / 100.0;
+    case NS_CSS_UNIT_VH:
+    case NS_CSS_UNIT_SVH:
+    case NS_CSS_UNIT_LVH:
+    case NS_CSS_UNIT_DVH:
+    case NS_CSS_UNIT_VB:
+    case NS_CSS_UNIT_SVB:
+    case NS_CSS_UNIT_LVB:
+    case NS_CSS_UNIT_DVB:
+        return v * g_viewport_h / 100.0;
+    case NS_CSS_UNIT_VMIN:
+    case NS_CSS_UNIT_SVMIN:
+    case NS_CSS_UNIT_LVMIN:
+    case NS_CSS_UNIT_DVMIN: {
         double m = g_viewport_w < g_viewport_h ? g_viewport_w : g_viewport_h;
         return v * m / 100.0;
     }
-    case NS_CSS_UNIT_VMAX: {
+    case NS_CSS_UNIT_VMAX:
+    case NS_CSS_UNIT_SVMAX:
+    case NS_CSS_UNIT_LVMAX:
+    case NS_CSS_UNIT_DVMAX: {
         double m = g_viewport_w > g_viewport_h ? g_viewport_w : g_viewport_h;
         return v * m / 100.0;
     }
@@ -2683,34 +2706,32 @@ parse_length(const char *text, double *out_v, ns_css_unit *out_unit)
     if (g_ascii_strcasecmp(end, "%")   == 0) { *out_unit = NS_CSS_UNIT_PERCENT; return TRUE; }
     if (g_ascii_strcasecmp(end, "vw") == 0) { *out_unit = NS_CSS_UNIT_VW; return TRUE; }
     if (g_ascii_strcasecmp(end, "vh") == 0) { *out_unit = NS_CSS_UNIT_VH; return TRUE; }
-    if (g_ascii_strcasecmp(end, "dvw") == 0 || g_ascii_strcasecmp(end, "svw") == 0 ||
-        g_ascii_strcasecmp(end, "lvw") == 0) { *out_unit = NS_CSS_UNIT_VW; return TRUE; }
-    if (g_ascii_strcasecmp(end, "dvh") == 0 || g_ascii_strcasecmp(end, "svh") == 0 ||
-        g_ascii_strcasecmp(end, "lvh") == 0) { *out_unit = NS_CSS_UNIT_VH; return TRUE; }
-    if (g_ascii_strcasecmp(end, "cqi") == 0 || g_ascii_strcasecmp(end, "cqw") == 0) {
-        *out_unit = NS_CSS_UNIT_CQW;
-        return TRUE;
-    }
-    if (g_ascii_strcasecmp(end, "cqb") == 0 || g_ascii_strcasecmp(end, "cqh") == 0) {
-        *out_unit = NS_CSS_UNIT_CQH;
-        return TRUE;
-    }
-    if (g_ascii_strcasecmp(end, "vi") == 0 || g_ascii_strcasecmp(end, "dvi") == 0 ||
-        g_ascii_strcasecmp(end, "svi") == 0 || g_ascii_strcasecmp(end, "lvi") == 0) {
-        *out_unit = NS_CSS_UNIT_VW;
-        return TRUE;
-    }
-    if (g_ascii_strcasecmp(end, "vb") == 0 || g_ascii_strcasecmp(end, "dvb") == 0 ||
-        g_ascii_strcasecmp(end, "svb") == 0 || g_ascii_strcasecmp(end, "lvb") == 0) {
-        *out_unit = NS_CSS_UNIT_VH;
-        return TRUE;
-    }
+    if (g_ascii_strcasecmp(end, "svw") == 0) { *out_unit = NS_CSS_UNIT_SVW; return TRUE; }
+    if (g_ascii_strcasecmp(end, "lvw") == 0) { *out_unit = NS_CSS_UNIT_LVW; return TRUE; }
+    if (g_ascii_strcasecmp(end, "dvw") == 0) { *out_unit = NS_CSS_UNIT_DVW; return TRUE; }
+    if (g_ascii_strcasecmp(end, "svh") == 0) { *out_unit = NS_CSS_UNIT_SVH; return TRUE; }
+    if (g_ascii_strcasecmp(end, "lvh") == 0) { *out_unit = NS_CSS_UNIT_LVH; return TRUE; }
+    if (g_ascii_strcasecmp(end, "dvh") == 0) { *out_unit = NS_CSS_UNIT_DVH; return TRUE; }
+    if (g_ascii_strcasecmp(end, "vi") == 0) { *out_unit = NS_CSS_UNIT_VI; return TRUE; }
+    if (g_ascii_strcasecmp(end, "svi") == 0) { *out_unit = NS_CSS_UNIT_SVI; return TRUE; }
+    if (g_ascii_strcasecmp(end, "lvi") == 0) { *out_unit = NS_CSS_UNIT_LVI; return TRUE; }
+    if (g_ascii_strcasecmp(end, "dvi") == 0) { *out_unit = NS_CSS_UNIT_DVI; return TRUE; }
+    if (g_ascii_strcasecmp(end, "vb") == 0) { *out_unit = NS_CSS_UNIT_VB; return TRUE; }
+    if (g_ascii_strcasecmp(end, "svb") == 0) { *out_unit = NS_CSS_UNIT_SVB; return TRUE; }
+    if (g_ascii_strcasecmp(end, "lvb") == 0) { *out_unit = NS_CSS_UNIT_LVB; return TRUE; }
+    if (g_ascii_strcasecmp(end, "dvb") == 0) { *out_unit = NS_CSS_UNIT_DVB; return TRUE; }
+    if (g_ascii_strcasecmp(end, "cqw") == 0) { *out_unit = NS_CSS_UNIT_CQW; return TRUE; }
+    if (g_ascii_strcasecmp(end, "cqh") == 0) { *out_unit = NS_CSS_UNIT_CQH; return TRUE; }
+    if (g_ascii_strcasecmp(end, "cqi") == 0) { *out_unit = NS_CSS_UNIT_CQI; return TRUE; }
+    if (g_ascii_strcasecmp(end, "cqb") == 0) { *out_unit = NS_CSS_UNIT_CQB; return TRUE; }
     if (g_ascii_strcasecmp(end, "vmin") == 0) { *out_unit = NS_CSS_UNIT_VMIN; return TRUE; }
     if (g_ascii_strcasecmp(end, "vmax") == 0) { *out_unit = NS_CSS_UNIT_VMAX; return TRUE; }
-    if (g_ascii_strcasecmp(end, "dvmin") == 0 || g_ascii_strcasecmp(end, "svmin") == 0 ||
-        g_ascii_strcasecmp(end, "lvmin") == 0) { *out_unit = NS_CSS_UNIT_VMIN; return TRUE; }
-    if (g_ascii_strcasecmp(end, "dvmax") == 0 || g_ascii_strcasecmp(end, "svmax") == 0 ||
-        g_ascii_strcasecmp(end, "lvmax") == 0) { *out_unit = NS_CSS_UNIT_VMAX; return TRUE; }
+    if (g_ascii_strcasecmp(end, "svmin") == 0) { *out_unit = NS_CSS_UNIT_SVMIN; return TRUE; }
+    if (g_ascii_strcasecmp(end, "lvmin") == 0) { *out_unit = NS_CSS_UNIT_LVMIN; return TRUE; }
+    if (g_ascii_strcasecmp(end, "dvmin") == 0) { *out_unit = NS_CSS_UNIT_DVMIN; return TRUE; }
+    if (g_ascii_strcasecmp(end, "svmax") == 0) { *out_unit = NS_CSS_UNIT_SVMAX; return TRUE; }
+    if (g_ascii_strcasecmp(end, "lvmax") == 0) { *out_unit = NS_CSS_UNIT_LVMAX; return TRUE; }
+    if (g_ascii_strcasecmp(end, "dvmax") == 0) { *out_unit = NS_CSS_UNIT_DVMAX; return TRUE; }
     if (g_ascii_strcasecmp(end, "cqmin") == 0) { *out_unit = NS_CSS_UNIT_CQMIN; return TRUE; }
     if (g_ascii_strcasecmp(end, "cqmax") == 0) { *out_unit = NS_CSS_UNIT_CQMAX; return TRUE; }
     if (g_ascii_strcasecmp(end, "pt")  == 0) {
@@ -2728,11 +2749,11 @@ parse_length(const char *text, double *out_v, ns_css_unit *out_unit)
     if (g_ascii_strcasecmp(end, "cap") == 0) { *out_unit = NS_CSS_UNIT_CAP; return TRUE; }
     if (g_ascii_strcasecmp(end, "ic")  == 0) { *out_unit = NS_CSS_UNIT_IC;  return TRUE; }
     if (g_ascii_strcasecmp(end, "lh") == 0) {
-        *out_unit = NS_CSS_UNIT_EM;
+        *out_unit = NS_CSS_UNIT_LH;
         return TRUE;
     }
     if (g_ascii_strcasecmp(end, "rlh") == 0) {
-        *out_unit = NS_CSS_UNIT_REM;
+        *out_unit = NS_CSS_UNIT_RLH;
         return TRUE;
     }
     if (g_ascii_strcasecmp(end, "cm")  == 0) { *out_v = v * (96.0 / 2.54); *out_unit = NS_CSS_UNIT_PX; return TRUE; }
@@ -2803,7 +2824,8 @@ resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
         g_free(wrapped);
     }
     if (v && v->kind == NS_CSS_V_CALC) {
-        double rel = (v->u.calc.em + v->u.calc.rem) * 16.0;
+        double rel = (v->u.calc.em + v->u.calc.rem) * 16.0 +
+                     (v->u.calc.lh + v->u.calc.rlh) * 19.2;
         *out_px = rel == 0 ? v->u.calc.px : v->u.calc.px + rel;
         *out_pct = v->u.calc.pct;
         ns_css_value_free(v);
@@ -2818,6 +2840,36 @@ resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
         case NS_CSS_UNIT_EM:
         case NS_CSS_UNIT_REM:
             *out_px = v->u.length.v * 16.0;
+            break;
+        case NS_CSS_UNIT_LH:
+        case NS_CSS_UNIT_RLH:
+            *out_px = v->u.length.v * 19.2;
+            break;
+        case NS_CSS_UNIT_VW:
+        case NS_CSS_UNIT_SVW:
+        case NS_CSS_UNIT_LVW:
+        case NS_CSS_UNIT_DVW:
+        case NS_CSS_UNIT_VH:
+        case NS_CSS_UNIT_SVH:
+        case NS_CSS_UNIT_LVH:
+        case NS_CSS_UNIT_DVH:
+        case NS_CSS_UNIT_VI:
+        case NS_CSS_UNIT_SVI:
+        case NS_CSS_UNIT_LVI:
+        case NS_CSS_UNIT_DVI:
+        case NS_CSS_UNIT_VB:
+        case NS_CSS_UNIT_SVB:
+        case NS_CSS_UNIT_LVB:
+        case NS_CSS_UNIT_DVB:
+        case NS_CSS_UNIT_VMIN:
+        case NS_CSS_UNIT_SVMIN:
+        case NS_CSS_UNIT_LVMIN:
+        case NS_CSS_UNIT_DVMIN:
+        case NS_CSS_UNIT_VMAX:
+        case NS_CSS_UNIT_SVMAX:
+        case NS_CSS_UNIT_LVMAX:
+        case NS_CSS_UNIT_DVMAX:
+            *out_px = viewport_resolve(v->u.length.v, v->u.length.unit);
             break;
         default:
             *out_px = v->u.length.v;
@@ -2835,18 +2887,38 @@ resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
         case NS_CSS_UNIT_PERCENT: *out_pct = num; break;
         case NS_CSS_UNIT_EM:
         case NS_CSS_UNIT_REM:     *out_px = num * 16.0; break;
-        case NS_CSS_UNIT_VW:      *out_px = num * g_viewport_w / 100.0; break;
-        case NS_CSS_UNIT_VH:      *out_px = num * g_viewport_h / 100.0; break;
+        case NS_CSS_UNIT_LH:
+        case NS_CSS_UNIT_RLH:     *out_px = num * 19.2; break;
+        case NS_CSS_UNIT_VW:
+        case NS_CSS_UNIT_SVW:
+        case NS_CSS_UNIT_LVW:
+        case NS_CSS_UNIT_DVW:
+        case NS_CSS_UNIT_VH:
+        case NS_CSS_UNIT_SVH:
+        case NS_CSS_UNIT_LVH:
+        case NS_CSS_UNIT_DVH:
+        case NS_CSS_UNIT_VI:
+        case NS_CSS_UNIT_SVI:
+        case NS_CSS_UNIT_LVI:
+        case NS_CSS_UNIT_DVI:
+        case NS_CSS_UNIT_VB:
+        case NS_CSS_UNIT_SVB:
+        case NS_CSS_UNIT_LVB:
+        case NS_CSS_UNIT_DVB:
         case NS_CSS_UNIT_VMIN:
-            *out_px = num * (g_viewport_w < g_viewport_h ?
-                             g_viewport_w : g_viewport_h) / 100.0;
-            break;
+        case NS_CSS_UNIT_SVMIN:
+        case NS_CSS_UNIT_LVMIN:
+        case NS_CSS_UNIT_DVMIN:
         case NS_CSS_UNIT_VMAX:
-            *out_px = num * (g_viewport_w > g_viewport_h ?
-                             g_viewport_w : g_viewport_h) / 100.0;
+        case NS_CSS_UNIT_SVMAX:
+        case NS_CSS_UNIT_LVMAX:
+        case NS_CSS_UNIT_DVMAX:
+            *out_px = viewport_resolve(num, u);
             break;
-        case NS_CSS_UNIT_CQW:     *out_px = num * g_viewport_w / 100.0; break;
-        case NS_CSS_UNIT_CQH:     *out_px = num * g_viewport_h / 100.0; break;
+        case NS_CSS_UNIT_CQW:
+        case NS_CSS_UNIT_CQI:     *out_px = num * g_viewport_w / 100.0; break;
+        case NS_CSS_UNIT_CQH:
+        case NS_CSS_UNIT_CQB:     *out_px = num * g_viewport_h / 100.0; break;
         case NS_CSS_UNIT_CQMIN:
             *out_px = num * (g_viewport_w < g_viewport_h ?
                              g_viewport_w : g_viewport_h) / 100.0;
@@ -2881,6 +2953,8 @@ typedef struct ns_calc_term {
     double pct;
     double em;
     double rem;
+    double lh;
+    double rlh;
     double num;
     gboolean is_number;
 } ns_calc_term;
@@ -2903,11 +2977,15 @@ calc_term_scale(ns_calc_term *v, double m)
         v->pct *= m;
         v->em *= m;
         v->rem *= m;
+        v->lh *= m;
+        v->rlh *= m;
     } else {
         if (v->px  != 0) v->px  *= m;
         if (v->pct != 0) v->pct *= m;
         if (v->em  != 0) v->em  *= m;
         if (v->rem != 0) v->rem *= m;
+        if (v->lh  != 0) v->lh  *= m;
+        if (v->rlh != 0) v->rlh *= m;
     }
 }
 
@@ -2962,24 +3040,44 @@ calc_unit_value(const char *unit, double num, ns_calc_term *out)
     case NS_CSS_UNIT_REM:
         out->rem = v;
         break;
+    case NS_CSS_UNIT_LH:
+        out->lh = v;
+        break;
+    case NS_CSS_UNIT_RLH:
+        out->rlh = v;
+        break;
     case NS_CSS_UNIT_VW:
-        out->px = v * g_viewport_w / 100.0;
-        break;
+    case NS_CSS_UNIT_SVW:
+    case NS_CSS_UNIT_LVW:
+    case NS_CSS_UNIT_DVW:
     case NS_CSS_UNIT_VH:
-        out->px = v * g_viewport_h / 100.0;
-        break;
+    case NS_CSS_UNIT_SVH:
+    case NS_CSS_UNIT_LVH:
+    case NS_CSS_UNIT_DVH:
+    case NS_CSS_UNIT_VI:
+    case NS_CSS_UNIT_SVI:
+    case NS_CSS_UNIT_LVI:
+    case NS_CSS_UNIT_DVI:
+    case NS_CSS_UNIT_VB:
+    case NS_CSS_UNIT_SVB:
+    case NS_CSS_UNIT_LVB:
+    case NS_CSS_UNIT_DVB:
     case NS_CSS_UNIT_VMIN:
-        out->px = v * (g_viewport_w < g_viewport_h ?
-                       g_viewport_w : g_viewport_h) / 100.0;
-        break;
+    case NS_CSS_UNIT_SVMIN:
+    case NS_CSS_UNIT_LVMIN:
+    case NS_CSS_UNIT_DVMIN:
     case NS_CSS_UNIT_VMAX:
-        out->px = v * (g_viewport_w > g_viewport_h ?
-                       g_viewport_w : g_viewport_h) / 100.0;
+    case NS_CSS_UNIT_SVMAX:
+    case NS_CSS_UNIT_LVMAX:
+    case NS_CSS_UNIT_DVMAX:
+        out->px = viewport_resolve(v, u);
         break;
     case NS_CSS_UNIT_CQW:
+    case NS_CSS_UNIT_CQI:
         out->px = v * g_viewport_w / 100.0;
         break;
     case NS_CSS_UNIT_CQH:
+    case NS_CSS_UNIT_CQB:
         out->px = v * g_viewport_h / 100.0;
         break;
     case NS_CSS_UNIT_CQMIN:
@@ -3053,6 +3151,8 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             out->pct = v->u.calc.pct;
             out->em = v->u.calc.em;
             out->rem = v->u.calc.rem;
+            out->lh = v->u.calc.lh;
+            out->rlh = v->u.calc.rlh;
         } else if (v->kind == NS_CSS_V_LENGTH) {
             double num = v->u.length.v;
             switch (v->u.length.unit) {
@@ -3063,18 +3163,38 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             case NS_CSS_UNIT_CAP:     out->em = num * 0.7; break;
             case NS_CSS_UNIT_IC:      out->em = num; break;
             case NS_CSS_UNIT_REM:     out->rem = num; break;
-            case NS_CSS_UNIT_VW:      out->px = num * g_viewport_w / 100.0; break;
-            case NS_CSS_UNIT_VH:      out->px = num * g_viewport_h / 100.0; break;
+            case NS_CSS_UNIT_LH:      out->lh = num; break;
+            case NS_CSS_UNIT_RLH:     out->rlh = num; break;
+            case NS_CSS_UNIT_VW:
+            case NS_CSS_UNIT_SVW:
+            case NS_CSS_UNIT_LVW:
+            case NS_CSS_UNIT_DVW:
+            case NS_CSS_UNIT_VH:
+            case NS_CSS_UNIT_SVH:
+            case NS_CSS_UNIT_LVH:
+            case NS_CSS_UNIT_DVH:
+            case NS_CSS_UNIT_VI:
+            case NS_CSS_UNIT_SVI:
+            case NS_CSS_UNIT_LVI:
+            case NS_CSS_UNIT_DVI:
+            case NS_CSS_UNIT_VB:
+            case NS_CSS_UNIT_SVB:
+            case NS_CSS_UNIT_LVB:
+            case NS_CSS_UNIT_DVB:
             case NS_CSS_UNIT_VMIN:
-                out->px = num * (g_viewport_w < g_viewport_h ?
-                                 g_viewport_w : g_viewport_h) / 100.0;
-                break;
+            case NS_CSS_UNIT_SVMIN:
+            case NS_CSS_UNIT_LVMIN:
+            case NS_CSS_UNIT_DVMIN:
             case NS_CSS_UNIT_VMAX:
-                out->px = num * (g_viewport_w > g_viewport_h ?
-                                 g_viewport_w : g_viewport_h) / 100.0;
+            case NS_CSS_UNIT_SVMAX:
+            case NS_CSS_UNIT_LVMAX:
+            case NS_CSS_UNIT_DVMAX:
+                out->px = viewport_resolve(num, v->u.length.unit);
                 break;
-            case NS_CSS_UNIT_CQW:     out->px = num * g_viewport_w / 100.0; break;
-            case NS_CSS_UNIT_CQH:     out->px = num * g_viewport_h / 100.0; break;
+            case NS_CSS_UNIT_CQW:
+            case NS_CSS_UNIT_CQI:     out->px = num * g_viewport_w / 100.0; break;
+            case NS_CSS_UNIT_CQH:
+            case NS_CSS_UNIT_CQB:     out->px = num * g_viewport_h / 100.0; break;
             case NS_CSS_UNIT_CQMIN:
                 out->px = num * (g_viewport_w < g_viewport_h ?
                                  g_viewport_w : g_viewport_h) / 100.0;
@@ -3193,11 +3313,15 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             out->pct += rhs.pct;
             out->em += rhs.em;
             out->rem += rhs.rem;
+            out->lh += rhs.lh;
+            out->rlh += rhs.rlh;
         } else {
             out->px -= rhs.px;
             out->pct -= rhs.pct;
             out->em -= rhs.em;
             out->rem -= rhs.rem;
+            out->lh -= rhs.lh;
+            out->rlh -= rhs.rlh;
         }
         *pp = p;
     }
@@ -3292,6 +3416,7 @@ progress_operand(const char *text, double *out)
         } else if (v->kind == NS_CSS_V_CALC) {
             ty = PT_LENGTHPCT;
             *out = v->u.calc.px + (v->u.calc.em + v->u.calc.rem) * 16.0 +
+                   (v->u.calc.lh + v->u.calc.rlh) * 19.2 +
                    v->u.calc.pct * 0.01 * g_viewport_w;
         }
         ns_css_value_free(v);
@@ -3413,14 +3538,44 @@ ns_css_unit_suffix(int unit)
     case NS_CSS_UNIT_PX:      return "px";
     case NS_CSS_UNIT_EM:      return "em";
     case NS_CSS_UNIT_REM:     return "rem";
+    case NS_CSS_UNIT_LH:      return "lh";
+    case NS_CSS_UNIT_RLH:     return "rlh";
     case NS_CSS_UNIT_PERCENT: return "%";
     case NS_CSS_UNIT_NUMBER:  return "";
     case NS_CSS_UNIT_VW:      return "vw";
+    case NS_CSS_UNIT_SVW:     return "svw";
+    case NS_CSS_UNIT_LVW:     return "lvw";
+    case NS_CSS_UNIT_DVW:     return "dvw";
     case NS_CSS_UNIT_VH:      return "vh";
+    case NS_CSS_UNIT_SVH:     return "svh";
+    case NS_CSS_UNIT_LVH:     return "lvh";
+    case NS_CSS_UNIT_DVH:     return "dvh";
+    case NS_CSS_UNIT_VI:      return "vi";
+    case NS_CSS_UNIT_SVI:     return "svi";
+    case NS_CSS_UNIT_LVI:     return "lvi";
+    case NS_CSS_UNIT_DVI:     return "dvi";
+    case NS_CSS_UNIT_VB:      return "vb";
+    case NS_CSS_UNIT_SVB:     return "svb";
+    case NS_CSS_UNIT_LVB:     return "lvb";
+    case NS_CSS_UNIT_DVB:     return "dvb";
     case NS_CSS_UNIT_VMIN:    return "vmin";
+    case NS_CSS_UNIT_SVMIN:   return "svmin";
+    case NS_CSS_UNIT_LVMIN:   return "lvmin";
+    case NS_CSS_UNIT_DVMIN:   return "dvmin";
     case NS_CSS_UNIT_VMAX:    return "vmax";
+    case NS_CSS_UNIT_SVMAX:   return "svmax";
+    case NS_CSS_UNIT_LVMAX:   return "lvmax";
+    case NS_CSS_UNIT_DVMAX:   return "dvmax";
+    case NS_CSS_UNIT_CQW:     return "cqw";
+    case NS_CSS_UNIT_CQH:     return "cqh";
+    case NS_CSS_UNIT_CQI:     return "cqi";
+    case NS_CSS_UNIT_CQB:     return "cqb";
+    case NS_CSS_UNIT_CQMIN:   return "cqmin";
+    case NS_CSS_UNIT_CQMAX:   return "cqmax";
     case NS_CSS_UNIT_EX:      return "ex";
     case NS_CSS_UNIT_CH:      return "ch";
+    case NS_CSS_UNIT_CAP:     return "cap";
+    case NS_CSS_UNIT_IC:      return "ic";
     default:                  return "px";
     }
 }
@@ -3771,6 +3926,8 @@ parse_calc_inner(const char *text)
     double px  = 0;
     double em  = 0;
     double rem = 0;
+    double lh  = 0;
+    double rlh = 0;
     const char *p = text;
     ns_calc_term term;
     gboolean parsed = FALSE;
@@ -3783,6 +3940,8 @@ parse_calc_inner(const char *text)
             pct = term.pct;
             em = term.em;
             rem = term.rem;
+            lh = term.lh;
+            rlh = term.rlh;
             parsed = TRUE;
         }
     }
@@ -3793,6 +3952,8 @@ parse_calc_inner(const char *text)
     v->u.calc.px  = px;
     v->u.calc.em  = em;
     v->u.calc.rem = rem;
+    v->u.calc.lh  = lh;
+    v->u.calc.rlh = rlh;
     return v;
 }
 
@@ -3810,12 +3971,14 @@ parse_bg_size_component(const char *tok, double *out_v, ns_css_unit *out_unit)
         *out_unit = cv->u.length.unit;
     } else if (cv->kind == NS_CSS_V_CALC) {
         if (cv->u.calc.pct != 0 && cv->u.calc.px == 0 &&
-            cv->u.calc.em == 0 && cv->u.calc.rem == 0) {
+            cv->u.calc.em == 0 && cv->u.calc.rem == 0 &&
+            cv->u.calc.lh == 0 && cv->u.calc.rlh == 0) {
             *out_v = cv->u.calc.pct;
             *out_unit = NS_CSS_UNIT_PERCENT;
         } else {
             *out_v = cv->u.calc.px +
-                     (cv->u.calc.em + cv->u.calc.rem) * 16.0;
+                     (cv->u.calc.em + cv->u.calc.rem) * 16.0 +
+                     (cv->u.calc.lh + cv->u.calc.rlh) * 19.2;
             *out_unit = NS_CSS_UNIT_PX;
         }
     } else {
@@ -3878,13 +4041,15 @@ parse_math_track(const char *start, gsize len, ns_css_track *out)
         ok = TRUE;
     } else if (cv->kind == NS_CSS_V_CALC) {
         if (cv->u.calc.pct != 0 && cv->u.calc.px == 0 &&
-            cv->u.calc.em == 0 && cv->u.calc.rem == 0) {
+            cv->u.calc.em == 0 && cv->u.calc.rem == 0 &&
+            cv->u.calc.lh == 0 && cv->u.calc.rlh == 0) {
             out->kind = NS_CSS_TRACK_PERCENT;
             out->v = cv->u.calc.pct;
         } else {
             out->kind = NS_CSS_TRACK_PX;
             out->v = cv->u.calc.px +
                      (cv->u.calc.em + cv->u.calc.rem) * 16.0 +
+                     (cv->u.calc.lh + cv->u.calc.rlh) * 19.2 +
                      cv->u.calc.pct / 100.0 * g_viewport_w;
         }
         ok = TRUE;
@@ -6551,7 +6716,8 @@ numeric_value_valid_for_prop(ns_css_prop prop, const ns_css_value *v)
         return FALSE;
     if (prop == NS_CSS_OPACITY)
         return v->u.calc.px == 0 && v->u.calc.em == 0 &&
-               v->u.calc.rem == 0;
+               v->u.calc.rem == 0 && v->u.calc.lh == 0 &&
+               v->u.calc.rlh == 0;
     return TRUE;
 }
 
@@ -6978,7 +7144,8 @@ parse_value_for(ns_css_prop prop, const char *text)
                 v->u.length.v /= 100.0;
                 v->u.length.unit = NS_CSS_UNIT_NUMBER;
             } else if (v->kind == NS_CSS_V_CALC && v->u.calc.px == 0 &&
-                       v->u.calc.em == 0 && v->u.calc.rem == 0) {
+                       v->u.calc.em == 0 && v->u.calc.rem == 0 &&
+                       v->u.calc.lh == 0 && v->u.calc.rlh == 0) {
                 double pnum = v->u.calc.pct / 100.0;
                 ns_css_value_free(v);
                 v = calc_num_value(pnum);
@@ -7399,7 +7566,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (cv) {
             if (cv->kind == NS_CSS_V_CALC && cv->u.calc.pct == 0) {
                 double px = cv->u.calc.px +
-                            (cv->u.calc.em + cv->u.calc.rem) * 16.0;
+                            (cv->u.calc.em + cv->u.calc.rem) * 16.0 +
+                            (cv->u.calc.lh + cv->u.calc.rlh) * 19.2;
                 ns_css_value_free(cv);
                 cv = calc_px_value(px);
             }
@@ -15287,26 +15455,7 @@ ns_css_value_serialize(const ns_css_value *v)
                 v->u.color.r, v->u.color.g, v->u.color.b, ab);
         }
     case NS_CSS_V_LENGTH: {
-        const char *unit = "";
-        switch (v->u.length.unit) {
-        case NS_CSS_UNIT_PX:      unit = "px"; break;
-        case NS_CSS_UNIT_EM:      unit = "em"; break;
-        case NS_CSS_UNIT_REM:     unit = "rem"; break;
-        case NS_CSS_UNIT_PERCENT: unit = "%";  break;
-        case NS_CSS_UNIT_NUMBER:  unit = "";   break;
-        case NS_CSS_UNIT_VW:      unit = "vw"; break;
-        case NS_CSS_UNIT_VH:      unit = "vh"; break;
-        case NS_CSS_UNIT_VMIN:    unit = "vmin"; break;
-        case NS_CSS_UNIT_VMAX:    unit = "vmax"; break;
-        case NS_CSS_UNIT_CQW:     unit = "cqw"; break;
-        case NS_CSS_UNIT_CQH:     unit = "cqh"; break;
-        case NS_CSS_UNIT_CQMIN:   unit = "cqmin"; break;
-        case NS_CSS_UNIT_CQMAX:   unit = "cqmax"; break;
-        case NS_CSS_UNIT_EX:      unit = "ex";  break;
-        case NS_CSS_UNIT_CH:      unit = "ch";  break;
-        case NS_CSS_UNIT_CAP:     unit = "cap"; break;
-        case NS_CSS_UNIT_IC:      unit = "ic";  break;
-        }
+        const char *unit = ns_css_unit_suffix(v->u.length.unit);
         return g_strdup_printf("%g%s", v->u.length.v, unit);
     }
     case NS_CSS_V_SIZE: {
@@ -15314,66 +15463,46 @@ ns_css_value_serialize(const ns_css_value *v)
         if (v->u.size.w_auto) {
             g_string_append(s, "auto");
         } else {
-            const char *unit = "";
-            switch (v->u.size.w_unit) {
-            case NS_CSS_UNIT_PX:      unit = "px"; break;
-            case NS_CSS_UNIT_EM:      unit = "em"; break;
-            case NS_CSS_UNIT_REM:     unit = "rem"; break;
-            case NS_CSS_UNIT_PERCENT: unit = "%";  break;
-            case NS_CSS_UNIT_NUMBER:  unit = "";   break;
-            case NS_CSS_UNIT_VW:      unit = "vw"; break;
-            case NS_CSS_UNIT_VH:      unit = "vh"; break;
-            case NS_CSS_UNIT_VMIN:    unit = "vmin"; break;
-            case NS_CSS_UNIT_VMAX:    unit = "vmax"; break;
-            case NS_CSS_UNIT_CQW:     unit = "cqw"; break;
-            case NS_CSS_UNIT_CQH:     unit = "cqh"; break;
-            case NS_CSS_UNIT_CQMIN:   unit = "cqmin"; break;
-            case NS_CSS_UNIT_CQMAX:   unit = "cqmax"; break;
-            case NS_CSS_UNIT_EX:      unit = "ex";  break;
-            case NS_CSS_UNIT_CH:      unit = "ch";  break;
-            case NS_CSS_UNIT_CAP:     unit = "cap"; break;
-            case NS_CSS_UNIT_IC:      unit = "ic";  break;
-            }
+            const char *unit = ns_css_unit_suffix(v->u.size.w_unit);
             g_string_append_printf(s, "%g%s", v->u.size.w, unit);
         }
         g_string_append_c(s, ' ');
         if (v->u.size.h_auto) {
             g_string_append(s, "auto");
         } else {
-            const char *unit = "";
-            switch (v->u.size.h_unit) {
-            case NS_CSS_UNIT_PX:      unit = "px"; break;
-            case NS_CSS_UNIT_EM:      unit = "em"; break;
-            case NS_CSS_UNIT_REM:     unit = "rem"; break;
-            case NS_CSS_UNIT_PERCENT: unit = "%";  break;
-            case NS_CSS_UNIT_NUMBER:  unit = "";   break;
-            case NS_CSS_UNIT_VW:      unit = "vw"; break;
-            case NS_CSS_UNIT_VH:      unit = "vh"; break;
-            case NS_CSS_UNIT_VMIN:    unit = "vmin"; break;
-            case NS_CSS_UNIT_VMAX:    unit = "vmax"; break;
-            case NS_CSS_UNIT_CQW:     unit = "cqw"; break;
-            case NS_CSS_UNIT_CQH:     unit = "cqh"; break;
-            case NS_CSS_UNIT_CQMIN:   unit = "cqmin"; break;
-            case NS_CSS_UNIT_CQMAX:   unit = "cqmax"; break;
-            case NS_CSS_UNIT_EX:      unit = "ex";  break;
-            case NS_CSS_UNIT_CH:      unit = "ch";  break;
-            case NS_CSS_UNIT_CAP:     unit = "cap"; break;
-            case NS_CSS_UNIT_IC:      unit = "ic";  break;
-            }
+            const char *unit = ns_css_unit_suffix(v->u.size.h_unit);
             g_string_append_printf(s, "%g%s", v->u.size.h, unit);
         }
         return g_string_free(s, FALSE);
     }
-    case NS_CSS_V_CALC:
-        if (v->u.calc.pct == 0)
-            return g_strdup_printf("%gpx", v->u.calc.px);
-        if (v->u.calc.px == 0)
-            return g_strdup_printf("%g%%", v->u.calc.pct);
-        if (v->u.calc.px < 0)
-            return g_strdup_printf("calc(%g%% - %gpx)", v->u.calc.pct,
-                                   -v->u.calc.px);
-        return g_strdup_printf("calc(%g%% + %gpx)", v->u.calc.pct,
-                               v->u.calc.px);
+    case NS_CSS_V_CALC: {
+        const double terms[] = {
+            v->u.calc.pct, v->u.calc.px, v->u.calc.em,
+            v->u.calc.rem, v->u.calc.lh, v->u.calc.rlh,
+        };
+        const char *units[] = { "%", "px", "em", "rem", "lh", "rlh" };
+        int count = 0;
+        int only = 0;
+        for (int i = 0; i < 6; i++) {
+            if (terms[i] == 0) continue;
+            count++;
+            only = i;
+        }
+        if (count == 0) return g_strdup("0px");
+        if (count == 1)
+            return g_strdup_printf("%g%s", terms[only], units[only]);
+        GString *s = g_string_new("calc(");
+        gboolean first = TRUE;
+        for (int i = 0; i < 6; i++) {
+            if (terms[i] == 0) continue;
+            if (!first) g_string_append(s, terms[i] < 0 ? " - " : " + ");
+            else if (terms[i] < 0) g_string_append_c(s, '-');
+            g_string_append_printf(s, "%g%s", fabs(terms[i]), units[i]);
+            first = FALSE;
+        }
+        g_string_append_c(s, ')');
+        return g_string_free(s, FALSE);
+    }
     case NS_CSS_V_SHADOW: {
         GString *s = g_string_new(NULL);
         for (int i = 0; i < v->u.shadow.n; i++) {
@@ -16360,8 +16489,9 @@ resolve_pending_into_matches(GArray *pending_matches,
 }
 
 static const char *kUa =
-    "html, body { display: block; color: #1a1a1a; "
-    "font-family: system-ui, sans-serif; font-size: 16px; line-height: normal; }\n"
+    "html, body { display: block; }\n"
+    "html { color: #1a1a1a; font-family: system-ui, sans-serif; "
+    "font-size: 16px; line-height: normal; }\n"
     "body { margin: 8px; }\n"
     "div, p, section, article, header, footer, nav, main, aside, "
     "ul, ol, dl, dt, dd, blockquote, pre, address, "
@@ -16498,6 +16628,37 @@ static const char *kUa =
     "template { display: none; }\n";
 
 static double
+normal_line_height_px(double font_px)
+{
+    return font_px * 1.4375;
+}
+
+static double
+style_line_height_px(const ns_style *s, double font_px, double root_px,
+                     double lh_base, double rlh_base)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_LINE_HEIGHT] : NULL;
+    if (!v || ns_css_keyword_is(v, "normal"))
+        return normal_line_height_px(font_px);
+    if (v->kind == NS_CSS_V_CALC)
+        return v->u.calc.px + v->u.calc.em * font_px +
+               v->u.calc.rem * root_px + v->u.calc.lh * lh_base +
+               v->u.calc.rlh * rlh_base +
+               v->u.calc.pct * font_px / 100.0;
+    if (v->kind != NS_CSS_V_LENGTH) return normal_line_height_px(font_px);
+    switch (v->u.length.unit) {
+    case NS_CSS_UNIT_PX:      return v->u.length.v;
+    case NS_CSS_UNIT_NUMBER:  return v->u.length.v * font_px;
+    case NS_CSS_UNIT_PERCENT: return v->u.length.v * font_px / 100.0;
+    case NS_CSS_UNIT_EM:      return v->u.length.v * font_px;
+    case NS_CSS_UNIT_REM:     return v->u.length.v * root_px;
+    case NS_CSS_UNIT_LH:      return v->u.length.v * lh_base;
+    case NS_CSS_UNIT_RLH:     return v->u.length.v * rlh_base;
+    default:                  return normal_line_height_px(font_px);
+    }
+}
+
+static double
 resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
 {
     double parent_px = 16;
@@ -16506,9 +16667,19 @@ resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
         parent_style->values[NS_CSS_FONT_SIZE]->u.length.unit == NS_CSS_UNIT_PX)
         parent_px = parent_style->values[NS_CSS_FONT_SIZE]->u.length.v;
     ns_css_value *fs = s ? s->values[NS_CSS_FONT_SIZE] : NULL;
+    double parent_line_px = style_line_height_px(parent_style, parent_px,
+                                                  parent_px,
+                                                  normal_line_height_px(parent_px),
+                                                  g_root_line_px > 0
+                                                      ? g_root_line_px
+                                                      : normal_line_height_px(parent_px));
     if (fs && fs->kind == NS_CSS_V_CALC)
         return fs->u.calc.px + fs->u.calc.em * parent_px +
                fs->u.calc.rem * parent_px +
+               fs->u.calc.lh * parent_line_px +
+               fs->u.calc.rlh * (g_root_line_px > 0
+                                      ? g_root_line_px
+                                      : normal_line_height_px(parent_px)) +
                fs->u.calc.pct * parent_px / 100.0;
     if (!fs || fs->kind != NS_CSS_V_LENGTH) return parent_px;
     switch (fs->u.length.unit) {
@@ -16516,6 +16687,10 @@ resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
     case NS_CSS_UNIT_NUMBER:  return fs->u.length.v;
     case NS_CSS_UNIT_EM:      return fs->u.length.v * parent_px;
     case NS_CSS_UNIT_REM:     return fs->u.length.v * parent_px;
+    case NS_CSS_UNIT_LH:      return fs->u.length.v * parent_line_px;
+    case NS_CSS_UNIT_RLH:     return fs->u.length.v *
+        (g_root_line_px > 0 ? g_root_line_px
+                            : normal_line_height_px(parent_px));
     case NS_CSS_UNIT_PERCENT: return fs->u.length.v * parent_px / 100.0;
     case NS_CSS_UNIT_EX:
     case NS_CSS_UNIT_CH:
@@ -16535,16 +16710,38 @@ resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
                font_relative_unit_px(fs->u.length.unit, parent_px, pf, pw, pi);
     }
     case NS_CSS_UNIT_VW:
+    case NS_CSS_UNIT_SVW:
+    case NS_CSS_UNIT_LVW:
+    case NS_CSS_UNIT_DVW:
     case NS_CSS_UNIT_VH:
+    case NS_CSS_UNIT_SVH:
+    case NS_CSS_UNIT_LVH:
+    case NS_CSS_UNIT_DVH:
+    case NS_CSS_UNIT_VI:
+    case NS_CSS_UNIT_SVI:
+    case NS_CSS_UNIT_LVI:
+    case NS_CSS_UNIT_DVI:
+    case NS_CSS_UNIT_VB:
+    case NS_CSS_UNIT_SVB:
+    case NS_CSS_UNIT_LVB:
+    case NS_CSS_UNIT_DVB:
     case NS_CSS_UNIT_VMIN:
+    case NS_CSS_UNIT_SVMIN:
+    case NS_CSS_UNIT_LVMIN:
+    case NS_CSS_UNIT_DVMIN:
     case NS_CSS_UNIT_VMAX:
+    case NS_CSS_UNIT_SVMAX:
+    case NS_CSS_UNIT_LVMAX:
+    case NS_CSS_UNIT_DVMAX:
         return viewport_resolve(fs->u.length.v, fs->u.length.unit);
-    case NS_CSS_UNIT_CQW: {
+    case NS_CSS_UNIT_CQW:
+    case NS_CSS_UNIT_CQI: {
         const ns_cq_container *c = cq_select_container(NULL, 0);
         double basis = c && c->width > 0 ? c->width : g_viewport_w;
         return fs->u.length.v * basis / 100.0;
     }
-    case NS_CSS_UNIT_CQH: {
+    case NS_CSS_UNIT_CQH:
+    case NS_CSS_UNIT_CQB: {
         const ns_cq_container *c = cq_select_container(NULL, 0);
         double basis = c && c->type == NS_CQ_TYPE_SIZE && c->height > 0
             ? c->height : g_viewport_h;
@@ -16589,7 +16786,9 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * root_px;
     } else if (out->values[NS_CSS_FONT_SIZE] &&
                out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_CALC &&
-               out->values[NS_CSS_FONT_SIZE]->u.calc.rem != 0) {
+               (out->values[NS_CSS_FONT_SIZE]->u.calc.rem != 0 ||
+                out->values[NS_CSS_FONT_SIZE]->u.calc.lh != 0 ||
+                out->values[NS_CSS_FONT_SIZE]->u.calc.rlh != 0)) {
         const ns_css_value *fsv = out->values[NS_CSS_FONT_SIZE];
         double parent_px = 16;
         if (parent_style && parent_style->values[NS_CSS_FONT_SIZE] &&
@@ -16599,6 +16798,14 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             parent_px = parent_style->values[NS_CSS_FONT_SIZE]->u.length.v;
         my_font_px = fsv->u.calc.px + fsv->u.calc.em * parent_px +
                      fsv->u.calc.rem * root_px +
+                     fsv->u.calc.lh * style_line_height_px(
+                         parent_style, parent_px, root_px,
+                         normal_line_height_px(parent_px),
+                         g_root_line_px > 0 ? g_root_line_px
+                                            : normal_line_height_px(root_px)) +
+                     fsv->u.calc.rlh *
+                         (g_root_line_px > 0 ? g_root_line_px
+                                            : normal_line_height_px(root_px)) +
                      fsv->u.calc.pct * parent_px / 100.0;
     }
     if (out->values[NS_CSS_FONT_SIZE] &&
@@ -16613,6 +16820,18 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         fs->u.length.unit = NS_CSS_UNIT_PX;
         out->values[NS_CSS_FONT_SIZE] = fs;
     }
+    double initial_line_px = normal_line_height_px(
+        parent_style ? my_font_px : 16.0);
+    double root_line_px = g_root_line_px > 0
+        ? g_root_line_px : initial_line_px;
+    double my_line_px = style_line_height_px(out, my_font_px, root_px,
+                                              initial_line_px,
+                                              parent_style ? root_line_px
+                                                           : initial_line_px);
+    if (!parent_style) {
+        g_root_line_px = my_line_px;
+        root_line_px = my_line_px;
+    }
     const char *fr_family =
         out->values[NS_CSS_FONT_FAMILY] &&
         out->values[NS_CSS_FONT_FAMILY]->kind == NS_CSS_V_KEYWORD
@@ -16626,12 +16845,21 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         ns_css_value *v = out->values[i];
         if (!v) continue;
         if (v->kind == NS_CSS_V_CALC) {
-            if (v->u.calc.em != 0 || v->u.calc.rem != 0)
+            if (v->u.calc.em != 0 || v->u.calc.rem != 0 ||
+                v->u.calc.lh != 0 || v->u.calc.rlh != 0)
                 v = ns_css_value_cow(out, i);
+            double lh_base = i == NS_CSS_LINE_HEIGHT
+                ? initial_line_px : my_line_px;
+            double rlh_base = i == NS_CSS_LINE_HEIGHT && !parent_style
+                ? initial_line_px : root_line_px;
             v->u.calc.px += v->u.calc.em * my_font_px +
-                            v->u.calc.rem * root_px;
+                            v->u.calc.rem * root_px +
+                            v->u.calc.lh * lh_base +
+                            v->u.calc.rlh * rlh_base;
             v->u.calc.em = 0;
             v->u.calc.rem = 0;
+            v->u.calc.lh = 0;
+            v->u.calc.rlh = 0;
             continue;
         }
         if (v->kind != NS_CSS_V_LENGTH) continue;
@@ -16646,10 +16874,42 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             v->u.length.v *= root_px;
             v->u.length.unit = NS_CSS_UNIT_PX;
             break;
+        case NS_CSS_UNIT_LH:
+            v = ns_css_value_cow(out, i);
+            v->u.length.v *= i == NS_CSS_LINE_HEIGHT
+                ? initial_line_px : my_line_px;
+            v->u.length.unit = NS_CSS_UNIT_PX;
+            break;
+        case NS_CSS_UNIT_RLH:
+            v = ns_css_value_cow(out, i);
+            v->u.length.v *= i == NS_CSS_LINE_HEIGHT && !parent_style
+                ? initial_line_px : root_line_px;
+            v->u.length.unit = NS_CSS_UNIT_PX;
+            break;
         case NS_CSS_UNIT_VW:
+        case NS_CSS_UNIT_SVW:
+        case NS_CSS_UNIT_LVW:
+        case NS_CSS_UNIT_DVW:
         case NS_CSS_UNIT_VH:
+        case NS_CSS_UNIT_SVH:
+        case NS_CSS_UNIT_LVH:
+        case NS_CSS_UNIT_DVH:
+        case NS_CSS_UNIT_VI:
+        case NS_CSS_UNIT_SVI:
+        case NS_CSS_UNIT_LVI:
+        case NS_CSS_UNIT_DVI:
+        case NS_CSS_UNIT_VB:
+        case NS_CSS_UNIT_SVB:
+        case NS_CSS_UNIT_LVB:
+        case NS_CSS_UNIT_DVB:
         case NS_CSS_UNIT_VMIN:
+        case NS_CSS_UNIT_SVMIN:
+        case NS_CSS_UNIT_LVMIN:
+        case NS_CSS_UNIT_DVMIN:
         case NS_CSS_UNIT_VMAX:
+        case NS_CSS_UNIT_SVMAX:
+        case NS_CSS_UNIT_LVMAX:
+        case NS_CSS_UNIT_DVMAX:
             v = ns_css_value_cow(out, i);
             v->u.length.v = viewport_resolve(v->u.length.v, v->u.length.unit);
             v->u.length.unit = NS_CSS_UNIT_PX;
@@ -18535,6 +18795,13 @@ cascade_walk(ns_node *node,
             s->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
             s->values[NS_CSS_FONT_SIZE]->u.length.unit == NS_CSS_UNIT_PX)
             *root_px = s->values[NS_CSS_FONT_SIZE]->u.length.v;
+        if (!parent_style && g_root_line_px <= 0) {
+            double root_font_px = *root_px > 0 ? *root_px : 16.0;
+            g_root_line_px = style_line_height_px(s, root_font_px,
+                                                   root_font_px,
+                                                   normal_line_height_px(root_font_px),
+                                                   normal_line_height_px(root_font_px));
+        }
         nd_recurse_dirty = nd_node_dirty;
     }
     gboolean pushed = FALSE;
@@ -19026,6 +19293,7 @@ ns_css_compute(ns_node *doc,
         css_collect_property_rules(g_registered_props, author_sheets[i]);
 
     double root_px = 0;
+    g_root_line_px = 0;
     if (g_decl_sheet_cache && g_hash_table_size(g_decl_sheet_cache) >= 8192)
         g_hash_table_remove_all(g_decl_sheet_cache);
     if (!g_cq_stack)

@@ -427,8 +427,10 @@ inline_control_dim_px(const ns_css_value *v, double font_size, double basis)
     case NS_CSS_UNIT_VMAX:
         return v->u.length.v * MAX(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
     case NS_CSS_UNIT_CQW:
+    case NS_CSS_UNIT_CQI:
         return v->u.length.v * (ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w()) / 100.0;
     case NS_CSS_UNIT_CQH:
+    case NS_CSS_UNIT_CQB:
         return v->u.length.v * (ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h()) / 100.0;
     case NS_CSS_UNIT_CQMIN: {
         double cw = ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w();
@@ -447,6 +449,8 @@ inline_control_dim_px(const ns_css_value *v, double font_size, double basis)
         return v->u.length.v * font_size * 0.7;
     case NS_CSS_UNIT_IC:
         return v->u.length.v * font_size;
+    default:
+        break;
     }
     return 0;
 }
