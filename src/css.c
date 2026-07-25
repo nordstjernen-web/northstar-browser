@@ -151,269 +151,271 @@ ns_css_set_active_node(const ns_node *node)
     return prev;
 }
 
-static const char *kProp[NS_CSS_PROP_COUNT] = {
-    [NS_CSS_DISPLAY]              = "display",
-    [NS_CSS_COLOR]                = "color",
-    [NS_CSS_BACKGROUND_COLOR]     = "background-color",
-    [NS_CSS_FONT_SIZE]            = "font-size",
-    [NS_CSS_FONT_WEIGHT]          = "font-weight",
-    [NS_CSS_FONT_STYLE]           = "font-style",
-    [NS_CSS_FONT_STRETCH]         = "font-stretch",
-    [NS_CSS_FONT_KERNING]         = "font-kerning",
-    [NS_CSS_FONT_VARIANT_LIGATURES] = "font-variant-ligatures",
-    [NS_CSS_FONT_FEATURE_SETTINGS] = "font-feature-settings",
-    [NS_CSS_FONT_VARIATION_SETTINGS] = "font-variation-settings",
-    [NS_CSS_FONT_FAMILY]          = "font-family",
-    [NS_CSS_TEXT_ALIGN]           = "text-align",
-    [NS_CSS_MARGIN_TOP]           = "margin-top",
-    [NS_CSS_MARGIN_RIGHT]         = "margin-right",
-    [NS_CSS_MARGIN_BOTTOM]        = "margin-bottom",
-    [NS_CSS_MARGIN_LEFT]          = "margin-left",
-    [NS_CSS_PADDING_TOP]          = "padding-top",
-    [NS_CSS_PADDING_RIGHT]        = "padding-right",
-    [NS_CSS_PADDING_BOTTOM]       = "padding-bottom",
-    [NS_CSS_PADDING_LEFT]         = "padding-left",
-    [NS_CSS_BORDER_TOP_WIDTH]     = "border-top-width",
-    [NS_CSS_BORDER_RIGHT_WIDTH]   = "border-right-width",
-    [NS_CSS_BORDER_BOTTOM_WIDTH]  = "border-bottom-width",
-    [NS_CSS_BORDER_LEFT_WIDTH]    = "border-left-width",
-    [NS_CSS_BORDER_TOP_COLOR]     = "border-top-color",
-    [NS_CSS_BORDER_RIGHT_COLOR]   = "border-right-color",
-    [NS_CSS_BORDER_BOTTOM_COLOR]  = "border-bottom-color",
-    [NS_CSS_BORDER_LEFT_COLOR]    = "border-left-color",
-    [NS_CSS_BORDER_TOP_STYLE]     = "border-top-style",
-    [NS_CSS_BORDER_RIGHT_STYLE]   = "border-right-style",
-    [NS_CSS_BORDER_BOTTOM_STYLE]  = "border-bottom-style",
-    [NS_CSS_BORDER_LEFT_STYLE]    = "border-left-style",
-    [NS_CSS_WIDTH]                = "width",
-    [NS_CSS_HEIGHT]               = "height",
-    [NS_CSS_MAX_WIDTH]            = "max-width",
-    [NS_CSS_MAX_HEIGHT]           = "max-height",
-    [NS_CSS_MIN_WIDTH]            = "min-width",
-    [NS_CSS_MIN_HEIGHT]           = "min-height",
-    [NS_CSS_LINE_HEIGHT]          = "line-height",
-    [NS_CSS_TEXT_DECORATION]      = "text-decoration",
-    [NS_CSS_POSITION]             = "position",
-    [NS_CSS_TOP]                  = "top",
-    [NS_CSS_RIGHT]                = "right",
-    [NS_CSS_BOTTOM]               = "bottom",
-    [NS_CSS_LEFT]                 = "left",
-    [NS_CSS_Z_INDEX]              = "z-index",
-    [NS_CSS_OPACITY]              = "opacity",
-    [NS_CSS_CURSOR]               = "cursor",
-    [NS_CSS_POINTER_EVENTS]       = "pointer-events",
-    [NS_CSS_LETTER_SPACING]       = "letter-spacing",
-    [NS_CSS_WORD_SPACING]         = "word-spacing",
-    [NS_CSS_WHITE_SPACE]          = "white-space",
-    [NS_CSS_BOX_SIZING]           = "box-sizing",
-    [NS_CSS_TEXT_INDENT]          = "text-indent",
-    [NS_CSS_TEXT_TRANSFORM]       = "text-transform",
-    [NS_CSS_LIST_STYLE_TYPE]      = "list-style-type",
-    [NS_CSS_VERTICAL_ALIGN]       = "vertical-align",
-    [NS_CSS_VISIBILITY]           = "visibility",
-    [NS_CSS_OVERFLOW]             = "overflow",
-    [NS_CSS_OVERFLOW_X]           = "overflow-x",
-    [NS_CSS_OVERFLOW_Y]           = "overflow-y",
-    [NS_CSS_FONT_VARIANT]         = "font-variant",
-    [NS_CSS_BORDER_RADIUS]            = "border-radius",
-    [NS_CSS_BORDER_TOP_LEFT_RADIUS]     = "border-top-left-radius",
-    [NS_CSS_BORDER_TOP_RIGHT_RADIUS]    = "border-top-right-radius",
-    [NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS] = "border-bottom-right-radius",
-    [NS_CSS_BORDER_BOTTOM_LEFT_RADIUS]  = "border-bottom-left-radius",
-    [NS_CSS_FLEX_DIRECTION]       = "flex-direction",
-    [NS_CSS_FLEX_WRAP]            = "flex-wrap",
-    [NS_CSS_JUSTIFY_CONTENT]      = "justify-content",
-    [NS_CSS_ALIGN_ITEMS]          = "align-items",
-    [NS_CSS_ALIGN_SELF]           = "align-self",
-    [NS_CSS_GAP]                  = "gap",
-    [NS_CSS_ROW_GAP]              = "row-gap",
-    [NS_CSS_COLUMN_GAP]           = "column-gap",
-    [NS_CSS_FLEX_GROW]            = "flex-grow",
-    [NS_CSS_FLEX_SHRINK]          = "flex-shrink",
-    [NS_CSS_FLEX_BASIS]           = "flex-basis",
-    [NS_CSS_ORDER]                = "order",
-    [NS_CSS_FLOAT]                = "float",
-    [NS_CSS_CLEAR]                = "clear",
-    [NS_CSS_BOX_SHADOW]           = "box-shadow",
-    [NS_CSS_OUTLINE_WIDTH]        = "outline-width",
-    [NS_CSS_OUTLINE_STYLE]        = "outline-style",
-    [NS_CSS_OUTLINE_COLOR]        = "outline-color",
-    [NS_CSS_OUTLINE_OFFSET]       = "outline-offset",
-    [NS_CSS_BACKGROUND_IMAGE]     = "background-image",
-    [NS_CSS_BACKGROUND_REPEAT]    = "background-repeat",
-    [NS_CSS_BACKGROUND_POSITION_X]= "background-position-x",
-    [NS_CSS_BACKGROUND_POSITION_Y]= "background-position-y",
-    [NS_CSS_BACKGROUND_SIZE]      = "background-size",
-    [NS_CSS_BACKGROUND_CLIP]      = "background-clip",
-    [NS_CSS_BACKGROUND_ORIGIN]    = "background-origin",
-    [NS_CSS_SCROLLBAR_WIDTH]      = "scrollbar-width",
-    [NS_CSS_SCROLLBAR_COLOR]      = "scrollbar-color",
-    [NS_CSS_IMAGE_RENDERING]      = "image-rendering",
-    [NS_CSS_CONTENT]              = "content",
-    [NS_CSS_CLIP]                 = "clip",
-    [NS_CSS_CONTENT_VISIBILITY]   = "content-visibility",
-    [NS_CSS_GRID_TEMPLATE_COLUMNS]= "grid-template-columns",
-    [NS_CSS_GRID_TEMPLATE_ROWS]   = "grid-template-rows",
-    [NS_CSS_GRID_TEMPLATE_AREAS]  = "grid-template-areas",
-    [NS_CSS_GRID_COLUMN]          = "grid-column",
-    [NS_CSS_GRID_ROW]             = "grid-row",
-    [NS_CSS_GRID_COLUMN_START]    = "grid-column-start",
-    [NS_CSS_GRID_COLUMN_END]      = "grid-column-end",
-    [NS_CSS_GRID_ROW_START]       = "grid-row-start",
-    [NS_CSS_GRID_ROW_END]         = "grid-row-end",
-    [NS_CSS_GRID_AREA]            = "grid-area",
-    [NS_CSS_GRID_AUTO_ROWS]       = "grid-auto-rows",
-    [NS_CSS_GRID_AUTO_COLUMNS]    = "grid-auto-columns",
-    [NS_CSS_GRID_AUTO_FLOW]       = "grid-auto-flow",
-    [NS_CSS_TRANSFORM]            = "transform",
-    [NS_CSS_TRANSFORM_ORIGIN]     = "transform-origin",
-    [NS_CSS_TRANSITION]           = "transition",
-    [NS_CSS_ANIMATION]            = "animation",
-    [NS_CSS_ASPECT_RATIO]         = "aspect-ratio",
-    [NS_CSS_TEXT_SHADOW]          = "text-shadow",
-    [NS_CSS_OVERFLOW_WRAP]        = "overflow-wrap",
-    [NS_CSS_WORD_BREAK]           = "word-break",
-    [NS_CSS_HYPHENS]              = "hyphens",
-    [NS_CSS_TEXT_OVERFLOW]        = "text-overflow",
-    [NS_CSS_TEXT_DECORATION_COLOR]= "text-decoration-color",
-    [NS_CSS_TEXT_DECORATION_STYLE]= "text-decoration-style",
-    [NS_CSS_LIST_STYLE_POSITION]  = "list-style-position",
-    [NS_CSS_LIST_STYLE_IMAGE]     = "list-style-image",
-    [NS_CSS_USER_SELECT]          = "user-select",
-    [NS_CSS_QUOTES]               = "quotes",
-    [NS_CSS_COLUMN_COUNT]         = "column-count",
-    [NS_CSS_COLUMN_WIDTH]         = "column-width",
-    [NS_CSS_COLUMN_RULE_WIDTH]    = "column-rule-width",
-    [NS_CSS_COLUMN_RULE_STYLE]    = "column-rule-style",
-    [NS_CSS_COLUMN_RULE_COLOR]    = "column-rule-color",
-    [NS_CSS_FILTER]               = "filter",
-    [NS_CSS_CLIP_PATH]            = "clip-path",
-    [NS_CSS_MIX_BLEND_MODE]       = "mix-blend-mode",
-    [NS_CSS_ACCENT_COLOR]         = "accent-color",
-    [NS_CSS_COUNTER_RESET]        = "counter-reset",
-    [NS_CSS_COUNTER_INCREMENT]    = "counter-increment",
-    [NS_CSS_LINE_CLAMP]           = "-webkit-line-clamp",
-    [NS_CSS_OBJECT_FIT]           = "object-fit",
-    [NS_CSS_OBJECT_POSITION_X]    = "object-position-x",
-    [NS_CSS_OBJECT_POSITION_Y]    = "object-position-y",
-    [NS_CSS_MASK_IMAGE]           = "mask-image",
-    [NS_CSS_APPEARANCE]           = "appearance",
-    [NS_CSS_TABLE_LAYOUT]         = "table-layout",
-    [NS_CSS_CAPTION_SIDE]         = "caption-side",
-    [NS_CSS_BORDER_COLLAPSE]      = "border-collapse",
-    [NS_CSS_BORDER_SPACING]       = "border-spacing",
-    [NS_CSS_CONTAINER_TYPE]       = "container-type",
-    [NS_CSS_CONTAINER_NAME]       = "container-name",
-    [NS_CSS_WRITING_MODE]         = "writing-mode",
-    [NS_CSS_TEXT_ORIENTATION]     = "text-orientation",
-    [NS_CSS_TRANSITION_DELAY]     = "transition-delay",
-    [NS_CSS_TRANSITION_DURATION]  = "transition-duration",
-    [NS_CSS_ANIMATION_DELAY]      = "animation-delay",
-    [NS_CSS_ANIMATION_DURATION]   = "animation-duration",
-    [NS_CSS_ORPHANS]              = "orphans",
-    [NS_CSS_WIDOWS]               = "widows",
-    [NS_CSS_MAX_LINES]            = "max-lines",
-    [NS_CSS_HYPHENATE_LIMIT_LINES] = "hyphenate-limit-lines",
-    [NS_CSS_COLUMN_SPAN]          = "column-span",
-    [NS_CSS_CARET_COLOR]          = "caret-color",
-    [NS_CSS_TAB_SIZE]             = "tab-size",
-    [NS_CSS_JUSTIFY_ITEMS]        = "justify-items",
-    [NS_CSS_JUSTIFY_SELF]         = "justify-self",
-    [NS_CSS_ALIGN_CONTENT]        = "align-content",
-    [NS_CSS_DIRECTION]            = "direction",
-    [NS_CSS_UNICODE_BIDI]         = "unicode-bidi",
-    [NS_CSS_TRANSLATE]            = "translate",
-    [NS_CSS_ROTATE]               = "rotate",
-    [NS_CSS_SCALE]                = "scale",
-    [NS_CSS_PERSPECTIVE]          = "perspective",
-    [NS_CSS_PERSPECTIVE_ORIGIN]   = "perspective-origin",
-    [NS_CSS_TRANSFORM_STYLE]      = "transform-style",
-    [NS_CSS_BACKFACE_VISIBILITY]  = "backface-visibility",
-    [NS_CSS_ANIMATION_PLAY_STATE] = "animation-play-state",
-    [NS_CSS_MARGIN_BLOCK_START]   = "margin-block-start",
-    [NS_CSS_MARGIN_BLOCK_END]     = "margin-block-end",
-    [NS_CSS_MARGIN_INLINE_START]  = "margin-inline-start",
-    [NS_CSS_MARGIN_INLINE_END]    = "margin-inline-end",
-    [NS_CSS_PADDING_BLOCK_START]  = "padding-block-start",
-    [NS_CSS_PADDING_BLOCK_END]    = "padding-block-end",
-    [NS_CSS_PADDING_INLINE_START] = "padding-inline-start",
-    [NS_CSS_PADDING_INLINE_END]   = "padding-inline-end",
-    [NS_CSS_BORDER_BLOCK_START_WIDTH] = "border-block-start-width",
-    [NS_CSS_BORDER_BLOCK_END_WIDTH] = "border-block-end-width",
-    [NS_CSS_BORDER_INLINE_START_WIDTH] = "border-inline-start-width",
-    [NS_CSS_BORDER_INLINE_END_WIDTH] = "border-inline-end-width",
-    [NS_CSS_BORDER_BLOCK_START_STYLE] = "border-block-start-style",
-    [NS_CSS_BORDER_BLOCK_END_STYLE] = "border-block-end-style",
-    [NS_CSS_BORDER_INLINE_START_STYLE] = "border-inline-start-style",
-    [NS_CSS_BORDER_INLINE_END_STYLE] = "border-inline-end-style",
-    [NS_CSS_BORDER_BLOCK_START_COLOR] = "border-block-start-color",
-    [NS_CSS_BORDER_BLOCK_END_COLOR] = "border-block-end-color",
-    [NS_CSS_BORDER_INLINE_START_COLOR] = "border-inline-start-color",
-    [NS_CSS_BORDER_INLINE_END_COLOR] = "border-inline-end-color",
-    [NS_CSS_BORDER_START_START_RADIUS] = "border-start-start-radius",
-    [NS_CSS_BORDER_START_END_RADIUS] = "border-start-end-radius",
-    [NS_CSS_BORDER_END_START_RADIUS] = "border-end-start-radius",
-    [NS_CSS_BORDER_END_END_RADIUS] = "border-end-end-radius",
-    [NS_CSS_INSET_BLOCK_START]    = "inset-block-start",
-    [NS_CSS_INSET_BLOCK_END]      = "inset-block-end",
-    [NS_CSS_INSET_INLINE_START]   = "inset-inline-start",
-    [NS_CSS_INSET_INLINE_END]     = "inset-inline-end",
-    [NS_CSS_BLOCK_SIZE]           = "block-size",
-    [NS_CSS_INLINE_SIZE]          = "inline-size",
-    [NS_CSS_MIN_BLOCK_SIZE]       = "min-block-size",
-    [NS_CSS_MIN_INLINE_SIZE]      = "min-inline-size",
-    [NS_CSS_MAX_BLOCK_SIZE]       = "max-block-size",
-    [NS_CSS_MAX_INLINE_SIZE]      = "max-inline-size",
+enum {
+    NS_CSS_META_INHERITED = 1u << 0,
+    NS_CSS_META_LOGICAL   = 1u << 1,
 };
 
-static gboolean
-prop_inherits(ns_css_prop p)
+typedef struct ns_css_property_meta {
+    const char *name;
+    guint flags;
+    ns_css_prop syntax;
+    guint8 logical_group;
+} ns_css_property_meta;
+
+#define P(name) { name, 0, NS_CSS_PROP_COUNT, 0 }
+#define PI(name) { name, NS_CSS_META_INHERITED, NS_CSS_PROP_COUNT, 0 }
+#define PG(name, group) { name, 0, NS_CSS_PROP_COUNT, group }
+#define PL(name, syntax_prop, group) \
+    { name, NS_CSS_META_LOGICAL, syntax_prop, group }
+
+static const ns_css_property_meta kProperty[NS_CSS_PROP_COUNT] = {
+    [NS_CSS_DISPLAY]              = P("display"),
+    [NS_CSS_COLOR]                = PI("color"),
+    [NS_CSS_BACKGROUND_COLOR]     = P("background-color"),
+    [NS_CSS_FONT_SIZE]            = PI("font-size"),
+    [NS_CSS_FONT_WEIGHT]          = PI("font-weight"),
+    [NS_CSS_FONT_STYLE]           = PI("font-style"),
+    [NS_CSS_FONT_STRETCH]         = PI("font-stretch"),
+    [NS_CSS_FONT_KERNING]         = PI("font-kerning"),
+    [NS_CSS_FONT_VARIANT_LIGATURES] = PI("font-variant-ligatures"),
+    [NS_CSS_FONT_FEATURE_SETTINGS] = PI("font-feature-settings"),
+    [NS_CSS_FONT_VARIATION_SETTINGS] = PI("font-variation-settings"),
+    [NS_CSS_FONT_FAMILY]          = PI("font-family"),
+    [NS_CSS_TEXT_ALIGN]           = PI("text-align"),
+    [NS_CSS_MARGIN_TOP]           = PG("margin-top", 1),
+    [NS_CSS_MARGIN_RIGHT]         = PG("margin-right", 1),
+    [NS_CSS_MARGIN_BOTTOM]        = PG("margin-bottom", 1),
+    [NS_CSS_MARGIN_LEFT]          = PG("margin-left", 1),
+    [NS_CSS_PADDING_TOP]          = PG("padding-top", 2),
+    [NS_CSS_PADDING_RIGHT]        = PG("padding-right", 2),
+    [NS_CSS_PADDING_BOTTOM]       = PG("padding-bottom", 2),
+    [NS_CSS_PADDING_LEFT]         = PG("padding-left", 2),
+    [NS_CSS_BORDER_TOP_WIDTH]     = PG("border-top-width", 3),
+    [NS_CSS_BORDER_RIGHT_WIDTH]   = PG("border-right-width", 3),
+    [NS_CSS_BORDER_BOTTOM_WIDTH]  = PG("border-bottom-width", 3),
+    [NS_CSS_BORDER_LEFT_WIDTH]    = PG("border-left-width", 3),
+    [NS_CSS_BORDER_TOP_COLOR]     = PG("border-top-color", 5),
+    [NS_CSS_BORDER_RIGHT_COLOR]   = PG("border-right-color", 5),
+    [NS_CSS_BORDER_BOTTOM_COLOR]  = PG("border-bottom-color", 5),
+    [NS_CSS_BORDER_LEFT_COLOR]    = PG("border-left-color", 5),
+    [NS_CSS_BORDER_TOP_STYLE]     = PG("border-top-style", 4),
+    [NS_CSS_BORDER_RIGHT_STYLE]   = PG("border-right-style", 4),
+    [NS_CSS_BORDER_BOTTOM_STYLE]  = PG("border-bottom-style", 4),
+    [NS_CSS_BORDER_LEFT_STYLE]    = PG("border-left-style", 4),
+    [NS_CSS_WIDTH]                = PG("width", 8),
+    [NS_CSS_HEIGHT]               = PG("height", 8),
+    [NS_CSS_MAX_WIDTH]            = PG("max-width", 10),
+    [NS_CSS_MAX_HEIGHT]           = PG("max-height", 10),
+    [NS_CSS_MIN_WIDTH]            = PG("min-width", 9),
+    [NS_CSS_MIN_HEIGHT]           = PG("min-height", 9),
+    [NS_CSS_LINE_HEIGHT]          = PI("line-height"),
+    [NS_CSS_TEXT_DECORATION]      = P("text-decoration"),
+    [NS_CSS_POSITION]             = P("position"),
+    [NS_CSS_TOP]                  = PG("top", 7),
+    [NS_CSS_RIGHT]                = PG("right", 7),
+    [NS_CSS_BOTTOM]               = PG("bottom", 7),
+    [NS_CSS_LEFT]                 = PG("left", 7),
+    [NS_CSS_Z_INDEX]              = P("z-index"),
+    [NS_CSS_OPACITY]              = P("opacity"),
+    [NS_CSS_CURSOR]               = PI("cursor"),
+    [NS_CSS_POINTER_EVENTS]       = PI("pointer-events"),
+    [NS_CSS_LETTER_SPACING]       = PI("letter-spacing"),
+    [NS_CSS_WORD_SPACING]         = PI("word-spacing"),
+    [NS_CSS_WHITE_SPACE]          = PI("white-space"),
+    [NS_CSS_BOX_SIZING]           = P("box-sizing"),
+    [NS_CSS_TEXT_INDENT]          = PI("text-indent"),
+    [NS_CSS_TEXT_TRANSFORM]       = PI("text-transform"),
+    [NS_CSS_LIST_STYLE_TYPE]      = PI("list-style-type"),
+    [NS_CSS_VERTICAL_ALIGN]       = P("vertical-align"),
+    [NS_CSS_VISIBILITY]           = PI("visibility"),
+    [NS_CSS_OVERFLOW]             = P("overflow"),
+    [NS_CSS_OVERFLOW_X]           = P("overflow-x"),
+    [NS_CSS_OVERFLOW_Y]           = P("overflow-y"),
+    [NS_CSS_FONT_VARIANT]         = PI("font-variant"),
+    [NS_CSS_BORDER_RADIUS]            = P("border-radius"),
+    [NS_CSS_BORDER_TOP_LEFT_RADIUS]     = PG("border-top-left-radius", 6),
+    [NS_CSS_BORDER_TOP_RIGHT_RADIUS]    = PG("border-top-right-radius", 6),
+    [NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS] = PG("border-bottom-right-radius", 6),
+    [NS_CSS_BORDER_BOTTOM_LEFT_RADIUS]  = PG("border-bottom-left-radius", 6),
+    [NS_CSS_FLEX_DIRECTION]       = P("flex-direction"),
+    [NS_CSS_FLEX_WRAP]            = P("flex-wrap"),
+    [NS_CSS_JUSTIFY_CONTENT]      = P("justify-content"),
+    [NS_CSS_ALIGN_ITEMS]          = P("align-items"),
+    [NS_CSS_ALIGN_SELF]           = P("align-self"),
+    [NS_CSS_GAP]                  = P("gap"),
+    [NS_CSS_ROW_GAP]              = P("row-gap"),
+    [NS_CSS_COLUMN_GAP]           = P("column-gap"),
+    [NS_CSS_FLEX_GROW]            = P("flex-grow"),
+    [NS_CSS_FLEX_SHRINK]          = P("flex-shrink"),
+    [NS_CSS_FLEX_BASIS]           = P("flex-basis"),
+    [NS_CSS_ORDER]                = P("order"),
+    [NS_CSS_FLOAT]                = P("float"),
+    [NS_CSS_CLEAR]                = P("clear"),
+    [NS_CSS_BOX_SHADOW]           = P("box-shadow"),
+    [NS_CSS_OUTLINE_WIDTH]        = P("outline-width"),
+    [NS_CSS_OUTLINE_STYLE]        = P("outline-style"),
+    [NS_CSS_OUTLINE_COLOR]        = P("outline-color"),
+    [NS_CSS_OUTLINE_OFFSET]       = P("outline-offset"),
+    [NS_CSS_BACKGROUND_IMAGE]     = P("background-image"),
+    [NS_CSS_BACKGROUND_REPEAT]    = P("background-repeat"),
+    [NS_CSS_BACKGROUND_POSITION_X]= P("background-position-x"),
+    [NS_CSS_BACKGROUND_POSITION_Y]= P("background-position-y"),
+    [NS_CSS_BACKGROUND_SIZE]      = P("background-size"),
+    [NS_CSS_BACKGROUND_CLIP]      = P("background-clip"),
+    [NS_CSS_BACKGROUND_ORIGIN]    = P("background-origin"),
+    [NS_CSS_SCROLLBAR_WIDTH]      = P("scrollbar-width"),
+    [NS_CSS_SCROLLBAR_COLOR]      = PI("scrollbar-color"),
+    [NS_CSS_IMAGE_RENDERING]      = PI("image-rendering"),
+    [NS_CSS_CONTENT]              = P("content"),
+    [NS_CSS_CLIP]                 = P("clip"),
+    [NS_CSS_CONTENT_VISIBILITY]   = P("content-visibility"),
+    [NS_CSS_GRID_TEMPLATE_COLUMNS]= P("grid-template-columns"),
+    [NS_CSS_GRID_TEMPLATE_ROWS]   = P("grid-template-rows"),
+    [NS_CSS_GRID_TEMPLATE_AREAS]  = P("grid-template-areas"),
+    [NS_CSS_GRID_COLUMN]          = P("grid-column"),
+    [NS_CSS_GRID_ROW]             = P("grid-row"),
+    [NS_CSS_GRID_COLUMN_START]    = P("grid-column-start"),
+    [NS_CSS_GRID_COLUMN_END]      = P("grid-column-end"),
+    [NS_CSS_GRID_ROW_START]       = P("grid-row-start"),
+    [NS_CSS_GRID_ROW_END]         = P("grid-row-end"),
+    [NS_CSS_GRID_AREA]            = P("grid-area"),
+    [NS_CSS_GRID_AUTO_ROWS]       = P("grid-auto-rows"),
+    [NS_CSS_GRID_AUTO_COLUMNS]    = P("grid-auto-columns"),
+    [NS_CSS_GRID_AUTO_FLOW]       = P("grid-auto-flow"),
+    [NS_CSS_TRANSFORM]            = P("transform"),
+    [NS_CSS_TRANSFORM_ORIGIN]     = P("transform-origin"),
+    [NS_CSS_TRANSITION]           = P("transition"),
+    [NS_CSS_ANIMATION]            = P("animation"),
+    [NS_CSS_ASPECT_RATIO]         = P("aspect-ratio"),
+    [NS_CSS_TEXT_SHADOW]          = P("text-shadow"),
+    [NS_CSS_OVERFLOW_WRAP]        = PI("overflow-wrap"),
+    [NS_CSS_WORD_BREAK]           = PI("word-break"),
+    [NS_CSS_HYPHENS]              = PI("hyphens"),
+    [NS_CSS_TEXT_OVERFLOW]        = P("text-overflow"),
+    [NS_CSS_TEXT_DECORATION_COLOR]= P("text-decoration-color"),
+    [NS_CSS_TEXT_DECORATION_STYLE]= P("text-decoration-style"),
+    [NS_CSS_LIST_STYLE_POSITION]  = PI("list-style-position"),
+    [NS_CSS_LIST_STYLE_IMAGE]     = PI("list-style-image"),
+    [NS_CSS_USER_SELECT]          = PI("user-select"),
+    [NS_CSS_QUOTES]               = PI("quotes"),
+    [NS_CSS_COLUMN_COUNT]         = P("column-count"),
+    [NS_CSS_COLUMN_WIDTH]         = P("column-width"),
+    [NS_CSS_COLUMN_RULE_WIDTH]    = P("column-rule-width"),
+    [NS_CSS_COLUMN_RULE_STYLE]    = P("column-rule-style"),
+    [NS_CSS_COLUMN_RULE_COLOR]    = P("column-rule-color"),
+    [NS_CSS_FILTER]               = P("filter"),
+    [NS_CSS_CLIP_PATH]            = P("clip-path"),
+    [NS_CSS_MIX_BLEND_MODE]       = P("mix-blend-mode"),
+    [NS_CSS_ACCENT_COLOR]         = PI("accent-color"),
+    [NS_CSS_COUNTER_RESET]        = P("counter-reset"),
+    [NS_CSS_COUNTER_INCREMENT]    = P("counter-increment"),
+    [NS_CSS_LINE_CLAMP]           = P("-webkit-line-clamp"),
+    [NS_CSS_OBJECT_FIT]           = P("object-fit"),
+    [NS_CSS_OBJECT_POSITION_X]    = P("object-position-x"),
+    [NS_CSS_OBJECT_POSITION_Y]    = P("object-position-y"),
+    [NS_CSS_MASK_IMAGE]           = P("mask-image"),
+    [NS_CSS_APPEARANCE]           = P("appearance"),
+    [NS_CSS_TABLE_LAYOUT]         = P("table-layout"),
+    [NS_CSS_CAPTION_SIDE]         = PI("caption-side"),
+    [NS_CSS_BORDER_COLLAPSE]      = PI("border-collapse"),
+    [NS_CSS_BORDER_SPACING]       = PI("border-spacing"),
+    [NS_CSS_CONTAINER_TYPE]       = P("container-type"),
+    [NS_CSS_CONTAINER_NAME]       = P("container-name"),
+    [NS_CSS_WRITING_MODE]         = PI("writing-mode"),
+    [NS_CSS_TEXT_ORIENTATION]     = PI("text-orientation"),
+    [NS_CSS_TRANSITION_DELAY]     = P("transition-delay"),
+    [NS_CSS_TRANSITION_DURATION]  = P("transition-duration"),
+    [NS_CSS_ANIMATION_DELAY]      = P("animation-delay"),
+    [NS_CSS_ANIMATION_DURATION]   = P("animation-duration"),
+    [NS_CSS_ORPHANS]              = P("orphans"),
+    [NS_CSS_WIDOWS]               = P("widows"),
+    [NS_CSS_MAX_LINES]            = P("max-lines"),
+    [NS_CSS_HYPHENATE_LIMIT_LINES] = P("hyphenate-limit-lines"),
+    [NS_CSS_COLUMN_SPAN]          = P("column-span"),
+    [NS_CSS_CARET_COLOR]          = PI("caret-color"),
+    [NS_CSS_TAB_SIZE]             = PI("tab-size"),
+    [NS_CSS_JUSTIFY_ITEMS]        = P("justify-items"),
+    [NS_CSS_JUSTIFY_SELF]         = P("justify-self"),
+    [NS_CSS_ALIGN_CONTENT]        = P("align-content"),
+    [NS_CSS_DIRECTION]            = PI("direction"),
+    [NS_CSS_UNICODE_BIDI]         = P("unicode-bidi"),
+    [NS_CSS_TRANSLATE]            = P("translate"),
+    [NS_CSS_ROTATE]               = P("rotate"),
+    [NS_CSS_SCALE]                = P("scale"),
+    [NS_CSS_PERSPECTIVE]          = P("perspective"),
+    [NS_CSS_PERSPECTIVE_ORIGIN]   = P("perspective-origin"),
+    [NS_CSS_TRANSFORM_STYLE]      = P("transform-style"),
+    [NS_CSS_BACKFACE_VISIBILITY]  = P("backface-visibility"),
+    [NS_CSS_ANIMATION_PLAY_STATE] = P("animation-play-state"),
+    [NS_CSS_MARGIN_BLOCK_START]   = PL("margin-block-start", NS_CSS_MARGIN_TOP, 1),
+    [NS_CSS_MARGIN_BLOCK_END]     = PL("margin-block-end", NS_CSS_MARGIN_TOP, 1),
+    [NS_CSS_MARGIN_INLINE_START]  = PL("margin-inline-start", NS_CSS_MARGIN_TOP, 1),
+    [NS_CSS_MARGIN_INLINE_END]    = PL("margin-inline-end", NS_CSS_MARGIN_TOP, 1),
+    [NS_CSS_PADDING_BLOCK_START]  = PL("padding-block-start", NS_CSS_PADDING_TOP, 2),
+    [NS_CSS_PADDING_BLOCK_END]    = PL("padding-block-end", NS_CSS_PADDING_TOP, 2),
+    [NS_CSS_PADDING_INLINE_START] = PL("padding-inline-start", NS_CSS_PADDING_TOP, 2),
+    [NS_CSS_PADDING_INLINE_END]   = PL("padding-inline-end", NS_CSS_PADDING_TOP, 2),
+    [NS_CSS_BORDER_BLOCK_START_WIDTH] = PL("border-block-start-width", NS_CSS_BORDER_TOP_WIDTH, 3),
+    [NS_CSS_BORDER_BLOCK_END_WIDTH] = PL("border-block-end-width", NS_CSS_BORDER_TOP_WIDTH, 3),
+    [NS_CSS_BORDER_INLINE_START_WIDTH] = PL("border-inline-start-width", NS_CSS_BORDER_TOP_WIDTH, 3),
+    [NS_CSS_BORDER_INLINE_END_WIDTH] = PL("border-inline-end-width", NS_CSS_BORDER_TOP_WIDTH, 3),
+    [NS_CSS_BORDER_BLOCK_START_STYLE] = PL("border-block-start-style", NS_CSS_BORDER_TOP_STYLE, 4),
+    [NS_CSS_BORDER_BLOCK_END_STYLE] = PL("border-block-end-style", NS_CSS_BORDER_TOP_STYLE, 4),
+    [NS_CSS_BORDER_INLINE_START_STYLE] = PL("border-inline-start-style", NS_CSS_BORDER_TOP_STYLE, 4),
+    [NS_CSS_BORDER_INLINE_END_STYLE] = PL("border-inline-end-style", NS_CSS_BORDER_TOP_STYLE, 4),
+    [NS_CSS_BORDER_BLOCK_START_COLOR] = PL("border-block-start-color", NS_CSS_BORDER_TOP_COLOR, 5),
+    [NS_CSS_BORDER_BLOCK_END_COLOR] = PL("border-block-end-color", NS_CSS_BORDER_TOP_COLOR, 5),
+    [NS_CSS_BORDER_INLINE_START_COLOR] = PL("border-inline-start-color", NS_CSS_BORDER_TOP_COLOR, 5),
+    [NS_CSS_BORDER_INLINE_END_COLOR] = PL("border-inline-end-color", NS_CSS_BORDER_TOP_COLOR, 5),
+    [NS_CSS_BORDER_START_START_RADIUS] = PL("border-start-start-radius", NS_CSS_BORDER_TOP_LEFT_RADIUS, 6),
+    [NS_CSS_BORDER_START_END_RADIUS] = PL("border-start-end-radius", NS_CSS_BORDER_TOP_LEFT_RADIUS, 6),
+    [NS_CSS_BORDER_END_START_RADIUS] = PL("border-end-start-radius", NS_CSS_BORDER_TOP_LEFT_RADIUS, 6),
+    [NS_CSS_BORDER_END_END_RADIUS] = PL("border-end-end-radius", NS_CSS_BORDER_TOP_LEFT_RADIUS, 6),
+    [NS_CSS_INSET_BLOCK_START]    = PL("inset-block-start", NS_CSS_TOP, 7),
+    [NS_CSS_INSET_BLOCK_END]      = PL("inset-block-end", NS_CSS_TOP, 7),
+    [NS_CSS_INSET_INLINE_START]   = PL("inset-inline-start", NS_CSS_TOP, 7),
+    [NS_CSS_INSET_INLINE_END]     = PL("inset-inline-end", NS_CSS_TOP, 7),
+    [NS_CSS_BLOCK_SIZE]           = PL("block-size", NS_CSS_WIDTH, 8),
+    [NS_CSS_INLINE_SIZE]          = PL("inline-size", NS_CSS_WIDTH, 8),
+    [NS_CSS_MIN_BLOCK_SIZE]       = PL("min-block-size", NS_CSS_MIN_WIDTH, 9),
+    [NS_CSS_MIN_INLINE_SIZE]      = PL("min-inline-size", NS_CSS_MIN_WIDTH, 9),
+    [NS_CSS_MAX_BLOCK_SIZE]       = PL("max-block-size", NS_CSS_MAX_WIDTH, 10),
+    [NS_CSS_MAX_INLINE_SIZE]      = PL("max-inline-size", NS_CSS_MAX_WIDTH, 10),
+};
+
+#undef P
+#undef PI
+#undef PG
+#undef PL
+
+gboolean
+ns_css_prop_inherited(int prop)
 {
-    switch (p) {
-    case NS_CSS_COLOR:
-    case NS_CSS_FONT_SIZE:
-    case NS_CSS_FONT_WEIGHT:
-    case NS_CSS_FONT_STYLE:
-    case NS_CSS_FONT_STRETCH:
-    case NS_CSS_FONT_KERNING:
-    case NS_CSS_FONT_VARIANT_LIGATURES:
-    case NS_CSS_FONT_FEATURE_SETTINGS:
-    case NS_CSS_FONT_VARIATION_SETTINGS:
-    case NS_CSS_FONT_FAMILY:
-    case NS_CSS_FONT_VARIANT:
-    case NS_CSS_LINE_HEIGHT:
-    case NS_CSS_LETTER_SPACING:
-    case NS_CSS_WORD_SPACING:
-    case NS_CSS_WHITE_SPACE:
-    case NS_CSS_HYPHENS:
-    case NS_CSS_DIRECTION:
-    case NS_CSS_WRITING_MODE:
-    case NS_CSS_TEXT_ORIENTATION:
-    case NS_CSS_CAPTION_SIDE:
-    case NS_CSS_BORDER_COLLAPSE:
-    case NS_CSS_BORDER_SPACING:
-    case NS_CSS_TEXT_ALIGN:
-    case NS_CSS_TEXT_INDENT:
-    case NS_CSS_TEXT_TRANSFORM:
-    case NS_CSS_LIST_STYLE_TYPE:
-    case NS_CSS_LIST_STYLE_POSITION:
-    case NS_CSS_LIST_STYLE_IMAGE:
-    case NS_CSS_USER_SELECT:
-    case NS_CSS_QUOTES:
-    case NS_CSS_VISIBILITY:
-    case NS_CSS_CURSOR:
-    case NS_CSS_POINTER_EVENTS:
-    case NS_CSS_SCROLLBAR_COLOR:
-    case NS_CSS_IMAGE_RENDERING:
-    case NS_CSS_TAB_SIZE:
-    case NS_CSS_WORD_BREAK:
-    case NS_CSS_OVERFLOW_WRAP:
-    case NS_CSS_CARET_COLOR:
-    case NS_CSS_ACCENT_COLOR:
-        return TRUE;
-    default:
-        return FALSE;
-    }
+    return prop >= 0 && prop < NS_CSS_PROP_COUNT &&
+           (kProperty[prop].flags & NS_CSS_META_INHERITED) != 0;
+}
+
+gboolean
+ns_css_prop_is_logical(int prop)
+{
+    return prop >= 0 && prop < NS_CSS_PROP_COUNT &&
+           (kProperty[prop].flags & NS_CSS_META_LOGICAL) != 0;
+}
+
+int
+ns_css_prop_logical_group(int prop)
+{
+    return prop >= 0 && prop < NS_CSS_PROP_COUNT
+        ? kProperty[prop].logical_group : 0;
+}
+
+int
+ns_css_prop_syntax(int prop)
+{
+    if (prop < 0 || prop >= NS_CSS_PROP_COUNT) return prop;
+    return kProperty[prop].syntax == NS_CSS_PROP_COUNT
+        ? prop : kProperty[prop].syntax;
 }
 
 static int
@@ -6209,8 +6211,6 @@ ns_css_specified_canonical(const char *prop, const char *value)
 }
 
 static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
-static ns_css_prop logical_to_physical(ns_css_prop prop, int writing_mode,
-                                       gboolean rtl);
 static gboolean is_font_stretch_keyword(const char *s);
 static gboolean is_font_ligatures_value(const char *s);
 static gboolean is_font_feature_settings_value(const char *s);
@@ -6807,7 +6807,7 @@ parse_value_for(ns_css_prop prop, const char *text)
         return v;
     }
 
-    prop = logical_to_physical(prop, 0, FALSE);
+    prop = (ns_css_prop)ns_css_prop_syntax(prop);
 
     if (prop_is_bg_layered(prop) && value_has_top_level_comma(t)) {
         v = parse_value_layer_list(prop, t);
@@ -7886,14 +7886,17 @@ ns_css_resolve_prop(int prop, const ns_style *style)
 const char *
 ns_css_prop_name(int prop)
 {
-    return prop >= 0 && prop < NS_CSS_PROP_COUNT ? kProp[prop] : NULL;
+    return prop >= 0 && prop < NS_CSS_PROP_COUNT
+        ? kProperty[prop].name : NULL;
 }
 
 static int
 prop_id(const char *name)
 {
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
-        if (g_ascii_strcasecmp(name, kProp[i]) == 0) return i;
+        if (kProperty[i].name &&
+            g_ascii_strcasecmp(name, kProperty[i].name) == 0)
+            return i;
     }
     if (g_ascii_strcasecmp(name, "word-wrap") == 0)
         return NS_CSS_OVERFLOW_WRAP;
@@ -14965,60 +14968,13 @@ inline_decl_find(GPtrArray *decls, const char *name)
 static int
 inline_logical_group(int prop)
 {
-    switch (prop) {
-    case NS_CSS_MARGIN_TOP: case NS_CSS_MARGIN_RIGHT:
-    case NS_CSS_MARGIN_BOTTOM: case NS_CSS_MARGIN_LEFT:
-    case NS_CSS_MARGIN_BLOCK_START: case NS_CSS_MARGIN_BLOCK_END:
-    case NS_CSS_MARGIN_INLINE_START: case NS_CSS_MARGIN_INLINE_END:
-        return 1;
-    case NS_CSS_PADDING_TOP: case NS_CSS_PADDING_RIGHT:
-    case NS_CSS_PADDING_BOTTOM: case NS_CSS_PADDING_LEFT:
-    case NS_CSS_PADDING_BLOCK_START: case NS_CSS_PADDING_BLOCK_END:
-    case NS_CSS_PADDING_INLINE_START: case NS_CSS_PADDING_INLINE_END:
-        return 2;
-    case NS_CSS_BORDER_TOP_WIDTH: case NS_CSS_BORDER_RIGHT_WIDTH:
-    case NS_CSS_BORDER_BOTTOM_WIDTH: case NS_CSS_BORDER_LEFT_WIDTH:
-    case NS_CSS_BORDER_BLOCK_START_WIDTH: case NS_CSS_BORDER_BLOCK_END_WIDTH:
-    case NS_CSS_BORDER_INLINE_START_WIDTH: case NS_CSS_BORDER_INLINE_END_WIDTH:
-        return 3;
-    case NS_CSS_BORDER_TOP_STYLE: case NS_CSS_BORDER_RIGHT_STYLE:
-    case NS_CSS_BORDER_BOTTOM_STYLE: case NS_CSS_BORDER_LEFT_STYLE:
-    case NS_CSS_BORDER_BLOCK_START_STYLE: case NS_CSS_BORDER_BLOCK_END_STYLE:
-    case NS_CSS_BORDER_INLINE_START_STYLE: case NS_CSS_BORDER_INLINE_END_STYLE:
-        return 4;
-    case NS_CSS_BORDER_TOP_COLOR: case NS_CSS_BORDER_RIGHT_COLOR:
-    case NS_CSS_BORDER_BOTTOM_COLOR: case NS_CSS_BORDER_LEFT_COLOR:
-    case NS_CSS_BORDER_BLOCK_START_COLOR: case NS_CSS_BORDER_BLOCK_END_COLOR:
-    case NS_CSS_BORDER_INLINE_START_COLOR: case NS_CSS_BORDER_INLINE_END_COLOR:
-        return 5;
-    case NS_CSS_BORDER_TOP_LEFT_RADIUS: case NS_CSS_BORDER_TOP_RIGHT_RADIUS:
-    case NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS: case NS_CSS_BORDER_BOTTOM_LEFT_RADIUS:
-    case NS_CSS_BORDER_START_START_RADIUS: case NS_CSS_BORDER_START_END_RADIUS:
-    case NS_CSS_BORDER_END_START_RADIUS: case NS_CSS_BORDER_END_END_RADIUS:
-        return 6;
-    case NS_CSS_TOP: case NS_CSS_RIGHT: case NS_CSS_BOTTOM: case NS_CSS_LEFT:
-    case NS_CSS_INSET_BLOCK_START: case NS_CSS_INSET_BLOCK_END:
-    case NS_CSS_INSET_INLINE_START: case NS_CSS_INSET_INLINE_END:
-        return 7;
-    case NS_CSS_WIDTH: case NS_CSS_HEIGHT:
-    case NS_CSS_BLOCK_SIZE: case NS_CSS_INLINE_SIZE:
-        return 8;
-    case NS_CSS_MIN_WIDTH: case NS_CSS_MIN_HEIGHT:
-    case NS_CSS_MIN_BLOCK_SIZE: case NS_CSS_MIN_INLINE_SIZE:
-        return 9;
-    case NS_CSS_MAX_WIDTH: case NS_CSS_MAX_HEIGHT:
-    case NS_CSS_MAX_BLOCK_SIZE: case NS_CSS_MAX_INLINE_SIZE:
-        return 10;
-    default:
-        return 0;
-    }
+    return ns_css_prop_logical_group(prop);
 }
 
 static gboolean
 inline_prop_is_logical(int prop)
 {
-    return prop >= NS_CSS_MARGIN_BLOCK_START &&
-           prop <= NS_CSS_MAX_INLINE_SIZE;
+    return ns_css_prop_is_logical(prop);
 }
 
 char *
@@ -17415,7 +17371,7 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
         for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
             if (out->values[i]) continue;
             if (explicit_initial[i]) continue;
-            if (!prop_inherits((ns_css_prop)i)) continue;
+            if (!ns_css_prop_inherited(i)) continue;
             if (parent_style->values[i])
                 out->values[i] = ns_css_value_dup(parent_style->values[i]);
         }
