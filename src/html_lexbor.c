@@ -11,6 +11,14 @@
 #include <lexbor/html/html.h>
 #include <lexbor/html/interfaces/template_element.h>
 
+struct ns_html_parser {
+    lxb_html_document_t *document;
+    GString *source;
+    gboolean scripting;
+    gboolean failed;
+    gboolean finished;
+};
+
 static void
 lxb_doc_destroy_void(void *p)
 {
@@ -674,35 +682,96 @@ ns_html_assign_script_positions(ns_node *root, const char *input, size_t len)
 }
 
 ns_node *
+ns_html_parser_finish(ns_html_parser *parser)
+{
+    if (!parser || parser->finished || parser->failed) return NULL;
+    parser->finished = TRUE;
+    if (lxb_html_document_parse_chunk_end(parser->document) != LXB_STATUS_OK) {
+        parser->failed = TRUE;
+        return NULL;
+    }
+    ns_node *root = lxb_to_nd_root(lxb_dom_interface_node(parser->document));
+    if (!root) return NULL;
+    if (parser->document->dom_document.compat_mode == LXB_DOM_DOCUMENT_CMODE_QUIRKS)
+        root->flags |= NS_NODE_QUIRKS;
+    else if (parser->document->dom_document.compat_mode == LXB_DOM_DOCUMENT_CMODE_LIMITED_QUIRKS)
+        root->flags |= NS_NODE_LIMITED_QUIRKS;
+    if (!parser->scripting) root->flags |= NS_NODE_SCRIPTING_DISABLED;
+    ns_html_assign_script_positions(root, parser->source->str,
+                                    parser->source->len);
+    ns_dsd_convert(root, 0);
+    ns_media_extract_standard(root);
+    ns_node_attach_backing(root, parser->document, lxb_doc_destroy_void);
+    parser->document = NULL;
+    return root;
+}
+
+ns_html_parser *
+ns_html_parser_new(gboolean scripting)
+{
+    ns_html_parser *parser = g_new0(ns_html_parser, 1);
+    parser->document = lxb_html_document_create();
+    parser->source = g_string_new(NULL);
+    parser->scripting = scripting;
+    if (!parser->document) {
+        ns_html_parser_free(parser);
+        return NULL;
+    }
+    lxb_html_document_dom_opt_set(parser->document,
+                                  LXB_DOM_DOCUMENT_OPT_WO_EVENTS);
+    lxb_html_document_scripting_set(parser->document, scripting);
+    if (lxb_html_document_parse_chunk_begin(parser->document) !=
+        LXB_STATUS_OK) {
+        ns_html_parser_free(parser);
+        return NULL;
+    }
+    return parser;
+}
+
+gboolean
+ns_html_parser_write(ns_html_parser *parser, const char *input, gsize len)
+{
+    if (!parser || parser->finished || parser->failed || (!input && len))
+        return FALSE;
+    if (len == 0) return TRUE;
+    g_string_append_len(parser->source, input, len);
+    if (lxb_html_document_parse_chunk(parser->document,
+                                      (const lxb_char_t *)input,
+                                      len) != LXB_STATUS_OK) {
+        parser->failed = TRUE;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+void
+ns_html_parser_free(ns_html_parser *parser)
+{
+    if (!parser) return;
+    if (parser->document) lxb_html_document_destroy(parser->document);
+    if (parser->source) g_string_free(parser->source, TRUE);
+    g_free(parser);
+}
+
+ns_node *
 ns_html_parse_with_scripting(const char *input, gssize len,
                              gboolean scripting)
 {
     if (!input) return NULL;
-    size_t n = (len < 0) ? strlen(input) : (size_t)len;
-    lxb_html_document_t *doc = lxb_html_document_create();
-    if (!doc) return NULL;
-    lxb_html_document_dom_opt_set(doc, LXB_DOM_DOCUMENT_OPT_WO_EVENTS);
-    lxb_html_document_scripting_set(doc, scripting);
-    lxb_status_t status = lxb_html_document_parse(doc,
-                                                  (const lxb_char_t *)input, n);
-    if (status != LXB_STATUS_OK) {
-        lxb_html_document_destroy(doc);
-        return NULL;
+    gsize n = (len < 0) ? strlen(input) : (gsize)len;
+    ns_html_parser *parser = ns_html_parser_new(scripting);
+    if (!parser) return NULL;
+    gsize offset = 0;
+    while (offset < n) {
+        gsize chunk = MIN((gsize)16384, n - offset);
+        if (!ns_html_parser_write(parser, input + offset, chunk)) {
+            ns_html_parser_free(parser);
+            return NULL;
+        }
+        offset += chunk;
     }
-    ns_node *root = lxb_to_nd_root(lxb_dom_interface_node(doc));
-    if (!root) {
-        lxb_html_document_destroy(doc);
-        return NULL;
-    }
-    if (doc->dom_document.compat_mode == LXB_DOM_DOCUMENT_CMODE_QUIRKS)
-        root->flags |= NS_NODE_QUIRKS;
-    else if (doc->dom_document.compat_mode == LXB_DOM_DOCUMENT_CMODE_LIMITED_QUIRKS)
-        root->flags |= NS_NODE_LIMITED_QUIRKS;
-    if (!scripting) root->flags |= NS_NODE_SCRIPTING_DISABLED;
-    ns_html_assign_script_positions(root, input, n);
-    ns_dsd_convert(root, 0);
-    ns_media_extract_standard(root);
-    ns_node_attach_backing(root, doc, lxb_doc_destroy_void);
+    ns_node *root = ns_html_parser_finish(parser);
+    ns_html_parser_free(parser);
     return root;
 }
 
