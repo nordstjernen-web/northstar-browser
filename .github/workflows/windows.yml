@@ -51,6 +51,7 @@ jobs:
             base-devel
             git
             mingw-w64-x86_64-clang
+            mingw-w64-x86_64-lld
             mingw-w64-x86_64-pkgconf
             mingw-w64-x86_64-meson
             mingw-w64-x86_64-ninja
@@ -87,19 +88,21 @@ jobs:
       - name: Show toolchain versions
         run: |
           clang --version
+          ld.lld --version
           ccache --version | head -1
           meson --version
           ninja --version
           pkg-config --modversion gtk4
           pkg-config --modversion libcurl
 
-      - name: Build (no LTO)
+      - name: Build (LTO via LLD)
         id: build
         if: hashFiles('meson.build') != ''
         run: |
           set -o pipefail
           export CC="ccache clang"
-          meson setup builddir --werror -Db_lto=false
+          export CC_LD=lld
+          meson setup builddir --werror -Db_lto=true
           meson compile -C builddir 2>&1 | tee build.log
 
       - name: ccache stats
