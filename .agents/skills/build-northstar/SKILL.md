@@ -1,45 +1,50 @@
 ---
 name: build-northstar
-description: Configure, compile, and smoke-test the Northstar browser on Linux, macOS, or Windows, and diagnose platform-specific Meson, compiler, linker, pkg-config, or dependency failures. Use after source changes, for clean builds, or when reproducing CI build problems on a supported desktop platform.
+description: Configure, compile, and smoke-test a Meson-based C or C++ desktop browser on Linux, macOS, or Windows, and diagnose dependency, compiler, linker, runtime-library, build-directory, or concurrent-build failures. Use after source changes, for clean builds, or when reproducing platform CI problems.
 ---
 
-# Build Northstar
+# Build a Cross-Platform Browser
 
-Read `AGENTS.md`, `docs/building.md`, and the workflow for the current platform under `.github/workflows/`. Preserve unrelated working-tree changes and reuse a compatible `builddir`.
+Read the repository instructions, build guide, and current platform's CI workflow. Preserve unrelated changes.
 
-## Choose the platform environment
+## Inspect before building
 
-- Linux: use the native shell with GCC by default. Install the packages listed in `docs/building.md`; `libseccomp` is required.
-- macOS: use the native shell with Homebrew Clang. Add Homebrew curl and OpenSSL pkg-config directories exactly as shown in `docs/building.md`.
-- Windows: run inside MSYS2 MINGW64, not ordinary PowerShell or the MSYS shell. Use the packages and Clang/LLD configuration in `.github/workflows/windows.yml`.
+1. Identify the operating system, architecture, shell, compiler, linker, dependency source, and intended feature set.
+2. Inspect the working tree and existing build directory. Reuse it only when its platform, compiler, and important options are compatible.
+3. Check for an active Meson, Ninja, or compiler process using the same build directory. Wait for its owner; do not delete locks or kill an unrelated build.
+4. Treat CI configuration as the reproducible platform reference. Do not invent flags when reproducing CI.
 
-Do not disable a required dependency or hardening option merely to make configuration pass. Optional Enchant and Ogg decoders may remain absent.
+## Select the environment
+
+- Linux: use the native shell and the project's primary GCC or Clang configuration. Verify required pkg-config dependencies, including platform sandbox libraries.
+- macOS: use Apple Clang and the documented package manager. Export required pkg-config search paths before configuring.
+- Windows: use the supported MSYS2 MinGW environment, not an ordinary PowerShell or MSYS toolchain. Keep compiler, archiver, linker, and pkg-config packages from the same environment.
+
+Do not disable required dependencies, hardening, or supported features merely to make configuration pass. Preserve optional-feature auto-detection unless the task requests a specific matrix entry.
 
 ## Configure and compile
 
-If `builddir/build.ninja` exists, run:
-
-```sh
-meson compile -C builddir
-```
-
-Otherwise run:
+Use the repository wrapper when it exists. Otherwise configure only when needed and compile through Meson:
 
 ```sh
 meson setup builddir
 meson compile -C builddir
 ```
 
-Use `./scripts/dev.sh build` as the equivalent convenience command in a POSIX shell. For a CI reproduction, copy the compiler, LTO, `--werror`, and feature flags from that platform's workflow instead of inventing new flags. Never delete an existing build directory without first proving it is incompatible and preserving any useful logs.
+If configuration is current, run only `meson compile -C builddir`. Use a separate clearly named build directory for a genuinely incompatible toolchain; never delete an existing directory before preserving useful logs.
 
-## Verify
+## Diagnose failures
 
-Run the platform binary against the built-in page:
+- Configure failure: inspect the first missing dependency, wrong pkg-config path, unsupported option, or stale cross file.
+- Compile failure: fix the first project-source diagnostic before cascaded errors; distinguish project warnings from vendored-code warnings.
+- Link failure: check compiler/archiver compatibility, LTO plugins, library order, subsystem flags, and runtime search paths.
+- Runtime failure: check shared-library discovery, resources, sandbox policy, environment, and platform GUI requirements.
+- Lock failure: identify the owning process and wait or use a different compatible build directory.
 
-```sh
-./builddir/src/gtk/northstar --headless --dump=text about:start
-```
+## Verify in layers
 
-On Windows use `./builddir/src/gtk/northstar.exe`. Confirm the output contains `Northstar`, then run `./scripts/dev.sh smoke` where a POSIX shell is available.
+Confirm the expected binary exists, run a built-in headless page, run deterministic smoke fixtures, and then launch the GUI for material changes. Terminate only the process started for the smoke check. Treat new warnings, empty headless output, baseline drift, or an early GUI exit as failures.
 
-For material changes, launch the GUI binary in the background, allow startup to complete, and terminate only that process. Treat new compiler warnings, a failed headless render, baseline drift, or a failed launch as a build failure and diagnose it before committing.
+## Northstar commands
+
+Use `scripts/dev.sh build`, then run the platform binary with `--headless --dump=text about:start` and run `scripts/dev.sh smoke`. The binary is `builddir/src/gtk/northstar` on Linux/macOS and `builddir/src/gtk/northstar.exe` on Windows. Follow `docs/building.md` and `.github/workflows/{linux,musl,macos,windows}.yml` for dependencies and exact CI variants.

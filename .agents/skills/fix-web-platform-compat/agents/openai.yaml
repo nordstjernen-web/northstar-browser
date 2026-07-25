@@ -1,4 +1,4 @@
 interface:
   display_name: "Fix Web Platform Compatibility"
-  short_description: "Fix Northstar web-platform compatibility gaps"
-  default_prompt: "Use $fix-web-platform-compat to diagnose and fix this web-platform compatibility gap."
+  short_description: "Fix browser standards compatibility gaps"
+  default_prompt: "Use $fix-web-platform-compat to diagnose and fix this browser standards compatibility gap."

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Diagnose Rendering Regressions"
-  short_description: "Trace and fix Northstar rendering defects"
-  default_prompt: "Use $diagnose-rendering-regressions to reproduce and fix this Northstar rendering defect."
+  display_name: "Diagnose Browser Rendering"
+  short_description: "Trace browser rendering pipeline regressions"
+  default_prompt: "Use $diagnose-rendering-regressions to reproduce, localize, and fix this browser rendering defect."

@@ -1,4 +1,3 @@
-.claude
 # Build artifacts
 /build/
 /dist/
@@ -87,6 +86,7 @@ Thumbs.db
 .claude/settings.local.json
 
 # Claude harness state
-/.claude/
+/.claude/*
+!/.claude/skills/
+!/.claude/skills/**
 perf.data
-

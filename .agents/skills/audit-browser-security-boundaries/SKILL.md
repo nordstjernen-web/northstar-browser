@@ -1,26 +1,34 @@
 ---
 name: audit-browser-security-boundaries
-description: Audit Northstar changes that touch untrusted web input, native memory, URL or origin handling, networking, cookies, cache, storage, CSP, extensions, service workers, decoders, sandboxing, or platform mitigations. Use for security reviews, threat analysis, or fixes where the single-process browser boundary could regress.
+description: Audit browser-engine changes that process untrusted content or cross native-memory, origin, network, storage, extension, decoder, sandbox, or operating-system boundaries. Use for security reviews, threat analysis, and security fixes where parsing, lifetime, isolation, or containment guarantees could regress.
 ---
 
 # Audit Browser Security Boundaries
 
-Read `AGENTS.md`, `SECURITY.md`, the changed code, and its callers. Treat fetched HTML, CSS, JavaScript, images, fonts, and audio as attacker-controlled. Preserve unrelated working-tree changes.
+Read the repository instructions, threat model, changed code, and its callers. Preserve unrelated changes. Treat all fetched content and metadata as attacker-controlled unless the threat model says otherwise.
 
-## Trace the boundary
+## Model the path
 
-Follow each changed value from attacker input to its final use. Check:
+1. Identify the attacker-controlled entry point, trust transition, security invariant, sensitive operation, and possible impact.
+2. Trace changed values through parsers, conversions, queues, callbacks, caches, persistence, and native APIs to their final use.
+3. Distinguish prevention boundaries such as origin checks from containment boundaries such as a process sandbox. Do not claim one provides the other.
 
-- Length conversion, multiplication, allocation caps, integer overflow, recursion depth, and parser cleanup
-- Ownership, callback lifetime, cancellation, worker-thread synchronization, and DOM/QuickJS pointer validation
-- WHATWG URL parsing, canonicalization, same-origin checks, top-site partitioning, redirects, mixed content, CORS, CSP, and SRI
-- Private-mode persistence, path canonicalization, file permissions, and extension or service-worker scope
-- Linux Landlock/seccomp, macOS Seatbelt, Windows mitigations, and the absence of renderer-process isolation
+## Review the invariants
 
-Do not assume a JS-runtime boundary contains native memory corruption. Do not weaken TLS verification, resource limits, sandbox allow-lists, or origin checks to make a page work.
+- Memory: length conversion, arithmetic overflow, allocation caps, bounds, nesting depth, cleanup, ownership, and use-after-free
+- Lifetime and concurrency: cancellation, callbacks, worker threads, shared state, teardown order, and stale native handles
+- Web security: URL canonicalization, same-origin checks, site partitioning, redirects, mixed content, CORS, CSP, SRI, scopes, and permissions
+- Persistence: private mode, path containment, file permissions, cache keys, secret handling, and extension identity
+- Containment: privilege drop, syscall and filesystem restrictions, executable-memory policy, child processes, and platform-specific mitigations
+
+Do not weaken verification, limits, isolation, or sandbox rules to improve compatibility. Prefer fail-closed behavior at security boundaries.
 
 ## Report or fix
 
-For a review request, report only actionable findings. For each finding give severity, exact code evidence, attacker path, consequence, and the smallest safe correction. Do not modify code unless the user requested a fix.
+For a review, report only findings with a concrete attacker path and consequence. Include severity, exact evidence, violated invariant, impact, and the smallest safe correction. Do not edit code during a review-only request.
 
-For an implementation request, prefer fail-closed behavior and existing security helpers. Keep platform branches equivalent where their capabilities overlap. Compile and exercise the affected path with `$build-northstar`; run `./scripts/dev.sh smoke` from a POSIX shell when available. Update `SECURITY.md` only when the documented threat model or guarantees actually change.
+For a requested fix, reuse established security helpers and keep equivalent platform paths aligned where capabilities overlap. Compile and exercise the affected path, run deterministic smoke cases, and update the threat-model documentation only when its guarantees change.
+
+## Northstar context
+
+Read `SECURITY.md`. Northstar processes untrusted pages in a single native process, so JavaScript realm separation does not contain native memory corruption. Pay particular attention to `src/security.c`, `src/net.c`, `src/csp.c`, `src/cache.c`, `src/idb.c`, `src/ext.c`, `src/js.c`, image/audio decoders, and platform startup code.

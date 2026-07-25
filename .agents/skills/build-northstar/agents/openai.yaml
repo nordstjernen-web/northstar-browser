@@ -1,4 +1,4 @@
 interface:
-  display_name: "Build Northstar"
-  short_description: "Build Northstar on Linux, macOS, or Windows"
-  default_prompt: "Use $build-northstar to compile and smoke-test Northstar on this operating system."
+  display_name: "Build Cross-Platform Browser"
+  short_description: "Build a C browser across desktop platforms"
+  default_prompt: "Use $build-northstar to compile and smoke-test this browser on the current operating system."

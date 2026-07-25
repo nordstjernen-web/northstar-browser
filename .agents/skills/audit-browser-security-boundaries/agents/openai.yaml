@@ -1,4 +1,4 @@
 interface:
   display_name: "Audit Browser Security Boundaries"
-  short_description: "Audit Northstar untrusted-input boundaries"
-  default_prompt: "Use $audit-browser-security-boundaries to audit this Northstar change for security boundary regressions."
+  short_description: "Audit browser trust and containment boundaries"
+  default_prompt: "Use $audit-browser-security-boundaries to audit this browser change for security boundary regressions."

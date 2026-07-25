@@ -1,42 +1,46 @@
 ---
 name: diagnose-rendering-regressions
-description: Diagnose and fix Northstar HTML/CSS rendering defects, including incorrect cascade, computed values, box generation, flex/grid/block/table layout, fragmentation, painting, hit testing, and viewport behavior. Use for visual regressions, bad geometry, incorrect wrapping or positioning, or pages that render differently after an engine change.
+description: Diagnose and fix visual, geometry, hit-testing, and viewport regressions in a browser rendering engine. Use when HTML or CSS produces incorrect styles, box trees, layout, fragmentation, paint output, coordinates, or screenshots, especially when a change has altered previously correct rendering.
 ---
 
 # Diagnose Rendering Regressions
 
-Read `AGENTS.md` and `docs/architecture.md`. Preserve unrelated working-tree changes.
+Read the repository instructions, architecture notes, build guide, and current diff. Preserve unrelated changes.
 
-## Reproduce
+## Establish the evidence
 
-1. Reduce the defect to deterministic local HTML when practical. Keep temporary cases under `.tmp/`; do not add an automated test suite.
-2. Build with `$build-northstar` when the binary is stale.
-3. Capture the same page and viewport as DOM, layout, text, and PNG with the headless binary. On Windows use `builddir/src/gtk/northstar.exe`; elsewhere use `builddir/src/gtk/northstar`.
-4. Compare at least one neighboring viewport when responsiveness, wrapping, flex, grid, or media queries are involved.
+1. Reduce the defect to deterministic local HTML when practical. Record the URL, viewport, scale, fonts, timing, configuration, and expected result.
+2. Capture comparable evidence at successive pipeline stages: DOM, computed style, box or layout tree, paint output, and screenshot.
+3. Compare the failing viewport with a nearby viewport when wrapping, media queries, flex, grid, or fragmentation is involved.
+4. Identify the first stage that becomes incorrect. Do not compensate in a later stage for an earlier-stage defect.
 
-Use the existing flags:
+## Trace the pipeline
 
-```text
---headless --url=URL --dump=dom
---headless --url=URL --dump=layout
---headless --url=URL --dump=text
---headless --url=URL --dump=png:PATH --viewport=WIDTH --viewport-height=HEIGHT
-```
+Check these layers in order:
 
-## Locate the defect
+- Input decoding, HTML/XML parsing, and DOM construction
+- Selector matching, cascade, inheritance, computed values, and animation
+- Box generation, formatting-context selection, and containing blocks
+- Intrinsic sizing, line breaking, flex/grid/table algorithms, positioning, and fragmentation
+- Display-list construction, clipping, transforms, compositing, and rasterization
+- Presentation scaling, scrolling, hit testing, and input-coordinate conversion
 
-Trace the first incorrect stage:
+At each layer verify ownership of coordinates and sizes, logical versus physical axes, in-flow versus out-of-flow participation, flat-tree membership, overflow, invalidation, and zoom.
 
-- Parse or DOM: `html_lexbor.c`, `html.c`, `dom.c`, `xml.c`
-- Cascade and computed values: `css_syntax.c`, `css.c`, `css_media.c`, `anim.c`
-- Box construction and geometry: `layout.c`, `layout.h`, `mathml.c`
-- Display list and rasterization: `paint.c`, `image.c`, `texture.c`
-- Presentation or input coordinates: `render.c`, `headless.c`, `src/gtk/procview.c`
+## Apply the fix
 
-Check coordinate meaning, containing blocks, formatting contexts, logical versus physical axes, flat-tree membership, out-of-flow participation, fragmentation, overflow, and zoom before changing code.
+Implement the smallest standards-based correction at the first incorrect layer. Avoid site-specific behavior, hostname checks, unsupported feature expansion, and unrelated refactoring. Follow the repository's code and comment policy.
 
-## Fix and verify
+## Verify the result
 
-Implement the smallest generic standards-based fix. Do not add hostname checks, site-specific shims, unsupported features, or inline code comments.
+Re-run the focused case with identical inputs, then check adjacent viewports and nearby layout modes. Run the repository's existing deterministic smoke cases and relevant visual fixtures. Compile and launch the application using the documented platform workflow. Update user-facing change notes when required.
 
-Verify the focused case, run `./scripts/dev.sh smoke` from a POSIX shell when available, render the relevant manual fixtures with `scripts/render-tests.sh`, and finish with `$build-northstar`. Update `Changelog.md` for a user-visible correction.
+## Northstar routing
+
+- Parse and DOM: `src/html_lexbor.c`, `src/html.c`, `src/dom.c`, `src/xml.c`
+- Style: `src/css_syntax.c`, `src/css.c`, `src/css_media.c`, `src/anim.c`
+- Layout: `src/layout.c`, `src/layout.h`, `src/mathml.c`
+- Paint: `src/paint.c`, `src/image.c`, `src/texture.c`
+- Presentation: `src/render.c`, `src/headless.c`, `src/gtk/procview.c`
+
+Use the headless `dom`, `layout`, `text`, and `png` dump modes. Use `scripts/dev.sh smoke` and `scripts/render-tests.sh` for the existing regression surfaces.
