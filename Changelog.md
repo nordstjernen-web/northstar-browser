@@ -4,6 +4,20 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* Flex items are sized by the flex algorithm rather than by their own
+  `width`. `layout_block` read `width` back out of the style and ignored
+  the main size the container had assigned, so nothing ever shrank —
+  `flex-shrink: 1` is the initial value, so every over-constrained flex
+  row overflowed instead of fitting.
+* The flex main axis is reversed when exactly one of
+  `flex-direction: row-reverse` and `direction: rtl` applies, and items
+  are then packed from the opposite edge, on wrapping and non-wrapping
+  rows alike. `row-reverse` used to reverse the item order but still pack
+  against the left edge, and `rtl` was ignored for the main axis.
+* Grid row placement added the item's top margin on top of the
+  margin-box origin that `ns_box.y` already means, so a negative margin
+  moved the item the wrong way by twice the amount and cut the
+  container's scrollable overflow to match.
 * Text now wraps around floats the way CSS 2.1 §9.5 describes. Floats
   intrude into the line boxes of nested blocks in the same block
   formatting context, and an inline run that crosses the bottom of a
