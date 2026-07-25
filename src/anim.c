@@ -467,6 +467,7 @@ observe_generic_chan(ns_anim *a, ns_anim_state *s, const ns_style *style,
 {
     int pid = ns_css_prop_id(e->name);
     if (pid < 0) return;
+    pid = ns_css_resolve_prop(pid, style);
     char *cur = ns_css_value_serialize(style->values[pid]);
     if (!cur) cur = g_strdup("");
     if (!s->generic) s->generic = g_ptr_array_new();

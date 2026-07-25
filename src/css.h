@@ -192,10 +192,47 @@ typedef enum ns_css_prop {
     NS_CSS_MAX_LINES,
     NS_CSS_HYPHENATE_LIMIT_LINES,
     NS_CSS_COLUMN_SPAN,
+    NS_CSS_MARGIN_BLOCK_START,
+    NS_CSS_MARGIN_BLOCK_END,
+    NS_CSS_MARGIN_INLINE_START,
+    NS_CSS_MARGIN_INLINE_END,
+    NS_CSS_PADDING_BLOCK_START,
+    NS_CSS_PADDING_BLOCK_END,
+    NS_CSS_PADDING_INLINE_START,
+    NS_CSS_PADDING_INLINE_END,
+    NS_CSS_BORDER_BLOCK_START_WIDTH,
+    NS_CSS_BORDER_BLOCK_END_WIDTH,
+    NS_CSS_BORDER_INLINE_START_WIDTH,
+    NS_CSS_BORDER_INLINE_END_WIDTH,
+    NS_CSS_BORDER_BLOCK_START_STYLE,
+    NS_CSS_BORDER_BLOCK_END_STYLE,
+    NS_CSS_BORDER_INLINE_START_STYLE,
+    NS_CSS_BORDER_INLINE_END_STYLE,
+    NS_CSS_BORDER_BLOCK_START_COLOR,
+    NS_CSS_BORDER_BLOCK_END_COLOR,
+    NS_CSS_BORDER_INLINE_START_COLOR,
+    NS_CSS_BORDER_INLINE_END_COLOR,
+    NS_CSS_BORDER_START_START_RADIUS,
+    NS_CSS_BORDER_START_END_RADIUS,
+    NS_CSS_BORDER_END_START_RADIUS,
+    NS_CSS_BORDER_END_END_RADIUS,
+    NS_CSS_INSET_BLOCK_START,
+    NS_CSS_INSET_BLOCK_END,
+    NS_CSS_INSET_INLINE_START,
+    NS_CSS_INSET_INLINE_END,
+    NS_CSS_BLOCK_SIZE,
+    NS_CSS_INLINE_SIZE,
+    NS_CSS_MIN_BLOCK_SIZE,
+    NS_CSS_MIN_INLINE_SIZE,
+    NS_CSS_MAX_BLOCK_SIZE,
+    NS_CSS_MAX_INLINE_SIZE,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
+struct ns_style;
 int         ns_css_prop_id(const char *name);
+int         ns_css_resolve_prop(int prop, const struct ns_style *style);
+const char *ns_css_prop_name(int prop);
 gboolean    ns_css_declaration_valid(int prop, const char *text);
 gboolean    ns_css_named_property_supported(const char *name);
 gboolean    ns_css_named_declaration_valid(const char *name, const char *text);

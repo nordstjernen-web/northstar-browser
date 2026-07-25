@@ -13961,18 +13961,23 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     const ns_style *computed = (js && js->style_table)
         ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (!computed && lbox) computed = lbox->style;
+    int property_id = ns_css_prop_id(name);
+    int resolved_id = ns_css_resolve_prop(property_id, computed);
+    const char *resolved_name = resolved_id != property_id
+        ? ns_css_prop_name(resolved_id) : name;
 
-    if (strcmp(name, "width") == 0 || strcmp(name, "height") == 0) {
+    if (strcmp(resolved_name, "width") == 0 ||
+        strcmp(resolved_name, "height") == 0) {
         if (lbox) {
-            double v = (name[0] == 'w') ? lbox->content_width
-                                        : lbox->content_height;
+            double v = (resolved_name[0] == 'w') ? lbox->content_width
+                                                 : lbox->content_height;
             if (v < 0) v = 0;
             return g_strdup_printf("%gpx", v);
         }
     }
 
     if (lbox) {
-        char *edge = ns_computed_box_edge_px(lbox, name);
+        char *edge = ns_computed_box_edge_px(lbox, resolved_name);
         if (edge) return edge;
     }
 
@@ -13985,9 +13990,11 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         return g_strdup(ns_css_node_dir(n));
     }
 
-    if (lbox && (strcmp(name, "top") == 0 || strcmp(name, "right") == 0 ||
-                 strcmp(name, "bottom") == 0 || strcmp(name, "left") == 0)) {
-        char *inset = ns_computed_inset_px(ctx, n, lbox, name);
+    if (lbox && (strcmp(resolved_name, "top") == 0 ||
+                 strcmp(resolved_name, "right") == 0 ||
+                 strcmp(resolved_name, "bottom") == 0 ||
+                 strcmp(resolved_name, "left") == 0)) {
+        char *inset = ns_computed_inset_px(ctx, n, lbox, resolved_name);
         if (inset) return inset;
     }
 
@@ -14026,7 +14033,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         if (anim_val) return anim_val;
     }
 
-    int pid = ns_css_prop_id(name);
+    int pid = resolved_id;
     if (pid == NS_CSS_MIN_WIDTH || pid == NS_CSS_MIN_HEIGHT) {
         const ns_css_value *minimum = computed ? computed->values[pid] : NULL;
         gboolean is_auto = !minimum ||
@@ -14091,7 +14098,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         const ns_style *s = g_hash_table_lookup(js->style_table, n);
         if (s && s->values[pid])
             return ns_css_value_serialize(s->values[pid]);
-        const char *initial = ns_computed_initial_value(name);
+        const char *initial = ns_computed_initial_value(resolved_name);
         if (s && initial) return g_strdup(initial);
     }
 
@@ -14120,7 +14127,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             if (result) return result;
         }
     }
-    const char *initial = ns_computed_initial_value(name);
+    const char *initial = ns_computed_initial_value(resolved_name);
     if (initial) return g_strdup(initial);
     return NULL;
 }
@@ -14185,7 +14192,8 @@ ns_computed_lookup_pseudo(JSContext *ctx, const ns_node *n,
         return g_strdup_printf("%d", w);
     }
 
-    int pid = ns_css_prop_id(name);
+    int property_id = ns_css_prop_id(name);
+    int pid = ns_css_resolve_prop(property_id, ps);
     if ((pid == NS_CSS_WIDTH || pid == NS_CSS_HEIGHT) &&
         ns_display_is_contents(ns_css_display_of(ps)))
         return g_strdup("auto");
@@ -14218,7 +14226,9 @@ ns_computed_lookup_pseudo(JSContext *ctx, const ns_node *n,
         return value;
     }
 
-    const char *initial = ns_computed_initial_value(name);
+    const char *resolved_name = pid != property_id
+        ? ns_css_prop_name(pid) : name;
+    const char *initial = ns_computed_initial_value(resolved_name);
     if (initial) return g_strdup(initial);
     return NULL;
 }

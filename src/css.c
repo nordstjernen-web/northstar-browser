@@ -330,6 +330,40 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_TRANSFORM_STYLE]      = "transform-style",
     [NS_CSS_BACKFACE_VISIBILITY]  = "backface-visibility",
     [NS_CSS_ANIMATION_PLAY_STATE] = "animation-play-state",
+    [NS_CSS_MARGIN_BLOCK_START]   = "margin-block-start",
+    [NS_CSS_MARGIN_BLOCK_END]     = "margin-block-end",
+    [NS_CSS_MARGIN_INLINE_START]  = "margin-inline-start",
+    [NS_CSS_MARGIN_INLINE_END]    = "margin-inline-end",
+    [NS_CSS_PADDING_BLOCK_START]  = "padding-block-start",
+    [NS_CSS_PADDING_BLOCK_END]    = "padding-block-end",
+    [NS_CSS_PADDING_INLINE_START] = "padding-inline-start",
+    [NS_CSS_PADDING_INLINE_END]   = "padding-inline-end",
+    [NS_CSS_BORDER_BLOCK_START_WIDTH] = "border-block-start-width",
+    [NS_CSS_BORDER_BLOCK_END_WIDTH] = "border-block-end-width",
+    [NS_CSS_BORDER_INLINE_START_WIDTH] = "border-inline-start-width",
+    [NS_CSS_BORDER_INLINE_END_WIDTH] = "border-inline-end-width",
+    [NS_CSS_BORDER_BLOCK_START_STYLE] = "border-block-start-style",
+    [NS_CSS_BORDER_BLOCK_END_STYLE] = "border-block-end-style",
+    [NS_CSS_BORDER_INLINE_START_STYLE] = "border-inline-start-style",
+    [NS_CSS_BORDER_INLINE_END_STYLE] = "border-inline-end-style",
+    [NS_CSS_BORDER_BLOCK_START_COLOR] = "border-block-start-color",
+    [NS_CSS_BORDER_BLOCK_END_COLOR] = "border-block-end-color",
+    [NS_CSS_BORDER_INLINE_START_COLOR] = "border-inline-start-color",
+    [NS_CSS_BORDER_INLINE_END_COLOR] = "border-inline-end-color",
+    [NS_CSS_BORDER_START_START_RADIUS] = "border-start-start-radius",
+    [NS_CSS_BORDER_START_END_RADIUS] = "border-start-end-radius",
+    [NS_CSS_BORDER_END_START_RADIUS] = "border-end-start-radius",
+    [NS_CSS_BORDER_END_END_RADIUS] = "border-end-end-radius",
+    [NS_CSS_INSET_BLOCK_START]    = "inset-block-start",
+    [NS_CSS_INSET_BLOCK_END]      = "inset-block-end",
+    [NS_CSS_INSET_INLINE_START]   = "inset-inline-start",
+    [NS_CSS_INSET_INLINE_END]     = "inset-inline-end",
+    [NS_CSS_BLOCK_SIZE]           = "block-size",
+    [NS_CSS_INLINE_SIZE]          = "inline-size",
+    [NS_CSS_MIN_BLOCK_SIZE]       = "min-block-size",
+    [NS_CSS_MIN_INLINE_SIZE]      = "min-inline-size",
+    [NS_CSS_MAX_BLOCK_SIZE]       = "max-block-size",
+    [NS_CSS_MAX_INLINE_SIZE]      = "max-inline-size",
 };
 
 static gboolean
@@ -382,18 +416,26 @@ prop_inherits(ns_css_prop p)
     }
 }
 
+static int
+writing_mode_code(const char *keyword)
+{
+    if (!keyword) return 0;
+    if (strcmp(keyword, "vertical-rl") == 0 ||
+        strcmp(keyword, "sideways-rl") == 0 ||
+        strcmp(keyword, "tb-rl") == 0 || strcmp(keyword, "tb") == 0)
+        return 1;
+    if (strcmp(keyword, "vertical-lr") == 0 ||
+        strcmp(keyword, "sideways-lr") == 0)
+        return 2;
+    return 0;
+}
+
 int
 ns_css_writing_mode(const ns_style *s)
 {
     const ns_css_value *v = s ? s->values[NS_CSS_WRITING_MODE] : NULL;
     if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return 0;
-    const char *k = v->u.keyword;
-    if (strcmp(k, "vertical-rl") == 0 || strcmp(k, "sideways-rl") == 0 ||
-        strcmp(k, "tb-rl") == 0 || strcmp(k, "tb") == 0)
-        return 1;
-    if (strcmp(k, "vertical-lr") == 0 || strcmp(k, "sideways-lr") == 0)
-        return 2;
-    return 0;
+    return writing_mode_code(v->u.keyword);
 }
 
 int
@@ -6167,6 +6209,8 @@ ns_css_specified_canonical(const char *prop, const char *value)
 }
 
 static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
+static ns_css_prop logical_to_physical(ns_css_prop prop, int writing_mode,
+                                       gboolean rtl);
 static gboolean is_font_stretch_keyword(const char *s);
 static gboolean is_font_ligatures_value(const char *s);
 static gboolean is_font_feature_settings_value(const char *s);
@@ -6762,6 +6806,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         g_free(t);
         return v;
     }
+
+    prop = logical_to_physical(prop, 0, FALSE);
 
     if (prop_is_bg_layered(prop) && value_has_top_level_comma(t)) {
         v = parse_value_layer_list(prop, t);
@@ -7710,50 +7756,137 @@ parse_value_for(ns_css_prop prop, const char *text)
     return v;
 }
 
-static const struct { const char *logical; const char *physical; } kLogicalAlias[] = {
-    { "margin-block-start",        "margin-top" },
-    { "margin-block-end",          "margin-bottom" },
-    { "margin-inline-start",       "margin-left" },
-    { "margin-inline-end",         "margin-right" },
-    { "padding-block-start",       "padding-top" },
-    { "padding-block-end",         "padding-bottom" },
-    { "padding-inline-start",      "padding-left" },
-    { "padding-inline-end",        "padding-right" },
-    { "border-block-start-width",  "border-top-width" },
-    { "border-block-end-width",    "border-bottom-width" },
-    { "border-inline-start-width", "border-left-width" },
-    { "border-inline-end-width",   "border-right-width" },
-    { "border-block-start-style",  "border-top-style" },
-    { "border-block-end-style",    "border-bottom-style" },
-    { "border-inline-start-style", "border-left-style" },
-    { "border-inline-end-style",   "border-right-style" },
-    { "border-block-start-color",  "border-top-color" },
-    { "border-block-end-color",    "border-bottom-color" },
-    { "border-inline-start-color", "border-left-color" },
-    { "border-inline-end-color",   "border-right-color" },
-    { "border-start-start-radius", "border-top-left-radius" },
-    { "border-start-end-radius",   "border-top-right-radius" },
-    { "border-end-start-radius",   "border-bottom-left-radius" },
-    { "border-end-end-radius",     "border-bottom-right-radius" },
-    { "inset-block-start",         "top" },
-    { "inset-block-end",           "bottom" },
-    { "inset-inline-start",        "left" },
-    { "inset-inline-end",          "right" },
-    { "block-size",                "height" },
-    { "inline-size",               "width" },
-    { "min-block-size",            "min-height" },
-    { "min-inline-size",           "min-width" },
-    { "max-block-size",            "max-height" },
-    { "max-inline-size",           "max-width" },
-};
-
-static const char *
-alias_logical(const char *name)
+static ns_css_prop
+logical_side_prop(ns_css_prop prop, int block_start, int block_end,
+                  int inline_start, int inline_end)
 {
-    for (gsize i = 0; i < G_N_ELEMENTS(kLogicalAlias); i++)
-        if (g_ascii_strcasecmp(name, kLogicalAlias[i].logical) == 0)
-            return kLogicalAlias[i].physical;
-    return NULL;
+    static const ns_css_prop margins[] = {
+        NS_CSS_MARGIN_TOP, NS_CSS_MARGIN_RIGHT,
+        NS_CSS_MARGIN_BOTTOM, NS_CSS_MARGIN_LEFT,
+    };
+    static const ns_css_prop paddings[] = {
+        NS_CSS_PADDING_TOP, NS_CSS_PADDING_RIGHT,
+        NS_CSS_PADDING_BOTTOM, NS_CSS_PADDING_LEFT,
+    };
+    static const ns_css_prop widths[] = {
+        NS_CSS_BORDER_TOP_WIDTH, NS_CSS_BORDER_RIGHT_WIDTH,
+        NS_CSS_BORDER_BOTTOM_WIDTH, NS_CSS_BORDER_LEFT_WIDTH,
+    };
+    static const ns_css_prop styles[] = {
+        NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
+        NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE,
+    };
+    static const ns_css_prop colors[] = {
+        NS_CSS_BORDER_TOP_COLOR, NS_CSS_BORDER_RIGHT_COLOR,
+        NS_CSS_BORDER_BOTTOM_COLOR, NS_CSS_BORDER_LEFT_COLOR,
+    };
+    static const ns_css_prop insets[] = {
+        NS_CSS_TOP, NS_CSS_RIGHT, NS_CSS_BOTTOM, NS_CSS_LEFT,
+    };
+    switch (prop) {
+    case NS_CSS_MARGIN_BLOCK_START: return margins[block_start];
+    case NS_CSS_MARGIN_BLOCK_END: return margins[block_end];
+    case NS_CSS_MARGIN_INLINE_START: return margins[inline_start];
+    case NS_CSS_MARGIN_INLINE_END: return margins[inline_end];
+    case NS_CSS_PADDING_BLOCK_START: return paddings[block_start];
+    case NS_CSS_PADDING_BLOCK_END: return paddings[block_end];
+    case NS_CSS_PADDING_INLINE_START: return paddings[inline_start];
+    case NS_CSS_PADDING_INLINE_END: return paddings[inline_end];
+    case NS_CSS_BORDER_BLOCK_START_WIDTH: return widths[block_start];
+    case NS_CSS_BORDER_BLOCK_END_WIDTH: return widths[block_end];
+    case NS_CSS_BORDER_INLINE_START_WIDTH: return widths[inline_start];
+    case NS_CSS_BORDER_INLINE_END_WIDTH: return widths[inline_end];
+    case NS_CSS_BORDER_BLOCK_START_STYLE: return styles[block_start];
+    case NS_CSS_BORDER_BLOCK_END_STYLE: return styles[block_end];
+    case NS_CSS_BORDER_INLINE_START_STYLE: return styles[inline_start];
+    case NS_CSS_BORDER_INLINE_END_STYLE: return styles[inline_end];
+    case NS_CSS_BORDER_BLOCK_START_COLOR: return colors[block_start];
+    case NS_CSS_BORDER_BLOCK_END_COLOR: return colors[block_end];
+    case NS_CSS_BORDER_INLINE_START_COLOR: return colors[inline_start];
+    case NS_CSS_BORDER_INLINE_END_COLOR: return colors[inline_end];
+    case NS_CSS_INSET_BLOCK_START: return insets[block_start];
+    case NS_CSS_INSET_BLOCK_END: return insets[block_end];
+    case NS_CSS_INSET_INLINE_START: return insets[inline_start];
+    case NS_CSS_INSET_INLINE_END: return insets[inline_end];
+    default: return prop;
+    }
+}
+
+static ns_css_prop
+logical_corner_prop(ns_css_prop prop, int block_start, int block_end,
+                    int inline_start, int inline_end)
+{
+    int block_side;
+    int inline_side;
+    switch (prop) {
+    case NS_CSS_BORDER_START_START_RADIUS:
+        block_side = block_start; inline_side = inline_start; break;
+    case NS_CSS_BORDER_START_END_RADIUS:
+        block_side = block_start; inline_side = inline_end; break;
+    case NS_CSS_BORDER_END_START_RADIUS:
+        block_side = block_end; inline_side = inline_start; break;
+    case NS_CSS_BORDER_END_END_RADIUS:
+        block_side = block_end; inline_side = inline_end; break;
+    default:
+        return prop;
+    }
+    if ((block_side == 0 && inline_side == 3) ||
+        (block_side == 3 && inline_side == 0))
+        return NS_CSS_BORDER_TOP_LEFT_RADIUS;
+    if ((block_side == 0 && inline_side == 1) ||
+        (block_side == 1 && inline_side == 0))
+        return NS_CSS_BORDER_TOP_RIGHT_RADIUS;
+    if ((block_side == 2 && inline_side == 1) ||
+        (block_side == 1 && inline_side == 2))
+        return NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS;
+    return NS_CSS_BORDER_BOTTOM_LEFT_RADIUS;
+}
+
+static ns_css_prop
+logical_to_physical(ns_css_prop prop, int writing_mode, gboolean rtl)
+{
+    int block_start = writing_mode == 1 ? 1 : writing_mode == 2 ? 3 : 0;
+    int block_end = writing_mode == 1 ? 3 : writing_mode == 2 ? 1 : 2;
+    int inline_start = writing_mode ? (rtl ? 2 : 0) : (rtl ? 1 : 3);
+    int inline_end = writing_mode ? (rtl ? 0 : 2) : (rtl ? 3 : 1);
+    ns_css_prop side = logical_side_prop(prop, block_start, block_end,
+                                        inline_start, inline_end);
+    if (side != prop) return side;
+    ns_css_prop corner = logical_corner_prop(prop, block_start, block_end,
+                                             inline_start, inline_end);
+    if (corner != prop) return corner;
+    switch (prop) {
+    case NS_CSS_BLOCK_SIZE:
+        return writing_mode ? NS_CSS_WIDTH : NS_CSS_HEIGHT;
+    case NS_CSS_INLINE_SIZE:
+        return writing_mode ? NS_CSS_HEIGHT : NS_CSS_WIDTH;
+    case NS_CSS_MIN_BLOCK_SIZE:
+        return writing_mode ? NS_CSS_MIN_WIDTH : NS_CSS_MIN_HEIGHT;
+    case NS_CSS_MIN_INLINE_SIZE:
+        return writing_mode ? NS_CSS_MIN_HEIGHT : NS_CSS_MIN_WIDTH;
+    case NS_CSS_MAX_BLOCK_SIZE:
+        return writing_mode ? NS_CSS_MAX_WIDTH : NS_CSS_MAX_HEIGHT;
+    case NS_CSS_MAX_INLINE_SIZE:
+        return writing_mode ? NS_CSS_MAX_HEIGHT : NS_CSS_MAX_WIDTH;
+    default:
+        return prop;
+    }
+}
+
+int
+ns_css_resolve_prop(int prop, const ns_style *style)
+{
+    if (prop < 0 || prop >= NS_CSS_PROP_COUNT) return prop;
+    gboolean rtl = style && ns_css_keyword_is(
+        style->values[NS_CSS_DIRECTION], "rtl");
+    return logical_to_physical((ns_css_prop)prop,
+                               ns_css_writing_mode(style), rtl);
+}
+
+const char *
+ns_css_prop_name(int prop)
+{
+    return prop >= 0 && prop < NS_CSS_PROP_COUNT ? kProp[prop] : NULL;
 }
 
 static int
@@ -7780,11 +7913,6 @@ prop_id(const char *name)
     if (g_ascii_strcasecmp(name, "-webkit-appearance") == 0 ||
         g_ascii_strcasecmp(name, "-moz-appearance") == 0)
         return NS_CSS_APPEARANCE;
-    const char *phys = alias_logical(name);
-    if (phys) {
-        for (int i = 0; i < NS_CSS_PROP_COUNT; i++)
-            if (g_ascii_strcasecmp(phys, kProp[i]) == 0) return i;
-    }
     return -1;
 }
 
@@ -8469,14 +8597,22 @@ parse_declaration_block(const char **pp, const char *end,
                                NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_PROP_COUNT },
             { "border-left",   NS_CSS_BORDER_LEFT_WIDTH,   NS_CSS_BORDER_LEFT_COLOR,
                                NS_CSS_BORDER_LEFT_STYLE,   NS_CSS_PROP_COUNT },
-            { "border-inline-start", NS_CSS_BORDER_LEFT_WIDTH,   NS_CSS_BORDER_LEFT_COLOR,
-                                      NS_CSS_BORDER_LEFT_STYLE,   NS_CSS_PROP_COUNT },
-            { "border-inline-end",   NS_CSS_BORDER_RIGHT_WIDTH,  NS_CSS_BORDER_RIGHT_COLOR,
-                                      NS_CSS_BORDER_RIGHT_STYLE,  NS_CSS_PROP_COUNT },
-            { "border-block-start",  NS_CSS_BORDER_TOP_WIDTH,    NS_CSS_BORDER_TOP_COLOR,
-                                      NS_CSS_BORDER_TOP_STYLE,    NS_CSS_PROP_COUNT },
-            { "border-block-end",    NS_CSS_BORDER_BOTTOM_WIDTH, NS_CSS_BORDER_BOTTOM_COLOR,
-                                      NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_PROP_COUNT },
+            { "border-inline-start", NS_CSS_BORDER_INLINE_START_WIDTH,
+                                      NS_CSS_BORDER_INLINE_START_COLOR,
+                                      NS_CSS_BORDER_INLINE_START_STYLE,
+                                      NS_CSS_PROP_COUNT },
+            { "border-inline-end",   NS_CSS_BORDER_INLINE_END_WIDTH,
+                                      NS_CSS_BORDER_INLINE_END_COLOR,
+                                      NS_CSS_BORDER_INLINE_END_STYLE,
+                                      NS_CSS_PROP_COUNT },
+            { "border-block-start",  NS_CSS_BORDER_BLOCK_START_WIDTH,
+                                      NS_CSS_BORDER_BLOCK_START_COLOR,
+                                      NS_CSS_BORDER_BLOCK_START_STYLE,
+                                      NS_CSS_PROP_COUNT },
+            { "border-block-end",    NS_CSS_BORDER_BLOCK_END_WIDTH,
+                                      NS_CSS_BORDER_BLOCK_END_COLOR,
+                                      NS_CSS_BORDER_BLOCK_END_STYLE,
+                                      NS_CSS_PROP_COUNT },
             { NULL, 0, 0, 0, 0 },
         };
 
@@ -8589,12 +8725,18 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "border-block") == 0 ||
             strcmp(pname, "border-inline") == 0) {
             gboolean is_block = strcmp(pname, "border-block") == 0;
-            ns_css_prop w1 = is_block ? NS_CSS_BORDER_TOP_WIDTH : NS_CSS_BORDER_LEFT_WIDTH;
-            ns_css_prop w2 = is_block ? NS_CSS_BORDER_BOTTOM_WIDTH : NS_CSS_BORDER_RIGHT_WIDTH;
-            ns_css_prop c1 = is_block ? NS_CSS_BORDER_TOP_COLOR : NS_CSS_BORDER_LEFT_COLOR;
-            ns_css_prop c2 = is_block ? NS_CSS_BORDER_BOTTOM_COLOR : NS_CSS_BORDER_RIGHT_COLOR;
-            ns_css_prop s1 = is_block ? NS_CSS_BORDER_TOP_STYLE : NS_CSS_BORDER_LEFT_STYLE;
-            ns_css_prop s2 = is_block ? NS_CSS_BORDER_BOTTOM_STYLE : NS_CSS_BORDER_RIGHT_STYLE;
+            ns_css_prop w1 = is_block ? NS_CSS_BORDER_BLOCK_START_WIDTH
+                                      : NS_CSS_BORDER_INLINE_START_WIDTH;
+            ns_css_prop w2 = is_block ? NS_CSS_BORDER_BLOCK_END_WIDTH
+                                      : NS_CSS_BORDER_INLINE_END_WIDTH;
+            ns_css_prop c1 = is_block ? NS_CSS_BORDER_BLOCK_START_COLOR
+                                      : NS_CSS_BORDER_INLINE_START_COLOR;
+            ns_css_prop c2 = is_block ? NS_CSS_BORDER_BLOCK_END_COLOR
+                                      : NS_CSS_BORDER_INLINE_END_COLOR;
+            ns_css_prop s1 = is_block ? NS_CSS_BORDER_BLOCK_START_STYLE
+                                      : NS_CSS_BORDER_INLINE_START_STYLE;
+            ns_css_prop s2 = is_block ? NS_CSS_BORDER_BLOCK_END_STYLE
+                                      : NS_CSS_BORDER_INLINE_END_STYLE;
             char *tokens[4] = {0};
             int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
             for (int i = 0; i < n; i++) {
@@ -8628,12 +8770,18 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         static const struct { const char *name; ns_css_prop a,b; } border_pair_props[] = {
-            { "border-block-width",  NS_CSS_BORDER_TOP_WIDTH,    NS_CSS_BORDER_BOTTOM_WIDTH },
-            { "border-inline-width", NS_CSS_BORDER_LEFT_WIDTH,   NS_CSS_BORDER_RIGHT_WIDTH },
-            { "border-block-style",  NS_CSS_BORDER_TOP_STYLE,    NS_CSS_BORDER_BOTTOM_STYLE },
-            { "border-inline-style", NS_CSS_BORDER_LEFT_STYLE,   NS_CSS_BORDER_RIGHT_STYLE },
-            { "border-block-color",  NS_CSS_BORDER_TOP_COLOR,    NS_CSS_BORDER_BOTTOM_COLOR },
-            { "border-inline-color", NS_CSS_BORDER_LEFT_COLOR,   NS_CSS_BORDER_RIGHT_COLOR },
+            { "border-block-width",  NS_CSS_BORDER_BLOCK_START_WIDTH,
+                                       NS_CSS_BORDER_BLOCK_END_WIDTH },
+            { "border-inline-width", NS_CSS_BORDER_INLINE_START_WIDTH,
+                                       NS_CSS_BORDER_INLINE_END_WIDTH },
+            { "border-block-style",  NS_CSS_BORDER_BLOCK_START_STYLE,
+                                       NS_CSS_BORDER_BLOCK_END_STYLE },
+            { "border-inline-style", NS_CSS_BORDER_INLINE_START_STYLE,
+                                       NS_CSS_BORDER_INLINE_END_STYLE },
+            { "border-block-color",  NS_CSS_BORDER_BLOCK_START_COLOR,
+                                       NS_CSS_BORDER_BLOCK_END_COLOR },
+            { "border-inline-color", NS_CSS_BORDER_INLINE_START_COLOR,
+                                       NS_CSS_BORDER_INLINE_END_COLOR },
             { NULL, NS_CSS_PROP_COUNT, NS_CSS_PROP_COUNT },
         };
         gboolean border_pair_prop = FALSE;
@@ -8694,40 +8842,40 @@ parse_declaration_block(const char **pp, const char *end,
             { "grid-column-gap", NS_CSS_COLUMN_GAP },
             { "-webkit-user-select", NS_CSS_USER_SELECT },
             { "-moz-user-select", NS_CSS_USER_SELECT },
-            { "inline-size", NS_CSS_WIDTH },
-            { "block-size", NS_CSS_HEIGHT },
-            { "min-inline-size", NS_CSS_MIN_WIDTH },
-            { "max-inline-size", NS_CSS_MAX_WIDTH },
-            { "min-block-size", NS_CSS_MIN_HEIGHT },
-            { "max-block-size", NS_CSS_MAX_HEIGHT },
-            { "margin-inline-start", NS_CSS_MARGIN_LEFT },
-            { "margin-inline-end", NS_CSS_MARGIN_RIGHT },
-            { "margin-block-start", NS_CSS_MARGIN_TOP },
-            { "margin-block-end", NS_CSS_MARGIN_BOTTOM },
-            { "padding-inline-start", NS_CSS_PADDING_LEFT },
-            { "padding-inline-end", NS_CSS_PADDING_RIGHT },
-            { "padding-block-start", NS_CSS_PADDING_TOP },
-            { "padding-block-end", NS_CSS_PADDING_BOTTOM },
-            { "inset-inline-start", NS_CSS_LEFT },
-            { "inset-inline-end", NS_CSS_RIGHT },
-            { "inset-block-start", NS_CSS_TOP },
-            { "inset-block-end", NS_CSS_BOTTOM },
-            { "border-inline-start-width", NS_CSS_BORDER_LEFT_WIDTH },
-            { "border-inline-end-width", NS_CSS_BORDER_RIGHT_WIDTH },
-            { "border-block-start-width", NS_CSS_BORDER_TOP_WIDTH },
-            { "border-block-end-width", NS_CSS_BORDER_BOTTOM_WIDTH },
-            { "border-inline-start-style", NS_CSS_BORDER_LEFT_STYLE },
-            { "border-inline-end-style", NS_CSS_BORDER_RIGHT_STYLE },
-            { "border-block-start-style", NS_CSS_BORDER_TOP_STYLE },
-            { "border-block-end-style", NS_CSS_BORDER_BOTTOM_STYLE },
-            { "border-inline-start-color", NS_CSS_BORDER_LEFT_COLOR },
-            { "border-inline-end-color", NS_CSS_BORDER_RIGHT_COLOR },
-            { "border-block-start-color", NS_CSS_BORDER_TOP_COLOR },
-            { "border-block-end-color", NS_CSS_BORDER_BOTTOM_COLOR },
-            { "border-start-start-radius", NS_CSS_BORDER_TOP_LEFT_RADIUS },
-            { "border-start-end-radius", NS_CSS_BORDER_TOP_RIGHT_RADIUS },
-            { "border-end-start-radius", NS_CSS_BORDER_BOTTOM_LEFT_RADIUS },
-            { "border-end-end-radius", NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS },
+            { "inline-size", NS_CSS_INLINE_SIZE },
+            { "block-size", NS_CSS_BLOCK_SIZE },
+            { "min-inline-size", NS_CSS_MIN_INLINE_SIZE },
+            { "max-inline-size", NS_CSS_MAX_INLINE_SIZE },
+            { "min-block-size", NS_CSS_MIN_BLOCK_SIZE },
+            { "max-block-size", NS_CSS_MAX_BLOCK_SIZE },
+            { "margin-inline-start", NS_CSS_MARGIN_INLINE_START },
+            { "margin-inline-end", NS_CSS_MARGIN_INLINE_END },
+            { "margin-block-start", NS_CSS_MARGIN_BLOCK_START },
+            { "margin-block-end", NS_CSS_MARGIN_BLOCK_END },
+            { "padding-inline-start", NS_CSS_PADDING_INLINE_START },
+            { "padding-inline-end", NS_CSS_PADDING_INLINE_END },
+            { "padding-block-start", NS_CSS_PADDING_BLOCK_START },
+            { "padding-block-end", NS_CSS_PADDING_BLOCK_END },
+            { "inset-inline-start", NS_CSS_INSET_INLINE_START },
+            { "inset-inline-end", NS_CSS_INSET_INLINE_END },
+            { "inset-block-start", NS_CSS_INSET_BLOCK_START },
+            { "inset-block-end", NS_CSS_INSET_BLOCK_END },
+            { "border-inline-start-width", NS_CSS_BORDER_INLINE_START_WIDTH },
+            { "border-inline-end-width", NS_CSS_BORDER_INLINE_END_WIDTH },
+            { "border-block-start-width", NS_CSS_BORDER_BLOCK_START_WIDTH },
+            { "border-block-end-width", NS_CSS_BORDER_BLOCK_END_WIDTH },
+            { "border-inline-start-style", NS_CSS_BORDER_INLINE_START_STYLE },
+            { "border-inline-end-style", NS_CSS_BORDER_INLINE_END_STYLE },
+            { "border-block-start-style", NS_CSS_BORDER_BLOCK_START_STYLE },
+            { "border-block-end-style", NS_CSS_BORDER_BLOCK_END_STYLE },
+            { "border-inline-start-color", NS_CSS_BORDER_INLINE_START_COLOR },
+            { "border-inline-end-color", NS_CSS_BORDER_INLINE_END_COLOR },
+            { "border-block-start-color", NS_CSS_BORDER_BLOCK_START_COLOR },
+            { "border-block-end-color", NS_CSS_BORDER_BLOCK_END_COLOR },
+            { "border-start-start-radius", NS_CSS_BORDER_START_START_RADIUS },
+            { "border-start-end-radius", NS_CSS_BORDER_START_END_RADIUS },
+            { "border-end-start-radius", NS_CSS_BORDER_END_START_RADIUS },
+            { "border-end-end-radius", NS_CSS_BORDER_END_END_RADIUS },
             { NULL, NS_CSS_PROP_COUNT },
         };
         gboolean aliased_prop = FALSE;
@@ -9944,19 +10092,26 @@ parse_declaration_block(const char **pp, const char *end,
             if (n > 0) {
                 const char *a = tokens[0];
                 const char *b = n >= 2 ? tokens[1] : a;
-                ns_css_prop pa = NS_CSS_MARGIN_TOP, pb = NS_CSS_MARGIN_BOTTOM;
+                ns_css_prop pa = NS_CSS_MARGIN_BLOCK_START;
+                ns_css_prop pb = NS_CSS_MARGIN_BLOCK_END;
                 if (strcmp(pname, "margin-block") == 0) {
-                    pa = NS_CSS_MARGIN_TOP; pb = NS_CSS_MARGIN_BOTTOM;
+                    pa = NS_CSS_MARGIN_BLOCK_START;
+                    pb = NS_CSS_MARGIN_BLOCK_END;
                 } else if (strcmp(pname, "margin-inline") == 0) {
-                    pa = NS_CSS_MARGIN_LEFT; pb = NS_CSS_MARGIN_RIGHT;
+                    pa = NS_CSS_MARGIN_INLINE_START;
+                    pb = NS_CSS_MARGIN_INLINE_END;
                 } else if (strcmp(pname, "padding-block") == 0) {
-                    pa = NS_CSS_PADDING_TOP; pb = NS_CSS_PADDING_BOTTOM;
+                    pa = NS_CSS_PADDING_BLOCK_START;
+                    pb = NS_CSS_PADDING_BLOCK_END;
                 } else if (strcmp(pname, "padding-inline") == 0) {
-                    pa = NS_CSS_PADDING_LEFT; pb = NS_CSS_PADDING_RIGHT;
+                    pa = NS_CSS_PADDING_INLINE_START;
+                    pb = NS_CSS_PADDING_INLINE_END;
                 } else if (strcmp(pname, "inset-block") == 0) {
-                    pa = NS_CSS_TOP; pb = NS_CSS_BOTTOM;
+                    pa = NS_CSS_INSET_BLOCK_START;
+                    pb = NS_CSS_INSET_BLOCK_END;
                 } else {
-                    pa = NS_CSS_LEFT; pb = NS_CSS_RIGHT;
+                    pa = NS_CSS_INSET_INLINE_START;
+                    pb = NS_CSS_INSET_INLINE_END;
                 }
                 ns_css_value *va = parse_value_for(pa, a);
                 ns_css_value *vb = parse_value_for(pb, b);
@@ -14807,6 +14962,65 @@ inline_decl_find(GPtrArray *decls, const char *name)
     return NULL;
 }
 
+static int
+inline_logical_group(int prop)
+{
+    switch (prop) {
+    case NS_CSS_MARGIN_TOP: case NS_CSS_MARGIN_RIGHT:
+    case NS_CSS_MARGIN_BOTTOM: case NS_CSS_MARGIN_LEFT:
+    case NS_CSS_MARGIN_BLOCK_START: case NS_CSS_MARGIN_BLOCK_END:
+    case NS_CSS_MARGIN_INLINE_START: case NS_CSS_MARGIN_INLINE_END:
+        return 1;
+    case NS_CSS_PADDING_TOP: case NS_CSS_PADDING_RIGHT:
+    case NS_CSS_PADDING_BOTTOM: case NS_CSS_PADDING_LEFT:
+    case NS_CSS_PADDING_BLOCK_START: case NS_CSS_PADDING_BLOCK_END:
+    case NS_CSS_PADDING_INLINE_START: case NS_CSS_PADDING_INLINE_END:
+        return 2;
+    case NS_CSS_BORDER_TOP_WIDTH: case NS_CSS_BORDER_RIGHT_WIDTH:
+    case NS_CSS_BORDER_BOTTOM_WIDTH: case NS_CSS_BORDER_LEFT_WIDTH:
+    case NS_CSS_BORDER_BLOCK_START_WIDTH: case NS_CSS_BORDER_BLOCK_END_WIDTH:
+    case NS_CSS_BORDER_INLINE_START_WIDTH: case NS_CSS_BORDER_INLINE_END_WIDTH:
+        return 3;
+    case NS_CSS_BORDER_TOP_STYLE: case NS_CSS_BORDER_RIGHT_STYLE:
+    case NS_CSS_BORDER_BOTTOM_STYLE: case NS_CSS_BORDER_LEFT_STYLE:
+    case NS_CSS_BORDER_BLOCK_START_STYLE: case NS_CSS_BORDER_BLOCK_END_STYLE:
+    case NS_CSS_BORDER_INLINE_START_STYLE: case NS_CSS_BORDER_INLINE_END_STYLE:
+        return 4;
+    case NS_CSS_BORDER_TOP_COLOR: case NS_CSS_BORDER_RIGHT_COLOR:
+    case NS_CSS_BORDER_BOTTOM_COLOR: case NS_CSS_BORDER_LEFT_COLOR:
+    case NS_CSS_BORDER_BLOCK_START_COLOR: case NS_CSS_BORDER_BLOCK_END_COLOR:
+    case NS_CSS_BORDER_INLINE_START_COLOR: case NS_CSS_BORDER_INLINE_END_COLOR:
+        return 5;
+    case NS_CSS_BORDER_TOP_LEFT_RADIUS: case NS_CSS_BORDER_TOP_RIGHT_RADIUS:
+    case NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS: case NS_CSS_BORDER_BOTTOM_LEFT_RADIUS:
+    case NS_CSS_BORDER_START_START_RADIUS: case NS_CSS_BORDER_START_END_RADIUS:
+    case NS_CSS_BORDER_END_START_RADIUS: case NS_CSS_BORDER_END_END_RADIUS:
+        return 6;
+    case NS_CSS_TOP: case NS_CSS_RIGHT: case NS_CSS_BOTTOM: case NS_CSS_LEFT:
+    case NS_CSS_INSET_BLOCK_START: case NS_CSS_INSET_BLOCK_END:
+    case NS_CSS_INSET_INLINE_START: case NS_CSS_INSET_INLINE_END:
+        return 7;
+    case NS_CSS_WIDTH: case NS_CSS_HEIGHT:
+    case NS_CSS_BLOCK_SIZE: case NS_CSS_INLINE_SIZE:
+        return 8;
+    case NS_CSS_MIN_WIDTH: case NS_CSS_MIN_HEIGHT:
+    case NS_CSS_MIN_BLOCK_SIZE: case NS_CSS_MIN_INLINE_SIZE:
+        return 9;
+    case NS_CSS_MAX_WIDTH: case NS_CSS_MAX_HEIGHT:
+    case NS_CSS_MAX_BLOCK_SIZE: case NS_CSS_MAX_INLINE_SIZE:
+        return 10;
+    default:
+        return 0;
+    }
+}
+
+static gboolean
+inline_prop_is_logical(int prop)
+{
+    return prop >= NS_CSS_MARGIN_BLOCK_START &&
+           prop <= NS_CSS_MAX_INLINE_SIZE;
+}
+
 char *
 ns_inline_style_serialize(const char *style)
 {
@@ -14909,6 +15123,18 @@ ns_inline_style_serialize(const char *style)
     gboolean quad_emitted[G_N_ELEMENTS(quad_names)] = { FALSE };
     for (gsize q = 0; q < G_N_ELEMENTS(quad_names); q++) {
         const int *ids = inline_quad_ids(quad_names[q]);
+        int logical_group = inline_logical_group(ids[0]);
+        gboolean mixed_logical_group = FALSE;
+        for (guint i = 0; i < decls->len; i++) {
+            ns_inline_decl *decl = g_ptr_array_index(decls, i);
+            int id = ns_css_prop_id(decl->name);
+            if (inline_prop_is_logical(id) &&
+                inline_logical_group(id) == logical_group) {
+                mixed_logical_group = TRUE;
+                break;
+            }
+        }
+        if (mixed_logical_group) continue;
         gboolean sides[4] = { FALSE, FALSE, FALSE, FALSE };
         for (guint i = 0; i < decls->len; i++) {
             ns_inline_decl *decl = g_ptr_array_index(decls, i);
@@ -15070,6 +15296,44 @@ ns_inline_value_strip_important(char *value)
     return important;
 }
 
+static char *
+inline_quad_expanded(const char *prop, const char *value)
+{
+    const int *ids = inline_quad_ids(prop);
+    if (!ids || !value || !*value) return NULL;
+    char *wrapped = g_strdup_printf("*{%s:%s}", prop, value);
+    ns_css_stylesheet *sheet = ns_css_stylesheet_parse(wrapped, -1);
+    g_free(wrapped);
+    char *values[4] = { NULL, NULL, NULL, NULL };
+    gboolean important[4] = { FALSE, FALSE, FALSE, FALSE };
+    if (sheet) {
+        for (guint ri = 0; ri < sheet->rules->len; ri++) {
+            ns_css_rule *rule = g_ptr_array_index(sheet->rules, ri);
+            for (guint di = 0; di < rule->decls->len; di++) {
+                ns_css_decl *decl = &g_array_index(rule->decls,
+                                                   ns_css_decl, di);
+                for (int side = 0; side < 4; side++) {
+                    if ((int)decl->prop != ids[side]) continue;
+                    g_free(values[side]);
+                    values[side] = ns_css_value_serialize(decl->value);
+                    important[side] = decl->important;
+                }
+            }
+        }
+        ns_css_stylesheet_free(sheet);
+    }
+    GString *out = g_string_new(NULL);
+    for (int side = 0; side < 4; side++) {
+        if (!values[side]) continue;
+        if (out->len) g_string_append(out, "; ");
+        g_string_append_printf(out, "%s: %s", ns_css_prop_name(ids[side]),
+                               values[side]);
+        if (important[side]) g_string_append(out, " !important");
+        g_free(values[side]);
+    }
+    return g_string_free(out, FALSE);
+}
+
 char *
 ns_inline_style_set(const char *style, const char *prop, const char *value)
 {
@@ -15081,6 +15345,10 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
         ? inline_all_value(style) : NULL;
     gboolean append_after_all = active_all != NULL;
     g_free(active_all);
+    const int *quad_ids = inline_quad_ids(prop);
+    char *quad_expanded = quad_ids ? inline_quad_expanded(prop, value) : NULL;
+    int set_prop_id = ns_css_prop_id(prop);
+    gboolean append_logical_group = inline_logical_group(set_prop_id) != 0;
     gsize plen = prop ? strlen(prop) : 0;
     const char *p = style ? style : "";
     const char *end = p + strlen(p);
@@ -15108,6 +15376,11 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
         gboolean match = strlen(key) == plen && prop &&
                          (custom ? strcmp(key, prop) == 0
                                  : g_ascii_strcasecmp(key, prop) == 0);
+        int key_id = ns_css_prop_id(key);
+        gboolean quad_member = FALSE;
+        if (quad_ids)
+            for (int side = 0; side < 4; side++)
+                if (key_id == quad_ids[side]) quad_member = TRUE;
         gboolean remove_for_all = prop &&
             g_ascii_strcasecmp(prop, "all") == 0 &&
             inline_property_is_all_covered(key);
@@ -15118,7 +15391,8 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
             p = term == ';' ? vend + 1 : vend;
             continue;
         }
-        if (append_after_all && match) {
+        if ((append_after_all || append_logical_group || quad_ids) &&
+            (match || quad_member)) {
             found = TRUE;
             g_free(key);
             g_free(old_value);
@@ -15148,12 +15422,18 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
         g_free(old_value);
         p = term == ';' ? vend + 1 : vend;
     }
-    if ((set_all || append_after_all || !found) && value && *value) {
+    if ((set_all || append_after_all || append_logical_group || quad_ids ||
+         !found) && value && *value) {
         if (out->len > 0) g_string_append(out, "; ");
-        g_string_append(out, prop);
-        g_string_append(out, ": ");
-        g_string_append(out, value);
+        if (quad_expanded)
+            g_string_append(out, quad_expanded);
+        else {
+            g_string_append(out, prop);
+            g_string_append(out, ": ");
+            g_string_append(out, value);
+        }
     }
+    g_free(quad_expanded);
     if (out->len > 0) g_string_append_c(out, ';');
     return g_string_free(out, FALSE);
 }
@@ -17040,6 +17320,32 @@ style_is_out_of_flow(const ns_style *s)
            strcmp(flt->u.keyword, "none") != 0;
 }
 
+static const char *
+cascade_axis_keyword(GArray *matches, ns_css_prop prop,
+                     const ns_style *parent_style, const char *initial)
+{
+    const ns_css_value *value = NULL;
+    for (guint i = 0; i < matches->len; i++) {
+        match_entry *entry = &g_array_index(matches, match_entry, i);
+        if (entry->prop != prop) continue;
+        if (value_is_revert(entry->value) ||
+            value_is_revert_layer(entry->value) ||
+            value_is_revert_rule(entry->value))
+            value = cascade_rollback_value(matches, (gint)i - 1, entry);
+        else
+            value = entry->value;
+    }
+    if (!value || value_is_inherit(value) || value_is_unset(value)) {
+        const ns_css_value *parent = parent_style
+            ? parent_style->values[prop] : NULL;
+        return parent && parent->kind == NS_CSS_V_KEYWORD && parent->u.keyword
+            ? parent->u.keyword : initial;
+    }
+    if (value_is_initial(value)) return initial;
+    return value->kind == NS_CSS_V_KEYWORD && value->u.keyword
+        ? value->u.keyword : initial;
+}
+
 static ns_display
 display_after_blockification(ns_display d, const ns_style *s,
                              const ns_style *layout_parent, gboolean is_root)
@@ -17066,6 +17372,16 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
 {
     g_array_sort(matches, match_cmp);
+    const char *direction = cascade_axis_keyword(
+        matches, NS_CSS_DIRECTION, parent_style, "ltr");
+    const char *writing_mode = cascade_axis_keyword(
+        matches, NS_CSS_WRITING_MODE, parent_style, "horizontal-tb");
+    gboolean rtl = strcmp(direction, "rtl") == 0;
+    int writing_mode_id = writing_mode_code(writing_mode);
+    for (guint i = 0; i < matches->len; i++) {
+        match_entry *entry = &g_array_index(matches, match_entry, i);
+        entry->prop = logical_to_physical(entry->prop, writing_mode_id, rtl);
+    }
     for (guint i = 0; i < matches->len; i++) {
         match_entry *m = &g_array_index(matches, match_entry, i);
         if (value_is_revert(m->value) || value_is_revert_layer(m->value) ||
