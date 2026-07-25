@@ -56,9 +56,17 @@ and headless drivers share the same path).
 | 3. Parse | `html_lexbor.c`, `html.c`, `xml.c` | Bytes → DOM via lexbor (WHATWG HTML). `xml.c` handles XHTML/namespaced XML. Charset via uchardet. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
 | 5. Style | `css.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `anim.c` runs transitions and `@keyframes`; `font.c` loads `@font-face` web fonts. |
-| 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. `mathml.c` lays out presentation MathML. |
+| 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. `mathml.c` lays out presentation MathML. Anonymous table boxes are generated around any run of table-internal siblings. |
 | 7. Paint | `paint.c`, `image.c` | Builds and rasterises the Cairo display list. `image.c` decodes images on demand. |
 | 8. Present | `src/gtk/procview.c`, `headless.c` | GUI blits the surface into the GTK widget; headless dumps it to PNG or a text/layout tree. |
+
+Most computed values stay as parsed `ns_css_value`s, but `display` is
+resolved once per element into an `ns_display` — the CSS Display Level 3
+decomposition into an outer type, an inner type, a list-item flag and a
+layout-internal kind. Layout, paint and the CSSOM read that value through
+predicates in `css.h` rather than comparing keyword strings, and
+blockification of floated and absolutely positioned boxes has a single
+implementation.
 
 ## JavaScript and web APIs
 
