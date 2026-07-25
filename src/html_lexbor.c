@@ -103,15 +103,11 @@ lxb_node_convert(lxb_dom_node_t *src)
         const lxb_char_t *name = lxb_dom_document_type_name(dt, &nlen);
         const lxb_char_t *pub = lxb_dom_document_type_public_id(dt, &plen);
         const lxb_char_t *sys = lxb_dom_document_type_system_id(dt, &slen);
-        ns_node *out = ns_node_new_element(NULL);
-        ns_node_set_name_borrow(out,
-            name && nlen ? (const char *)name : "html");
-        ns_element_set_attr(out, "publicId",
-            pub && plen ? (const char *)pub : "");
-        ns_element_set_attr(out, "systemId",
-            sys && slen ? (const char *)sys : "");
-        out->kind = NS_NODE_DOCTYPE;
-        return out;
+        return ns_node_new_doctype(
+            g_strndup(name && nlen ? (const char *)name : "html",
+                      name && nlen ? nlen : 4),
+            g_strndup(pub && plen ? (const char *)pub : "", plen),
+            g_strndup(sys && slen ? (const char *)sys : "", slen));
     }
     case LXB_DOM_NODE_TYPE_PROCESSING_INSTRUCTION:
     case LXB_DOM_NODE_TYPE_ATTRIBUTE:

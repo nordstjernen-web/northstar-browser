@@ -68,6 +68,9 @@ struct ns_node {
 
     char *text;
 
+    char *public_id;
+    char *system_id;
+
     ns_attr *attrs;
 
     struct ns_node *parent;
@@ -105,6 +108,7 @@ struct ns_node {
 };
 
 ns_node *ns_node_new_document(void);
+ns_node *ns_node_new_doctype(char *name, char *public_id, char *system_id);
 ns_node *ns_node_new_element(char *name);
 ns_node *ns_node_new_text(char *text);
 ns_node *ns_node_new_comment(char *text);

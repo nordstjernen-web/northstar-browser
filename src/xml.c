@@ -76,36 +76,56 @@ xml_skip_space_range(const char *p, const char *end)
     return p;
 }
 
-static gboolean
-xml_skip_quoted_range(const char **cursor, const char *end)
+static char *
+xml_read_quoted_range(const char **cursor, const char *end)
 {
     const char *p = *cursor;
-    if (p >= end || (*p != '"' && *p != '\'')) return FALSE;
+    if (p >= end || (*p != '"' && *p != '\'')) return NULL;
     char quote = *p++;
+    const char *start = p;
     while (p < end && *p != quote) p++;
-    if (p >= end) return FALSE;
+    if (p >= end) return NULL;
     *cursor = p + 1;
-    return TRUE;
+    return g_strndup(start, (gsize)(p - start));
 }
 
 static gboolean
-xml_doctype_tail_valid(const char *p, const char *end)
+xml_doctype_tail_parse(const char *p, const char *end,
+                       char **public_id, char **system_id)
 {
+    *public_id = g_strdup("");
+    *system_id = g_strdup("");
     p = xml_skip_space_range(p, end);
     if (p == end || *p == '[') return TRUE;
-    gboolean public_id = end - p >= 6 && strncmp(p, "PUBLIC", 6) == 0 &&
-                         p + 6 < end && xml_is_space(p[6]);
-    gboolean system_id = end - p >= 6 && strncmp(p, "SYSTEM", 6) == 0 &&
-                         p + 6 < end && xml_is_space(p[6]);
-    if (!public_id && !system_id) return FALSE;
+    gboolean has_public_id = end - p >= 6 && strncmp(p, "PUBLIC", 6) == 0 &&
+                             p + 6 < end && xml_is_space(p[6]);
+    gboolean has_system_id = end - p >= 6 && strncmp(p, "SYSTEM", 6) == 0 &&
+                             p + 6 < end && xml_is_space(p[6]);
+    if (!has_public_id && !has_system_id) goto invalid;
     p = xml_skip_space_range(p + 6, end);
-    if (!xml_skip_quoted_range(&p, end)) return FALSE;
+    char *first_id = xml_read_quoted_range(&p, end);
+    if (!first_id) goto invalid;
+    if (has_public_id) {
+        g_free(*public_id);
+        *public_id = first_id;
+    } else {
+        g_free(*system_id);
+        *system_id = first_id;
+    }
     p = xml_skip_space_range(p, end);
-    if (public_id) {
-        if (!xml_skip_quoted_range(&p, end)) return FALSE;
+    if (has_public_id) {
+        char *second_id = xml_read_quoted_range(&p, end);
+        if (!second_id) goto invalid;
+        g_free(*system_id);
+        *system_id = second_id;
         p = xml_skip_space_range(p, end);
     }
-    return p == end || *p == '[';
+    if (p == end || *p == '[') return TRUE;
+
+invalid:
+    g_clear_pointer(public_id, g_free);
+    g_clear_pointer(system_id, g_free);
+    return FALSE;
 }
 
 static void
@@ -320,18 +340,19 @@ xml_skip_misc_and_doctype(xml_parser *xp, ns_node *doc)
                     while (tn < e && !xml_is_space(*tn) && *tn != '>' && *tn != '[') tn++;
                     char *doctype_name = tn > t
                         ? g_strndup(t, (gsize)(tn - t)) : NULL;
+                    char *public_id = NULL;
+                    char *system_id = NULL;
                     if (!doctype_name || !xml_qname_valid(doctype_name) ||
-                        !xml_doctype_tail_valid(tn, e)) {
+                        !xml_doctype_tail_parse(tn, e, &public_id,
+                                               &system_id)) {
                         g_free(doctype_name);
                         xp->ok = FALSE;
                         return;
                     }
                     if (tn > t) {
-                        ns_node *dt = ns_node_new_element(NULL);
-                        ns_node_set_name_owned(dt, doctype_name);
-                        ns_element_set_attr(dt, "publicId", "");
-                        ns_element_set_attr(dt, "systemId", "");
-                        dt->kind = NS_NODE_DOCTYPE;
+                        ns_node *dt = ns_node_new_doctype(doctype_name,
+                                                          public_id,
+                                                          system_id);
                         ns_node_append_child(doc, dt);
                     }
                 }

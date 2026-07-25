@@ -3291,18 +3291,12 @@ ns_make_element(JSContext *ctx, const ns_node *cnode)
     JSValue kind_proto = ns_node_kind_proto(js, node);
     if (JS_IsObject(kind_proto)) JS_SetPrototype(ctx, obj, kind_proto);
     if (node->kind == NS_NODE_DOCTYPE) {
-        const char *pub = "", *sys = "";
-        for (const ns_attr *a = node->attrs; a; a = a->next) {
-            if (!a->name) continue;
-            if (strcmp(a->name, "publicId") == 0) pub = a->value ? a->value : "";
-            else if (strcmp(a->name, "systemId") == 0) sys = a->value ? a->value : "";
-        }
         JS_DefinePropertyValueStr(ctx, obj, "name",
             JS_NewString(ctx, node->name ? node->name : ""), JS_PROP_ENUMERABLE);
         JS_DefinePropertyValueStr(ctx, obj, "publicId",
-            JS_NewString(ctx, pub), JS_PROP_ENUMERABLE);
+            JS_NewString(ctx, node->public_id ? node->public_id : ""), JS_PROP_ENUMERABLE);
         JS_DefinePropertyValueStr(ctx, obj, "systemId",
-            JS_NewString(ctx, sys), JS_PROP_ENUMERABLE);
+            JS_NewString(ctx, node->system_id ? node->system_id : ""), JS_PROP_ENUMERABLE);
     }
     if (node->kind == NS_NODE_ELEMENT && node->name &&
         (strcmp(node->name, "body") == 0 ||
@@ -29555,6 +29549,8 @@ ns_node_equal(const ns_node *a, const ns_node *b, int depth)
     if (a->name && b->name && strcmp(a->name, b->name) != 0) return FALSE;
     if ((a->text == NULL) != (b->text == NULL)) return FALSE;
     if (a->text && b->text && strcmp(a->text, b->text) != 0) return FALSE;
+    if (g_strcmp0(a->public_id, b->public_id) != 0) return FALSE;
+    if (g_strcmp0(a->system_id, b->system_id) != 0) return FALSE;
     if (!ns_node_attrs_equal(a, b)) return FALSE;
     const ns_node *ca = a->first_child, *cb = b->first_child;
     while (ca && cb) {
@@ -45447,10 +45443,8 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
     }
     ns_node *doc = ns_node_new_document();
     doc->flags |= NS_NODE_SCRIPTING_DISABLED;
-    ns_node *doctype = ns_node_new_element(g_strdup("html"));
-    ns_element_set_attr(doctype, "publicId", "");
-    ns_element_set_attr(doctype, "systemId", "");
-    doctype->kind = NS_NODE_DOCTYPE;
+    ns_node *doctype = ns_node_new_doctype(g_strdup("html"), g_strdup(""),
+                                           g_strdup(""));
     ns_node *html = ns_node_new_element(g_strdup("html"));
     ns_node *head = ns_node_new_element(g_strdup("head"));
     ns_node *body = ns_node_new_element(g_strdup("body"));
@@ -45849,10 +45843,9 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
         if (public_id) JS_FreeCString(ctx, public_id);
         return JS_EXCEPTION;
     }
-    ns_node *dt = ns_node_new_element(g_strndup(name, name_len));
-    ns_element_set_attr(dt, "publicId", public_id);
-    ns_element_set_attr(dt, "systemId", system_id);
-    dt->kind = NS_NODE_DOCTYPE;
+    ns_node *dt = ns_node_new_doctype(g_strndup(name, name_len),
+                                      g_strdup(public_id),
+                                      g_strdup(system_id));
     g_hash_table_add(js->orphan_nodes, dt);
     JSValue wrapper = ns_make_element(ctx, dt);
     JSValue impl_doc = JS_GetPropertyStr(ctx, this_val, "__ndDocument");

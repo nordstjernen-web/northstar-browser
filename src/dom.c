@@ -636,6 +636,17 @@ ns_node_new_document(void)
 }
 
 ns_node *
+ns_node_new_doctype(char *name, char *public_id, char *system_id)
+{
+    ns_node *n = ns_node_new(NS_NODE_DOCTYPE);
+    n->name = name;
+    n->public_id = public_id;
+    n->system_id = system_id;
+    n->flags |= NS_NODE_OWN_NAME;
+    return n;
+}
+
+ns_node *
 ns_node_new_element(char *name)
 {
     ns_node *n = ns_node_new(NS_NODE_ELEMENT);
@@ -899,6 +910,8 @@ ns_node_free(ns_node *node)
             cur->js_invalidate(cur);
         if (cur->flags & NS_NODE_OWN_NAME) g_free(cur->name);
         if (cur->flags & NS_NODE_OWN_TEXT) g_free(cur->text);
+        g_free(cur->public_id);
+        g_free(cur->system_id);
         ns_class_set_clear(cur);
         ns_attr_free(cur->attrs);
         if (cur->backing && cur->backing_free)
@@ -1160,12 +1173,9 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
         out = ns_node_new_text(g_strdup(src->text ? src->text : ""));
         break;
     case NS_NODE_DOCTYPE:
-        out = ns_node_new_element(src->name ? g_strdup(src->name) : g_strdup(""));
-        for (const ns_attr *a = src->attrs; a; a = a->next)
-            ns_element_set_attr_ns(out, a->namespace_uri, a->prefix,
-                                   ns_attr_local_name(a), a->name,
-                                   a->value ? a->value : "");
-        out->kind = NS_NODE_DOCTYPE;
+        out = ns_node_new_doctype(g_strdup(src->name ? src->name : ""),
+                                  g_strdup(src->public_id ? src->public_id : ""),
+                                  g_strdup(src->system_id ? src->system_id : ""));
         break;
     case NS_NODE_DOCUMENT:
     case NS_NODE_COMMENT:
@@ -2230,7 +2240,23 @@ serialize_node_opts(const ns_node *n, GString *out, gboolean include_self,
         return;
     }
     if (n->kind == NS_NODE_DOCTYPE) {
-        g_string_append_printf(out, "<!DOCTYPE %s>", n->name ? n->name : "");
+        g_string_append(out, "<!DOCTYPE ");
+        g_string_append(out, n->name ? n->name : "");
+        if (n->public_id && *n->public_id) {
+            g_string_append(out, " PUBLIC \"");
+            g_string_append(out, n->public_id);
+            g_string_append_c(out, '"');
+            if (n->system_id && *n->system_id) {
+                g_string_append(out, " \"");
+                g_string_append(out, n->system_id);
+                g_string_append_c(out, '"');
+            }
+        } else if (n->system_id && *n->system_id) {
+            g_string_append(out, " SYSTEM \"");
+            g_string_append(out, n->system_id);
+            g_string_append_c(out, '"');
+        }
+        g_string_append_c(out, '>');
         return;
     }
     gboolean raw_text = serialize_raw_text(n);
@@ -2510,6 +2536,20 @@ xml_serialize_node(const ns_node *n, GString *out, const char *parent_ns,
     if (n->kind == NS_NODE_DOCTYPE) {
         g_string_append(out, "<!DOCTYPE ");
         g_string_append(out, n->name ? n->name : "");
+        if (n->public_id && *n->public_id) {
+            g_string_append(out, " PUBLIC \"");
+            g_string_append(out, n->public_id);
+            g_string_append_c(out, '"');
+            if (n->system_id && *n->system_id) {
+                g_string_append(out, " \"");
+                g_string_append(out, n->system_id);
+                g_string_append_c(out, '"');
+            }
+        } else if (n->system_id && *n->system_id) {
+            g_string_append(out, " SYSTEM \"");
+            g_string_append(out, n->system_id);
+            g_string_append_c(out, '"');
+        }
         g_string_append_c(out, '>');
         return;
     }
@@ -2709,7 +2749,14 @@ ns_dump_node(GString *out, const ns_node *n, int depth)
         g_string_append(out, "#document\n");
         break;
     case NS_NODE_DOCTYPE:
-        g_string_append_printf(out, "<!DOCTYPE %s>\n", n->name ? n->name : "");
+        g_string_append_printf(out, "<!DOCTYPE %s", n->name ? n->name : "");
+        if (n->public_id && *n->public_id)
+            g_string_append_printf(out, " PUBLIC \"%s\"", n->public_id);
+        if (n->system_id && *n->system_id)
+            g_string_append_printf(out, "%s\"%s\"",
+                                   n->public_id && *n->public_id ? " " : " SYSTEM ",
+                                   n->system_id);
+        g_string_append(out, ">\n");
         break;
     case NS_NODE_ELEMENT:
         g_string_append_printf(out, "<%s", n->name ? n->name : "?");
