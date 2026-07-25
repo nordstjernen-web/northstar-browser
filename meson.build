@@ -11,6 +11,7 @@ project(
     'quickjs-ng:default_library=static',
     'buildtype=release',
     'optimization=3',
+    'b_lto=true',
     'b_ndebug=true',
     'b_pie=true',
   ],
