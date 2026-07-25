@@ -104,10 +104,14 @@ wamr_incs = include_directories(
   'core/shared/mem-alloc',
 )
 
+# The Windows platform layer threads through Win32, and clang's MinGW driver
+# drops -pthread unclaimed, which -Werror turns into a link failure under LTO.
 wamr_sys_deps = [
   cc.find_library('m', required: false),
-  dependency('threads', required: false),
 ]
+if wamr_system != 'windows'
+  wamr_sys_deps += dependency('threads', required: false)
+endif
 
 wamr_lib = static_library(
   'wamr',
