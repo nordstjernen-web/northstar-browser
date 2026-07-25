@@ -5900,10 +5900,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
 
-    if (b->kind == NS_BOX_BLOCK && b->style && b->columns >= 2) {
-        double col_gap = 16;
-        int n_cols = b->columns;
-        (void)ns_css_used_column_count(b->style, b->content_width, &col_gap);
+    const ns_fragment_context *fragment_context = b->fragment_context;
+    if (b->kind == NS_BOX_BLOCK && b->style && fragment_context &&
+        fragment_context->kind == NS_FRAGMENT_CONTEXT_COLUMNS &&
+        fragment_context->fragmentainers->len >= 2) {
         {
             double rule_w = length_or(b->style->values[NS_CSS_COLUMN_RULE_WIDTH], 0);
             const ns_css_value *rstyle =
@@ -5914,10 +5914,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if (rule_w > 0 && rdrawable) {
                 rgba rc = rgba_of(b->style->values[NS_CSS_COLUMN_RULE_COLOR],
                                   0.50, 0.50, 0.50, 1.0);
-                double inx = b->x + b->margin.left + b->border.left + b->padding.left;
-                double iny = b->y + b->margin.top  + b->border.top  + b->padding.top;
-                double cw = b->content_width;
-                double col_w = (cw - col_gap * (n_cols - 1)) / n_cols;
                 cairo_save(cr);
                 set_source_rgba(cr, rc);
                 cairo_set_line_width(cr, rule_w);
@@ -5928,10 +5924,20 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                     double dashes[] = { rule_w, rule_w };
                     cairo_set_dash(cr, dashes, 2, 0);
                 }
-                for (int i = 0; i < n_cols - 1; i++) {
-                    double rx = inx + col_w * (i + 1) + col_gap * i + col_gap / 2.0;
-                    cairo_move_to(cr, rx, iny);
-                    cairo_line_to(cr, rx, iny + b->content_height);
+                for (guint i = 0;
+                     i + 1 < fragment_context->fragmentainers->len; i++) {
+                    const ns_fragmentainer *left = &g_array_index(
+                        fragment_context->fragmentainers,
+                        ns_fragmentainer, i);
+                    const ns_fragmentainer *right = &g_array_index(
+                        fragment_context->fragmentainers,
+                        ns_fragmentainer, i + 1);
+                    double rx = (left->x + left->inline_size + right->x) / 2.0;
+                    double top = MIN(left->y, right->y);
+                    double bottom = MAX(left->y + left->block_size,
+                                        right->y + right->block_size);
+                    cairo_move_to(cr, rx, top);
+                    cairo_line_to(cr, rx, bottom);
                     cairo_stroke(cr);
                 }
                 cairo_restore(cr);

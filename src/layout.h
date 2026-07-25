@@ -117,6 +117,28 @@ typedef struct ns_box_media {
     gboolean intrinsic_ratio_only;
 } ns_box_media;
 
+typedef enum ns_fragment_context_kind {
+    NS_FRAGMENT_CONTEXT_COLUMNS,
+} ns_fragment_context_kind;
+
+typedef enum ns_box_fragment_flags {
+    NS_BOX_FRAGMENT_FIRST = 1u << 0,
+    NS_BOX_FRAGMENT_LAST  = 1u << 1,
+} ns_box_fragment_flags;
+
+typedef struct ns_fragmentainer {
+    double x, y;
+    double inline_size, block_size;
+    struct ns_box *first_box;
+    struct ns_box *last_box;
+} ns_fragmentainer;
+
+typedef struct ns_fragment_context {
+    ns_fragment_context_kind kind;
+    double gap;
+    GArray *fragmentainers;
+} ns_fragment_context;
+
 typedef struct ns_box {
     ns_box_kind kind;
     const ns_node  *dom;
@@ -159,7 +181,11 @@ typedef struct ns_box {
 
     int colspan;
     int rowspan;
-    int columns;
+    ns_fragment_context *fragment_context;
+    int fragmentainer_index;
+    guint fragment_flags;
+    gsize fragment_text_start;
+    gsize fragment_text_end;
 
     struct ns_box *parent;
     struct ns_box *first_child;
