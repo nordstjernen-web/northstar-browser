@@ -37,6 +37,7 @@ executable(
   link_with: northstar_audio_libs,
   c_args: ['-DNS_HAVE_GTK=1'],
   include_directories: include_directories('..', '.'),
+  pie: host_machine.system() != 'windows',
   win_subsystem: northstar_win_subsystem,
   link_args: northstar_exe_link_args + northstar_gtk_platform_link_args,
   install: true,

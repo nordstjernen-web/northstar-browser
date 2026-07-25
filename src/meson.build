@@ -195,6 +195,7 @@ if host_machine.system() == 'windows'
   executable(
     'northstar-launcher',
     files('win_launcher.c') + northstar_win_resources,
+    pie: false,
     win_subsystem: 'windows',
     link_args: ['-luser32', '-lshell32'],
   )
