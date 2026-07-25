@@ -49053,6 +49053,11 @@ typedef struct ns_script_task {
     ns_script_schedule schedule;
 } ns_script_task;
 
+typedef struct ns_parser_tail {
+    ns_node *parent;
+    GPtrArray *nodes;
+} ns_parser_tail;
+
 static gboolean
 ns_script_type_is_module(const ns_node *n)
 {
@@ -49321,6 +49326,50 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
 }
 
 static void
+ns_parser_tail_free(gpointer data)
+{
+    ns_parser_tail *tail = data;
+    if (!tail) return;
+    g_ptr_array_free(tail->nodes, TRUE);
+    g_free(tail);
+}
+
+static GPtrArray *
+ns_js_parser_pause_after(ns_node *script)
+{
+    GPtrArray *tails = g_ptr_array_new_with_free_func(ns_parser_tail_free);
+    for (ns_node *cursor = script; cursor && cursor->parent;
+         cursor = cursor->parent) {
+        if (!cursor->next_sibling) continue;
+        ns_parser_tail *tail = g_new0(ns_parser_tail, 1);
+        tail->parent = cursor->parent;
+        tail->nodes = g_ptr_array_new();
+        ns_node *next = cursor->next_sibling;
+        while (next) {
+            ns_node *following = next->next_sibling;
+            ns_node_remove(next);
+            g_ptr_array_add(tail->nodes, next);
+            next = following;
+        }
+        g_ptr_array_add(tails, tail);
+    }
+    return tails;
+}
+
+static void
+ns_js_parser_resume(GPtrArray *tails)
+{
+    if (!tails) return;
+    for (guint i = 0; i < tails->len; i++) {
+        ns_parser_tail *tail = g_ptr_array_index(tails, i);
+        for (guint j = 0; j < tail->nodes->len; j++)
+            ns_node_append_child(tail->parent,
+                                 g_ptr_array_index(tail->nodes, j));
+    }
+    g_ptr_array_free(tails, TRUE);
+}
+
+static void
 ns_js_run_script_schedule(ns_js *js, GArray *tasks, ns_script_schedule schedule,
                           const char *origin)
 {
@@ -49328,7 +49377,12 @@ ns_js_run_script_schedule(ns_js *js, GArray *tasks, ns_script_schedule schedule,
     for (guint i = 0; i < tasks->len; i++) {
         ns_script_task *task = &g_array_index(tasks, ns_script_task, i);
         if (task->schedule != schedule) continue;
+        GPtrArray *parser_tails = NULL;
+        if (schedule == NS_SCRIPT_BLOCKING &&
+            !(task->node->flags & NS_NODE_NOT_PARSER_INSERTED))
+            parser_tails = ns_js_parser_pause_after(task->node);
         ns_js_run_script_element(js, task->node, origin);
+        ns_js_parser_resume(parser_tails);
     }
     ns_ce_upgrade_subtree_all(js, js->current_doc);
 }
