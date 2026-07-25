@@ -6629,6 +6629,7 @@ layout_image(ns_box *box, double parent_content_width)
         ? keyword_or(box->parent->style, NS_CSS_FLEX_DIRECTION, "row") : "row";
     gboolean flex_row_item = box->parent &&
         style_is_flex_container(box->parent->style) &&
+        !style_is_absolute_or_fixed(box->style) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
          strcmp(parent_flex_dir, "row-reverse") == 0);
     double pct_width_base = parent_content_width;
@@ -8034,7 +8035,8 @@ layout_flex_row(ns_box *box, double cw,
 
     GPtrArray *items = g_ptr_array_new();
     for (ns_box *c = box->first_child; c; c = c->next_sibling)
-        g_ptr_array_add(items, c);
+        if (!style_is_absolute_or_fixed(c->style))
+            g_ptr_array_add(items, c);
 
     double gap = flex_gap_of(box->style, cw);
 
@@ -8361,7 +8363,8 @@ layout_flex_row_wrap(ns_box *box, double cw,
 {
     GPtrArray *items = g_ptr_array_new();
     for (ns_box *c = box->first_child; c; c = c->next_sibling)
-        g_ptr_array_add(items, c);
+        if (!style_is_absolute_or_fixed(c->style))
+            g_ptr_array_add(items, c);
     double gap = flex_gap_of(box->style, cw);
     double row_gap = flex_gap_row_of(box->style);
     const char *align = keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
@@ -8591,7 +8594,8 @@ layout_flex_column(ns_box *box, double cw,
 {
     GPtrArray *items = g_ptr_array_new();
     for (ns_box *c = box->first_child; c; c = c->next_sibling)
-        g_ptr_array_add(items, c);
+        if (!style_is_absolute_or_fixed(c->style))
+            g_ptr_array_add(items, c);
 
     double row_gap = flex_gap_row_of(box->style);
     const char *align = keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
@@ -10126,10 +10130,12 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         ? keyword_or(box->parent->style, NS_CSS_FLEX_DIRECTION, "row") : "row";
     gboolean flex_row_item = box->parent &&
         style_is_flex_container(box->parent->style) &&
+        !style_is_absolute_or_fixed(box->style) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
          strcmp(parent_flex_dir, "row-reverse") == 0);
     gboolean flex_col_item_stretch = box->parent &&
         style_is_flex_container(box->parent->style) &&
+        !style_is_absolute_or_fixed(box->style) &&
         (strcmp(parent_flex_dir, "column") == 0 ||
          strcmp(parent_flex_dir, "column-reverse") == 0);
     if (flex_col_item_stretch) {
