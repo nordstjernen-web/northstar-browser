@@ -1,0 +1,4 @@
+interface:
+  display_name: "Port Engine Changes"
+  short_description: "Port a change between sibling browser editions"
+  default_prompt: "Use $port-engine-changes to port this change into the current tree and verify it here."

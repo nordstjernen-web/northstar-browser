@@ -28,6 +28,10 @@ Implement the smallest generic behavior required by the specification. Do not ad
 
 Run the original case and the smallest targeted standards-test slice. Compare before and after counts, then run nearby tests that exercise the same primitive. Exercise the behavior through the real browser path, run deterministic smoke cases, and complete the documented build and launch gates.
 
+Aggregate pass and fail totals hide compensating movement: a change can gain subtests in one file while losing them in another and still look flat. Diff the per-test results, not the totals, and account for every file that moved in either direction.
+
+Build the baseline from the published head with your change alone applied. Comparing against a working tree that carries unrelated edits attributes their wins and losses to you; when a suite moves in an area your change cannot influence, rebuild the head plus only your diff before drawing any conclusion.
+
 ## Northstar routing
 
 - Parsing and encoding: `src/html.c`, `src/html_lexbor.c`, `src/xml.c`
@@ -38,4 +42,10 @@ Run the original case and the smallest targeted standards-test slice. Compare be
 - Dedicated APIs: the corresponding `src/*.c` module
 - JavaScript fallbacks: `data/js/polyfills.js`, only when native integration is unnecessary
 
-Use `scripts/wpt-run.sh` or `scripts/wpt-fast.sh` for targeted WPT work, `scripts/dev.sh smoke` for deterministic baselines, and the repository build workflow for final verification. Do not introduce a new test framework or `tests/` directory.
+Use `scripts/wpt-fast.sh` for scored WPT work: it serves the checkout, runs the headless `--wpt` harness in parallel, writes a `wptreport.json`, and prints per-standard scores. Point it at the checkout with `--fast-root=DIR` or `NS_WPT_FAST_ROOT` when it is not at `~/wpt-fast`, and pass paths to limit the run to the subtrees you care about. `scripts/wpt-run.sh` covers a stock WPT checkout.
+
+Do not open WPT tests over `file://`. They load `/resources/testharness.js` from the server root, which does not resolve, and the run reports a harness timeout that looks like an engine hang. Let the script serve the checkout, or serve it yourself before pointing the browser at `http://` URLs.
+
+Only testharness.js tests are scored; reftests and crashtests do not run under the headless harness. A visual difference therefore needs `scripts/render-tests.sh` or a layout dump, not a WPT score.
+
+Use `scripts/dev.sh smoke` for deterministic baselines and the repository build workflow for final verification. Do not introduce a new test framework or `tests/` directory.

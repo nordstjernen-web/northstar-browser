@@ -29,6 +29,14 @@ For a review, report only findings with a concrete attacker path and consequence
 
 For a requested fix, reuse established security helpers and keep equivalent platform paths aligned where capabilities overlap. Compile and exercise the affected path, run deterministic smoke cases, and update the threat-model documentation only when its guarantees change.
 
+## Substantiate the finding
+
+Reading a code path is enough to raise a suspicion, not to report it. Reach the behavior through the real browser: a minimal local page for parser and DOM paths, the headless driver with `--debug=net,error` for fetch, cache, and policy paths. Report what the browser did, and say plainly when a finding is reasoned rather than observed.
+
+The same evidence protects a fix. A security correction that cannot be shown to change the observed behavior has not been verified, and one that changes behavior on paths the report never mentioned needs its blast radius established before it lands.
+
 ## Northstar context
 
 Read `SECURITY.md`. Northstar processes untrusted pages in a single native process, so JavaScript realm separation does not contain native memory corruption. Pay particular attention to `src/security.c`, `src/net.c`, `src/csp.c`, `src/cache.c`, `src/idb.c`, `src/ext.c`, `src/js.c`, image/audio decoders, and platform startup code.
+
+The repository's helper scripts export `NS_ALLOW_ROOT` so headless runs bypass the privileged-startup refusal. That is a convenience for local fixtures, not a statement about the product: never carry it into a claim that the refusal is optional, and never widen it in the engine to make a scenario reproduce.

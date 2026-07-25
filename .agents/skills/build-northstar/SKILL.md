@@ -41,10 +41,36 @@ If configuration is current, run only `meson compile -C builddir`. Use a separat
 - Runtime failure: check shared-library discovery, resources, sandbox policy, environment, and platform GUI requirements.
 - Lock failure: identify the owning process and wait or use a different compatible build directory.
 
+## Match the CI warning level
+
+A local build usually runs at the project's default warning level while CI adds `-Werror`, so a warning that is invisible locally fails the pipeline. Before pushing a change, rebuild once at the CI warning level and restore the option afterwards:
+
+```sh
+meson configure builddir -Dwerror=true
+meson compile -C builddir
+meson configure builddir -Dwerror=false
+```
+
+Judge only diagnostics from the project's own sources. Vendored subprojects raise platform-specific warnings that the pipeline's platform does not, so a vendored `-Werror` failure on one host says nothing about CI on another.
+
+## Separate your failure from someone else's
+
+A shared checkout may be edited by another session while you build. When the build breaks in files your change does not touch, inspect the working tree before assuming your change is at fault, and reproduce in a clean worktree at the published head:
+
+```sh
+git worktree add --detach <tmp> origin/main
+```
+
+An empty or truncated headless run usually means a stale or half-written binary, not a rendering bug. Rebuild before diagnosing it.
+
 ## Verify in layers
 
 Confirm the expected binary exists, run a built-in headless page, run deterministic smoke fixtures, and then launch the GUI for material changes. Terminate only the process started for the smoke check. Treat new warnings, empty headless output, baseline drift, or an early GUI exit as failures.
 
 ## Northstar commands
 
-Use `scripts/dev.sh build`, then run the platform binary with `--headless --dump=text about:start` and run `scripts/dev.sh smoke`. The binary is `builddir/src/gtk/northstar` on Linux/macOS and `builddir/src/gtk/northstar.exe` on Windows. Follow `docs/building.md` and `.github/workflows/{linux,musl,macos,windows}.yml` for dependencies and exact CI variants.
+Use `scripts/dev.sh build`, then run the platform binary with `--headless --dump=text about:start` and run `scripts/dev.sh smoke`, which renders the `data/fixtures/` set and diffs each against its baseline in `data/baseline/`. It is the fastest honest regression gate in the repository; run it before every commit. Refresh baselines with `scripts/dev.sh baseline <target>` only after an intended change.
+
+The binary is `builddir/src/gtk/northstar` on Linux/macOS and `builddir/src/gtk/northstar.exe` on Windows. Follow `docs/building.md` and `.github/workflows/{linux,musl,macos,windows}.yml` for dependencies and exact CI variants.
+
+On Windows, build and run inside MSYS2 MinGW64. A binary launched without that environment's `bin` directory on `PATH` aborts at startup while loading a runtime library rather than reporting a browser error; export the MinGW64 path in any shell that launches the binary, including background and GUI launches. `ccache` is picked up automatically and takes a warm rebuild down to seconds.
