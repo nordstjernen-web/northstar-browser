@@ -7334,7 +7334,8 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
             ns_listener_tombstone(ctx, ex);
             continue;
         }
-        if (ex->target == n && strcmp(ex->type, type) == 0 &&
+        if (!ex->window_level && ex->target == n &&
+            strcmp(ex->type, type) == 0 &&
             !!ex->capture == !!capture &&
             JS_VALUE_GET_TAG(ex->cb) == JS_VALUE_GET_TAG(argv[1]) &&
             JS_VALUE_GET_PTR(ex->cb) == JS_VALUE_GET_PTR(argv[1])) {
@@ -7349,7 +7350,7 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
             ? _js->current_doc
             : ns_node_find_first_element(_js->current_doc, "html");
         ns_node *body = ns_node_find_first_element(_js->current_doc, "body");
-        if (n == html || n == body) passive = TRUE;
+        if (n == _js->current_doc || n == html || n == body) passive = TRUE;
     }
     ns_listener *l = g_new0(ns_listener, 1);
     l->target = n;
@@ -7383,7 +7384,8 @@ ns_element_removeEventListener(JSContext *ctx, JSValueConst this_val,
     for (guint i = 0; i < js->listeners->len; i++) {
         ns_listener *l = g_ptr_array_index(js->listeners, i);
         if (ns_listener_is_tombstoned(l)) continue;
-        if (l->target == n && strcmp(l->type, type) == 0 &&
+        if (!l->window_level && l->target == n &&
+            strcmp(l->type, type) == 0 &&
             !!l->capture == !!capture &&
             JS_VALUE_GET_TAG(l->cb) == JS_VALUE_GET_TAG(argv[1]) &&
             JS_VALUE_GET_PTR(l->cb) == JS_VALUE_GET_PTR(argv[1])) {
@@ -25257,6 +25259,10 @@ ns_js_dispatch_window_only_event(ns_js *js, const char *type, JSValue event,
     ns_js_budget_push(js, &bg);
 
     JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_TRUE);
+    JSValue event_path = JS_NewArray(js->ctx);
+    JS_SetPropertyUint32(js->ctx, event_path, 0,
+                         JS_GetGlobalObject(js->ctx));
+    JS_SetPropertyStr(js->ctx, event, "__nd_path", event_path);
 
     gboolean stopped = ns_event_propagation_is_stopped(js, event);
     if (!stopped)
@@ -25271,6 +25277,7 @@ ns_js_dispatch_window_only_event(ns_js *js, const char *type, JSValue event,
     JS_SetPropertyStr(js->ctx, event, "_propagation_stopped", JS_FALSE);
     JS_SetPropertyStr(js->ctx, event, "_immediate_stopped", JS_FALSE);
     JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_FALSE);
+    JS_SetPropertyStr(js->ctx, event, "__nd_path", JS_UNDEFINED);
 
     if (default_prevented) {
         JSValue dp = JS_GetPropertyStr(js->ctx, event, "defaultPrevented");
@@ -34984,19 +34991,34 @@ ns_node_is_focusable(const ns_node *el)
     return FALSE;
 }
 
+static void
+ns_js_dispatch_focus_event(ns_js *js, const ns_node *target,
+                           const ns_node *related, const char *type,
+                           gboolean bubbles)
+{
+    JSValue event = ns_make_event(js->ctx, type, target);
+    JS_SetPropertyStr(js->ctx, event, "bubbles",
+                      bubbles ? JS_TRUE : JS_FALSE);
+    JS_SetPropertyStr(js->ctx, event, "cancelable", JS_FALSE);
+    JS_SetPropertyStr(js->ctx, event, "composed", JS_TRUE);
+    JS_SetPropertyStr(js->ctx, event, "relatedTarget",
+                      related ? ns_make_element(js->ctx, related) : JS_NULL);
+    ns_js_dispatch_built_event(js, target, type, event, NULL);
+}
+
 void
 ns_js_set_focus(ns_js *js, const ns_node *el)
 {
     if (!js || js->focused_node == el) return;
     const ns_node *old = js->focused_node;
     if (old) {
-        ns_js_dispatch_event(js, old, "blur", NULL);
-        ns_js_dispatch_event(js, old, "focusout", NULL);
+        ns_js_dispatch_focus_event(js, old, el, "blur", FALSE);
+        ns_js_dispatch_focus_event(js, old, el, "focusout", TRUE);
     }
     js->focused_node = el;
     if (el) {
-        ns_js_dispatch_event(js, el, "focus", NULL);
-        ns_js_dispatch_event(js, el, "focusin", NULL);
+        ns_js_dispatch_focus_event(js, el, old, "focus", FALSE);
+        ns_js_dispatch_focus_event(js, el, old, "focusin", TRUE);
     }
     js->mutated = TRUE;
 }
@@ -36613,6 +36635,31 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
 }
 
 
+static void
+ns_mouse_event_retarget_offsets(JSContext *ctx, JSValueConst event,
+                                JSValueConst target)
+{
+    JSValue rect = ns_element_getBoundingClientRect(ctx, target, 0, NULL);
+    JSValue client_x_value = JS_GetPropertyStr(ctx, event, "clientX");
+    JSValue client_y_value = JS_GetPropertyStr(ctx, event, "clientY");
+    JSValue left_value = JS_GetPropertyStr(ctx, rect, "left");
+    JSValue top_value = JS_GetPropertyStr(ctx, rect, "top");
+    double client_x = 0, client_y = 0, left = 0, top = 0;
+    JS_ToFloat64(ctx, &client_x, client_x_value);
+    JS_ToFloat64(ctx, &client_y, client_y_value);
+    JS_ToFloat64(ctx, &left, left_value);
+    JS_ToFloat64(ctx, &top, top_value);
+    JS_SetPropertyStr(ctx, event, "offsetX",
+                      JS_NewFloat64(ctx, client_x - left));
+    JS_SetPropertyStr(ctx, event, "offsetY",
+                      JS_NewFloat64(ctx, client_y - top));
+    JS_FreeValue(ctx, top_value);
+    JS_FreeValue(ctx, left_value);
+    JS_FreeValue(ctx, client_y_value);
+    JS_FreeValue(ctx, client_x_value);
+    JS_FreeValue(ctx, rect);
+}
+
 static JSValue
 ns_element_dispatchEvent(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
@@ -36646,6 +36693,7 @@ ns_element_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     JSValue mouse_v = JS_GetPropertyStr(ctx, ev, "__ndMouseEvent");
     gboolean is_mouse = JS_ToBool(ctx, mouse_v);
     JS_FreeValue(ctx, mouse_v);
+    if (is_mouse) ns_mouse_event_retarget_offsets(ctx, ev, this_val);
     gboolean activates = is_mouse && strcmp(type, "click") == 0 &&
                          !ns_element_effectively_inert(el);
     const ns_node *act = NULL;
