@@ -16,14 +16,43 @@ typedef enum { MQ_NO, MQ_YES, MQ_DUNNO } mq_tri;
 static struct { double w, h; } g_mq_stack[MQ_VIEWPORT_STACK];
 static int g_mq_stack_len;
 
-static double g_mq_device_w = 1920;
-static double g_mq_device_h = 1080;
+static ns_css_media_device g_mq_device = {
+    .width = 1920,
+    .height = 1080,
+    .resolution_dppx = 1,
+    .color_bits = 8,
+    .pointer = NS_CSS_MEDIA_POINTER_FINE,
+    .any_pointer = NS_CSS_MEDIA_POINTER_FINE,
+    .update = NS_CSS_MEDIA_UPDATE_FAST,
+    .hover = TRUE,
+    .any_hover = TRUE,
+};
 
 void
 ns_css_set_device_size(double w, double h)
 {
-    if (w > 0) g_mq_device_w = w;
-    if (h > 0) g_mq_device_h = h;
+    if (w > 0) g_mq_device.width = w;
+    if (h > 0) g_mq_device.height = h;
+}
+
+void
+ns_css_set_media_device(const ns_css_media_device *device)
+{
+    if (!device) return;
+    g_mq_device = *device;
+    if (g_mq_device.width <= 0) g_mq_device.width = 1920;
+    if (g_mq_device.height <= 0) g_mq_device.height = 1080;
+    if (g_mq_device.resolution_dppx <= 0)
+        g_mq_device.resolution_dppx = 1;
+    if (g_mq_device.color_bits < 0) g_mq_device.color_bits = 0;
+    if (g_mq_device.color_index_bits < 0) g_mq_device.color_index_bits = 0;
+    if (g_mq_device.monochrome_bits < 0) g_mq_device.monochrome_bits = 0;
+}
+
+void
+ns_css_get_media_device(ns_css_media_device *device)
+{
+    if (device) *device = g_mq_device;
 }
 
 void
@@ -885,10 +914,17 @@ mq_discrete_current(const mq_feature_def *f)
     const char *n = f->name;
     if (strcmp(n, "orientation") == 0)
         return mq_vw() >= mq_vh() ? "landscape" : "portrait";
-    if (strcmp(n, "hover") == 0 || strcmp(n, "any-hover") == 0) return "hover";
-    if (strcmp(n, "pointer") == 0 || strcmp(n, "any-pointer") == 0)
-        return "fine";
-    if (strcmp(n, "update") == 0) return "fast";
+    if (strcmp(n, "hover") == 0) return g_mq_device.hover ? "hover" : "none";
+    if (strcmp(n, "any-hover") == 0)
+        return g_mq_device.any_hover ? "hover" : "none";
+    if (strcmp(n, "pointer") == 0 || strcmp(n, "any-pointer") == 0) {
+        ns_css_media_pointer pointer = g_mq_device.pointer;
+        return pointer == NS_CSS_MEDIA_POINTER_FINE ? "fine" :
+               pointer == NS_CSS_MEDIA_POINTER_COARSE ? "coarse" : "none";
+    }
+    if (strcmp(n, "update") == 0)
+        return g_mq_device.update == NS_CSS_MEDIA_UPDATE_FAST ? "fast" :
+               g_mq_device.update == NS_CSS_MEDIA_UPDATE_SLOW ? "slow" : "none";
     if (strcmp(n, "overflow-block") == 0) return "scroll";
     if (strcmp(n, "overflow-inline") == 0) return "scroll";
     if (strcmp(n, "scripting") == 0) return "enabled";
@@ -921,22 +957,25 @@ mq_feature_current(const mq_feature_def *f, double *num, double *denom)
     else if (strcmp(n, "height") == 0 || strcmp(n, "block-size") == 0)
         *num = mq_vh();
     else if (strcmp(n, "device-width") == 0)
-        *num = g_mq_device_w;
+        *num = g_mq_device.width;
     else if (strcmp(n, "device-height") == 0)
-        *num = g_mq_device_h;
+        *num = g_mq_device.height;
     else if (strcmp(n, "aspect-ratio") == 0) {
         *num = mq_vw();
         *denom = mq_vh();
     } else if (strcmp(n, "device-aspect-ratio") == 0) {
-        *num = g_mq_device_w;
-        *denom = g_mq_device_h;
+        *num = g_mq_device.width;
+        *denom = g_mq_device.height;
     } else if (strcmp(n, "resolution") == 0)
-        *num = 1.0;
+        *num = g_mq_device.resolution_dppx;
     else if (strcmp(n, "color") == 0)
-        *num = 8;
-    else if (strcmp(n, "monochrome") == 0 || strcmp(n, "color-index") == 0 ||
-             strcmp(n, "grid") == 0)
-        *num = 0;
+        *num = g_mq_device.color_bits;
+    else if (strcmp(n, "color-index") == 0)
+        *num = g_mq_device.color_index_bits;
+    else if (strcmp(n, "monochrome") == 0)
+        *num = g_mq_device.monochrome_bits;
+    else if (strcmp(n, "grid") == 0)
+        *num = g_mq_device.grid ? 1 : 0;
     else
         return FALSE;
     return TRUE;
@@ -962,6 +1001,17 @@ mq_eval_feature(const mq_node *n)
 {
     const mq_feature_def *f = n->feature;
     if (f->type == MQF_DISCRETE) {
+        if (strcmp(f->name, "any-pointer") == 0) {
+            if (n->nops == 0)
+                return g_mq_device.any_pointer ? MQ_YES : MQ_NO;
+            guint wanted = strcmp(n->v1.ident, "fine") == 0
+                ? NS_CSS_MEDIA_POINTER_FINE :
+                strcmp(n->v1.ident, "coarse") == 0
+                    ? NS_CSS_MEDIA_POINTER_COARSE : 0;
+            if (strcmp(n->v1.ident, "none") == 0)
+                return g_mq_device.any_pointer == 0 ? MQ_YES : MQ_NO;
+            return (g_mq_device.any_pointer & wanted) != 0 ? MQ_YES : MQ_NO;
+        }
         const char *cur = mq_discrete_current(f);
         if (n->nops == 0) {
             if (!cur) return MQ_NO;

@@ -1776,6 +1776,18 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     double vh = opts->viewport_height > 0 ? (double)opts->viewport_height
                                           : (double)vw * 0.75;
     ns_css_set_viewport((double)vw, vh);
+    ns_css_media_device media_device = {
+        .width = vw,
+        .height = vh,
+        .resolution_dppx = 1,
+        .color_bits = 8,
+        .pointer = NS_CSS_MEDIA_POINTER_FINE,
+        .any_pointer = NS_CSS_MEDIA_POINTER_FINE,
+        .update = NS_CSS_MEDIA_UPDATE_FAST,
+        .hover = TRUE,
+        .any_hover = TRUE,
+    };
+    ns_css_set_media_device(&media_device);
     const char *frag = opts->url ? strchr(opts->url, '#') : NULL;
     const char *target_frag = frag && *(frag + 1) ? frag + 1 : NULL;
     ns_css_set_target_fragment(target_frag);

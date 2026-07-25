@@ -15,6 +15,7 @@
 #include "bookmarks.h"
 #include "cache.h"
 #include "config.h"
+#include "css.h"
 #include "history.h"
 #include "net.h"
 #include "security.h"
@@ -28,6 +29,64 @@
 
 static int g_initial_win_w;
 static int g_initial_win_h;
+
+static void
+configure_media_inputs(void)
+{
+    GdkDisplay *display = gdk_display_get_default();
+    ns_css_media_device device = {
+        .width = 1920,
+        .height = 1080,
+        .resolution_dppx = 1,
+        .color_bits = 8,
+        .pointer = NS_CSS_MEDIA_POINTER_NONE,
+        .any_pointer = NS_CSS_MEDIA_POINTER_NONE,
+        .update = NS_CSS_MEDIA_UPDATE_FAST,
+    };
+    if (display) {
+        GListModel *monitors = gdk_display_get_monitors(display);
+        GdkMonitor *monitor = monitors && g_list_model_get_n_items(monitors) > 0
+            ? g_list_model_get_item(monitors, 0) : NULL;
+        if (monitor) {
+            GdkRectangle geometry;
+            gdk_monitor_get_geometry(monitor, &geometry);
+            device.width = geometry.width;
+            device.height = geometry.height;
+            device.resolution_dppx = gdk_monitor_get_scale_factor(monitor);
+            g_object_unref(monitor);
+        }
+        GdkSeat *seat = gdk_display_get_default_seat(display);
+        GdkSeatCapabilities caps = seat
+            ? gdk_seat_get_capabilities(seat) : GDK_SEAT_CAPABILITY_NONE;
+        gboolean fine = (caps & (GDK_SEAT_CAPABILITY_POINTER |
+                                 GDK_SEAT_CAPABILITY_TABLET_STYLUS)) != 0;
+        gboolean coarse = (caps & GDK_SEAT_CAPABILITY_TOUCH) != 0;
+        device.hover = fine;
+        device.any_hover = fine;
+        device.pointer = fine ? NS_CSS_MEDIA_POINTER_FINE :
+                         coarse ? NS_CSS_MEDIA_POINTER_COARSE :
+                                  NS_CSS_MEDIA_POINTER_NONE;
+        device.any_pointer =
+            (fine ? NS_CSS_MEDIA_POINTER_FINE : 0) |
+            (coarse ? NS_CSS_MEDIA_POINTER_COARSE : 0);
+    }
+    ns_css_set_media_device(&device);
+
+    GtkSettings *settings = gtk_settings_get_default();
+    if (settings) {
+        gboolean dark = FALSE;
+        gboolean animations = TRUE;
+        g_object_get(settings,
+                     "gtk-application-prefer-dark-theme", &dark,
+                     "gtk-enable-animations", &animations,
+                     NULL);
+        ns_css_set_color_scheme(dark ? NS_CSS_COLOR_SCHEME_DARK
+                                     : NS_CSS_COLOR_SCHEME_LIGHT);
+        ns_css_set_reduced_motion(animations
+            ? NS_CSS_REDUCED_MOTION_NO_PREFERENCE
+            : NS_CSS_REDUCED_MOTION_REDUCE);
+    }
+}
 
 void
 ns_procapp_set_window_size(int width, int height)
@@ -1658,6 +1717,7 @@ static void
 on_proc_activate(GtkApplication *app, gpointer user_data)
 {
     ProcAppCtx *ctx = user_data;
+    configure_media_inputs();
     install_icon_search_paths();
     gtk_window_set_default_icon_name("northstar");
     install_status_css();

@@ -453,8 +453,37 @@ typedef enum ns_css_reduced_motion {
     NS_CSS_REDUCED_MOTION_REDUCE,
 } ns_css_reduced_motion;
 
+typedef enum ns_css_media_pointer {
+    NS_CSS_MEDIA_POINTER_NONE = 0,
+    NS_CSS_MEDIA_POINTER_COARSE = 1 << 0,
+    NS_CSS_MEDIA_POINTER_FINE = 1 << 1,
+} ns_css_media_pointer;
+
+typedef enum ns_css_media_update {
+    NS_CSS_MEDIA_UPDATE_NONE,
+    NS_CSS_MEDIA_UPDATE_SLOW,
+    NS_CSS_MEDIA_UPDATE_FAST,
+} ns_css_media_update;
+
+typedef struct ns_css_media_device {
+    double width;
+    double height;
+    double resolution_dppx;
+    int color_bits;
+    int color_index_bits;
+    int monochrome_bits;
+    gboolean grid;
+    gboolean hover;
+    gboolean any_hover;
+    ns_css_media_pointer pointer;
+    guint any_pointer;
+    ns_css_media_update update;
+} ns_css_media_device;
+
 ns_css_reduced_motion ns_css_get_reduced_motion(void);
 ns_css_color_scheme ns_css_get_color_scheme(void);
+void ns_css_set_reduced_motion(ns_css_reduced_motion motion);
+void ns_css_set_color_scheme(ns_css_color_scheme scheme);
 
 char    *ns_css_media_list_serialize(const char *query);
 void     ns_css_media_viewport_push(double w, double h);
@@ -462,6 +491,8 @@ void     ns_css_media_viewport_pop(void);
 double   ns_css_media_viewport_current_w(void);
 double   ns_css_media_viewport_current_h(void);
 void     ns_css_set_device_size(double w, double h);
+void     ns_css_set_media_device(const ns_css_media_device *device);
+void     ns_css_get_media_device(ns_css_media_device *device);
 
 typedef struct ns_css_value {
     ns_css_value_kind kind;

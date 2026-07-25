@@ -10687,6 +10687,18 @@ ns_css_get_color_scheme(void)
     return g_color_scheme;
 }
 
+void
+ns_css_set_reduced_motion(ns_css_reduced_motion motion)
+{
+    g_reduced_motion = motion;
+}
+
+void
+ns_css_set_color_scheme(ns_css_color_scheme scheme)
+{
+    g_color_scheme = scheme;
+}
+
 static gboolean
 sizes_is_length_fn(const char *p)
 {

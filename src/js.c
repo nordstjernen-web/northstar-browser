@@ -1165,10 +1165,12 @@ ns_nav_screen_metrics(int *width, int *height,
                       int *avail_width, int *avail_height,
                       int *avail_left, int *avail_top)
 {
-    *width = 1920;
-    *height = 1080;
-    *avail_width = 1920;
-    *avail_height = 1040;
+    ns_css_media_device device;
+    ns_css_get_media_device(&device);
+    *width = (int)device.width;
+    *height = (int)device.height;
+    *avail_width = *width;
+    *avail_height = *height;
     *avail_left = 0;
     *avail_top = 0;
 #ifdef G_OS_WIN32
@@ -43857,7 +43859,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "pageYOffset", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, global, "pageXOffset", JS_NewInt32(ctx, 0));
     ns_js_sync_window_metrics(js);
-    JS_SetPropertyStr(ctx, global, "devicePixelRatio", JS_NewFloat64(ctx, 1.0));
+    ns_css_media_device media_device;
+    ns_css_get_media_device(&media_device);
+    JS_SetPropertyStr(ctx, global, "devicePixelRatio",
+                      JS_NewFloat64(ctx, media_device.resolution_dppx));
     static const ns_fn_def window_noops[] = {
         { "close", 0 }, { "blur", 0 },
         { "moveTo", 2 }, { "moveBy", 2 },
@@ -44461,6 +44466,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
                           &screen_avail_width, &screen_avail_height,
                           &screen_avail_left, &screen_avail_top);
     ns_css_set_device_size(screen_width, screen_height);
+    ns_css_get_media_device(&media_device);
     JSValue screen = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, screen, "width",       JS_NewInt32(ctx, screen_width));
     JS_SetPropertyStr(ctx, screen, "height",      JS_NewInt32(ctx, screen_height));
@@ -44468,8 +44474,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, screen, "availHeight", JS_NewInt32(ctx, screen_avail_height));
     JS_SetPropertyStr(ctx, screen, "availLeft",   JS_NewInt32(ctx, screen_avail_left));
     JS_SetPropertyStr(ctx, screen, "availTop",    JS_NewInt32(ctx, screen_avail_top));
-    JS_SetPropertyStr(ctx, screen, "colorDepth",  JS_NewInt32(ctx, 24));
-    JS_SetPropertyStr(ctx, screen, "pixelDepth",  JS_NewInt32(ctx, 24));
+    int pixel_depth = media_device.color_bits > 0
+        ? media_device.color_bits * 3 : media_device.monochrome_bits;
+    JS_SetPropertyStr(ctx, screen, "colorDepth", JS_NewInt32(ctx, pixel_depth));
+    JS_SetPropertyStr(ctx, screen, "pixelDepth", JS_NewInt32(ctx, pixel_depth));
     JSValue orientation = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, orientation, "type",
                       JS_NewString(ctx, "landscape-primary"));
