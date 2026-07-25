@@ -19,6 +19,17 @@ struct ns_html_parser {
     gboolean finished;
 };
 
+struct ns_html_fragment_parser {
+    lxb_html_parser_t *parser;
+    lxb_html_document_t *document;
+    ns_node *output;
+    gboolean failed;
+    gboolean finished;
+    gboolean in_markup;
+    gboolean in_char_ref;
+    char quote;
+};
+
 static void
 lxb_doc_destroy_void(void *p)
 {
@@ -790,6 +801,230 @@ lxb_tag_id_from_name(lxb_html_document_t *doc, const char *name)
         (const lxb_char_t *)name, strlen(name));
     if (!data) return LXB_TAG_BODY;
     return data->tag_id;
+}
+
+static ns_node *
+lxb_fragment_sync_node(lxb_dom_node_t *src, ns_node *parent)
+{
+    ns_node *out = src->user;
+    if (!out) {
+        out = lxb_node_convert(src);
+        if (!out) return NULL;
+        if (ns_node_is_element_named(out, "nd-write-flush")) {
+            ns_node_free(out);
+            return NULL;
+        }
+        ns_node_own_strings_deep(out);
+        src->user = out;
+        ns_node_append_child(parent, out);
+    } else if ((src->type == LXB_DOM_NODE_TYPE_TEXT ||
+                src->type == LXB_DOM_NODE_TYPE_CDATA_SECTION ||
+                src->type == LXB_DOM_NODE_TYPE_COMMENT)) {
+        lxb_dom_character_data_t *cd = lxb_dom_interface_character_data(src);
+        const char *text = cd->data.data ? (const char *)cd->data.data : "";
+        if (g_strcmp0(out->text, text) != 0)
+            ns_node_replace_text_owned(out, g_strdup(text));
+    }
+    ns_node *child_parent = out;
+    lxb_dom_node_t *child = src->first_child;
+    if (src->type == LXB_DOM_NODE_TYPE_ELEMENT &&
+        src->ns == LXB_NS_HTML && src->local_name == LXB_TAG_TEMPLATE) {
+        child = lxb_template_content_first_child(src);
+        child_parent = ns_template_content_get(out);
+    }
+    while (child) {
+        lxb_fragment_sync_node(child, child_parent);
+        child = child->next;
+    }
+    return out;
+}
+
+static void
+lxb_fragment_track_input(ns_html_fragment_parser *stream,
+                         const char *input, gsize len)
+{
+    for (gsize i = 0; i < len; i++) {
+        char c = input[i];
+        if (stream->in_markup) {
+            if (stream->quote) {
+                if (c == stream->quote) stream->quote = 0;
+            } else if (c == '\'' || c == '"') {
+                stream->quote = c;
+            } else if (c == '>') {
+                stream->in_markup = FALSE;
+            }
+            continue;
+        }
+        if (stream->in_char_ref) {
+            if (c == ';') stream->in_char_ref = FALSE;
+            else if (!(g_ascii_isalnum((guchar)c) || c == '#'))
+                stream->in_char_ref = FALSE;
+            continue;
+        }
+        if (c == '<') stream->in_markup = TRUE;
+        else if (c == '&') stream->in_char_ref = TRUE;
+    }
+}
+
+static gboolean
+lxb_fragment_can_flush_text(ns_html_fragment_parser *stream)
+{
+    if (!stream || stream->in_markup || stream->in_char_ref ||
+        !stream->parser || !stream->parser->tree ||
+        !stream->parser->tree->open_elements)
+        return FALSE;
+    lexbor_array_t *open = stream->parser->tree->open_elements;
+    for (size_t i = 0; i < open->length; i++) {
+        lxb_dom_node_t *node = open->list[i];
+        if (!node || node->type != LXB_DOM_NODE_TYPE_ELEMENT) continue;
+        if (node->local_name == LXB_TAG_SCRIPT ||
+            node->local_name == LXB_TAG_STYLE ||
+            node->local_name == LXB_TAG_TITLE ||
+            node->local_name == LXB_TAG_TEXTAREA ||
+            node->local_name == LXB_TAG_PLAINTEXT)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static void
+lxb_fragment_clear_open(lxb_dom_node_t *src)
+{
+    for (lxb_dom_node_t *child = src ? src->first_child : NULL;
+         child; child = child->next) {
+        ns_node *out = child->user;
+        if (out) out->flags &= ~NS_NODE_PARSER_OPEN;
+        lxb_fragment_clear_open(child);
+        lxb_dom_node_t *tpl = lxb_template_content_first_child(child);
+        while (tpl) {
+            lxb_fragment_clear_open(tpl);
+            if (tpl->user)
+                ((ns_node *)tpl->user)->flags &= ~NS_NODE_PARSER_OPEN;
+            tpl = tpl->next;
+        }
+    }
+}
+
+static void
+lxb_fragment_sync(ns_html_fragment_parser *stream, lxb_dom_node_t *root)
+{
+    if (!stream || !root) return;
+    for (lxb_dom_node_t *child = root->first_child;
+         child; child = child->next) {
+        if (!child->user)
+            lxb_fragment_sync_node(child, stream->output);
+        else
+            lxb_fragment_sync_node(child, (ns_node *)child->user);
+    }
+    lxb_fragment_clear_open(root);
+    if (!stream->finished && stream->parser && stream->parser->tree &&
+        stream->parser->tree->open_elements) {
+        lexbor_array_t *open = stream->parser->tree->open_elements;
+        for (size_t i = 0; i < open->length; i++) {
+            lxb_dom_node_t *node = open->list[i];
+            ns_node *out = node ? node->user : NULL;
+            if (out && ns_node_is_element_named(out, "script"))
+                out->flags |= NS_NODE_PARSER_OPEN;
+        }
+    }
+}
+
+ns_html_fragment_parser *
+ns_html_fragment_parser_new(const char *context_tag, gboolean scripting)
+{
+    ns_html_fragment_parser *stream = g_new0(ns_html_fragment_parser, 1);
+    stream->parser = lxb_html_parser_create();
+    stream->document = lxb_html_document_create();
+    stream->output = ns_node_new_document();
+    if (!scripting) stream->output->flags |= NS_NODE_SCRIPTING_DISABLED;
+    if (!stream->parser || !stream->document ||
+        lxb_html_parser_init(stream->parser) != LXB_STATUS_OK) {
+        ns_html_fragment_parser_free(stream);
+        return NULL;
+    }
+    lxb_html_parser_dom_opt_set(stream->parser,
+                               LXB_DOM_DOCUMENT_OPT_WO_EVENTS);
+    lxb_html_parser_scripting_set(stream->parser, scripting);
+    lxb_html_document_scripting_set(stream->document, scripting);
+    lxb_tag_id_t tag_id = lxb_tag_id_from_name(stream->document, context_tag);
+    if (lxb_html_parse_fragment_chunk_begin(stream->parser, stream->document,
+                                            tag_id, LXB_NS_HTML) !=
+        LXB_STATUS_OK) {
+        ns_html_fragment_parser_free(stream);
+        return NULL;
+    }
+    return stream;
+}
+
+gboolean
+ns_html_fragment_parser_write(ns_html_fragment_parser *stream,
+                              const char *input, gsize len)
+{
+    if (!stream || stream->finished || stream->failed || (!input && len))
+        return FALSE;
+    if (len) {
+        lxb_fragment_track_input(stream, input, len);
+        if (lxb_html_parse_fragment_chunk_process(
+                stream->parser, (const lxb_char_t *)input, len) !=
+            LXB_STATUS_OK) {
+            stream->failed = TRUE;
+            return FALSE;
+        }
+        if (lxb_fragment_can_flush_text(stream)) {
+            static const char flush[] =
+                "<nd-write-flush></nd-write-flush>";
+            if (lxb_html_parse_fragment_chunk_process(
+                    stream->parser, (const lxb_char_t *)flush,
+                    sizeof(flush) - 1) != LXB_STATUS_OK) {
+                stream->failed = TRUE;
+                return FALSE;
+            }
+        }
+    }
+    lxb_fragment_sync(stream, stream->parser->root);
+    return TRUE;
+}
+
+gboolean
+ns_html_fragment_parser_finish(ns_html_fragment_parser *stream)
+{
+    if (!stream || stream->finished || stream->failed) return FALSE;
+    lxb_dom_node_t *root =
+        lxb_html_parse_fragment_chunk_end(stream->parser);
+    stream->finished = TRUE;
+    if (!root) {
+        stream->failed = TRUE;
+        return FALSE;
+    }
+    lxb_fragment_sync(stream, root);
+    return TRUE;
+}
+
+gboolean
+ns_html_fragment_parser_needs_source(const ns_html_fragment_parser *stream)
+{
+    if (!stream || stream->finished || stream->failed) return FALSE;
+    if (stream->in_markup || stream->in_char_ref) return TRUE;
+    if (!stream->parser || !stream->parser->tree ||
+        !stream->parser->tree->open_elements)
+        return FALSE;
+    return stream->parser->tree->open_elements->length > 1;
+}
+
+ns_node *
+ns_html_fragment_parser_output(ns_html_fragment_parser *stream)
+{
+    return stream ? stream->output : NULL;
+}
+
+void
+ns_html_fragment_parser_free(ns_html_fragment_parser *stream)
+{
+    if (!stream) return;
+    if (stream->parser) lxb_html_parser_destroy(stream->parser);
+    if (stream->document) lxb_html_document_destroy(stream->document);
+    if (stream->output) ns_node_free(stream->output);
+    g_free(stream);
 }
 
 ns_node *

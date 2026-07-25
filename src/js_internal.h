@@ -169,8 +169,8 @@ struct ns_js {
     int           eval_depth;
     guint         microtask_source;
     gboolean      draining_microtasks;
-    GString      *document_write_buffer;
-    ns_node      *document_write_script;
+    GPtrArray    *document_write_states;
+    ns_node      *parser_write_body;
     gboolean      document_write_parser_open;
     GPtrArray    *deferred_script_roots;
     GPtrArray    *async_script_roots;

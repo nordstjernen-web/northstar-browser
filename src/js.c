@@ -46477,12 +46477,27 @@ ns_document_get_compatMode(JSContext *ctx, JSValueConst this_val)
     return JS_NewString(ctx, "CSS1Compat");
 }
 
+typedef struct ns_document_write_state {
+    ns_node *script;
+    ns_node *parent;
+    ns_node *ref;
+    ns_html_fragment_parser *parser;
+} ns_document_write_state;
+
+static void
+ns_document_write_state_free(gpointer data)
+{
+    ns_document_write_state *state = data;
+    if (!state) return;
+    ns_html_fragment_parser_free(state->parser);
+    g_free(state);
+}
+
 static ns_node *
-ns_document_write_parent(ns_js *js, ns_node **out_ref)
+ns_document_write_parent(ns_js *js, ns_node *script, ns_node **out_ref)
 {
     if (out_ref) *out_ref = NULL;
     if (!js || !js->current_doc) return NULL;
-    ns_node *script = js->document_write_script;
     if (script && script->parent) {
         if (out_ref) *out_ref = script;
         return script->parent;
@@ -46490,6 +46505,51 @@ ns_document_write_parent(ns_js *js, ns_node **out_ref)
     ns_node *body = ns_node_find_first_element(js->current_doc, "body");
     if (body && out_ref) *out_ref = body->last_child;
     return body;
+}
+
+static ns_document_write_state *
+ns_document_write_state_find(ns_js *js, ns_node *script)
+{
+    if (!js || !js->document_write_states) return NULL;
+    for (guint i = js->document_write_states->len; i > 0; i--) {
+        ns_document_write_state *state =
+            g_ptr_array_index(js->document_write_states, i - 1);
+        if (state->script == script) return state;
+    }
+    return NULL;
+}
+
+static ns_document_write_state *
+ns_document_write_state_new(ns_js *js, ns_node *script)
+{
+    ns_node *ref = NULL;
+    ns_node *parent = ns_document_write_parent(js, script, &ref);
+    if (!parent) return NULL;
+    if (script && ns_node_is_element_named(parent, "head") &&
+        js->parser_write_body) {
+        if (!js->parser_write_body->parent)
+            ns_insert_sibling_after(parent, js->parser_write_body);
+        parent = js->parser_write_body;
+        ref = parent->last_child;
+    }
+    const char *context = parent->kind == NS_NODE_ELEMENT
+        ? parent->name : NULL;
+    const ns_node *root = ns_node_root(parent);
+    gboolean scripting = !root ||
+        !(root->flags & NS_NODE_SCRIPTING_DISABLED);
+    ns_html_fragment_parser *parser =
+        ns_html_fragment_parser_new(context, scripting);
+    if (!parser) return NULL;
+    ns_document_write_state *state = g_new0(ns_document_write_state, 1);
+    state->script = script;
+    state->parent = parent;
+    state->ref = ref;
+    state->parser = parser;
+    if (!js->document_write_states)
+        js->document_write_states =
+            g_ptr_array_new_with_free_func(ns_document_write_state_free);
+    g_ptr_array_add(js->document_write_states, state);
+    return state;
 }
 
 static void
@@ -46531,31 +46591,11 @@ ns_document_expose_legacy_named(ns_js *js, const ns_node *root,
 }
 
 static void
-ns_js_flush_document_write(ns_js *js)
+ns_document_write_insert_output(ns_js *js, ns_document_write_state *state)
 {
-    if (!js || !js->document_write_buffer) return;
-    if (js->document_write_buffer->len == 0) {
-        js->document_write_script = NULL;
-        return;
-    }
-    ns_node *ref = NULL;
-    ns_node *parent = ns_document_write_parent(js, &ref);
-    char *html = g_strdup(js->document_write_buffer->str);
-    g_string_truncate(js->document_write_buffer, 0);
-    js->document_write_script = NULL;
-    if (!parent) {
-        g_free(html);
-        return;
-    }
-    const char *ctx_tag = parent->kind == NS_NODE_ELEMENT ? parent->name : NULL;
-    const ns_node *root = ns_node_root(parent);
-    gboolean scripting = !root ||
-        !(root->flags & NS_NODE_SCRIPTING_DISABLED);
-    ns_node *fragment = ns_html_parse_fragment_with_scripting(
-        ctx_tag, html, -1, scripting);
-    g_free(html);
+    if (!js || !state || !state->parent) return;
+    ns_node *fragment = ns_html_fragment_parser_output(state->parser);
     if (!fragment) return;
-    ns_mark_scripts_already_started(fragment);
     GPtrArray *inserted = g_ptr_array_new();
     js->throw_on_dynamic_markup++;
     ns_node *c = fragment->first_child;
@@ -46563,18 +46603,17 @@ ns_js_flush_document_write(ns_js *js)
         ns_node *next = c->next_sibling;
         ns_node_own_strings_deep(c);
         ns_node_remove(c);
-        if (ref && ref->parent == parent) {
-            ns_insert_sibling_after(ref, c);
+        if (state->ref && state->ref->parent == state->parent) {
+            ns_insert_sibling_after(state->ref, c);
         } else {
-            ns_node_append_child(parent, c);
+            ns_node_append_child(state->parent, c);
         }
-        ns_js_record_child_change(js, parent, c, NULL,
+        ns_js_record_child_change(js, state->parent, c, NULL,
                                   c->prev_sibling, c->next_sibling);
-        ref = c;
+        state->ref = c;
         g_ptr_array_add(inserted, c);
         c = next;
     }
-    ns_node_free(fragment);
     if (inserted->len > 0) {
         JSValue global = JS_GetGlobalObject(js->ctx);
         JSValue document = JS_GetPropertyStr(js->ctx, global, "document");
@@ -46584,13 +46623,49 @@ ns_js_flush_document_write(ns_js *js)
         JS_FreeValue(js->ctx, document);
         JS_FreeValue(js->ctx, global);
         js->mutated = TRUE;
-        ns_ce_upgrade_subtree_all(js, parent);
+        ns_ce_upgrade_subtree_all(js, state->parent);
         js->throw_on_dynamic_markup--;
-        ns_js_run_inserted_scripts(js, parent);
+        ns_js_run_inserted_scripts(js, state->parent);
     } else {
         js->throw_on_dynamic_markup--;
     }
     g_ptr_array_free(inserted, TRUE);
+}
+
+static gboolean
+ns_document_write_process(ns_js *js, ns_document_write_state *state,
+                          const char *input, gsize len, gboolean finish)
+{
+    if (!js || !state) return FALSE;
+    gboolean ok = finish
+        ? ns_html_fragment_parser_finish(state->parser)
+        : ns_html_fragment_parser_write(state->parser, input, len);
+    if (ok) ns_document_write_insert_output(js, state);
+    return ok;
+}
+
+static void
+ns_document_write_finish_state(ns_js *js, ns_document_write_state *state)
+{
+    if (!js || !state || !js->document_write_states) return;
+    ns_document_write_process(js, state, NULL, 0, TRUE);
+    for (guint i = 0; i < js->document_write_states->len; i++) {
+        if (g_ptr_array_index(js->document_write_states, i) == state) {
+            g_ptr_array_remove_index(js->document_write_states, i);
+            return;
+        }
+    }
+}
+
+static void
+ns_js_flush_document_write(ns_js *js)
+{
+    if (!js) return;
+    ns_document_write_state *state =
+        ns_document_write_state_find(js, js->current_script);
+    if (state &&
+        !ns_html_fragment_parser_needs_source(state->parser))
+        ns_document_write_finish_state(js, state);
 }
 
 static void
@@ -46607,9 +46682,8 @@ ns_document_open_impl(ns_js *js)
     ns_doc_tag_index_build(js->current_doc);
     ns_doc_id_index_build(js->current_doc);
     ns_doc_class_index_build(js->current_doc);
-    if (js->document_write_buffer)
-        g_string_truncate(js->document_write_buffer, 0);
-    js->document_write_script = NULL;
+    if (js->document_write_states)
+        g_ptr_array_set_size(js->document_write_states, 0);
     js->document_write_parser_open = TRUE;
     js->mutated = TRUE;
     ns_node_arm_js_invalidate(js->current_doc);
@@ -46643,7 +46717,13 @@ ns_document_close(JSContext *ctx, JSValueConst this_val,
                                       "document.close during parser-created "
                                       "element construction");
     if (js) {
-        ns_js_flush_document_write(js);
+        while (js->document_write_states &&
+               js->document_write_states->len > 0) {
+            ns_document_write_state *state =
+                g_ptr_array_index(js->document_write_states,
+                                  js->document_write_states->len - 1);
+            ns_document_write_finish_state(js, state);
+        }
         js->document_write_parser_open = FALSE;
     }
     return JS_UNDEFINED;
@@ -46664,21 +46744,20 @@ ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
     if (!js->current_script && js->ready_state >= 2 &&
         !js->document_write_parser_open)
         ns_document_open_impl(js);
-    if (js->document_write_buffer &&
-        js->document_write_script != js->current_script)
-        ns_js_flush_document_write(js);
-    if (!js->document_write_buffer)
-        js->document_write_buffer = g_string_new(NULL);
-    js->document_write_script = js->current_script;
+    ns_document_write_state *state =
+        ns_document_write_state_find(js, js->current_script);
+    if (!state)
+        state = ns_document_write_state_new(js, js->current_script);
+    if (!state) return JS_UNDEFINED;
     for (int i = 0; i < argc; i++) {
         const char *s = JS_ToCString(ctx, argv[i]);
         if (!s) continue;
-        g_string_append(js->document_write_buffer, s);
+        ns_document_write_process(js, state, s, strlen(s), FALSE);
         JS_FreeCString(ctx, s);
     }
-    if (newline) g_string_append_c(js->document_write_buffer, '\n');
-    if (!js->current_script)
-        ns_js_flush_document_write(js);
+    if (newline) ns_document_write_process(js, state, "\n", 1, FALSE);
+    if (!js->current_script && !js->document_write_parser_open)
+        ns_document_write_finish_state(js, state);
     return JS_UNDEFINED;
 }
 
@@ -47908,9 +47987,9 @@ ns_js_free(ns_js *js)
     g_free(js->referrer);
     g_free(js->current_url);
     g_free(js->selection_text);
-    if (js->document_write_buffer) {
-        g_string_free(js->document_write_buffer, TRUE);
-        js->document_write_buffer = NULL;
+    if (js->document_write_states) {
+        g_ptr_array_free(js->document_write_states, TRUE);
+        js->document_write_states = NULL;
     }
     if (js->workers) {
         for (guint i = 0; i < js->workers->len; i++) {
@@ -49139,6 +49218,7 @@ ns_js_collect_script_tasks_rec(ns_node *n, GArray *tasks, int depth)
 {
     if (!n || depth >= 512) return;
     if (ns_node_is_element_named(n, "script")) {
+        if (n->flags & NS_NODE_PARSER_OPEN) return;
         if (ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED)) return;
         if (!ns_script_type_supported(n) || ns_script_skipped_by_nomodule(n)) {
             ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
@@ -49184,6 +49264,7 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
                     ns_node *prev = js->current_script;
                     js->current_script = n;
                     ns_js_eval(js, body, blen, "data:");
+                    ns_js_flush_document_write(js);
                     js->current_script = prev;
                 }
                 g_free(body);
@@ -49204,6 +49285,7 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
                     ns_node *prev = js->current_script;
                     js->current_script = n;
                     ns_js_eval(js, data, blen, src);
+                    ns_js_flush_document_write(js);
                     js->current_script = prev;
                 }
                 ns_js_dispatch_resource_event(js, n, "load");
@@ -49283,6 +49365,7 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
                 js->current_script = n;
                 ns_js_eval(js, (const char *)resp->body->data,
                            resp->body->len, abs_url);
+                ns_js_flush_document_write(js);
                 js->current_script = prev;
                 loaded = TRUE;
             } else {
@@ -49320,6 +49403,7 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             ns_node *prev = js->current_script;
             js->current_script = n;
             ns_js_eval(js, c->text, tlen, origin);
+            ns_js_flush_document_write(js);
             js->current_script = prev;
         }
     }
@@ -49335,9 +49419,10 @@ ns_parser_tail_free(gpointer data)
 }
 
 static GPtrArray *
-ns_js_parser_pause_after(ns_node *script)
+ns_js_parser_pause_after(ns_js *js, ns_node *script)
 {
     GPtrArray *tails = g_ptr_array_new_with_free_func(ns_parser_tail_free);
+    if (js) js->parser_write_body = NULL;
     for (ns_node *cursor = script; cursor && cursor->parent;
          cursor = cursor->parent) {
         if (!cursor->next_sibling) continue;
@@ -49347,6 +49432,20 @@ ns_js_parser_pause_after(ns_node *script)
         ns_node *next = cursor->next_sibling;
         while (next) {
             ns_node *following = next->next_sibling;
+            if (js && ns_node_is_element_named(next, "body")) {
+                ns_parser_tail *body_tail = g_new0(ns_parser_tail, 1);
+                body_tail->parent = next;
+                body_tail->nodes = g_ptr_array_new();
+                ns_node *body_child = next->first_child;
+                while (body_child) {
+                    ns_node *body_following = body_child->next_sibling;
+                    ns_node_remove(body_child);
+                    g_ptr_array_add(body_tail->nodes, body_child);
+                    body_child = body_following;
+                }
+                g_ptr_array_add(tails, body_tail);
+                js->parser_write_body = next;
+            }
             ns_node_remove(next);
             g_ptr_array_add(tail->nodes, next);
             next = following;
@@ -49357,9 +49456,56 @@ ns_js_parser_pause_after(ns_node *script)
 }
 
 static void
-ns_js_parser_resume(GPtrArray *tails)
+ns_document_write_consume_parser_tail(ns_js *js, ns_node *script,
+                                      GPtrArray *tails)
 {
-    if (!tails) return;
+    ns_document_write_state *state =
+        ns_document_write_state_find(js, script);
+    if (!state || !tails) return;
+    for (guint i = 0; i < tails->len; i++) {
+        ns_parser_tail *tail = g_ptr_array_index(tails, i);
+        if (tail->parent != state->parent) continue;
+        while (tail->nodes->len > 0) {
+            ns_node *node = g_ptr_array_index(tail->nodes, 0);
+            char *source = NULL;
+            if (node->kind == NS_NODE_TEXT) {
+                source = g_strdup(node->text ? node->text : "");
+                if (tail->nodes->len > 1 &&
+                    ns_node_is_element_named(
+                        g_ptr_array_index(tail->nodes, 1), "script")) {
+                    gsize source_len = strlen(source);
+                    while (source_len > 0 &&
+                           (source[source_len - 1] == '\r' ||
+                            source[source_len - 1] == '\n'))
+                        source[--source_len] = '\0';
+                }
+            } else if (node->kind == NS_NODE_COMMENT) {
+                source = g_strdup_printf("<!--%s-->",
+                                         node->text ? node->text : "");
+            } else {
+                break;
+            }
+            g_ptr_array_remove_index(tail->nodes, 0);
+            ns_document_write_process(js, state, source, strlen(source),
+                                      FALSE);
+            g_free(source);
+            ns_node_free(node);
+        }
+        break;
+    }
+    ns_document_write_finish_state(js, state);
+}
+
+static void
+ns_js_parser_resume(ns_js *js, ns_node *script, GPtrArray *tails)
+{
+    if (!tails) {
+        ns_document_write_state *state =
+            ns_document_write_state_find(js, script);
+        if (state) ns_document_write_finish_state(js, state);
+        return;
+    }
+    ns_document_write_consume_parser_tail(js, script, tails);
     for (guint i = 0; i < tails->len; i++) {
         ns_parser_tail *tail = g_ptr_array_index(tails, i);
         for (guint j = 0; j < tail->nodes->len; j++)
@@ -49367,6 +49513,7 @@ ns_js_parser_resume(GPtrArray *tails)
                                  g_ptr_array_index(tail->nodes, j));
     }
     g_ptr_array_free(tails, TRUE);
+    if (js) js->parser_write_body = NULL;
 }
 
 static void
@@ -49380,9 +49527,9 @@ ns_js_run_script_schedule(ns_js *js, GArray *tasks, ns_script_schedule schedule,
         GPtrArray *parser_tails = NULL;
         if (schedule == NS_SCRIPT_BLOCKING &&
             !(task->node->flags & NS_NODE_NOT_PARSER_INSERTED))
-            parser_tails = ns_js_parser_pause_after(task->node);
+            parser_tails = ns_js_parser_pause_after(js, task->node);
         ns_js_run_script_element(js, task->node, origin);
-        ns_js_parser_resume(parser_tails);
+        ns_js_parser_resume(js, task->node, parser_tails);
     }
     ns_ce_upgrade_subtree_all(js, js->current_doc);
 }
@@ -49616,12 +49763,20 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     gboolean have_external = FALSE;
     for (guint i = 0; i < tasks->len; i++) {
         ns_script_task *t = &g_array_index(tasks, ns_script_task, i);
-        if (t->schedule == NS_SCRIPT_BLOCKING &&
+        gboolean parser_inserted =
+            !(t->node->flags & NS_NODE_NOT_PARSER_INSERTED);
+        gboolean inline_classic =
             !ns_element_get_attr(t->node, "src") &&
-            !ns_script_type_is_module(t->node))
+            !ns_script_type_is_module(t->node);
+        if (t->schedule == NS_SCRIPT_BLOCKING &&
+            (parser_inserted || inline_classic)) {
+            GPtrArray *parser_tails = parser_inserted
+                ? ns_js_parser_pause_after(js, t->node) : NULL;
             ns_js_run_script_element(js, t->node, origin);
-        else
+            ns_js_parser_resume(js, t->node, parser_tails);
+        } else {
             have_external = TRUE;
+        }
     }
     ns_ce_upgrade_subtree_all(js, js->current_doc);
     if (js->eval_depth > 0 && (have_external || sheets->len > 0)) {
