@@ -7750,22 +7750,23 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
                 (const uint8_t *)body_data, body_data_len));
         JSValue header_init = JS_NewObject(st->ctx);
         if (allow) {
-            const struct { const char *name; const char *value; } known[] = {
-                { "content-type",                resp->content_type        },
-                { "content-disposition",         resp->content_disposition },
-                { "content-security-policy",     resp->csp_header          },
-                { "x-frame-options",             resp->xframe_options      },
-                { "access-control-allow-origin", resp->cors_allow_origin   },
-            };
-            for (gsize i = 0; i < G_N_ELEMENTS(known); i++) {
-                if (known[i].value && *known[i].value)
-                    JS_SetPropertyStr(st->ctx, header_init, known[i].name,
-                                      JS_NewString(st->ctx, known[i].value));
-            }
             gboolean same_origin = ns_url_same_origin(
                 st->js ? st->js->current_url : NULL, resp->final_url);
-            if (same_origin && resp->raw_headers)
+            if (same_origin && resp->raw_headers) {
                 ns_headers_init_add_raw(st->ctx, header_init, resp->raw_headers);
+            } else {
+                const struct { const char *name; const char *value; } known[] = {
+                    { "content-type",                resp->content_type        },
+                    { "content-disposition",         resp->content_disposition },
+                    { "content-security-policy",     resp->csp_header          },
+                    { "x-frame-options",             resp->xframe_options      },
+                    { "access-control-allow-origin", resp->cors_allow_origin   },
+                };
+                for (gsize i = 0; i < G_N_ELEMENTS(known); i++)
+                    if (known[i].value && *known[i].value)
+                        JS_SetPropertyStr(st->ctx, header_init, known[i].name,
+                                          JS_NewString(st->ctx, known[i].value));
+            }
         }
         JSValue global = JS_GetGlobalObject(st->ctx);
         JSValue hdr_ctor = JS_GetPropertyStr(st->ctx, global, "Headers");
@@ -16106,9 +16107,7 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
         if (!allow) {
             hdrs = g_strdup("");
         } else if (same_origin && resp->raw_headers) {
-            char *known = ns_xhr_serialize_headers(resp);
-            hdrs = g_strconcat(known, resp->raw_headers, NULL);
-            g_free(known);
+            hdrs = g_strdup(resp->raw_headers);
         } else {
             hdrs = ns_xhr_serialize_headers(resp);
         }
