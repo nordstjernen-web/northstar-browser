@@ -93,13 +93,13 @@ jobs:
           pkg-config --modversion gtk4
           pkg-config --modversion libcurl
 
-      - name: Build
+      - name: Build (no LTO)
         id: build
         if: hashFiles('meson.build') != ''
         run: |
           set -o pipefail
           export CC="ccache clang"
-          meson setup builddir --werror
+          meson setup builddir --werror -Db_lto=false
           meson compile -C builddir 2>&1 | tee build.log
 
       - name: ccache stats
