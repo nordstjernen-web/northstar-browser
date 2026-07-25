@@ -3466,6 +3466,7 @@ enum {
 };
 
 static int ns_live_collection_kind(JSValueConst val);
+static gboolean ns_value_is_attr_node(JSContext *ctx, JSValueConst v);
 
 typedef struct { const char *ctor; const char *tags; int special; } ns_instof_def;
 
@@ -3616,7 +3617,7 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
     const ns_node *n = ns_unwrap_element(argv[0]);
     if (!n) {
         if (d->special == NS_INSTOF_NODE)
-            return ns_ctor_ordinary_has_instance(ctx, this_val, argv[0]);
+            return JS_NewBool(ctx, ns_value_is_attr_node(ctx, argv[0]));
         return JS_FALSE;
     }
     switch (d->special) {
@@ -25088,9 +25089,9 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
         }
     }
     if (!capture_phase) {
-        if (ns_fire_inline_on_handler(js, cur, type, event))
-            *fired = TRUE;
         if (ns_fire_property_on_handler(js, cur, type, event))
+            *fired = TRUE;
+        else if (ns_fire_inline_on_handler(js, cur, type, event))
             *fired = TRUE;
         if (cur->kind == NS_NODE_DOCUMENT &&
             ns_fire_window_level_handlers(js, cur, type, event, at_target))
@@ -26396,8 +26397,12 @@ ns_value_is_attr_node(JSContext *ctx, JSValueConst v)
     if (!JS_IsObject(v)) return FALSE;
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue ctor = JS_GetPropertyStr(ctx, global, "Attr");
-    gboolean is_attr = JS_IsObject(ctor) &&
-                       JS_IsInstanceOf(ctx, v, ctor) > 0;
+    gboolean is_attr = FALSE;
+    if (JS_IsObject(ctor)) {
+        JSValue r = ns_ctor_ordinary_has_instance(ctx, ctor, v);
+        is_attr = JS_ToBool(ctx, r) == 1;
+        JS_FreeValue(ctx, r);
+    }
     JS_FreeValue(ctx, ctor);
     JS_FreeValue(ctx, global);
     return is_attr;
@@ -42308,16 +42313,26 @@ ns_element_on_get(JSContext *ctx, JSValueConst this_val,
     if (magic < 0 || magic >= (int)G_N_ELEMENTS(ns_event_handler_names))
         return JS_NULL;
     const char *name = ns_event_handler_names[magic];
-    char key[48];
+    char key[48], src_key[52];
     g_snprintf(key, sizeof key, "\xff%s", name);
-    JSValue v = JS_GetPropertyStr(ctx, this_val, key);
-    if (JS_IsFunction(ctx, v)) return v;
-    gboolean cleared = JS_IsNull(v);
-    JS_FreeValue(ctx, v);
-    if (cleared) return JS_NULL;
+    g_snprintf(src_key, sizeof src_key, "\xffsrc:%s", name);
     const ns_node *el = ns_unwrap_element(this_val);
     const char *body = el ? ns_element_get_attr(el, name) : NULL;
-    if (!body) return JS_NULL;
+    JSValue v = JS_GetPropertyStr(ctx, this_val, key);
+    if (JS_IsFunction(ctx, v)) {
+        JSValue compiled_from = JS_GetPropertyStr(ctx, this_val, src_key);
+        gboolean stale = FALSE;
+        if (JS_IsString(compiled_from)) {
+            const char *was = JS_ToCString(ctx, compiled_from);
+            stale = !body || !was || strcmp(was, body) != 0;
+            if (was) JS_FreeCString(ctx, was);
+        }
+        JS_FreeValue(ctx, compiled_from);
+        if (!stale) return v;
+    }
+    gboolean cleared = JS_IsNull(v);
+    JS_FreeValue(ctx, v);
+    if (cleared || !body) return JS_NULL;
     ns_js *js = js_from_ctx(ctx);
     if (js && !ns_csp_inline_event_handler_allowed(js->csp)) return JS_NULL;
     JSValue fn = ns_compile_inline_handler(ctx, body);
@@ -42326,6 +42341,7 @@ ns_element_on_get(JSContext *ctx, JSValueConst this_val,
         return JS_NULL;
     }
     JS_SetPropertyStr(ctx, this_val, key, JS_DupValue(ctx, fn));
+    JS_SetPropertyStr(ctx, this_val, src_key, JS_NewString(ctx, body));
     return fn;
 }
 
@@ -42336,11 +42352,14 @@ ns_element_on_set(JSContext *ctx, JSValueConst this_val,
     if (magic < 0 || magic >= (int)G_N_ELEMENTS(ns_event_handler_names))
         return JS_UNDEFINED;
     JSValueConst val = argc >= 1 ? argv[0] : JS_UNDEFINED;
-    char key[48];
+    char key[48], src_key[52];
     g_snprintf(key, sizeof key, "\xff%s", ns_event_handler_names[magic]);
+    g_snprintf(src_key, sizeof src_key, "\xffsrc:%s",
+               ns_event_handler_names[magic]);
     JS_SetPropertyStr(ctx, this_val, key,
                       JS_IsFunction(ctx, val) ? JS_DupValue(ctx, val)
                                               : JS_NULL);
+    JS_SetPropertyStr(ctx, this_val, src_key, JS_UNDEFINED);
     return JS_UNDEFINED;
 }
 
@@ -42952,7 +42971,7 @@ ns_proto_delete_names(JSContext *ctx, JSValueConst proto,
 
 static const char *const ns_element_only_methods[] = {
     "matches", "closest", "webkitMatchesSelector",
-    "hasAttributes", "attributes", "namespaceURI", "prefix", "localName",
+    "hasAttributes", "namespaceURI", "prefix", "localName",
 };
 
 static void
@@ -43079,7 +43098,6 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
                                ns_element_noop_set);
     if (JS_IsObject(doctype_proto)) JS_SetPrototype(ctx, doctype_proto, node_proto);
     if (JS_IsObject(docfrag_proto)) JS_SetPrototype(ctx, docfrag_proto, node_proto);
-    ns_chain_proto(ctx, global, "Attr", node_proto);
     JSValue shadow_proto = ns_proto_of(ctx, global, "ShadowRoot");
     if (JS_IsObject(shadow_proto) && JS_IsObject(docfrag_proto))
         JS_SetPrototype(ctx, shadow_proto, docfrag_proto);
