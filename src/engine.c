@@ -34,6 +34,23 @@ ns_engine_in_blocking_fetch(void)
 static guint64 g_engine_relayout_count;
 static gint64  g_engine_relayout_us;
 
+static char *
+engine_document_base_url(ns_node *doc, const char *fallback)
+{
+    GPtrArray *bases = doc ? ns_doc_tag_index_lookup(doc, "base") : NULL;
+    for (guint i = 0; bases && i < bases->len; i++) {
+        const ns_node *base = g_ptr_array_index(bases, i);
+        const char *href = ns_element_get_attr(base, "href");
+        if (!href || !*href) continue;
+        if (fallback && *fallback) {
+            char *resolved = ns_url_resolve(fallback, href);
+            if (resolved) return resolved;
+        }
+        return g_strdup(href);
+    }
+    return fallback && *fallback ? g_strdup(fallback) : NULL;
+}
+
 static void
 ns_engine_perf_add_relayout(gint64 elapsed_us)
 {
@@ -431,13 +448,14 @@ void
 ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
                               GPtrArray *out, GHashTable *css_cache)
 {
+    g_autofree char *document_base = engine_document_base_url(doc, base_url);
     sheet_collect_ctx cc = {
         .out = out, .cache = css_cache,
         .run = g_string_new(NULL), .run_base = NULL,
         .top_url = base_url,
         .strict_css_mime = doc && !(doc->flags & NS_NODE_QUIRKS),
     };
-    collect_stylesheets_walk(doc, base_url, &cc, 0);
+    collect_stylesheets_walk(doc, document_base, &cc, 0);
     sheet_run_flush(&cc);
     g_string_free(cc.run, TRUE);
 }
@@ -446,8 +464,9 @@ GHashTable *
 ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                           GHashTable *css_cache)
 {
+    g_autofree char *document_base = engine_document_base_url(doc, base_url);
     ns_css_relayout_enter();
-    ns_css_set_doc_base(base_url);
+    ns_css_set_doc_base(document_base);
     ns_css_style_element_cache_begin();
     GPtrArray *page_sheets = g_ptr_array_new();
     ns_engine_collect_stylesheets(doc, base_url, page_sheets, css_cache);
@@ -470,8 +489,9 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
                    gsize caret_byte,
                    gsize sel_anchor_byte, ns_box **out_layout)
 {
+    g_autofree char *document_base = engine_document_base_url(doc, base_url);
     ns_css_relayout_enter();
-    ns_css_set_doc_base(base_url);
+    ns_css_set_doc_base(document_base);
     ns_css_style_element_cache_begin();
     GPtrArray *sheets = g_ptr_array_new();
     ns_engine_collect_stylesheets(doc, base_url, sheets, css_cache);

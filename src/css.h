@@ -723,6 +723,9 @@ void       ns_css_clear_defined_elements(void);
 char *ns_inline_style_get(const char *style_text, const char *prop_name);
 char *ns_inline_style_set(const char *style_text, const char *prop_name, const char *value);
 char *ns_inline_style_serialize(const char *style_text);
+char *ns_inline_style_resolve_urls(const char *style_text, const char *base_url);
+guint ns_inline_style_length(const char *style_text);
+char *ns_inline_style_item(const char *style_text, guint index);
 gboolean ns_inline_value_strip_important(char *value);
 
 typedef struct ns_css_decl {

@@ -1437,6 +1437,9 @@ static ns_node *ns_unwrap_element_mut(JSValueConst val);
 
 typedef struct {
     JSValue element;
+    char *css_text;
+    char *base_url;
+    guint32 attr_gen;
 } ns_style_back;
 
 static void
@@ -1445,6 +1448,8 @@ ns_style_finalizer(JSRuntime *rt, JSValue val)
     ns_style_back *b = JS_GetOpaque(val, ns_style_class_id);
     if (!b) return;
     JS_FreeValueRT(rt, b->element);
+    g_free(b->css_text);
+    g_free(b->base_url);
     g_free(b);
 }
 
@@ -1455,11 +1460,49 @@ ns_style_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
     if (b) JS_MarkValue(rt, b->element, mark_func);
 }
 
-static ns_node *
-ns_style_node(JSValueConst this_val)
+static ns_style_back *
+ns_style_sync(JSContext *ctx, JSValueConst style, ns_node **out_node)
 {
-    ns_style_back *b = JS_GetOpaque(this_val, ns_style_class_id);
-    return b ? ns_unwrap_element_mut(b->element) : NULL;
+    ns_style_back *back = JS_GetOpaque(style, ns_style_class_id);
+    ns_node *node = back ? ns_unwrap_element_mut(back->element) : NULL;
+    if (out_node) *out_node = node;
+    if (!back || !node) return NULL;
+    if (!back->css_text || back->attr_gen != node->attr_gen) {
+        g_free(back->css_text);
+        back->css_text = ns_inline_style_serialize(
+            ns_element_get_attr(node, "style"));
+        g_free(back->base_url);
+        back->base_url = ns_js_doc_base_url(js_from_ctx(ctx));
+        back->attr_gen = node->attr_gen;
+    }
+    return back;
+}
+
+static void
+ns_style_store(JSContext *ctx, JSValueConst style, const char *css_text,
+               gboolean force)
+{
+    ns_node *node = NULL;
+    ns_style_back *back = ns_style_sync(ctx, style, &node);
+    if (!back || !node) return;
+    char *serialized = ns_inline_style_serialize(css_text ? css_text : "");
+    if (!force && g_strcmp0(back->css_text, serialized) == 0) {
+        g_free(serialized);
+        return;
+    }
+    ns_js_set_attr_recorded(js_from_ctx(ctx), node, "style", serialized);
+    g_free(back->css_text);
+    back->css_text = serialized;
+    g_free(back->base_url);
+    back->base_url = ns_js_doc_base_url(js_from_ctx(ctx));
+    back->attr_gen = node->attr_gen;
+}
+
+static char *
+ns_style_mutation_text(const ns_style_back *back)
+{
+    return ns_inline_style_resolve_urls(back ? back->css_text : NULL,
+                                        back ? back->base_url : NULL);
 }
 
 static char *
@@ -1498,8 +1541,9 @@ static int
 ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
                           JSValueConst obj, JSAtom prop)
 {
-    ns_node *n = ns_style_node(obj);
-    if (!n) return 0;
+    ns_node *n = NULL;
+    ns_style_back *back = ns_style_sync(ctx, obj, &n);
+    if (!back || !n) return 0;
     {
         JSValue key = JS_AtomToValue(ctx, prop);
         gboolean is_sym = JS_IsSymbol(key);
@@ -1516,28 +1560,8 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
         char *end = NULL;
         long idx = strtol(name, &end, 10);
         if (end && *end == '\0' && idx >= 0) {
-            char *style = ns_inline_style_serialize(
-                ns_element_get_attr(n, "style"));
-            char *prop_name = NULL;
-            gsize cur = 0;
-            const char *p = style;
-            while (p && *p) {
-                while (*p == ' ' || *p == ';') p++;
-                const char *colon = strchr(p, ':');
-                if (!colon) break;
-                if ((long)cur == idx) {
-                    prop_name = g_strndup(p, (gsize)(colon - p));
-                    while (*prop_name && (prop_name[strlen(prop_name)-1] == ' '))
-                        prop_name[strlen(prop_name)-1] = '\0';
-                    break;
-                }
-                const char *end_p = strchr(colon, ';');
-                if (!end_p) end_p = colon + strlen(colon);
-                p = end_p;
-                cur++;
-            }
+            char *prop_name = ns_inline_style_item(back->css_text, (guint)idx);
             JS_FreeCString(ctx, name);
-            g_free(style);
             if (prop_name) {
                 if (desc) {
                     desc->flags = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
@@ -1553,8 +1577,7 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
     }
     char *css = camel_to_kebab(name);
     JS_FreeCString(ctx, name);
-    const char *style = ns_element_get_attr(n, "style");
-    char *val = ns_inline_style_get(style, css);
+    char *val = ns_inline_style_get(back->css_text, css);
     if (val) ns_inline_value_strip_important(val);
     if (val && !(css[0] == '-' && css[1] == '-') &&
         !ns_css_named_declaration_valid(css, val)) {
@@ -1578,23 +1601,8 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
 static JSValue
 ns_style_get_length(JSContext *ctx, JSValueConst this_val)
 {
-    ns_node *n = ns_style_node(this_val);
-    if (!n) return JS_NewInt32(ctx, 0);
-    char *style = ns_inline_style_serialize(ns_element_get_attr(n, "style"));
-    int32_t count = 0;
-    const char *p = style;
-    while (*p) {
-        while (*p == ' ' || *p == ';') p++;
-        if (!*p) break;
-        const char *colon = strchr(p, ':');
-        if (!colon) break;
-        count++;
-        const char *end_p = strchr(colon, ';');
-        if (!end_p) break;
-        p = end_p;
-    }
-    g_free(style);
-    return JS_NewInt32(ctx, count);
+    ns_style_back *back = ns_style_sync(ctx, this_val, NULL);
+    return JS_NewUint32(ctx, back ? ns_inline_style_length(back->css_text) : 0);
 }
 
 static int
@@ -1602,8 +1610,9 @@ ns_style_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
                       JSValueConst val, JSValueConst receiver, int flags)
 {
     (void)receiver; (void)flags;
-    ns_node *n = ns_style_node(obj);
-    if (!n) return FALSE;
+    ns_node *n = NULL;
+    ns_style_back *back = ns_style_sync(ctx, obj, &n);
+    if (!back || !n) return FALSE;
     ns_js *js = js_from_ctx(ctx);
     if (js && js->pinned_wrappers_set &&
         !g_hash_table_contains(js->pinned_wrappers_set, n))
@@ -1614,7 +1623,7 @@ ns_style_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
         JS_FreeCString(ctx, name);
         const char *s = JS_ToCString(ctx, val);
         if (s) {
-            ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", s);
+            ns_style_store(ctx, obj, s, TRUE);
             JS_FreeCString(ctx, s);
         }
         return TRUE;
@@ -1628,10 +1637,11 @@ ns_style_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
         JS_FreeCString(ctx, vstr);
         return TRUE;
     }
-    char *old = ns_inline_style_serialize(ns_element_get_attr(n, "style"));
-    char *new_style = ns_inline_style_set(old, css, vstr ? vstr : "");
-    ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", new_style);
-    g_free(old);
+    char *mutation_text = ns_style_mutation_text(back);
+    char *new_style = ns_inline_style_set(mutation_text, css,
+                                          vstr ? vstr : "");
+    ns_style_store(ctx, obj, new_style, vstr && *vstr);
+    g_free(mutation_text);
     g_free(new_style);
     g_free(css);
     if (vstr) JS_FreeCString(ctx, vstr);
@@ -2847,22 +2857,17 @@ static const JSCFunctionListEntry ns_tlist_proto_funcs[] = {
 static JSValue
 ns_style_get_cssText(JSContext *ctx, JSValueConst this_val)
 {
-    ns_node *n = ns_style_node(this_val);
-    if (!n) return JS_NewString(ctx, "");
-    char *s = ns_inline_style_serialize(ns_element_get_attr(n, "style"));
-    JSValue result = JS_NewString(ctx, s);
-    g_free(s);
-    return result;
+    ns_style_back *back = ns_style_sync(ctx, this_val, NULL);
+    return JS_NewString(ctx, back && back->css_text ? back->css_text : "");
 }
 
 static JSValue
 ns_style_set_cssText(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
-    ns_node *n = ns_style_node(this_val);
-    if (!n) return JS_UNDEFINED;
+    if (!ns_style_sync(ctx, this_val, NULL)) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, val);
     if (s) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", s);
+        ns_style_store(ctx, this_val, s, TRUE);
         JS_FreeCString(ctx, s);
     }
     return JS_UNDEFINED;
@@ -2872,12 +2877,11 @@ static JSValue
 ns_style_getPropertyValue(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
-    ns_node *n = ns_style_node(this_val);
-    if (!n || argc < 1) return JS_NewString(ctx, "");
+    ns_style_back *back = ns_style_sync(ctx, this_val, NULL);
+    if (!back || argc < 1) return JS_NewString(ctx, "");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NewString(ctx, "");
-    const char *style = ns_element_get_attr(n, "style");
-    char *val = ns_inline_style_get(style, name);
+    char *val = ns_inline_style_get(back->css_text, name);
     if (val) ns_inline_value_strip_important(val);
     char *canon = val && !(name[0] == '-' && name[1] == '-')
         ? ns_css_specified_canonical(name, val) : NULL;
@@ -2892,8 +2896,8 @@ static JSValue
 ns_style_setProperty(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
-    ns_node *n = ns_style_node(this_val);
-    if (!n || argc < 2) return JS_UNDEFINED;
+    ns_style_back *back = ns_style_sync(ctx, this_val, NULL);
+    if (!back || argc < 2) return JS_UNDEFINED;
     const char *name = JS_ToCString(ctx, argv[0]);
     const char *value = JS_IsNull(argv[1]) ? NULL : JS_ToCString(ctx, argv[1]);
     const char *priority = argc >= 3 && !JS_IsNull(argv[2]) &&
@@ -2906,15 +2910,15 @@ ns_style_setProperty(JSContext *ctx, JSValueConst this_val,
     gboolean priority_valid = !priority || !*priority || important;
     if (name && (!value || !*value || priority_valid) &&
         (!value || !*value || ns_css_named_declaration_valid(css_name, value))) {
-        char *old = ns_inline_style_serialize(ns_element_get_attr(n, "style"));
         char *stored = (value && *value && important)
                        ? g_strconcat(value, " !important", NULL)
                        : g_strdup(value ? value : "");
-        char *new_style = ns_inline_style_set(old, css_name, stored);
-        g_free(old);
+        char *mutation_text = ns_style_mutation_text(back);
+        char *new_style = ns_inline_style_set(mutation_text, css_name, stored);
         g_free(stored);
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", new_style);
+        ns_style_store(ctx, this_val, new_style, value && *value);
         g_free(new_style);
+        g_free(mutation_text);
     }
     g_free(css_name);
     if (name) JS_FreeCString(ctx, name);
@@ -2927,17 +2931,18 @@ static JSValue
 ns_style_removeProperty(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
-    ns_node *n = ns_style_node(this_val);
-    if (!n || argc < 1) return JS_NewString(ctx, "");
+    ns_style_back *back = ns_style_sync(ctx, this_val, NULL);
+    if (!back || argc < 1) return JS_NewString(ctx, "");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NewString(ctx, "");
-    const char *style = ns_element_get_attr(n, "style");
-    char *old_val = ns_inline_style_get(style, name);
-    char *serialized = ns_inline_style_serialize(style);
-    char *new_style = ns_inline_style_set(serialized, name, "");
-    g_free(serialized);
-    ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", new_style);
-    g_free(new_style);
+    char *old_val = ns_inline_style_get(back->css_text, name);
+    if (old_val || g_ascii_strcasecmp(name, "all") == 0) {
+        char *mutation_text = ns_style_mutation_text(back);
+        char *new_style = ns_inline_style_set(mutation_text, name, "");
+        ns_style_store(ctx, this_val, new_style, FALSE);
+        g_free(new_style);
+        g_free(mutation_text);
+    }
     JS_FreeCString(ctx, name);
     if (old_val) ns_inline_value_strip_important(old_val);
     JSValue ret = JS_NewString(ctx, old_val ? old_val : "");
@@ -2969,12 +2974,11 @@ static JSValue
 ns_style_getPropertyPriority(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    ns_node *n = ns_style_node(this_val);
-    if (!n || argc < 1) return JS_NewString(ctx, "");
+    ns_style_back *back = ns_style_sync(ctx, this_val, NULL);
+    if (!back || argc < 1) return JS_NewString(ctx, "");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NewString(ctx, "");
-    const char *style = ns_element_get_attr(n, "style");
-    char *val = ns_inline_style_get(style, name);
+    char *val = ns_inline_style_get(back->css_text, name);
     JS_FreeCString(ctx, name);
     gboolean important = val ? ns_inline_value_strip_important(val) : FALSE;
     g_free(val);
@@ -5900,6 +5904,7 @@ ns_element_get_style(JSContext *ctx, JSValueConst this_val)
     ns_style_back *b = g_new0(ns_style_back, 1);
     b->element = JS_DupValue(ctx, this_val);
     JS_SetOpaque(obj, b);
+    ns_style_sync(ctx, obj, NULL);
     JS_DefinePropertyValueStr(ctx, this_val, "__nsStyleDecl",
                               JS_DupValue(ctx, obj), 0);
     return obj;

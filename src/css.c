@@ -14776,8 +14776,10 @@ ns_inline_style_get(const char *style, const char *prop)
     if (!style || !prop) return NULL;
     if (g_ascii_strcasecmp(prop, "all") == 0)
         return inline_all_value(style);
-    if (inline_quad_ids(prop))
-        return inline_quad_value(style, prop, NULL);
+    if (inline_quad_ids(prop)) {
+        char *quad = inline_quad_value(style, prop, NULL);
+        return quad ? quad : inline_all_value_for(style, prop);
+    }
     if (g_ascii_strcasecmp(prop, "overflow") == 0)
         return inline_pair_value(style, NS_CSS_OVERFLOW_X,
                                  NS_CSS_OVERFLOW_Y, NULL);
@@ -14880,6 +14882,89 @@ inline_decl_find(GPtrArray *decls, const char *name)
     return NULL;
 }
 
+static void
+inline_decl_store(GPtrArray *decls, char *name, char *value,
+                  gboolean important)
+{
+    ns_inline_decl *decl = inline_decl_find(decls, name);
+    if (!decl) {
+        decl = g_new0(ns_inline_decl, 1);
+        decl->name = name;
+        decl->value = value;
+        decl->important = important;
+        g_ptr_array_add(decls, decl);
+        return;
+    }
+    g_free(name);
+    if (important || !decl->important) {
+        g_free(decl->value);
+        decl->value = value;
+        decl->important = important;
+        for (guint i = 0; i + 1 < decls->len; i++) {
+            if (g_ptr_array_index(decls, i) != decl) continue;
+            g_ptr_array_steal_index(decls, i);
+            g_ptr_array_add(decls, decl);
+            break;
+        }
+    } else {
+        g_free(value);
+    }
+}
+
+static gboolean
+inline_decl_expand_group_shorthand(GPtrArray *decls, const char *name,
+                                   const char *value, gboolean important)
+{
+    gboolean pair = strcmp(name, "margin-block") == 0 ||
+                    strcmp(name, "margin-inline") == 0 ||
+                    strcmp(name, "padding-block") == 0 ||
+                    strcmp(name, "padding-inline") == 0;
+    if (!inline_quad_ids(name) && !pair) return FALSE;
+    char *text = g_strdup_printf("%s: %s%s;", name, value,
+                                 important ? " !important" : "");
+    const char *p = text;
+    const char *end = text + strlen(text);
+    GArray *expanded = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
+    parse_declaration_block(&p, end, expanded, NULL);
+    gboolean stored = FALSE;
+    for (guint i = 0; i < expanded->len; i++) {
+        ns_css_decl *item = &g_array_index(expanded, ns_css_decl, i);
+        const char *property = ns_css_prop_name(item->prop);
+        char *serialized = ns_css_value_serialize(item->value);
+        if (property && serialized) {
+            inline_decl_store(decls, g_strdup(property), serialized,
+                              item->important);
+            stored = TRUE;
+        } else {
+            g_free(serialized);
+        }
+        ns_css_value_free(item->value);
+    }
+    g_array_free(expanded, TRUE);
+    g_free(text);
+    return stored;
+}
+
+static gboolean
+inline_background_longhand_blocked(GPtrArray *decls, const char *name,
+                                    gboolean important)
+{
+    if (!g_str_has_prefix(name, "background-") || important) return FALSE;
+    ns_inline_decl *background = inline_decl_find(decls, "background");
+    return background && background->important;
+}
+
+static void
+inline_background_shorthand_override(GPtrArray *decls, gboolean important)
+{
+    for (gint i = (gint)decls->len - 1; i >= 0; i--) {
+        ns_inline_decl *decl = g_ptr_array_index(decls, (guint)i);
+        if (!g_str_has_prefix(decl->name, "background-")) continue;
+        if (important || !decl->important)
+            g_ptr_array_remove_index(decls, (guint)i);
+    }
+}
+
 static int
 inline_logical_group(int prop)
 {
@@ -14892,8 +14977,18 @@ inline_prop_is_logical(int prop)
     return ns_css_prop_is_logical(prop);
 }
 
-char *
-ns_inline_style_serialize(const char *style)
+static int
+inline_mapping_logic(int prop)
+{
+    if (!inline_prop_is_logical(prop)) return 0;
+    const char *name = ns_css_prop_name(prop);
+    if (name && strstr(name, "block")) return 1;
+    if (name && strstr(name, "inline")) return 2;
+    return 3;
+}
+
+static GPtrArray *
+inline_decl_list_parse(const char *style)
 {
     GPtrArray *decls = g_ptr_array_new_with_free_func(inline_decl_free);
     const char *p = style ? style : "";
@@ -14945,25 +15040,30 @@ ns_inline_style_serialize(const char *style)
             g_free(value);
             value = canonical;
         }
-        ns_inline_decl *decl = inline_decl_find(decls, name);
-        if (!decl) {
-            decl = g_new0(ns_inline_decl, 1);
-            decl->name = name;
-            decl->value = value;
-            decl->important = important;
-            g_ptr_array_add(decls, decl);
-        } else {
+        if (inline_background_longhand_blocked(decls, name, important)) {
             g_free(name);
-            if (important || !decl->important) {
-                g_free(decl->value);
-                decl->value = value;
-                decl->important = important;
-            } else {
-                g_free(value);
-            }
+            g_free(value);
+            p = term == ';' ? vend + 1 : vend;
+            continue;
+        }
+        if (strcmp(name, "background") == 0)
+            inline_background_shorthand_override(decls, important);
+        if (inline_decl_expand_group_shorthand(decls, name, value,
+                                               important)) {
+            g_free(name);
+            g_free(value);
+        } else {
+            inline_decl_store(decls, name, value, important);
         }
         p = term == ';' ? vend + 1 : vend;
     }
+    return decls;
+}
+
+char *
+ns_inline_style_serialize(const char *style)
+{
+    GPtrArray *decls = inline_decl_list_parse(style);
     gint all_index = -1;
     for (guint i = 0; i < decls->len; i++) {
         ns_inline_decl *decl = g_ptr_array_index(decls, i);
@@ -14995,33 +15095,91 @@ ns_inline_style_serialize(const char *style)
     for (gsize q = 0; q < G_N_ELEMENTS(quad_names); q++) {
         const int *ids = inline_quad_ids(quad_names[q]);
         int logical_group = inline_logical_group(ids[0]);
-        gboolean mixed_logical_group = FALSE;
-        for (guint i = 0; i < decls->len; i++) {
-            ns_inline_decl *decl = g_ptr_array_index(decls, i);
-            int id = ns_css_prop_id(decl->name);
-            if (inline_prop_is_logical(id) &&
-                inline_logical_group(id) == logical_group) {
-                mixed_logical_group = TRUE;
-                break;
-            }
-        }
-        if (mixed_logical_group) continue;
         gboolean sides[4] = { FALSE, FALSE, FALSE, FALSE };
+        guint first = G_MAXUINT;
+        guint last = 0;
         for (guint i = 0; i < decls->len; i++) {
             ns_inline_decl *decl = g_ptr_array_index(decls, i);
             if (strcmp(decl->name, quad_names[q]) == 0) {
                 quad_complete[q] = TRUE;
+                first = MIN(first, i);
+                last = MAX(last, i);
                 break;
             }
             int id = ns_css_prop_id(decl->name);
             for (int side = 0; side < 4; side++)
-                if (id == ids[side]) sides[side] = TRUE;
+                if (id == ids[side]) {
+                    sides[side] = TRUE;
+                    first = MIN(first, i);
+                    last = MAX(last, i);
+                }
         }
         if (!quad_complete[q])
             quad_complete[q] = sides[0] && sides[1] && sides[2] && sides[3];
+        for (guint i = first + 1; quad_complete[q] && i < last; i++) {
+            ns_inline_decl *decl = g_ptr_array_index(decls, i);
+            int id = ns_css_prop_id(decl->name);
+            if (inline_logical_group(id) == logical_group &&
+                inline_mapping_logic(id) != 0)
+                quad_complete[q] = FALSE;
+        }
         if (quad_complete[q])
             quad_values[q] = inline_quad_value(style, quad_names[q],
                                                 &quad_priorities[q]);
+    }
+    static const struct {
+        const char *name;
+        int first;
+        int second;
+    } logical_pairs[] = {
+        { "margin-block", NS_CSS_MARGIN_BLOCK_START,
+          NS_CSS_MARGIN_BLOCK_END },
+        { "margin-inline", NS_CSS_MARGIN_INLINE_START,
+          NS_CSS_MARGIN_INLINE_END },
+        { "padding-block", NS_CSS_PADDING_BLOCK_START,
+          NS_CSS_PADDING_BLOCK_END },
+        { "padding-inline", NS_CSS_PADDING_INLINE_START,
+          NS_CSS_PADDING_INLINE_END },
+    };
+    char *pair_values[G_N_ELEMENTS(logical_pairs)] = { NULL };
+    gboolean pair_priorities[G_N_ELEMENTS(logical_pairs)] = { FALSE };
+    gboolean pair_emitted[G_N_ELEMENTS(logical_pairs)] = { FALSE };
+    for (gsize pair = 0; pair < G_N_ELEMENTS(logical_pairs); pair++) {
+        ns_inline_decl *parts[2] = { NULL, NULL };
+        guint positions[2] = { G_MAXUINT, G_MAXUINT };
+        for (guint i = 0; i < decls->len; i++) {
+            ns_inline_decl *decl = g_ptr_array_index(decls, i);
+            int id = ns_css_prop_id(decl->name);
+            if (id == logical_pairs[pair].first) {
+                parts[0] = decl;
+                positions[0] = i;
+            } else if (id == logical_pairs[pair].second) {
+                parts[1] = decl;
+                positions[1] = i;
+            }
+        }
+        if (!parts[0] || !parts[1] ||
+            parts[0]->important != parts[1]->important)
+            continue;
+        guint first = MIN(positions[0], positions[1]);
+        guint last = MAX(positions[0], positions[1]);
+        int group = inline_logical_group(logical_pairs[pair].first);
+        int mapping = inline_mapping_logic(logical_pairs[pair].first);
+        gboolean blocked = FALSE;
+        for (guint i = first + 1; i < last; i++) {
+            ns_inline_decl *decl = g_ptr_array_index(decls, i);
+            int id = ns_css_prop_id(decl->name);
+            if (inline_logical_group(id) == group &&
+                inline_mapping_logic(id) != mapping) {
+                blocked = TRUE;
+                break;
+            }
+        }
+        if (blocked) continue;
+        pair_values[pair] = strcmp(parts[0]->value, parts[1]->value) == 0
+            ? g_strdup(parts[0]->value)
+            : g_strdup_printf("%s %s", parts[0]->value, parts[1]->value);
+        pair_priorities[pair] = parts[0]->important;
     }
     gboolean overflow_sides[2] = { FALSE, FALSE };
     gboolean overflow_complete = FALSE;
@@ -15100,6 +15258,23 @@ ns_inline_style_serialize(const char *style)
             break;
         }
         int decl_id = ns_css_prop_id(decl->name);
+        for (gsize pair = 0;
+             !collapsed && pair < G_N_ELEMENTS(logical_pairs); pair++) {
+            if (!pair_values[pair] ||
+                (decl_id != logical_pairs[pair].first &&
+                 decl_id != logical_pairs[pair].second))
+                continue;
+            if (!pair_emitted[pair]) {
+                if (out->len) g_string_append_c(out, ' ');
+                g_string_append_printf(out, "%s: %s", logical_pairs[pair].name,
+                                       pair_values[pair]);
+                if (pair_priorities[pair])
+                    g_string_append(out, " !important");
+                g_string_append_c(out, ';');
+                pair_emitted[pair] = TRUE;
+            }
+            collapsed = TRUE;
+        }
         gboolean overflow_member = strcmp(decl->name, "overflow") == 0 ||
             decl_id == NS_CSS_OVERFLOW_X || decl_id == NS_CSS_OVERFLOW_Y;
         if (!collapsed && overflow_value && overflow_member) {
@@ -15152,11 +15327,41 @@ ns_inline_style_serialize(const char *style)
     }
     for (gsize q = 0; q < G_N_ELEMENTS(quad_names); q++)
         g_free(quad_values[q]);
+    for (gsize pair = 0; pair < G_N_ELEMENTS(logical_pairs); pair++)
+        g_free(pair_values[pair]);
     g_free(overflow_value);
     g_free(outline_value);
     g_free(list_value);
     g_ptr_array_free(decls, TRUE);
     return g_string_free(out, FALSE);
+}
+
+char *
+ns_inline_style_resolve_urls(const char *style, const char *base_url)
+{
+    char *resolved = base_url && *base_url
+        ? css_raw_text_resolve_urls(style, base_url) : NULL;
+    return resolved ? resolved : g_strdup(style ? style : "");
+}
+
+guint
+ns_inline_style_length(const char *style)
+{
+    GPtrArray *decls = inline_decl_list_parse(style);
+    guint length = decls->len;
+    g_ptr_array_free(decls, TRUE);
+    return length;
+}
+
+char *
+ns_inline_style_item(const char *style, guint index)
+{
+    GPtrArray *decls = inline_decl_list_parse(style);
+    char *name = index < decls->len
+        ? g_strdup(((ns_inline_decl *)g_ptr_array_index(decls, index))->name)
+        : NULL;
+    g_ptr_array_free(decls, TRUE);
+    return name;
 }
 
 gboolean
@@ -17788,12 +17993,23 @@ ns_css_cached_decl_sheet(const char *decls)
         g_decl_sheet_cache = g_hash_table_new_full(
             g_str_hash, g_str_equal, g_free,
             (GDestroyNotify)ns_css_stylesheet_free);
-    ns_css_stylesheet *s = g_hash_table_lookup(g_decl_sheet_cache, decls);
-    if (s) return s;
+    const char *base = g_css_doc_base ? g_css_doc_base : "";
+    char *key = g_strdup_printf("%" G_GSIZE_FORMAT ":%s%s",
+                                strlen(base), base, decls);
+    ns_css_stylesheet *s = g_hash_table_lookup(g_decl_sheet_cache, key);
+    if (s) {
+        g_free(key);
+        return s;
+    }
     char *wrapped = g_strconcat("* { ", decls, " }", NULL);
     s = ns_css_stylesheet_parse(wrapped, -1);
     g_free(wrapped);
-    if (s) g_hash_table_insert(g_decl_sheet_cache, g_strdup(decls), s);
+    if (s) {
+        ns_css_stylesheet_resolve_urls(s, base);
+        g_hash_table_insert(g_decl_sheet_cache, key, s);
+    } else {
+        g_free(key);
+    }
     return s;
 }
 
