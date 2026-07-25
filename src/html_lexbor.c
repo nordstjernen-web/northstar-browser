@@ -619,43 +619,6 @@ ns_xml_well_formed(const char *input, gssize len, char **out_root_ns)
     return ok;
 }
 
-static gboolean
-ns_text_all_whitespace(const char *s)
-{
-    if (!s) return TRUE;
-    for (; *s; s++)
-        if (*s != ' ' && *s != '\t' && *s != '\n' && *s != '\r' && *s != '\f')
-            return FALSE;
-    return TRUE;
-}
-
-static void
-ns_prune_html_interelement_whitespace(ns_node *root)
-{
-    if (!root) return;
-    ns_node *html = NULL;
-    for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        if (c->kind == NS_NODE_ELEMENT && c->name &&
-            g_ascii_strcasecmp(c->name, "html") == 0) { html = c; break; }
-    if (!html) return;
-    gboolean has_head = FALSE, has_body = FALSE;
-    for (ns_node *c = html->first_child; c; c = c->next_sibling)
-        if (c->kind == NS_NODE_ELEMENT && c->name) {
-            if (g_ascii_strcasecmp(c->name, "head") == 0) has_head = TRUE;
-            else if (g_ascii_strcasecmp(c->name, "body") == 0) has_body = TRUE;
-        }
-    if (!has_head || !has_body) return;
-    ns_node *c = html->first_child;
-    while (c) {
-        ns_node *next = c->next_sibling;
-        if (c->kind == NS_NODE_TEXT && ns_text_all_whitespace(c->text)) {
-            ns_node_remove(c);
-            ns_node_free(c);
-        }
-        c = next;
-    }
-}
-
 static void
 ns_collect_script_elems(ns_node *n, GPtrArray *out, int depth)
 {
@@ -741,7 +704,6 @@ ns_html_parse_with_scripting(const char *input, gssize len,
         root->flags |= NS_NODE_LIMITED_QUIRKS;
     if (!scripting) root->flags |= NS_NODE_SCRIPTING_DISABLED;
     ns_html_assign_script_positions(root, input, n);
-    ns_prune_html_interelement_whitespace(root);
     ns_dsd_convert(root, 0);
     ns_media_extract_standard(root);
     ns_node_attach_backing(root, doc, lxb_doc_destroy_void);
