@@ -4,7 +4,6 @@ Significant changes in each release:
 
 1.0.5:
 ======
-* foo
 * CSS `display` is now a structured computed value (outer type, inner
   type, list-item flag, layout-internal kind) instead of a keyword string.
   Two-value syntax such as `display: flow-root list-item` reaches layout
