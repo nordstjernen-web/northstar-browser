@@ -4,6 +4,7 @@
  */
 
 #include "css.h"
+#include "css_syntax.h"
 
 #include "config.h"
 #include "net.h"
@@ -10316,48 +10317,7 @@ static const char *
 css_scan_until(const char *p, const char *end,
                const char *terminators, char *terminator)
 {
-    char quote = 0;
-    int paren = 0, bracket = 0, brace = 0;
-    if (terminator) *terminator = 0;
-    while (p < end) {
-        char c = *p;
-        if (quote) {
-            if (c == '\\' && p + 1 < end) {
-                p += 2;
-                continue;
-            }
-            if (c == quote) quote = 0;
-            else if (c == '\n' || c == '\r' || c == '\f') quote = 0;
-            p++;
-            continue;
-        }
-        if (c == '/' && p + 1 < end && p[1] == '*') {
-            p = css_skip_comment(p, end);
-            continue;
-        }
-        if (c == '\\' && p + 1 < end) {
-            p += 2;
-            continue;
-        }
-        if (c == '"' || c == '\'') {
-            quote = c;
-            p++;
-            continue;
-        }
-        if (paren == 0 && bracket == 0 && brace == 0 &&
-            strchr(terminators, c)) {
-            if (terminator) *terminator = c;
-            return p;
-        }
-        if (c == '(') paren++;
-        else if (c == ')' && paren > 0) paren--;
-        else if (c == '[') bracket++;
-        else if (c == ']' && bracket > 0) bracket--;
-        else if (c == '{') brace++;
-        else if (c == '}' && brace > 0) brace--;
-        p++;
-    }
-    return p;
+    return ns_css_syntax_scan(p, end, terminators, terminator);
 }
 
 static const char *
@@ -10375,54 +10335,7 @@ css_scan_declaration_value(const char *p, const char *end, char *terminator)
 static gboolean
 css_declaration_value_syntax_valid(const char *text)
 {
-    char *value = g_strdup(text ? text : "");
-    gboolean important = FALSE;
-    css_strip_important(value, &important);
-    const char *p = value;
-    const char *end = value + strlen(value);
-    char quote = 0;
-    int paren = 0, bracket = 0, brace = 0;
-    gboolean valid = TRUE;
-    while (p < end && valid) {
-        char c = *p;
-        if (quote) {
-            if (c == '\\' && p + 1 < end) {
-                p += 2;
-                continue;
-            }
-            if (c == quote) quote = 0;
-            else if (c == '\n' || c == '\r' || c == '\f') valid = FALSE;
-            p++;
-            continue;
-        }
-        if (c == '/' && p + 1 < end && p[1] == '*') {
-            p = css_skip_comment(p, end);
-            continue;
-        }
-        if (c == '\\' && p + 1 < end) {
-            p += 2;
-            continue;
-        }
-        if (c == '"' || c == '\'') {
-            quote = c;
-            p++;
-            continue;
-        }
-        if (c == '(') paren++;
-        else if (c == ')') { if (paren == 0) valid = FALSE; else paren--; }
-        else if (c == '[') bracket++;
-        else if (c == ']') { if (bracket == 0) valid = FALSE; else bracket--; }
-        else if (c == '{') brace++;
-        else if (c == '}') { if (brace == 0) valid = FALSE; else brace--; }
-        else if (c == '!' && paren == 0 && bracket == 0 && brace == 0)
-            valid = FALSE;
-        else if (c == ';' && paren == 0 && bracket == 0 && brace == 0)
-            valid = FALSE;
-        p++;
-    }
-    valid = valid && quote == 0 && paren == 0 && bracket == 0 && brace == 0;
-    g_free(value);
-    return valid;
+    return ns_css_component_value_valid(text ? text : "");
 }
 
 gboolean

@@ -44,6 +44,7 @@ northstar_engine_sources = files(
   'csp.c',
   'css.c',
   'css_media.c',
+  'css_syntax.c',
   'datetime.c',
   'debuglog.c',
   'dom.c',
