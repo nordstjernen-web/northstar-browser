@@ -102,8 +102,9 @@ else
     language: 'c',
   )
 endif
+ns_release_profile = get_option('b_lto') ? 'release (LTO + stripped + hardened)' : 'release (stripped + hardened)'
 message('northstar build profile: ' +
-        (ns_is_release ? 'release (LTO + stripped + hardened)'
+        (ns_is_release ? ns_release_profile
                        : 'development (debug symbols + frame pointer + hardened)'))
 
 # The GTK shell is a feature: disabling it yields an engine-only build that

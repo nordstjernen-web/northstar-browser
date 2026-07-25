@@ -51,10 +51,10 @@ jobs:
           ccache --max-size=200M
           ccache --zero-stats
 
-      - name: Build (musl libc)
+      - name: Build (musl libc, no LTO)
         run: |
           export CC="ccache clang"
-          meson setup builddir
+          meson setup builddir -Db_lto=false
           meson compile -C builddir
           file builddir/src/gtk/northstar
 
