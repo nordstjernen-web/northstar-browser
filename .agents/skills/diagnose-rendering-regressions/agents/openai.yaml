@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diagnose Rendering Regressions"
+  short_description: "Trace and fix Northstar rendering defects"
+  default_prompt: "Use $diagnose-rendering-regressions to reproduce and fix this Northstar rendering defect."
