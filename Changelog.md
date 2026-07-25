@@ -39,3 +39,11 @@ Significant changes in each release:
   the rule; the prelude is serialized canonically.
 * `StyleSheet.media` is a live `MediaList` that writes back to the owner
   node's `media` attribute.
+* A unitless `0` on a length property computes to `0px`. Elements with a
+  box hid this because their box edges are read back from layout; on an
+  element with no box every such property reported `0`, and the inset
+  resolver rejected `left: 0`, so the opposite inset of an out-of-flow
+  box came back as `auto` instead of its used value.
+* `getComputedStyle` returns an empty declaration list for an element
+  that is not rendered — not connected, or outside the flat tree — as
+  CSSOM requires, instead of a full style.
