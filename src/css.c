@@ -415,7 +415,7 @@ ns_css_prop_syntax(int prop)
 {
     if (prop < 0 || prop >= NS_CSS_PROP_COUNT) return prop;
     return kProperty[prop].syntax == NS_CSS_PROP_COUNT
-        ? prop : kProperty[prop].syntax;
+        ? prop : (int)kProperty[prop].syntax;
 }
 
 static int
