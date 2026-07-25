@@ -12,3 +12,7 @@ Significant changes in each release:
 * Anonymous table boxes are generated around any run of table-internal
   siblings, so `display: table-row` and `display: table-row-group` outside
   a table lay out as tables instead of collapsing into surrounding text.
+* Blockification follows the spec: the root element blockifies
+  (`display: contents` on `<html>` computes to `block`) and flex and grid
+  items report their blockified `display` to script, including items
+  nested inside a `display: contents` wrapper.
