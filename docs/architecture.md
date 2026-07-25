@@ -68,6 +68,16 @@ predicates in `css.h` rather than comparing keyword strings, and
 blockification of floated and absolutely positioned boxes has a single
 implementation.
 
+Floats are tracked per block formatting context. A block that does not
+establish its own context inherits the enclosing context's floats, so a
+float placed in an ancestor still shortens the line boxes of nested
+content. Only tables, block-level replaced elements and boxes that
+establish a new formatting context are pushed aside by a float; every
+other in-flow block keeps the full containing-block width and overlaps
+the float, as CSS 2.1 §9.5 requires. An inline run whose lines cross the
+bottom of a float is split into fragments, so the text below the float
+reclaims the full width.
+
 ## JavaScript and web APIs
 
 | Area | File(s) |
