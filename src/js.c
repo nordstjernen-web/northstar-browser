@@ -14285,7 +14285,21 @@ static const char *const ns_css_computed_props[] = {
 static int
 ns_css_computed_count(void)
 {
-    return (int)G_N_ELEMENTS(ns_css_computed_props);
+    int count = 0;
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_css_computed_props); i++)
+        if (ns_css_named_property_supported(ns_css_computed_props[i])) count++;
+    return count;
+}
+
+static const char *
+ns_css_computed_name(int index)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_css_computed_props); i++) {
+        if (!ns_css_named_property_supported(ns_css_computed_props[i]))
+            continue;
+        if (index-- == 0) return ns_css_computed_props[i];
+    }
+    return NULL;
 }
 
 static JSValue
@@ -14305,7 +14319,8 @@ ns_computed_item(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
         JS_FreeValue(ctx, value);
         return JS_NewString(ctx, "");
     }
-    return JS_NewString(ctx, ns_css_computed_props[i]);
+    const char *name = ns_css_computed_name(i);
+    return JS_NewString(ctx, name ? name : "");
 }
 
 static JSValue
@@ -14431,7 +14446,7 @@ ns_css_supported_property(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_FALSE;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_FALSE;
-    gboolean ok = (name[0] == '-' && name[1] == '-') || ns_css_prop_id(name) >= 0;
+    gboolean ok = ns_css_named_property_supported(name);
     JS_FreeCString(ctx, name);
     return JS_NewBool(ctx, ok);
 }

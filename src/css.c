@@ -7812,8 +7812,11 @@ ns_css_named_declaration_valid(const char *name, const char *text)
     if (!ns_css_named_property_supported(name)) return FALSE;
     if (name[0] == '-' && name[1] == '-')
         return css_declaration_value_syntax_valid(text);
-    if (g_ascii_strcasecmp(name, "all") != 0)
-        return ns_css_declaration_valid(prop_id(name), text);
+    if (g_ascii_strcasecmp(name, "all") != 0) {
+        int prop = prop_id(name);
+        return prop >= 0 ? ns_css_declaration_valid(prop, text)
+                         : ns_css_supports_declaration(name, text);
+    }
     if (strstr(text, "var(")) return TRUE;
     ns_css_value *wide = parse_css_wide_keyword(text);
     if (!wide) return FALSE;
@@ -10267,20 +10270,26 @@ css_declaration_value_syntax_valid(const char *text)
 gboolean
 ns_css_named_property_supported(const char *name)
 {
-    static const char *const cssom_properties[] = {
-        "alignment-baseline", "background-attachment", "baseline-shift",
-        "baseline-source", "background", "border", "column-rule",
-        "columns", "empty-cells", "flex", "flex-flow", "font", "grid",
-        "grid-template", "list-style", "outline", "page-break-after",
-        "page-break-before", "page-break-inside", "place-content",
-        "place-items", "place-self", "src", "unicode-range",
+    static const char *const shorthand_properties[] = {
+        "background", "background-position", "border", "border-block",
+        "border-block-color", "border-block-end", "border-block-start",
+        "border-block-style", "border-block-width", "border-bottom",
+        "border-color", "border-inline", "border-inline-color",
+        "border-inline-end", "border-inline-start", "border-inline-style",
+        "border-inline-width", "border-left", "border-right", "border-style",
+        "border-top", "border-width", "column-rule", "columns", "container",
+        "flex", "flex-flow", "font", "grid", "grid-gap", "grid-template",
+        "inset", "inset-block", "inset-inline", "list-style", "margin",
+        "margin-block", "margin-inline", "object-position", "outline",
+        "padding", "padding-block", "padding-inline", "place-content",
+        "place-items", "place-self",
     };
     if (!name || !*name) return FALSE;
     if (name[0] == '-' && name[1] == '-' && name[2]) return TRUE;
     if (g_ascii_strcasecmp(name, "all") == 0 || prop_id(name) >= 0)
         return TRUE;
-    for (gsize i = 0; i < G_N_ELEMENTS(cssom_properties); i++)
-        if (g_ascii_strcasecmp(name, cssom_properties[i]) == 0)
+    for (gsize i = 0; i < G_N_ELEMENTS(shorthand_properties); i++)
+        if (g_ascii_strcasecmp(name, shorthand_properties[i]) == 0)
             return TRUE;
     char *declaration = g_strdup_printf("%s: initial;", name);
     const char *p = declaration;
@@ -10788,7 +10797,8 @@ ns_css_supports_declaration(const char *property, const char *value)
     const char *value_end = value + strlen(value);
     const char *value_scan = css_scan_declaration_value(value, value_end, &term);
     if (!*property || (!*value && !empty_custom) || !property_valid ||
-        value_scan != value_end) {
+        value_scan != value_end ||
+        !ns_css_named_property_supported(property)) {
         g_free(property_copy);
         g_free(value_copy);
         return FALSE;
