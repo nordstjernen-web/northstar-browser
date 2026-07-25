@@ -5928,8 +5928,8 @@ inline_attr_can_fragment(ns_inline_attr_kind k)
 }
 
 static gboolean
-inline_box_can_fragment_multicol(const ns_box *box, const ns_style *style,
-                                 double basis)
+inline_box_can_fragment(const ns_box *box, const ns_style *style,
+                        double basis)
 {
     if (!box || box->kind != NS_BOX_INLINE || !box->text || !*box->text)
         return FALSE;
@@ -6018,8 +6018,8 @@ inline_box_clone_range(const ns_box *src, gsize start, gsize end)
 }
 
 static PangoLayout *
-inline_box_layout_for_multicol(const ns_box *box, double content_width,
-                               const ns_style *parent_style)
+inline_box_fragment_layout(const ns_box *box, double content_width,
+                           const ns_style *parent_style)
 {
     PangoLayout *layout = make_pango_layout(parent_style);
     pango_layout_set_width(layout, (int)(content_width * PANGO_SCALE));
@@ -6047,11 +6047,11 @@ layout_multicol_single_inline(ns_box *box, double inner_x, double inner_y,
     ns_box *src = box ? box->first_child : NULL;
     if (!src || src->next_sibling || n_cols < 2)
         return FALSE;
-    if (!inline_box_can_fragment_multicol(src, child_inherited, col_w))
+    if (!inline_box_can_fragment(src, child_inherited, col_w))
         return FALSE;
 
-    PangoLayout *layout = inline_box_layout_for_multicol(src, col_w,
-                                                         child_inherited);
+    PangoLayout *layout = inline_box_fragment_layout(src, col_w,
+                                                     child_inherited);
     int line_count = pango_layout_get_line_count(layout);
     if (line_count <= 1) {
         g_object_unref(layout);
@@ -6357,10 +6357,14 @@ typedef struct float_ref {
     int side;
     double top, bottom;
     double outer_w;
+    double left_edge, right_edge;
+    gboolean intruding;
 } float_ref;
 
+static const GArray *g_bfc_floats;
+
 static void
-floats_offsets_at(const GArray *floats, double y,
+floats_offsets_at(const GArray *floats, double y, double cx0, double cx1,
                   double *left_out, double *right_out)
 {
     double l = 0, r = 0;
@@ -6368,12 +6372,30 @@ floats_offsets_at(const GArray *floats, double y,
         for (guint i = 0; i < floats->len; i++) {
             const float_ref *f = &g_array_index(floats, float_ref, i);
             if (y < f->top || y >= f->bottom) continue;
-            if (f->side == 0) l += f->outer_w;
-            else              r += f->outer_w;
+            if (f->side == 0) {
+                double d = f->right_edge - cx0;
+                if (d > l) l = d;
+            } else {
+                double d = cx1 - f->left_edge;
+                if (d > r) r = d;
+            }
         }
     }
-    *left_out = l;
-    *right_out = r;
+    *left_out = l > 0 ? l : 0;
+    *right_out = r > 0 ? r : 0;
+}
+
+static double
+floats_next_bottom_within(const GArray *floats, double top, double bottom)
+{
+    double edge = top;
+    if (!floats) return top;
+    for (guint i = 0; i < floats->len; i++) {
+        const float_ref *f = &g_array_index(floats, float_ref, i);
+        if (f->bottom <= top || f->bottom >= bottom) continue;
+        if (edge == top || f->bottom < edge) edge = f->bottom;
+    }
+    return edge;
 }
 
 static double
@@ -6397,6 +6419,7 @@ floats_max_bottom(const GArray *floats)
     if (!floats) return y;
     for (guint i = 0; i < floats->len; i++) {
         const float_ref *f = &g_array_index(floats, float_ref, i);
+        if (f->intruding) continue;
         if (f->bottom > y) y = f->bottom;
     }
     return y;
@@ -6404,7 +6427,7 @@ floats_max_bottom(const GArray *floats)
 
 static gboolean
 floats_advance_to_readable_width(const GArray *floats, double cw,
-                                 double *y, double *left_out,
+                                 double cx0, double *y, double *left_out,
                                  double *right_out)
 {
     if (!floats || floats->len == 0 || !y) return FALSE;
@@ -6414,7 +6437,7 @@ floats_advance_to_readable_width(const GArray *floats, double cw,
     gboolean moved = FALSE;
     for (;;) {
         double left = 0, right = 0;
-        floats_offsets_at(floats, *y, &left, &right);
+        floats_offsets_at(floats, *y, cx0, cx0 + cw, &left, &right);
         double avail = cw - left - right;
         if (avail >= min_w || cw <= min_w) {
             if (left_out) *left_out = left;
@@ -6438,6 +6461,98 @@ floats_advance_to_readable_width(const GArray *floats, double cw,
         *y = next_y;
         moved = TRUE;
     }
+}
+
+static gboolean box_is_block_level_replaced(const ns_box *c);
+
+static gboolean
+box_establishes_bfc(const ns_box *b)
+{
+    if (!b || b->kind != NS_BOX_BLOCK) return TRUE;
+    if (float_side_of(b->style) >= 0) return TRUE;
+    if (style_is_absolute_or_fixed(b->style)) return TRUE;
+    if (box_clips_children(b)) return TRUE;
+    ns_display d = ns_css_display_of(b->style);
+    if (display_is_atomic_inline_container(d)) return TRUE;
+    if (ns_display_inner_is(d, NS_DISPLAY_INNER_FLOW_ROOT)) return TRUE;
+    if (ns_display_is_flex_container(d) || ns_display_is_grid_container(d))
+        return TRUE;
+    if (b->parent && (style_is_flex_container(b->parent->style) ||
+                      style_is_grid_container(b->parent->style)))
+        return TRUE;
+    return FALSE;
+}
+
+static gboolean
+block_child_avoids_floats(const ns_box *c)
+{
+    return c->kind == NS_BOX_TABLE || box_is_block_level_replaced(c) ||
+           box_establishes_bfc(c);
+}
+
+static ns_box *
+inline_split_below_floats(ns_box *parent, ns_box *run, const GArray *floats,
+                          double inner_x, double cw, double run_y,
+                          double run_width, const ns_style *style)
+{
+    if (!inline_box_can_fragment(run, style, run_width)) return NULL;
+    if (run->content_height <= 0) return NULL;
+    double band_end = floats_next_bottom_within(floats, run_y,
+                                                run_y + run->content_height);
+    if (band_end <= run_y) return NULL;
+
+    double next_l = 0, next_r = 0;
+    floats_offsets_at(floats, band_end, inner_x, inner_x + cw,
+                      &next_l, &next_r);
+    if (cw - next_l - next_r <= run_width + 0.5) return NULL;
+
+    PangoLayout *layout = inline_box_fragment_layout(run, run_width, style);
+    int line_count = pango_layout_get_line_count(layout);
+    if (line_count < 2) { g_object_unref(layout); return NULL; }
+    double line_h = run->content_height / line_count;
+    if (line_h <= 0) { g_object_unref(layout); return NULL; }
+    int tail_line = (int)ceil((band_end - run_y) / line_h - 0.001);
+    if (tail_line < 1 || tail_line >= line_count) {
+        g_object_unref(layout);
+        return NULL;
+    }
+    PangoLayoutLine *ln = pango_layout_get_line_readonly(layout, tail_line);
+    gsize split = ln ? (gsize)ln->start_index : 0;
+    g_object_unref(layout);
+
+    gsize text_len = strlen(run->text);
+    if (split == 0 || split >= text_len) return NULL;
+    gsize head_end = split;
+    while (head_end > 0 && g_ascii_isspace(run->text[head_end - 1])) head_end--;
+    if (head_end == 0) return NULL;
+
+    ns_box *head = inline_box_clone_range(run, 0, head_end);
+    ns_box *tail = inline_box_clone_range(run, split, text_len);
+    if (!head || !tail) {
+        ns_box_free(head);
+        ns_box_free(tail);
+        return NULL;
+    }
+
+    head->parent = parent;
+    tail->parent = parent;
+    head->next_sibling = tail;
+    tail->next_sibling = run->next_sibling;
+    if (parent->first_child == run) {
+        parent->first_child = head;
+    } else {
+        for (ns_box *p = parent->first_child; p; p = p->next_sibling)
+            if (p->next_sibling == run) { p->next_sibling = head; break; }
+    }
+    if (parent->last_child == run) parent->last_child = tail;
+    head->x = run->x;
+    head->y = run->y;
+    run->parent = NULL;
+    run->next_sibling = NULL;
+    ns_box_free(run);
+
+    layout_box(head, run_width, style);
+    return head;
 }
 
 static void
@@ -7474,6 +7589,8 @@ layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_s
 {
     if (box_is_query_container(box)) g_cq_seen_container = TRUE;
     if (g_cq_seen_container) cq_set_dims_from_ancestors(box);
+    const GArray *entry_floats = g_bfc_floats;
+    if (box_establishes_bfc(box)) g_bfc_floats = NULL;
     if (box->kind == NS_BOX_BLOCK) {
         layout_block(box, parent_content_width, inherited_style);
     } else if (box->kind == NS_BOX_INLINE) {
@@ -7497,6 +7614,7 @@ layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_s
         box->content_width = parent_content_width;
         box->content_height = 0;
     }
+    g_bfc_floats = entry_floats;
 }
 
 static gboolean
@@ -10074,8 +10192,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 if (++distributable >= 2) break;
         gboolean single_fragmentable_inline =
             box->first_child && !box->first_child->next_sibling &&
-            inline_box_can_fragment_multicol(box->first_child,
-                                             child_inherited, cw);
+            inline_box_can_fragment(box->first_child, child_inherited, cw);
         if (distributable < 2 &&
             !single_fragmentable_inline)
             n_cols = 1;
@@ -10088,6 +10205,15 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     box->columns = n_cols;
 
     GArray *floats = g_array_new(FALSE, FALSE, sizeof(float_ref));
+    const GArray *outer_floats = g_bfc_floats;
+    if (n_cols == 1 && outer_floats) {
+        for (guint i = 0; i < outer_floats->len; i++) {
+            float_ref fr = g_array_index(outer_floats, float_ref, i);
+            fr.intruding = TRUE;
+            g_array_append_val(floats, fr);
+        }
+    }
+    g_bfc_floats = floats;
     double inline_line_top = -1;
 
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
@@ -10135,7 +10261,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 if (y_after_clear > float_y) float_y = y_after_clear;
             }
             double left_off = 0, right_off = 0;
-            floats_offsets_at(floats, float_y, &left_off, &right_off);
+            floats_offsets_at(floats, float_y, inner_x, inner_x + cw,
+                              &left_off, &right_off);
             while ((avail > cw - left_off - right_off) && floats->len > 0) {
                 double next_y = float_y;
                 gboolean advanced = FALSE;
@@ -10149,7 +10276,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 }
                 if (!advanced) break;
                 float_y = next_y;
-                floats_offsets_at(floats, float_y, &left_off, &right_off);
+                floats_offsets_at(floats, float_y, inner_x, inner_x + cw,
+                                  &left_off, &right_off);
             }
             double cw_capped = cw - left_off - right_off
                 - c->margin.left - c->margin.right
@@ -10193,6 +10321,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                     + c->border.top + c->border.bottom
                     + c->margin.bottom,
                 .outer_w = actual_outer,
+                .left_edge = c->x,
+                .right_edge = c->x + actual_outer,
             };
             g_array_append_val(floats, fr);
             continue;
@@ -10213,9 +10343,12 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 if (y_after_clear > cursor_y) cursor_y = y_after_clear;
             }
             double left_off = 0, right_off = 0;
-            floats_offsets_at(floats, cursor_y, &left_off, &right_off);
-            floats_advance_to_readable_width(floats, cw, &cursor_y,
-                                             &left_off, &right_off);
+            if (block_child_avoids_floats(c)) {
+                floats_offsets_at(floats, cursor_y, inner_x, inner_x + cw,
+                                  &left_off, &right_off);
+                floats_advance_to_readable_width(floats, cw, inner_x, &cursor_y,
+                                                 &left_off, &right_off);
+            }
             double cw_avail = cw - left_off - right_off;
             if (cw_avail < 0) cw_avail = 0;
             c->x = inner_x + left_off;
@@ -10230,14 +10363,21 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             cursor_y += prev_margin_bottom;
             prev_margin_bottom = 0;
             double left_off = 0, right_off = 0;
-            floats_offsets_at(floats, cursor_y, &left_off, &right_off);
-            floats_advance_to_readable_width(floats, cw, &cursor_y,
+            floats_offsets_at(floats, cursor_y, inner_x, inner_x + cw,
+                              &left_off, &right_off);
+            floats_advance_to_readable_width(floats, cw, inner_x, &cursor_y,
                                              &left_off, &right_off);
             double cw_avail = cw - left_off - right_off;
             if (cw_avail < 0) cw_avail = 0;
             c->x = inner_x + left_off;
             c->y = cursor_y;
             layout_box(c, cw_avail, child_inherited);
+            if (left_off > 0 || right_off > 0) {
+                ns_box *head = inline_split_below_floats(box, c, floats, inner_x,
+                                                         cw, cursor_y, cw_avail,
+                                                         child_inherited);
+                if (head) c = head;
+            }
             inline_line_top = c->content_height <= 24 ? c->y : -1;
             cursor_y += c->content_height;
         }
@@ -10280,6 +10420,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         double fb = floats_max_bottom(floats);
         if (fb > cursor_y) cursor_y = fb;
     }
+    g_bfc_floats = outer_floats;
     g_array_free(floats, TRUE);
 
     if (n_cols > 1 &&
@@ -11310,6 +11451,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     root->x = 0;
     root->y = 0;
 
+    g_bfc_floats = NULL;
     layout_block(root, viewport_width, NULL);
     gint64 t2 = profile_env ? g_get_monotonic_time() : 0;
     apply_position_offsets(root, viewport_width, root->content_height);
