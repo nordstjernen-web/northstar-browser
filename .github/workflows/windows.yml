@@ -52,6 +52,7 @@ jobs:
             git
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-lld
+            mingw-w64-x86_64-llvm-tools
             mingw-w64-x86_64-pkgconf
             mingw-w64-x86_64-meson
             mingw-w64-x86_64-ninja
@@ -89,6 +90,7 @@ jobs:
         run: |
           clang --version
           ld.lld --version
+          llvm-ar --version | head -2
           ccache --version | head -1
           meson --version
           ninja --version

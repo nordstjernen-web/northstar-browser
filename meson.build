@@ -102,6 +102,18 @@ else
     language: 'c',
   )
 endif
+# binutils ar on Windows has no LLVM plugin, so it archives clang's LTO
+# bitcode without indexing a single symbol and every static library links as
+# if it were empty. Meson picks llvm-ar for clang when it is installed.
+if get_option('b_lto') and cc.get_id() == 'clang' and host_machine.system() == 'windows'
+  llvm_ar = find_program('llvm-ar-' + cc.version().split('.')[0], 'llvm-ar',
+                         required: false)
+  if not llvm_ar.found()
+    error('LTO with clang needs llvm-ar; install it (MSYS2: pacman -S ' +
+          'mingw-w64-x86_64-llvm-tools) or configure with -Db_lto=false')
+  endif
+endif
+
 ns_release_profile = get_option('b_lto') ? 'release (LTO + stripped + hardened)' : 'release (stripped + hardened)'
 message('northstar build profile: ' +
         (ns_is_release ? ns_release_profile
