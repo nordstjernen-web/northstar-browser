@@ -699,6 +699,7 @@ typedef struct ns_css_stylesheet {
     gboolean   has_active_rules;
     gboolean   cached;
     guint      pseudo_mask;
+    guint64    serial;
     struct ns_css_rule_index *index;
 } ns_css_stylesheet;
 

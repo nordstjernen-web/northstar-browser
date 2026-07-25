@@ -11130,13 +11130,18 @@ css_layer_register(ns_css_stylesheet *sh, const char *name)
     return rank;
 }
 
+static char *css_layer_join(const char *parent, const char *child);
+
 static char *
-css_layer_anonymous(ns_css_stylesheet *sh)
+css_layer_anonymous(ns_css_stylesheet *sh, const char *current_layer)
 {
-    char *name = g_strdup_printf("@anon:%p:%u", (void *)sh,
+    char *leaf = g_strdup_printf("@anon:%" G_GUINT64_FORMAT ":%u",
+                                 sh ? sh->serial : 0,
                                  sh && sh->layer_names ? sh->layer_names->len : 0);
-    css_layer_register(sh, name);
-    return name;
+    char *full = css_layer_join(current_layer, leaf);
+    g_free(leaf);
+    css_layer_register(sh, full);
+    return full;
 }
 
 static char *
@@ -11154,7 +11159,7 @@ css_layer_name_from_range(ns_css_stylesheet *sh, const char *current_layer,
     char *name = css_trim_dup_range(start, end);
     if (!name || !*name) {
         g_free(name);
-        return css_layer_anonymous(sh);
+        return css_layer_anonymous(sh, current_layer);
     }
     char *full = current_layer ? css_layer_join(current_layer, name)
                                : g_strdup(name);
@@ -11264,7 +11269,7 @@ css_parse_layer_function(ns_css_stylesheet *sh, const char **pp,
         return name;
     }
     *pp = p;
-    return css_layer_anonymous(sh);
+    return css_layer_anonymous(sh, NULL);
 }
 
 static void
@@ -12404,10 +12409,13 @@ css_flatten_nesting(const char *text, gssize len)
     return g_string_free(out, FALSE);
 }
 
+static guint64 g_stylesheet_serial_next = 1;
+
 ns_css_stylesheet *
 ns_css_stylesheet_parse(const char *text, gssize len_in)
 {
     ns_css_stylesheet *sh = g_new0(ns_css_stylesheet, 1);
+    sh->serial = g_stylesheet_serial_next++;
     sh->rules = g_ptr_array_new_with_free_func((GDestroyNotify)ns_css_rule_free);
     if (!text) return sh;
     if (len_in < 0) len_in = (gssize)strlen(text);
@@ -12616,6 +12624,7 @@ void
 ns_css_stylesheet_force_layer(ns_css_stylesheet *s, const char *layer_name)
 {
     if (!s || !layer_name || !*layer_name) return;
+    s->serial = g_stylesheet_serial_next++;
     GPtrArray *old_names = s->layer_names;
     GHashTable *old_layers = s->layers;
     s->layer_names = NULL;
@@ -15570,9 +15579,89 @@ css_layer_rank_add_sheet(GHashTable *layer_ranks,
         const char *name = g_ptr_array_index(sheet->layer_names, i);
         if (!name || g_hash_table_contains(layer_ranks, name)) continue;
         int rank = (int)g_hash_table_size(layer_ranks);
-        g_hash_table_insert(layer_ranks, (gpointer)name,
+        g_hash_table_insert(layer_ranks, g_strdup(name),
                             GINT_TO_POINTER(rank + 1));
     }
+}
+
+static void
+css_layer_prefix_note(GHashTable *first, const char *name, int index)
+{
+    const char *dot = name;
+    for (;;) {
+        dot = strchr(dot, '.');
+        gsize len = dot ? (gsize)(dot - name) : strlen(name);
+        char *prefix = g_strndup(name, len);
+        gpointer prev = g_hash_table_lookup(first, prefix);
+        if (prev && GPOINTER_TO_INT(prev) - 1 <= index)
+            g_free(prefix);
+        else
+            g_hash_table_insert(first, prefix, GINT_TO_POINTER(index + 1));
+        if (!dot) break;
+        dot++;
+    }
+}
+
+static int
+css_layer_first_index(GHashTable *first, const char *name, gsize len)
+{
+    char *prefix = g_strndup(name, len);
+    gpointer v = g_hash_table_lookup(first, prefix);
+    g_free(prefix);
+    return v ? GPOINTER_TO_INT(v) - 1 : INT_MAX;
+}
+
+static int
+css_layer_name_cmp(gconstpointer a_, gconstpointer b_, gpointer user_data)
+{
+    GHashTable *first = user_data;
+    const char *a = *(const char *const *)a_;
+    const char *b = *(const char *const *)b_;
+    const char *ap = a, *bp = b;
+    for (;;) {
+        const char *ad = strchr(ap, '.');
+        const char *bd = strchr(bp, '.');
+        gsize al = ad ? (gsize)(ad - ap) : strlen(ap);
+        gsize bl = bd ? (gsize)(bd - bp) : strlen(bp);
+        if (al != bl || memcmp(ap, bp, al) != 0) {
+            int ai = css_layer_first_index(first, a, (gsize)(ap - a) + al);
+            int bi = css_layer_first_index(first, b, (gsize)(bp - b) + bl);
+            if (ai != bi) return ai < bi ? -1 : 1;
+            return strcmp(a, b);
+        }
+        if (!ad && !bd) return 0;
+        if (!ad) return 1;
+        if (!bd) return -1;
+        ap = ad + 1;
+        bp = bd + 1;
+    }
+}
+
+static void
+css_layer_ranks_finalize(GHashTable *layer_ranks)
+{
+    if (!layer_ranks || g_hash_table_size(layer_ranks) == 0) return;
+    GHashTable *first = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                              g_free, NULL);
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, layer_ranks);
+    while (g_hash_table_iter_next(&it, &k, &v))
+        css_layer_prefix_note(first, k, GPOINTER_TO_INT(v) - 1);
+
+    GPtrArray *names = g_ptr_array_new();
+    g_hash_table_iter_init(&it, first);
+    while (g_hash_table_iter_next(&it, &k, NULL))
+        g_ptr_array_add(names, k);
+    g_ptr_array_sort_with_data(names, css_layer_name_cmp, first);
+
+    g_hash_table_remove_all(layer_ranks);
+    for (guint i = 0; i < names->len; i++)
+        g_hash_table_insert(layer_ranks,
+                            g_strdup(g_ptr_array_index(names, i)),
+                            GINT_TO_POINTER((int)i + 1));
+    g_ptr_array_free(names, TRUE);
+    g_hash_table_destroy(first);
 }
 
 static int
@@ -17904,10 +17993,10 @@ incr_sheet_sig(const ns_css_stylesheet *ua,
                const ns_css_stylesheet *const *author, gsize n)
 {
     guint64 h = 1469598103934665603ULL;
-    guint64 vals[2] = { (guint64)(gsize)(gconstpointer)ua, (guint64)n };
+    guint64 vals[2] = { ua ? ua->serial : 0, (guint64)n };
     for (int i = 0; i < 2; i++) { h ^= vals[i]; h *= 1099511628211ULL; }
     for (gsize i = 0; i < n; i++) {
-        h ^= (guint64)(gsize)(gconstpointer)author[i];
+        h ^= author[i] ? author[i]->serial : 0;
         h *= 1099511628211ULL;
     }
     return h;
@@ -18897,10 +18986,12 @@ ns_css_compute(ns_node *doc,
         (void)ns_css_rule_index_ensure(author_sheets[i]);
     gint64 t_idx = profile ? g_get_monotonic_time() : 0;
 
-    GHashTable *layer_ranks = g_hash_table_new(g_str_hash, g_str_equal);
+    GHashTable *layer_ranks = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                    g_free, NULL);
     css_layer_rank_add_sheet(layer_ranks, cached_ua);
     for (gsize i = 0; i < n_sheets; i++)
         css_layer_rank_add_sheet(layer_ranks, author_sheets[i]);
+    css_layer_ranks_finalize(layer_ranks);
 
     g_registered_props = g_hash_table_new(g_str_hash, g_str_equal);
     css_collect_property_rules(g_registered_props, cached_ua);
