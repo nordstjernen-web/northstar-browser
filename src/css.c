@@ -13366,6 +13366,15 @@ ns_dir_is_rtl_script(GUnicodeScript s)
     }
 }
 
+static gboolean
+ns_dir_attr_sets_direction(const char *dir)
+{
+    return dir &&
+        (g_ascii_strcasecmp(dir, "ltr") == 0 ||
+         g_ascii_strcasecmp(dir, "rtl") == 0 ||
+         g_ascii_strcasecmp(dir, "auto") == 0);
+}
+
 static const char *
 ns_dir_first_strong(const ns_node *n, int depth)
 {
@@ -13388,7 +13397,7 @@ ns_dir_first_strong(const ns_node *n, int depth)
                g_ascii_strcasecmp(c->name, "style") == 0 ||
                g_ascii_strcasecmp(c->name, "textarea") == 0 ||
                g_ascii_strcasecmp(c->name, "bdi") == 0)) ||
-             ns_element_get_attr(c, "dir")))
+             ns_dir_attr_sets_direction(ns_element_get_attr(c, "dir"))))
             continue;
         const char *d = ns_dir_first_strong(c, depth + 1);
         if (d) return d;
@@ -13451,9 +13460,16 @@ ns_css_node_dir(const ns_node *el)
             if (g_ascii_strcasecmp(dir, "rtl") == 0) return "rtl";
             if (g_ascii_strcasecmp(dir, "auto") == 0)
                 return ns_dir_auto_resolve(n);
-        } else if (is_bdi) {
+        }
+        if (is_bdi) {
             const char *d = ns_dir_first_strong(n, 0);
             return d ? d : "ltr";
+        }
+        if (n == el && n->name &&
+            g_ascii_strcasecmp(n->name, "input") == 0) {
+            const char *type = ns_element_get_attr(n, "type");
+            if (type && g_ascii_strcasecmp(type, "tel") == 0)
+                return "ltr";
         }
     }
     return "ltr";
