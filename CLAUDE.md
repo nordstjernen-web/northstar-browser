@@ -10,6 +10,8 @@ project](https://github.com/nordstjernen-web/nordstjernen). It carries
 **no upstream browser engine** — the HTML/CSS/JS/layout engine is
 hand-written, not forked from Gecko, WebKit, or Blink.
 
+Update Changelog.md
+
 ## Minimalist GPL edition — scope (authoritative)
 
 This is the minimalist desktop edition. The following are **not** part of
