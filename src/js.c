@@ -202,6 +202,7 @@ static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
 static void ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe,
                                             gboolean force);
 static void ns_js_schedule_static_iframes(ns_js *js, ns_node *n);
+static void ns_js_promote_deferred_iframes(ns_js *js);
 static void ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin);
 static void ns_input_resanitize_value(ns_node *el);
 static char *ns_input_sanitize_value(const ns_node *el, const char *value);
@@ -25625,6 +25626,7 @@ ns_js_run_animation_frame(ns_js *js)
     ns_js_flush_scrollend(js);
     ns_js_flush_ready_images(js);
     ns_drain_microtasks(js);
+    ns_js_promote_deferred_iframes(js);
     ns_js_process_pending_iframes(js);
     ns_drain_microtasks(js);
     if (!js->raf_pending || js->raf_pending->len == 0)
@@ -30558,6 +30560,7 @@ ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
     js->layout_root = root;
     ns_js_sync_window_metrics(js);
     if (root) {
+        ns_js_promote_deferred_iframes(js);
         ns_intersection_observers_tick(js);
         ns_resize_observers_tick(js);
     }
@@ -47509,6 +47512,8 @@ ns_js_reset_runtime_state(ns_js *js)
     js->draining_microtasks = FALSE;
     if (js->async_script_roots)
         g_ptr_array_set_size(js->async_script_roots, 0);
+    if (js->deferred_iframe_loads)
+        g_ptr_array_set_size(js->deferred_iframe_loads, 0);
 
     if (js->pinned_wrappers_set) {
         GList *pinned = g_hash_table_get_keys(js->pinned_wrappers_set);
@@ -48251,6 +48256,10 @@ ns_js_free(ns_js *js)
     if (js->pending_iframe_loads) {
         g_ptr_array_free(js->pending_iframe_loads, TRUE);
         js->pending_iframe_loads = NULL;
+    }
+    if (js->deferred_iframe_loads) {
+        g_ptr_array_free(js->deferred_iframe_loads, TRUE);
+        js->deferred_iframe_loads = NULL;
     }
     if (js->orphan_nodes) {
         GList *list = g_hash_table_get_keys(js->orphan_nodes);
@@ -49777,8 +49786,8 @@ static void
 ns_js_drain_async_script_roots(ns_js *js)
 {
     if (!js || !js->async_script_roots || js->halted) return;
-    guint batch = js->async_script_roots->len;
-    while (js->async_script_roots->len > 0 && batch-- > 0 && !js->halted) {
+    guint scanned = js->async_script_roots->len;
+    while (js->async_script_roots->len > 0 && scanned-- > 0 && !js->halted) {
         ns_node *root = g_ptr_array_index(js->async_script_roots, 0);
         g_ptr_array_remove_index(js->async_script_roots, 0);
         if (!ns_js_root_connected(js, root)) continue;
@@ -49792,6 +49801,7 @@ ns_js_drain_async_script_roots(ns_js *js)
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, origin);
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, origin);
         g_array_free(tasks, TRUE);
+        break;
     }
 }
 
@@ -49859,8 +49869,8 @@ static void
 ns_js_drain_deferred_scripts(ns_js *js)
 {
     if (!js || !js->deferred_script_roots) return;
-    int safety = 100000;
-    while (js->deferred_script_roots->len > 0 && !js->halted && safety-- > 0) {
+    guint scanned = js->deferred_script_roots->len;
+    while (js->deferred_script_roots->len > 0 && !js->halted && scanned-- > 0) {
         ns_node *root = g_ptr_array_index(js->deferred_script_roots, 0);
         g_ptr_array_remove_index(js->deferred_script_roots, 0);
         if (!ns_js_root_connected(js, root)) continue;
@@ -49885,6 +49895,7 @@ ns_js_drain_deferred_scripts(ns_js *js)
             ns_js_load_stylesheet_element(js, g_ptr_array_index(sheets, i),
                                           origin);
         g_ptr_array_free(sheets, TRUE);
+        break;
     }
 }
 
@@ -49941,8 +49952,27 @@ ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe, gboolean force)
     if (!js || !iframe || js->halted) return;
     if (!ns_frame_src_attr(iframe)) return;
     if (!force && ns_js_iframe_source_loaded(js, iframe)) return;
+    const char *loading = ns_element_get_attr(iframe, "loading");
+    gboolean lazy = loading && g_ascii_strcasecmp(loading, "lazy") == 0;
+    if (!force && lazy && js->iframe_load_depth == 0) {
+        const ns_box *box = js->layout_root
+            ? ns_box_find_by_dom(js->layout_root, iframe) : NULL;
+        double limit = js->layout_root
+            ? js->layout_root->scroll_y + ns_css_viewport_h() + 1500.0 : 0;
+        if (!box || box->y > limit) {
+            if (!js->deferred_iframe_loads)
+                js->deferred_iframe_loads = g_ptr_array_new();
+            for (guint i = 0; i < js->deferred_iframe_loads->len; i++)
+                if (g_ptr_array_index(js->deferred_iframe_loads, i) == iframe)
+                    return;
+            g_ptr_array_add(js->deferred_iframe_loads, iframe);
+            return;
+        }
+    }
     if (force)
         ns_element_remove_attr(iframe, "data-nd-frame-loaded");
+    if (js->deferred_iframe_loads)
+        g_ptr_array_remove(js->deferred_iframe_loads, iframe);
     if (!js->pending_iframe_loads)
         js->pending_iframe_loads = g_ptr_array_new();
     for (guint i = 0; i < js->pending_iframe_loads->len; i++)
@@ -49955,6 +49985,24 @@ static void
 ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe)
 {
     ns_js_schedule_iframe_load_full(js, iframe, FALSE);
+}
+
+static void
+ns_js_promote_deferred_iframes(ns_js *js)
+{
+    if (!js || !js->layout_root || !js->deferred_iframe_loads) return;
+    guint i = 0;
+    while (i < js->deferred_iframe_loads->len) {
+        ns_node *iframe = g_ptr_array_index(js->deferred_iframe_loads, i);
+        const ns_box *box = ns_box_find_by_dom(js->layout_root, iframe);
+        double limit = js->layout_root->scroll_y + ns_css_viewport_h() + 1500.0;
+        if (!box || box->y > limit) {
+            i++;
+            continue;
+        }
+        g_ptr_array_remove_index(js->deferred_iframe_loads, i);
+        ns_js_schedule_iframe_load(js, iframe);
+    }
 }
 
 static gboolean
@@ -49978,13 +50026,20 @@ ns_subtree_has_wrapper(ns_node *root)
 static void
 ns_js_purge_subtree_pending_iframes(ns_js *js, ns_node *root)
 {
-    if (!js || !js->pending_iframe_loads || !root) return;
-    guint i = 0;
-    while (i < js->pending_iframe_loads->len) {
-        if (g_ptr_array_index(js->pending_iframe_loads, i) == root)
-            g_ptr_array_remove_index(js->pending_iframe_loads, i);
-        else
-            i++;
+    if (!js || !root) return;
+    GPtrArray *queues[] = {
+        js->pending_iframe_loads,
+        js->deferred_iframe_loads,
+    };
+    for (guint q = 0; q < G_N_ELEMENTS(queues); q++) {
+        if (!queues[q]) continue;
+        guint i = 0;
+        while (i < queues[q]->len) {
+            if (g_ptr_array_index(queues[q], i) == root)
+                g_ptr_array_remove_index(queues[q], i);
+            else
+                i++;
+        }
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_js_purge_subtree_pending_iframes(js, c);
@@ -51162,11 +51217,10 @@ ns_js_process_pending_iframes(ns_js *js)
 {
     if (!js || !js->pending_iframe_loads || js->halted) return;
     if (js->iframe_load_depth > 0 || js->eval_depth > 0) return;
-    while (js->pending_iframe_loads->len > 0) {
-        ns_node *iframe = g_ptr_array_index(js->pending_iframe_loads, 0);
-        g_ptr_array_remove_index(js->pending_iframe_loads, 0);
-        ns_js_load_iframe_now(js, iframe);
-    }
+    if (js->pending_iframe_loads->len == 0) return;
+    ns_node *iframe = g_ptr_array_index(js->pending_iframe_loads, 0);
+    g_ptr_array_remove_index(js->pending_iframe_loads, 0);
+    ns_js_load_iframe_now(js, iframe);
 }
 
 static void
