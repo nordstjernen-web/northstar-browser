@@ -5280,6 +5280,132 @@ ns_fetch_ctx_free(gpointer data)
     g_free(ctx);
 }
 
+#define NS_PRELOAD_STORE_MAX_ENTRIES 32
+#define NS_PRELOAD_STORE_MAX_BYTES   (16u * 1024u * 1024u)
+#define NS_PRELOAD_STORE_TTL_US      (20 * G_USEC_PER_SEC)
+
+typedef struct {
+    ns_response *resp;
+    gint64       stored_us;
+    gboolean     pending;
+} ns_preload_entry;
+
+static GMutex      g_preload_mutex;
+static GHashTable *g_preload_store;
+static guint       g_preload_bytes;
+
+static void
+ns_preload_entry_free(gpointer p)
+{
+    ns_preload_entry *e = p;
+    if (!e) return;
+    if (e->resp) {
+        guint len = e->resp->body ? e->resp->body->len : 0u;
+        g_preload_bytes = (g_preload_bytes > len) ? g_preload_bytes - len : 0u;
+        ns_response_free(e->resp);
+    }
+    g_free(e);
+}
+
+void
+ns_net_preload_begin(const char *url)
+{
+    if (!url) return;
+    g_mutex_lock(&g_preload_mutex);
+    if (!g_preload_store)
+        g_preload_store = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                g_free, ns_preload_entry_free);
+    if (!g_hash_table_contains(g_preload_store, url) &&
+        g_hash_table_size(g_preload_store) < NS_PRELOAD_STORE_MAX_ENTRIES) {
+        ns_preload_entry *e = g_new0(ns_preload_entry, 1);
+        e->pending = TRUE;
+        e->stored_us = g_get_monotonic_time();
+        g_hash_table_insert(g_preload_store, g_strdup(url), e);
+    }
+    g_mutex_unlock(&g_preload_mutex);
+}
+
+void
+ns_net_preload_put(const char *url, const ns_response *resp)
+{
+    if (!url) return;
+    gboolean storable = resp && resp->status == 200 && !resp->error &&
+                        resp->body && resp->body->len <= NS_PRELOAD_STORE_MAX_BYTES;
+
+    g_mutex_lock(&g_preload_mutex);
+    if (!g_preload_store)
+        g_preload_store = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                g_free, ns_preload_entry_free);
+    ns_preload_entry *e = g_hash_table_lookup(g_preload_store, url);
+    if (e && !e->pending) {
+        g_mutex_unlock(&g_preload_mutex);
+        return;
+    }
+    if (!storable ||
+        g_preload_bytes + resp->body->len > NS_PRELOAD_STORE_MAX_BYTES) {
+        if (e) g_hash_table_remove(g_preload_store, url);
+        g_mutex_unlock(&g_preload_mutex);
+        return;
+    }
+    if (!e) {
+        if (g_hash_table_size(g_preload_store) >= NS_PRELOAD_STORE_MAX_ENTRIES) {
+            g_mutex_unlock(&g_preload_mutex);
+            return;
+        }
+        e = g_new0(ns_preload_entry, 1);
+        g_hash_table_insert(g_preload_store, g_strdup(url), e);
+    }
+    e->pending = FALSE;
+    e->resp = ns_response_copy(resp);
+    e->stored_us = g_get_monotonic_time();
+    g_preload_bytes += resp->body->len;
+    g_mutex_unlock(&g_preload_mutex);
+}
+
+gboolean
+ns_net_preload_has(const char *url)
+{
+    if (!url) return FALSE;
+    g_mutex_lock(&g_preload_mutex);
+    gboolean found = g_preload_store &&
+                     g_hash_table_contains(g_preload_store, url);
+    g_mutex_unlock(&g_preload_mutex);
+    return found;
+}
+
+ns_response *
+ns_net_preload_take(const char *url)
+{
+    if (!url) return NULL;
+    ns_response *out = NULL;
+    g_mutex_lock(&g_preload_mutex);
+    if (g_preload_store) {
+        ns_preload_entry *e = g_hash_table_lookup(g_preload_store, url);
+        if (e && !e->pending) {
+            if (e->resp &&
+                g_get_monotonic_time() - e->stored_us <= NS_PRELOAD_STORE_TTL_US) {
+                out = e->resp;
+                e->resp = NULL;
+                guint len = out->body ? out->body->len : 0u;
+                g_preload_bytes = (g_preload_bytes > len)
+                                      ? g_preload_bytes - len : 0u;
+            }
+            g_hash_table_remove(g_preload_store, url);
+        }
+    }
+    g_mutex_unlock(&g_preload_mutex);
+    return out;
+}
+
+void
+ns_net_preload_clear(void)
+{
+    g_mutex_lock(&g_preload_mutex);
+    if (g_preload_store) g_hash_table_remove_all(g_preload_store);
+    g_preload_bytes = 0;
+    g_mutex_unlock(&g_preload_mutex);
+}
+
 static GMutex     g_fetch_coalesce_mutex;
 static GHashTable *g_fetch_coalesce;
 

@@ -23,6 +23,18 @@ Significant changes in each release:
   wrapped line that contains them. Multi-line form controls and table
   cells now reserve the correct vertical space instead of allowing later
   lines to overlap following content, fixing the Google footer position.
+* The speculative preloader's bytes are handed to the loader that
+  needs them instead of being thrown away. `ns_engine_speculative_preload`
+  fetched every script and stylesheet on the page and freed each
+  response; the stylesheet loader and the script loader — which reach
+  the network through different entry points — then fetched the same
+  URLs again, so a page with eight scripts and five stylesheets issued
+  35 requests for 14 resources. Preload responses are now parked in a
+  small capped, expiring store keyed by URL, the two loaders take from
+  it before going to the network, and the script prefetcher skips URLs
+  the preloader is already fetching. The same page now issues 15
+  requests, and a Wikipedia article drops from three duplicated
+  subresources to none.
 * Concurrent fetches of the same subresource share one network
   request. Three separate paths ask for a page's scripts and
   stylesheets — the speculative preloader, the external-script
