@@ -4,6 +4,21 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* Container queries no longer defeat incremental restyle. ns_css_compute
+  runs twice per relayout when a page has containers, and the second
+  pass — the one with the container map set — failed the incr_want test
+  and then took the branch that frees the previous pass's computed
+  styles. The next relayout therefore always started with an empty
+  cache, so any page using `@container` re-cascaded every element from
+  scratch, forever. The cache is now only discarded when incremental
+  restyle is genuinely unusable, not merely because this is the
+  container pass. Rules carrying a container condition also no longer
+  contribute conservative invalidation keys: container_cond_matches()
+  returns false whenever there is no container map, so those rules
+  cannot affect the first pass, which is the only one incremental
+  restyle runs in. On a 1610-element container-query page over 13
+  relayouts, cascade time drops from 39ms to 8ms and style reuse goes
+  from 0 to 1609 of 1610 elements per pass.
 * The intrinsic width of a replaced box prefers its specified `width`
   and its decoded intrinsic size over the 200x150 placeholder an
   `<img>` without `width`/`height` attributes is given while it loads.

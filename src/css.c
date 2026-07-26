@@ -18877,11 +18877,10 @@ incr_collect_has_cq_keys(const ns_css_stylesheet *sh)
     for (guint ri = 0; ri < sh->rules->len; ri++) {
         const ns_css_rule *r = g_ptr_array_index(sh->rules, ri);
         if (!r || !r->selectors) continue;
-        gboolean cq = (r->container_condition != NULL);
         for (guint si = 0; si < r->selectors->len; si++) {
             const ns_css_selector *sel = g_ptr_array_index(r->selectors, si);
             if (!sel || !sel->compounds || sel->compounds->len == 0) continue;
-            if (!cq && !incr_selector_uses_has(sel)) continue;
+            if (!incr_selector_uses_has(sel)) continue;
             const ns_css_simple *subj =
                 g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
             if (!incr_add_compound_keys(g_has_cq_keys, subj))
@@ -19937,9 +19936,10 @@ ns_css_compute(ns_node *doc,
         g_incr_eligible = !g_has_cq_loose;
         g_incr_has_sig = sig;
     }
-    gboolean incr_want = g_getenv("NS_NO_INCR_RESTYLE") == NULL
-        && g_incr_eligible && g_cq_map == NULL
+    gboolean incr_usable = g_getenv("NS_NO_INCR_RESTYLE") == NULL
+        && g_incr_eligible
         && fabs(g_incr_zoom - 1.0) <= 0.001;
+    gboolean incr_want = incr_usable && g_cq_map == NULL;
     g_incr_pass_active = incr_want
         && g_incr_prev_styles != NULL
         && g_incr_prev_doc == doc
@@ -19978,7 +19978,7 @@ ns_css_compute(ns_node *doc,
         if (g_getenv("NS_PROFILE"))
             g_printerr("[incr] active=%d reused=%u recomputed=%u\n",
                        g_incr_pass_active, g_incr_reused, g_incr_recomputed);
-    } else if (g_incr_prev_styles) {
+    } else if (g_incr_prev_styles && !incr_usable) {
         g_hash_table_destroy(g_incr_prev_styles);
         g_incr_prev_styles = NULL;
         g_incr_prev_doc = NULL;
