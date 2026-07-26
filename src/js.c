@@ -1,5 +1,5 @@
-/* Northstar â€” JavaScript engine binding (QuickJS).
- * Copyright 2026 Andreas RÃ¸sdal
+/* Northstar — JavaScript engine binding (QuickJS).
+ * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -444,7 +444,7 @@ ns_js_interrupt_cb(JSRuntime *rt, void *opaque)
     gint64 now = g_get_monotonic_time();
     if (js->js_monitor_deadline_us != 0 && now > js->js_monitor_deadline_us) {
         js->halted = TRUE;
-        g_warning("[js] monitor: page JavaScript ran longer than %d s â€” halting it",
+        g_warning("[js] monitor: page JavaScript ran longer than %d s — halting it",
                   (int)(NS_JS_MONITOR_LIMIT_US / 1000000LL));
         return 1;
     }
@@ -487,19 +487,10 @@ ns_js_pumped_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     if (pf->loop) g_main_loop_quit(pf->loop);
 }
 
-static const char *const ns_js_script_accept_headers[] = {
-    "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",
-    NULL
-};
-
 static ns_response *
 ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
                      const char *const *headers, GError **error)
 {
-    ns_debug_log_emit(NS_DLOG_NET, "SITE", "js_fetch_resource %s", url);
-    ns_response *preloaded = ns_net_preload_take(url);
-    if (preloaded) return preloaded;
-
     if (!js || js->worker_host)
         return ns_net_request_blocking(url, top_url, "GET", NULL, 0, NULL,
                                        headers, NULL, error);
@@ -1236,8 +1227,8 @@ ns_timer_fire(gpointer data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
 
-    /* The callback can clear its own timer (clearInterval(myId)) â€” or, via a
-       re-entrant relayout/fetch, another timer that shares state â€” which would
+    /* The callback can clear its own timer (clearInterval(myId)) — or, via a
+       re-entrant relayout/fetch, another timer that shares state — which would
        drop the last reference and free the function while it is still running.
        Hold owned copies of the callback, its code and its extra args for the
        duration of the call so the engine never executes freed memory. */
@@ -36504,7 +36495,7 @@ ns_js_image_ready_idle(gpointer data)
     g_free(abs_url);
     ns_image *img = r->img;
     if (img && img->failed && js->log_cb && img->http_status != 204) {
-        char *line = g_strdup_printf("[image] error: %s â€” %s (HTTP %ld)",
+        char *line = g_strdup_printf("[image] error: %s — %s (HTTP %ld)",
             img->url ? img->url : "(no url)",
             img->error ? img->error : "(no error msg)",
             img->http_status);
@@ -49295,26 +49286,15 @@ typedef struct ns_prefetch_state {
     int        pending;
 } ns_prefetch_state;
 
-typedef struct ns_prefetch_item {
-    ns_prefetch_state *st;
-    char              *url;
-} ns_prefetch_item;
-
 static void
 ns_js_prefetch_done(GObject *src, GAsyncResult *res, gpointer user_data)
 {
     (void)src;
-    ns_prefetch_item *item = user_data;
-    ns_prefetch_state *st = item->st;
+    ns_prefetch_state *st = user_data;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(res, &err);
-    if (resp) {
-        ns_net_preload_put(item->url, resp);
-        ns_response_free(resp);
-    }
+    if (resp) ns_response_free(resp);
     g_clear_error(&err);
-    g_free(item->url);
-    g_free(item);
     if (--st->pending <= 0)
         g_main_loop_quit(st->loop);
 }
@@ -49341,12 +49321,7 @@ ns_js_prefetch_external_scripts(ns_js *js, const ns_node *doc,
     gint64 t0 = g_get_monotonic_time();
     for (guint i = 0; i < urls->len; i++) {
         const char *u = g_ptr_array_index(urls, i);
-        ns_prefetch_item *item = g_new0(ns_prefetch_item, 1);
-        item->st = &st;
-        item->url = g_strdup(u);
-        ns_net_request_async(u, origin, "GET", NULL, 0, NULL,
-                             ns_js_script_accept_headers, NULL,
-                             ns_js_prefetch_done, item);
+        ns_net_fetch_async(u, origin, NULL, ns_js_prefetch_done, &st);
     }
     gboolean saved = js->in_pump;
     js->in_pump = TRUE;
@@ -49562,9 +49537,12 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         }
         GError *err = NULL;
         gboolean loaded = FALSE;
+        static const char *const script_headers[] = {
+            "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",
+            NULL
+        };
         ns_response *resp = ns_js_fetch_resource(js, abs_url, origin,
-                                                 ns_js_script_accept_headers,
-                                                 &err);
+                                                 script_headers, &err);
         if (resp && ns_net_header_is_nosniff(resp->x_content_type_options) &&
             !content_type_is_javascript(resp->content_type)) {
             if (js->log_cb) {
