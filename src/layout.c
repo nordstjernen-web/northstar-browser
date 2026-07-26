@@ -6732,6 +6732,30 @@ inline_atomic_measure_basis(const ns_box *box)
 }
 
 static double
+replaced_box_intrinsic_width(const ns_box *box)
+{
+    double w = -1;
+    const ns_css_value *wv = box->style ? box->style->values[NS_CSS_WIDTH] : NULL;
+    if (wv && wv->kind == NS_CSS_V_LENGTH &&
+        (wv->u.length.unit == NS_CSS_UNIT_PX ||
+         wv->u.length.unit == NS_CSS_UNIT_NUMBER) && wv->u.length.v > 0)
+        w = wv->u.length.v;
+    const ns_image *img = box->media ? (const ns_image *)box->media->image : NULL;
+    if (w < 0 && img && img->loaded && img->natural_width > 0)
+        w = (double)img->natural_width;
+    if (w < 0 && box->content_width > 0) w = box->content_width;
+    if (w < 0) w = 200;
+    const ns_css_value *mxw = box->style
+        ? box->style->values[NS_CSS_MAX_WIDTH] : NULL;
+    if (mxw && mxw->kind == NS_CSS_V_LENGTH &&
+        (mxw->u.length.unit == NS_CSS_UNIT_PX ||
+         mxw->u.length.unit == NS_CSS_UNIT_NUMBER) &&
+        mxw->u.length.v > 0 && w > mxw->u.length.v)
+        w = mxw->u.length.v;
+    return w;
+}
+
+static double
 measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
     if (!box) return 0;
@@ -6811,7 +6835,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         return pw;
     }
     if (box->kind == NS_BOX_IMAGE || box->kind == NS_BOX_VIDEO) {
-        return box->content_width > 0 ? box->content_width : 200;
+        return replaced_box_intrinsic_width(box);
     }
     if (box->kind == NS_BOX_TEXT) {
         return box->content_width > 0 ? box->content_width : 0;
@@ -6923,7 +6947,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         return pw;
     }
     if (box->kind == NS_BOX_IMAGE || box->kind == NS_BOX_VIDEO)
-        return box->content_width > 0 ? box->content_width : 200;
+        return replaced_box_intrinsic_width(box);
     if (box->kind == NS_BOX_TEXT)
         return box->content_width > 0 ? box->content_width : 0;
     const ns_style *child_style = box->style ? box->style : parent_style;

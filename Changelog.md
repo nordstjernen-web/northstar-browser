@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* The intrinsic width of a replaced box prefers its specified `width`
+  and its decoded intrinsic size over the 200x150 placeholder an
+  `<img>` without `width`/`height` attributes is given while it loads.
+  Shrink-to-fit contexts — a floated `<a>` around a thumbnail above all
+  — measured the placeholder, so the float reserved 200px while the
+  image painted at its real width and the text ran underneath it.
 * A flex item in a column container is clamped by its own `max-height`
   and floored by its own `min-height`. Only an explicit `min-height` was
   consulted, and only to keep a shrinking item from collapsing, so
