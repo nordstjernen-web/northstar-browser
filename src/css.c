@@ -8362,6 +8362,12 @@ substitute_vars_with(const char *vtext, const ns_var_map *map, int depth)
     return out;
 }
 
+char *
+ns_css_resolve_style_vars(const char *text, const ns_style *style)
+{
+    return substitute_vars_with(text, style ? style->vars : NULL, 0);
+}
+
 static gboolean
 is_color_keyword(const char *s)
 {

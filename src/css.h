@@ -1000,6 +1000,7 @@ int ns_css_text_orientation(const ns_style *s);
 
 const char *ns_var_map_lookup(const struct ns_var_map *m, const char *name);
 GPtrArray  *ns_var_map_names(const struct ns_var_map *m);
+char *ns_css_resolve_style_vars(const char *text, const ns_style *style);
 
 void ns_css_style_effective_transform(const ns_style *st,
                                       const ns_css_transform *transform_override,
