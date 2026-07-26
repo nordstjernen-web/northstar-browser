@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* Inline atomic boxes contribute their full height to the individual
+  wrapped line that contains them. Multi-line form controls and table
+  cells now reserve the correct vertical space instead of allowing later
+  lines to overlap following content, fixing the Google footer position.
 * Concurrent fetches of the same subresource share one network
   request. Three separate paths ask for a page's scripts and
   stylesheets — the speculative preloader, the external-script

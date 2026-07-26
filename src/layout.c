@@ -5807,7 +5807,27 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     if (line_count < 1) line_count = 1;
     double lh_default = inline_line_height(parent_style);
     double lh_control = inline_control_line_height(box, lh_default);
-    double expected = line_count * lh_control;
+    double *line_heights = g_new(double, line_count);
+    for (int i = 0; i < line_count; i++) line_heights[i] = lh_control;
+    if (box->inline_atomics) {
+        for (guint i = 0; i < box->inline_atomics->len; i++) {
+            const ns_inline_atomic *a =
+                &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+            const ns_box *atomic = a->box;
+            if (!atomic) continue;
+            int line = 0;
+            pango_layout_index_to_line_x(layout, (int)a->byte_off,
+                                         FALSE, &line, NULL);
+            if (line < 0 || line >= line_count) continue;
+            double outer = atomic->content_height
+                + atomic->padding.top + atomic->padding.bottom
+                + atomic->border.top + atomic->border.bottom
+                + atomic->margin.top + atomic->margin.bottom;
+            if (outer > line_heights[line]) line_heights[line] = outer;
+        }
+    }
+    double expected = 0;
+    for (int i = 0; i < line_count; i++) expected += line_heights[i];
     box->content_width  = content_width;
     const ns_css_value *lhv = parent_style
         ? parent_style->values[NS_CSS_LINE_HEIGHT] : NULL;
@@ -5837,12 +5857,19 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             if (!a->box) continue;
             PangoRectangle pos;
             pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+            int line = 0;
+            pango_layout_index_to_line_x(layout, (int)a->byte_off,
+                                         FALSE, &line, NULL);
+            double line_y = 0;
+            for (int j = 0; j < line && j < line_count; j++)
+                line_y += line_heights[j];
             double nx = text_x0 + (double)pos.x / PANGO_SCALE + a->box->margin.left;
-            double ny = box->y + (double)pos.y / PANGO_SCALE + a->box->margin.top;
+            double ny = box->y + line_y + a->box->margin.top;
             shift_box_tree(a->box, nx - a->box->x, ny - a->box->y);
         }
     }
 
+    g_free(line_heights);
     g_object_unref(layout);
 }
 
