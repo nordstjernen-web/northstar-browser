@@ -675,8 +675,7 @@ browser_content_type_starts(const char *content_type, const char *prefix)
 static gboolean
 browser_content_type_is_html(const char *content_type)
 {
-    return browser_content_type_starts(content_type, "text/html") ||
-           browser_content_type_starts(content_type, "application/xhtml");
+    return browser_content_type_starts(content_type, "text/html");
 }
 
 static gboolean
@@ -685,17 +684,6 @@ browser_content_type_is_json(const char *content_type)
     return browser_content_type_starts(content_type, "application/json") ||
            browser_content_type_starts(content_type, "text/json") ||
            (content_type && strstr(content_type, "+json") != NULL);
-}
-
-static gboolean
-browser_content_type_is_xml(const char *content_type)
-{
-    if (!content_type) return FALSE;
-    if (strstr(content_type, "xhtml") || strstr(content_type, "svg"))
-        return FALSE;
-    return browser_content_type_starts(content_type, "text/xml") ||
-           browser_content_type_starts(content_type, "application/xml") ||
-           strstr(content_type, "+xml") != NULL;
 }
 
 static char *
@@ -727,7 +715,8 @@ browser_prepare_document_response(ns_response *resp)
         return;
     const char *final_url = resp->final_url ? resp->final_url : "";
     char *html = NULL;
-    if (browser_content_type_starts(resp->content_type, "image/")) {
+    if (browser_content_type_starts(resp->content_type, "image/") &&
+        !ns_html_mime_is_xml(resp->content_type)) {
         html = ns_html_image_document(final_url);
     } else if (browser_content_type_is_json(resp->content_type)) {
         char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
@@ -737,16 +726,9 @@ browser_prepare_document_response(ns_response *resp)
                                      decoded ? strlen(decoded) : 0);
         if (!html) html = browser_text_document(final_url, decoded);
         g_free(decoded);
-    } else if (browser_content_type_is_xml(resp->content_type)) {
-        char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
-                                                 resp->body->len,
-                                                 resp->content_type, NULL);
-        html = ns_html_xml_document(final_url, decoded,
-                                    decoded ? strlen(decoded) : 0);
-        if (!html) html = browser_text_document(final_url, decoded);
-        g_free(decoded);
     } else if (browser_content_type_starts(resp->content_type, "text/") &&
-               !browser_content_type_is_html(resp->content_type)) {
+               !browser_content_type_is_html(resp->content_type) &&
+               !ns_html_mime_is_xml(resp->content_type)) {
         char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
                                                  resp->body->len,
                                                  resp->content_type, NULL);
@@ -799,7 +781,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
                        double viewport_height, int settle_ms,
                        gboolean bfcache_ok, char *refresh_hdr,
                        char *doc_language, char *csp_header, char *doc_charset,
-                       const char *url,
+                       const char *url, const char *content_type,
                        const ns_js_navigation_timing *navigation_timing)
 {
     int vw = viewport_width > 0 ? viewport_width : 1000;
@@ -845,7 +827,8 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_audio_cb(b->js, browser_js_audio, b);
         ns_js_add_csp_header(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
-        ns_js_run_scripts_in_doc(b->js, doc, base, b->doc_charset);
+        ns_js_run_scripts_in_doc(b->js, doc, base, b->doc_charset,
+                                 content_type);
     }
     g_free(csp_header);
 
@@ -903,7 +886,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             return browser_build_from_doc(doc, g_strdup(url), viewport_width,
                                           viewport_height, settle_ms, FALSE,
                                           NULL, NULL, NULL, g_strdup("UTF-8"),
-                                          url, NULL);
+                                          url, "text/html", NULL);
         }
         g_free(host);
     }
@@ -991,8 +974,10 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
                                              resp->body->len,
                                              resp->content_type,
                                              &doc_charset);
-    ns_node *doc = ns_html_parse(decoded ? decoded : "",
-                                 decoded ? (gssize)strlen(decoded) : 0);
+    char *doc_content_type = ns_html_mime_essence(resp->content_type);
+    ns_node *doc = ns_html_parse_document(
+        decoded ? decoded : "", decoded ? (gssize)strlen(decoded) : 0,
+        doc_content_type);
     g_free(decoded);
     int sec = resp->security;
     if (sec == NS_SEC_NONE) {
@@ -1022,7 +1007,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
                                            viewport_height, settle_ms,
                                            bfcache_ok, refresh_hdr, doc_language,
                                            csp_header, doc_charset, url,
+                                           doc_content_type,
                                            &navigation_timing);
+    g_free(doc_content_type);
     if (b) {
         b->security = sec;
         b->remote_ip = ip;

@@ -1722,6 +1722,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
 
     if (resp->content_type &&
         g_ascii_strncasecmp(resp->content_type, "image/", 6) == 0 &&
+        !ns_html_mime_is_xml(resp->content_type) &&
         resp->body && resp->body->len > 0) {
         char *html = ns_html_image_document(
             resp->final_url ? resp->final_url : fetch_url);
@@ -1735,20 +1736,12 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     if (resp->content_type && resp->body && resp->body->len > 0) {
         const char *ct = resp->content_type;
         gboolean is_json = strstr(ct, "json") != NULL;
-        gboolean is_xml = !strstr(ct, "xhtml") && !strstr(ct, "svg") &&
-                          (g_str_has_prefix(ct, "text/xml") ||
-                           g_str_has_prefix(ct, "application/xml") ||
-                           strstr(ct, "+xml") != NULL);
-        if (is_json || is_xml) {
+        if (is_json) {
             char *decoded = ns_html_decode_body_full(
                 (const char *)resp->body->data, resp->body->len, ct, NULL);
-            char *html = is_json
-                ? ns_html_json_document(resp->final_url ? resp->final_url
-                                        : fetch_url, decoded,
-                                        decoded ? strlen(decoded) : 0)
-                : ns_html_xml_document(resp->final_url ? resp->final_url
-                                       : fetch_url, decoded,
-                                       decoded ? strlen(decoded) : 0);
+            char *html = ns_html_json_document(
+                resp->final_url ? resp->final_url : fetch_url, decoded,
+                decoded ? strlen(decoded) : 0);
             g_free(decoded);
             if (html) {
                 g_byte_array_set_size(resp->body, 0);
@@ -1768,8 +1761,9 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     char *decoded = ns_html_decode_body_full(raw, raw_len,
                                              resp->content_type,
                                              &g_headless_doc_charset);
-    ns_node *doc = ns_html_parse(decoded ? decoded : "",
-                                 decoded ? (gssize)strlen(decoded) : 0);
+    ns_node *doc = ns_html_parse_document(
+        decoded ? decoded : "", decoded ? (gssize)strlen(decoded) : 0,
+        resp->content_type);
     const char *page_url = resp->final_url ? resp->final_url : opts->url;
 
     int vw = opts->viewport_width > 0 ? opts->viewport_width : 1000;
@@ -1836,7 +1830,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_style_flush_cb(js, headless_flush_style, &flush_ctx);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
         ns_js_run_scripts_in_doc(js, doc, resp->final_url,
-                                 g_headless_doc_charset);
+                                 g_headless_doc_charset, resp->content_type);
     }
 
     if (opts->settle_ms > 0) settle_main_loop(opts->settle_ms, &flush_ctx);

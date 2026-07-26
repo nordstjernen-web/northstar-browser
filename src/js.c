@@ -32525,6 +32525,21 @@ ns_node_element_namespace(const ns_node *n)
     return "http://www.w3.org/1999/xhtml";
 }
 
+static gboolean
+ns_node_is_script_element(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name)
+        return FALSE;
+    const char *local_name = strrchr(n->name, ':');
+    local_name = local_name ? local_name + 1 : n->name;
+    if (strcmp(local_name, "script") != 0)
+        return FALSE;
+    const char *namespace_uri = ns_node_element_namespace(n);
+    return namespace_uri &&
+        (strcmp(namespace_uri, "http://www.w3.org/1999/xhtml") == 0 ||
+         strcmp(namespace_uri, "http://www.w3.org/2000/svg") == 0);
+}
+
 static char *
 ns_node_element_prefix_dup(const ns_node *n)
 {
@@ -47664,7 +47679,7 @@ ns_document_lift_methods_to_proto(JSContext *ctx, JSValueConst document)
 
 static void
 ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
-                       const char *charset)
+                       const char *charset, const char *content_type)
 {
     ns_js_reset_runtime_state(js);
 
@@ -47693,9 +47708,15 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
     JSValue global = JS_GetGlobalObject(ctx);
     ns_sw_prepare_document(js);
     const char *cs = charset && *charset ? charset : "UTF-8";
+    gboolean is_xml = doc && (doc->flags & NS_NODE_XML_DOC);
+    g_autofree char *mime = content_type && *content_type
+        ? ns_html_mime_essence(content_type)
+        : g_strdup(is_xml ? "application/xml" : "text/html");
 
     JSValue document = JS_NewObjectClass(ctx, ns_element_class_id);
     if (js->current_doc) JS_SetOpaque(document, js->current_doc);
+    if (is_xml)
+        JS_DefinePropertyValueStr(ctx, document, "__ndXmlDoc", JS_TRUE, 0);
     JS_SetPropertyStr(ctx, document, "URL",         JS_NewString(ctx, js->current_url));
     JS_SetPropertyStr(ctx, document, "documentURI", JS_NewString(ctx, js->current_url));
     JS_SetPropertyStr(ctx, document, "baseURI",     JS_NewString(ctx, js->current_url));
@@ -47703,7 +47724,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
     JS_DefinePropertyValueStr(ctx, document, "charset",
                               JS_NewString(ctx, cs), JS_PROP_C_W_E);
     JS_SetPropertyStr(ctx, document, "inputEncoding", JS_NewString(ctx, cs));
-    JS_SetPropertyStr(ctx, document, "contentType",  JS_NewString(ctx, "text/html"));
+    JS_SetPropertyStr(ctx, document, "contentType",  JS_NewString(ctx, mime));
     {
         char *dom_host = ns_url_host_from(js->current_url);
         JS_SetPropertyStr(ctx, document, "domain",
@@ -47721,7 +47742,9 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
     JS_SetPropertyFunctionList(ctx, document, ns_document_funcs,
                                G_N_ELEMENTS(ns_document_funcs));
     ns_install_event_handler_props(ctx, document);
-    {
+    if (is_xml) {
+        ns_document_use_xml_document_prototype(ctx, document);
+    } else {
         JSValue doc_ctor = JS_GetPropertyStr(ctx, global, "HTMLDocument");
         if (!JS_IsObject(doc_ctor)) {
             JS_FreeValue(ctx, doc_ctor);
@@ -47922,6 +47945,11 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
         JS_FreeValue(ctx, xml_proto);
     }
     ns_install_dom_hierarchy(js, ctx, global);
+    if (is_xml) {
+        JSValue active_document = JS_GetPropertyStr(ctx, global, "document");
+        ns_document_use_xml_document_prototype(ctx, active_document);
+        JS_FreeValue(ctx, active_document);
+    }
     ns_install_web_api_shapes(ctx, global);
     ns_bind_ctor(ctx, global, "FontFace", ns_window_fontface_ctor, 3);
     {
@@ -49063,7 +49091,7 @@ ns_js_collect_external_script_urls_rec(const ns_node *n, const char *origin,
                                        int depth)
 {
     if (!n || depth >= 512) return;
-    if (ns_node_is_element_named(n, "script")) {
+    if (ns_node_is_script_element(n)) {
         const char *type = ns_element_get_attr(n, "type");
         gboolean is_module = type && g_ascii_strcasecmp(type, "module") == 0;
         gboolean ok_type = !type || !*type ||
@@ -49231,7 +49259,7 @@ static void
 ns_js_mark_scripts_already_started_rec(ns_node *n, int depth)
 {
     if (!n || depth >= 512) return;
-    if (ns_node_is_element_named(n, "script")) {
+    if (ns_node_is_script_element(n)) {
         ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
         return;
     }
@@ -49249,7 +49277,7 @@ static void
 ns_js_collect_script_tasks_rec(ns_node *n, GArray *tasks, int depth)
 {
     if (!n || depth >= 512) return;
-    if (ns_node_is_element_named(n, "script")) {
+    if (ns_node_is_script_element(n)) {
         if (n->flags & NS_NODE_PARSER_OPEN) return;
         if (ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED)) return;
         if (!ns_script_type_supported(n) || ns_script_skipped_by_nomodule(n)) {
@@ -49572,7 +49600,7 @@ ns_subtree_scan_special(const ns_node *n, int depth, gboolean *script,
 {
     if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_ELEMENT && n->name) {
-        if (ns_node_is_element_named(n, "script")) *script = TRUE;
+        if (ns_node_is_script_element(n)) *script = TRUE;
         else if (ns_node_is_element_named(n, "link")) *link = TRUE;
         else if (ns_node_is_element_named(n, "iframe") ||
                  ns_node_is_element_named(n, "object")) *frame = TRUE;
@@ -49587,7 +49615,7 @@ static gboolean
 ns_subtree_has_pending_script_rec(const ns_node *n, int depth)
 {
     if (!n || depth >= 512) return FALSE;
-    if (ns_node_is_element_named(n, "script") &&
+    if (ns_node_is_script_element(n) &&
         !ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED))
         return TRUE;
     if (ns_node_is_element_named(n, "template")) return FALSE;
@@ -51287,7 +51315,8 @@ ns_js_lifecycle_tick(gpointer data)
 
 void
 ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
-                         const char *base_url_borrowed, const char *charset)
+                         const char *base_url_borrowed, const char *charset,
+                         const char *content_type)
 {
     if (!js || !doc) return;
     g_autofree char *base_url = g_strdup(base_url_borrowed);
@@ -51301,7 +51330,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
     ns_js_set_navigation_milestone(js,
         &js->navigation_timing.dom_loading_ms, "domLoading");
     gint64 t0 = g_get_monotonic_time();
-    ns_js_install_document(js, doc, base_url, charset);
+    ns_js_install_document(js, doc, base_url, charset, content_type);
     {
         const char *early = g_getenv("NS_EARLY_JS_FILE");
         char *early_src = NULL;

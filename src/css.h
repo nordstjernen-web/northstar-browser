@@ -596,8 +596,10 @@ typedef enum ns_css_attr_op {
 
 typedef struct ns_css_attr_pred {
     char *name;
+    char *namespace_uri;
     ns_css_attr_op op;
     char *value;
+    gboolean namespace_any;
     gboolean case_insensitive;
     gboolean case_sensitive;
     guint64 name_bit;
@@ -659,6 +661,7 @@ typedef struct ns_css_pseudo_pred {
 
 typedef struct ns_css_simple {
     char *type;
+    char *namespace_uri;
     char *id;
     GPtrArray *classes;
     GArray    *class_lens;
@@ -668,6 +671,7 @@ typedef struct ns_css_simple {
     GPtrArray *matches_none;
     GPtrArray *has_groups;
     gboolean   never_match;
+    gboolean   namespace_any;
     gboolean   ns_none;
 } ns_css_simple;
 

@@ -10,6 +10,48 @@
 
 #include <lexbor/core/base.h>
 
+char *
+ns_html_mime_essence(const char *content_type)
+{
+    if (!content_type || !*content_type)
+        return g_strdup("text/html");
+    const char *start = content_type;
+    while (g_ascii_isspace(*start)) start++;
+    const char *end = strchr(start, ';');
+    if (!end) end = start + strlen(start);
+    while (end > start && g_ascii_isspace(end[-1])) end--;
+    if (end == start)
+        return g_strdup("text/html");
+    char *essence = g_strndup(start, (gsize)(end - start));
+    for (char *p = essence; *p; p++)
+        *p = g_ascii_tolower(*p);
+    return essence;
+}
+
+gboolean
+ns_html_mime_is_xml(const char *content_type)
+{
+    g_autofree char *essence = ns_html_mime_essence(content_type);
+    return strcmp(essence, "text/xml") == 0 ||
+           strcmp(essence, "application/xml") == 0 ||
+           g_str_has_suffix(essence, "+xml");
+}
+
+ns_node *
+ns_html_parse_document(const char *input, gssize len,
+                       const char *content_type)
+{
+    if (!ns_html_mime_is_xml(content_type))
+        return ns_html_parse(input, len);
+    ns_node *doc = ns_xml_parse(input, len);
+    if (doc) return doc;
+    static const char error_document[] =
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+        "<title>XML parsing error</title></head><body>"
+        "<p>This XML document is not well-formed.</p></body></html>";
+    return ns_xml_parse(error_document, sizeof error_document - 1);
+}
+
 gboolean
 ns_html_is_void(const char *tag)
 {

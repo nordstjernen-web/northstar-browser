@@ -1900,6 +1900,7 @@ ns_attr_pred_clear(gpointer p)
 {
     ns_css_attr_pred *a = p;
     g_free(a->name);
+    g_free(a->namespace_uri);
     g_free(a->value);
 }
 
@@ -1935,6 +1936,7 @@ ns_css_simple_free(ns_css_simple *s)
 {
     if (!s) return;
     g_free(s->type);
+    g_free(s->namespace_uri);
     g_free(s->id);
     g_ptr_array_free(s->classes, TRUE);
     g_array_free(s->class_lens, TRUE);
@@ -1976,6 +1978,9 @@ static gboolean g_sel_has_hover;
 static gboolean g_sel_has_active;
 static gboolean g_sel_strict;
 static int g_sel_has_depth;
+static GHashTable *g_sel_namespaces;
+static const char *g_sel_default_namespace;
+static gboolean g_sel_namespace_locked;
 
 static ns_css_selector *parse_one_selector_rel(const char **pp, const char *end,
                                                int depth, gboolean relative);
@@ -2343,17 +2348,23 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
             pending = NS_CSS_COMB_DESCENDANT;
 
         ns_css_simple *cmp = ns_css_simple_new();
+        if (g_sel_default_namespace)
+            cmp->namespace_uri = g_strdup(g_sel_default_namespace);
+        else
+            cmp->namespace_any = TRUE;
         gboolean any = FALSE;
         while (p < end) {
             const char *tok_start = p;
             char cc = *p;
             if (cc == '*' || (cc == '|' && !(p + 1 < end && p[1] == '='))) {
-                if (cc == '*') {
-                    p++;
-                }
+                if (cc == '*') p++;
                 if (p < end && *p == '|' && !(p + 1 < end && p[1] == '=')) {
-                    if (cc == '|')
+                    g_clear_pointer(&cmp->namespace_uri, g_free);
+                    cmp->namespace_any = cc == '*';
+                    if (cc == '|') {
                         cmp->ns_none = TRUE;
+                        cmp->namespace_any = FALSE;
+                    }
                     p++;
                     if (p < end && *p == '*') {
                         p++;
@@ -2364,7 +2375,7 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                         char *type = read_css_ident(&p, end);
                         if (type && *type) {
                             if (!cmp->type) {
-                                cmp->type = ascii_lower(type, strlen(type));
+                                cmp->type = g_strdup(type);
                                 sel->spec_c += 1;
                             }
                         }
@@ -2423,18 +2434,38 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                 char *type = read_css_ident(&p, end);
                 if (p < end && *p == '|' && !(p + 1 < end && p[1] == '=')) {
                     g_sel_ns_prefix = TRUE;
-                    cmp->never_match = TRUE;
+                    const char *namespace_uri = g_sel_namespaces
+                        ? g_hash_table_lookup(g_sel_namespaces, type) : NULL;
+                    if (!namespace_uri) {
+                        g_sel_parse_error = TRUE;
+                        cmp->never_match = TRUE;
+                    } else {
+                        g_clear_pointer(&cmp->namespace_uri, g_free);
+                        cmp->namespace_uri = g_strdup(namespace_uri);
+                        cmp->namespace_any = FALSE;
+                        cmp->ns_none = FALSE;
+                    }
                     p++;
                     if (p < end && *p == '*') {
                         p++;
+                        g_free(cmp->type);
+                        cmp->type = g_strdup("*");
                     }
                     else {
-                        char *unused = read_css_ident(&p, end);
-                        g_free(unused);
+                        char *local_name = read_css_ident(&p, end);
+                        if (local_name && *local_name) {
+                            g_free(cmp->type);
+                            cmp->type = g_strdup(local_name);
+                            sel->spec_c += 1;
+                        } else {
+                            g_sel_parse_error = TRUE;
+                            cmp->never_match = TRUE;
+                        }
+                        g_free(local_name);
                     }
                 }
                 else if (!cmp->type) {
-                    cmp->type = ascii_lower(type, strlen(type));
+                    cmp->type = g_strdup(type);
                     sel->spec_c += 1;
                 }
                 else {
@@ -2642,32 +2673,57 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
             } else if (cc == '[') {
                 p++;
                 p = css_skip_ws_comments(p, end);
+                gboolean attr_namespace_any = FALSE;
+                char *attr_namespace_uri = NULL;
+                char *attr_name = NULL;
                 if (p + 1 < end && *p == '*' && p[1] == '|') {
+                    attr_namespace_any = TRUE;
                     p += 2;
-                }
-                else if (p < end && *p == '|' && !(p + 1 < end && p[1] == '=')) {
-                    p++;
-                }
-                char *attr_name = read_css_ident(&p, end);
-                if (attr_name && *attr_name && p < end && *p == '|'
-                    && !(p + 1 < end && p[1] == '='))
-                {
-                    g_sel_ns_prefix = TRUE;
-                    g_free(attr_name);
+                    attr_name = read_css_ident(&p, end);
+                } else if (p < end && *p == '|' &&
+                           !(p + 1 < end && p[1] == '=')) {
                     p++;
                     attr_name = read_css_ident(&p, end);
-                    cmp->never_match = TRUE;
+                } else {
+                    char *first = read_css_ident(&p, end);
+                    if (first && *first && p < end && *p == '|' &&
+                        !(p + 1 < end && p[1] == '=')) {
+                        g_sel_ns_prefix = TRUE;
+                        const char *resolved = g_sel_namespaces
+                            ? g_hash_table_lookup(g_sel_namespaces, first)
+                            : NULL;
+                        if (!resolved) {
+                            g_sel_parse_error = TRUE;
+                            cmp->never_match = TRUE;
+                        } else {
+                            attr_namespace_uri = g_strdup(resolved);
+                        }
+                        p++;
+                        attr_name = read_css_ident(&p, end);
+                        g_free(first);
+                    } else {
+                        attr_name = first;
+                    }
                 }
                 if (!attr_name || !*attr_name) {
                     g_free(attr_name);
+                    g_free(attr_namespace_uri);
                     char term = 0;
                     const char *close = css_scan_until(p, end, "]", &term);
                     p = term == ']' ? close + 1 : close;
                     continue;
                 }
                 ns_css_attr_pred ap = {0};
-                ap.name = ascii_lower(attr_name, strlen(attr_name));
-                ap.name_bit = ns_attr_name_bloom_bit(ap.name);
+                ap.name = g_strdup(attr_name);
+                ap.namespace_uri = attr_namespace_uri;
+                ap.namespace_any = attr_namespace_any;
+                if (!ap.namespace_any && !ap.namespace_uri) {
+                    char *lower_name = ascii_lower(attr_name,
+                                                   strlen(attr_name));
+                    ap.name_bit = ns_attr_name_bloom_bit(attr_name) |
+                                  ns_attr_name_bloom_bit(lower_name);
+                    g_free(lower_name);
+                }
                 g_free(attr_name);
                 ap.op   = NS_CSS_ATTR_PRESENT;
                 p = css_skip_ws_comments(p, end);
@@ -11521,6 +11577,30 @@ css_parse_import_url(const char **pp, const char *end)
     return url;
 }
 
+static void
+css_parse_namespace_prelude(const char *start, const char *end)
+{
+    const char *p = css_skip_ws_comments(start, end);
+    char *prefix = NULL;
+    if (p < end && *p != '\'' && *p != '"' &&
+        !(p + 4 <= end && g_ascii_strncasecmp(p, "url(", 4) == 0)) {
+        prefix = read_css_ident(&p, end);
+        p = css_skip_ws_comments(p, end);
+    }
+    char *namespace_uri = css_parse_import_url(&p, end);
+    p = css_skip_ws_comments(p, end);
+    if (namespace_uri && p == end && g_sel_namespaces) {
+        const char *key = prefix ? prefix : "";
+        g_hash_table_replace(g_sel_namespaces, g_strdup(key), namespace_uri);
+        namespace_uri = NULL;
+        if (!prefix)
+            g_sel_default_namespace =
+                g_hash_table_lookup(g_sel_namespaces, "");
+    }
+    g_free(namespace_uri);
+    g_free(prefix);
+}
+
 static char *
 css_parse_layer_function(ns_css_stylesheet *sh, const char **pp,
                          const char *end)
@@ -11916,6 +11996,25 @@ parse_rules_until(const char **pp, const char *end,
                 skip_at_rule(&p, end);
                 continue;
             }
+            if (g_ascii_strcasecmp(at_name, "namespace") == 0) {
+                char term = 0;
+                const char *prelude_start = p;
+                const char *prelude_end = css_scan_segment(p, end, &term);
+                if (!nested && !g_sel_namespace_locked && term == ';')
+                    css_parse_namespace_prelude(prelude_start, prelude_end);
+                p = term == ';' ? prelude_end + 1 : prelude_end;
+                if (term == '{') p = css_skip_to_block_end(prelude_end, end);
+                g_free(at_name);
+                continue;
+            }
+            if (g_ascii_strcasecmp(at_name, "charset") == 0) {
+                p = at_start;
+                skip_at_rule(&p, end);
+                g_free(at_name);
+                continue;
+            }
+            if (!nested && g_ascii_strcasecmp(at_name, "import") != 0)
+                g_sel_namespace_locked = TRUE;
             if (g_ascii_strcasecmp(at_name, "import") == 0) {
                 char term = 0;
                 const char *prelude_start = p;
@@ -12344,6 +12443,7 @@ parse_rules_until(const char **pp, const char *end,
             continue;
         }
 
+        if (!nested) g_sel_namespace_locked = TRUE;
         ns_css_rule *rule = g_new0(ns_css_rule, 1);
         rule->selectors = g_ptr_array_new();
         rule->decls     = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
@@ -12704,7 +12804,19 @@ ns_css_stylesheet_parse(const char *text, gssize len_in)
     int source_order = 0;
     GPtrArray *scope_stack =
         g_ptr_array_new_with_free_func(ns_css_scope_text_free);
+    GHashTable *saved_namespaces = g_sel_namespaces;
+    const char *saved_default_namespace = g_sel_default_namespace;
+    gboolean saved_namespace_locked = g_sel_namespace_locked;
+    GHashTable *namespaces =
+        g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+    g_sel_namespaces = namespaces;
+    g_sel_default_namespace = NULL;
+    g_sel_namespace_locked = FALSE;
     parse_rules_until(&p, end, sh, &source_order, 0, NULL, scope_stack);
+    g_sel_namespaces = saved_namespaces;
+    g_sel_default_namespace = saved_default_namespace;
+    g_sel_namespace_locked = saved_namespace_locked;
+    g_hash_table_destroy(namespaces);
     g_ptr_array_free(scope_stack, TRUE);
     g_free(flattened);
     return sh;
@@ -14025,24 +14137,95 @@ ns_css_html_ci_attr(const char *name)
 }
 
 static gboolean
+ns_css_attr_value_matches(const ns_css_attr_pred *a, const char *value,
+                          gboolean html_doc)
+{
+    if (a->op == NS_CSS_ATTR_PRESENT) return TRUE;
+    if (!a->value) return FALSE;
+    gsize value_len = strlen(value);
+    gsize wanted_len = strlen(a->value);
+    gboolean ci = a->case_insensitive ||
+        (!a->case_sensitive && html_doc && ns_css_html_ci_attr(a->name));
+    switch (a->op) {
+    case NS_CSS_ATTR_EQ:
+        return ci ? g_ascii_strcasecmp(value, a->value) == 0
+                  : strcmp(value, a->value) == 0;
+    case NS_CSS_ATTR_PREFIX:
+        return wanted_len > 0 && value_len >= wanted_len &&
+               (ci ? g_ascii_strncasecmp(value, a->value, wanted_len) == 0
+                   : strncmp(value, a->value, wanted_len) == 0);
+    case NS_CSS_ATTR_SUFFIX:
+        return wanted_len > 0 && value_len >= wanted_len &&
+               (ci ? g_ascii_strcasecmp(value + value_len - wanted_len,
+                                        a->value) == 0
+                   : strcmp(value + value_len - wanted_len, a->value) == 0);
+    case NS_CSS_ATTR_SUBSTR:
+        if (wanted_len == 0) return FALSE;
+        if (!ci) return strstr(value, a->value) != NULL;
+        for (gsize i = 0; i + wanted_len <= value_len; i++)
+            if (g_ascii_strncasecmp(value + i, a->value, wanted_len) == 0)
+                return TRUE;
+        return FALSE;
+    case NS_CSS_ATTR_WORD: {
+        const char *p = value;
+        while (*p) {
+            while (*p && is_ws(*p)) p++;
+            const char *token = p;
+            while (*p && !is_ws(*p)) p++;
+            if ((gsize)(p - token) == wanted_len &&
+                (ci ? g_ascii_strncasecmp(token, a->value, wanted_len) == 0
+                    : strncmp(token, a->value, wanted_len) == 0))
+                return TRUE;
+        }
+        return FALSE;
+    }
+    case NS_CSS_ATTR_HYPHEN:
+        return value_len >= wanted_len &&
+               (ci ? g_ascii_strncasecmp(value, a->value, wanted_len) == 0
+                   : strncmp(value, a->value, wanted_len) == 0) &&
+               (value_len == wanted_len || value[wanted_len] == '-');
+    case NS_CSS_ATTR_PRESENT:
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 match_simple(const ns_css_simple *sel, const ns_node *el)
 {
     if (sel->never_match) return FALSE;
     if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
-    if (sel->ns_none) {
-        gboolean null_ns = (el->flags & NS_NODE_FOREIGN_NS) &&
-                           !(el->flags & NS_NODE_SVG_NS) &&
-                           !ns_element_get_attr(el, "data-nd-ns-uri");
-        if (!null_ns) return FALSE;
+    const char *element_namespace =
+        ns_element_get_attr(el, "data-nd-ns-uri");
+    if (!element_namespace || !*element_namespace) {
+        if (el->flags & NS_NODE_SVG_NS)
+            element_namespace = "http://www.w3.org/2000/svg";
+        else if (!(el->flags & (NS_NODE_FOREIGN_NS | NS_NODE_XML_DOC)))
+            element_namespace = "http://www.w3.org/1999/xhtml";
+        else
+            element_namespace = NULL;
+    }
+    if (!sel->namespace_any) {
+        const char *wanted_namespace = sel->namespace_uri;
+        if (wanted_namespace && !*wanted_namespace) wanted_namespace = NULL;
+        if ((wanted_namespace == NULL) != (element_namespace == NULL) ||
+            (wanted_namespace && strcmp(wanted_namespace,
+                                        element_namespace) != 0))
+            return FALSE;
     }
     if (sel->type && strcmp(sel->type, "*") != 0) {
         if (!el->name) return FALSE;
-        if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
-            if (strcmp(sel->type, el->name) != 0) return FALSE;
+        const char *local_name = el->name;
+        const char *colon = strchr(local_name, ':');
+        if (colon && ns_element_get_attr(el, "data-nd-ns-prefix"))
+            local_name = colon + 1;
+        if (el->flags & (NS_NODE_XML_DOC | NS_NODE_SVG_NS |
+                         NS_NODE_FOREIGN_NS)) {
+            if (strcmp(sel->type, local_name) != 0) return FALSE;
         }
-        else if (g_ascii_tolower((unsigned char)el->name[0]) !=
+        else if (g_ascii_tolower((unsigned char)local_name[0]) !=
                      g_ascii_tolower((unsigned char)sel->type[0]) ||
-                 g_ascii_strcasecmp(sel->type, el->name) != 0) {
+                 g_ascii_strcasecmp(sel->type, local_name) != 0) {
             return FALSE;
         }
     }
@@ -14067,70 +14250,30 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
         for (guint i = 0; i < sel->attrs->len; i++) {
             const ns_css_attr_pred *a = &g_array_index(sel->attrs, ns_css_attr_pred, i);
             if (a->name_bit && (elbloom & a->name_bit) == 0) return FALSE;
-            const char *v = ns_element_get_attr(el, a->name);
-            if (a->op == NS_CSS_ATTR_PRESENT) {
-                if (!v) return FALSE;
-            } else {
-                if (!v || !a->value) return FALSE;
-                gsize vl = strlen(v), wl = strlen(a->value);
-                gboolean ci = a->case_insensitive ||
-                    (!a->case_sensitive && html_doc &&
-                     ns_css_html_ci_attr(a->name));
-                switch (a->op) {
-                case NS_CSS_ATTR_EQ:
-                    if (ci ? g_ascii_strcasecmp(v, a->value)
-                           : strcmp(v, a->value)) return FALSE;
+            gboolean matched = FALSE;
+            for (const ns_attr *attr = el->attrs; attr; attr = attr->next) {
+                const char *attr_namespace = attr->namespace_uri;
+                if (attr_namespace && !*attr_namespace) attr_namespace = NULL;
+                const char *wanted_namespace = a->namespace_uri;
+                if (wanted_namespace && !*wanted_namespace)
+                    wanted_namespace = NULL;
+                if (!a->namespace_any &&
+                    ((wanted_namespace == NULL) != (attr_namespace == NULL) ||
+                     (wanted_namespace && strcmp(wanted_namespace,
+                                                 attr_namespace) != 0)))
+                    continue;
+                const char *local_name = ns_attr_local_name(attr);
+                if (html_doc ? g_ascii_strcasecmp(local_name, a->name) != 0
+                             : strcmp(local_name, a->name) != 0)
+                    continue;
+                if (ns_css_attr_value_matches(a,
+                                              attr->value ? attr->value : "",
+                                              html_doc)) {
+                    matched = TRUE;
                     break;
-                case NS_CSS_ATTR_PREFIX:
-                    if (wl == 0 || vl < wl) return FALSE;
-                    if (ci ? g_ascii_strncasecmp(v, a->value, wl)
-                           : strncmp(v, a->value, wl)) return FALSE;
-                    break;
-                case NS_CSS_ATTR_SUFFIX:
-                    if (wl == 0 || vl < wl) return FALSE;
-                    if (ci ? g_ascii_strcasecmp(v + vl - wl, a->value)
-                           : strcmp(v + vl - wl, a->value)) return FALSE;
-                    break;
-                case NS_CSS_ATTR_SUBSTR:
-                    if (wl == 0) return FALSE;
-                    if (ci) {
-                        gboolean found = FALSE;
-                        for (gsize i2 = 0; i2 + wl <= vl; i2++) {
-                            if (g_ascii_strncasecmp(v + i2, a->value, wl) == 0) {
-                                found = TRUE; break;
-                            }
-                        }
-                        if (!found) return FALSE;
-                    } else {
-                        if (!strstr(v, a->value)) return FALSE;
-                    }
-                    break;
-                case NS_CSS_ATTR_WORD: {
-                    gboolean found = FALSE;
-                    const char *s = v;
-                    while (*s) {
-                        while (*s && is_ws(*s)) s++;
-                        const char *tok = s;
-                        while (*s && !is_ws(*s)) s++;
-                        if ((gsize)(s - tok) == wl &&
-                            (ci ? g_ascii_strncasecmp(tok, a->value, wl)
-                                : strncmp(tok, a->value, wl)) == 0) {
-                            found = TRUE; break;
-                        }
-                    }
-                    if (!found) return FALSE;
-                    break;
-                }
-                case NS_CSS_ATTR_HYPHEN: {
-                    if (vl < wl) return FALSE;
-                    if (ci ? g_ascii_strncasecmp(v, a->value, wl)
-                           : strncmp(v, a->value, wl)) return FALSE;
-                    if (vl > wl && v[wl] != '-') return FALSE;
-                    break;
-                }
-                case NS_CSS_ATTR_PRESENT: break;
                 }
             }
+            if (!matched) return FALSE;
         }
     }
     if (sel->pseudos && sel->pseudos->len > 0) {
@@ -15098,6 +15241,7 @@ ns_inline_style_serialize(const char *style)
     gboolean quad_emitted[G_N_ELEMENTS(quad_names)] = { FALSE };
     for (gsize q = 0; q < G_N_ELEMENTS(quad_names); q++) {
         const int *ids = inline_quad_ids(quad_names[q]);
+        if (!ids) continue;
         int logical_group = inline_logical_group(ids[0]);
         gboolean sides[4] = { FALSE, FALSE, FALSE, FALSE };
         guint first = G_MAXUINT;
@@ -16334,12 +16478,17 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         if (el->name && *el->name) {
             CAND_PUSH_ARR(css_index_lookup_ci(idx->by_tag, el->name,
                                               strlen(el->name)));
+            const char *colon = strchr(el->name, ':');
+            if (colon && ns_element_get_attr(el, "data-nd-ns-prefix"))
+                CAND_PUSH_ARR(css_index_lookup_ci(idx->by_tag, colon + 1,
+                                                  strlen(colon + 1)));
         }
         if (idx->by_attr && g_hash_table_size(idx->by_attr) > 0) {
             for (const ns_attr *a = el->attrs; a; a = a->next) {
-                if (!a->name) continue;
-                CAND_PUSH_ARR(css_index_lookup_ci(idx->by_attr, a->name,
-                                                  strlen(a->name)));
+                const char *local_name = ns_attr_local_name(a);
+                if (!local_name) continue;
+                CAND_PUSH_ARR(css_index_lookup_ci(idx->by_attr, local_name,
+                                                  strlen(local_name)));
             }
         }
     }

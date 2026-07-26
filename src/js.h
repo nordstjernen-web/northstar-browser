@@ -95,7 +95,8 @@ void   ns_js_free(ns_js *js);
 gboolean ns_js_in_pump(const ns_js *js);
 
 void     ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
-                                  const char *base_url, const char *charset);
+                                  const char *base_url, const char *charset,
+                                  const char *content_type);
 
 gboolean ns_js_consume_mutated(ns_js *js);
 
