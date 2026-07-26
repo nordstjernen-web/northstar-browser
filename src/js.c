@@ -1,5 +1,5 @@
-/* Northstar — JavaScript engine binding (QuickJS).
- * Copyright 2026 Andreas Røsdal
+/* Northstar â€” JavaScript engine binding (QuickJS).
+ * Copyright 2026 Andreas RÃ¸sdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -444,7 +444,7 @@ ns_js_interrupt_cb(JSRuntime *rt, void *opaque)
     gint64 now = g_get_monotonic_time();
     if (js->js_monitor_deadline_us != 0 && now > js->js_monitor_deadline_us) {
         js->halted = TRUE;
-        g_warning("[js] monitor: page JavaScript ran longer than %d s — halting it",
+        g_warning("[js] monitor: page JavaScript ran longer than %d s â€” halting it",
                   (int)(NS_JS_MONITOR_LIMIT_US / 1000000LL));
         return 1;
     }
@@ -1227,8 +1227,8 @@ ns_timer_fire(gpointer data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
 
-    /* The callback can clear its own timer (clearInterval(myId)) — or, via a
-       re-entrant relayout/fetch, another timer that shares state — which would
+    /* The callback can clear its own timer (clearInterval(myId)) â€” or, via a
+       re-entrant relayout/fetch, another timer that shares state â€” which would
        drop the last reference and free the function while it is still running.
        Hold owned copies of the callback, its code and its extra args for the
        duration of the call so the engine never executes freed memory. */
@@ -36495,7 +36495,7 @@ ns_js_image_ready_idle(gpointer data)
     g_free(abs_url);
     ns_image *img = r->img;
     if (img && img->failed && js->log_cb && img->http_status != 204) {
-        char *line = g_strdup_printf("[image] error: %s — %s (HTTP %ld)",
+        char *line = g_strdup_printf("[image] error: %s â€” %s (HTTP %ld)",
             img->url ? img->url : "(no url)",
             img->error ? img->error : "(no error msg)",
             img->http_status);
