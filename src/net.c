@@ -2101,6 +2101,31 @@ ns_response_free(ns_response *resp)
     g_free(resp);
 }
 
+static ns_response *
+ns_response_copy(const ns_response *src)
+{
+    if (!src) return NULL;
+    ns_response *r = g_new0(ns_response, 1);
+    *r = *src;
+    r->final_url = g_strdup(src->final_url);
+    r->content_type = g_strdup(src->content_type);
+    r->content_disposition = g_strdup(src->content_disposition);
+    r->csp_header = g_strdup(src->csp_header);
+    r->xframe_options = g_strdup(src->xframe_options);
+    r->x_content_type_options = g_strdup(src->x_content_type_options);
+    r->cors_allow_origin = g_strdup(src->cors_allow_origin);
+    r->refresh = g_strdup(src->refresh);
+    r->content_language = g_strdup(src->content_language);
+    r->raw_headers = g_strdup(src->raw_headers);
+    r->error = g_strdup(src->error);
+    r->tls_warning = g_strdup(src->tls_warning);
+    r->remote_ip = g_strdup(src->remote_ip);
+    r->body = g_byte_array_new();
+    if (src->body && src->body->len)
+        g_byte_array_append(r->body, src->body->data, src->body->len);
+    return r;
+}
+
 typedef struct {
     char   *method;
     char   *url;
@@ -5238,6 +5263,7 @@ typedef struct ns_fetch_ctx {
     guint8 *body;
     gsize body_len;
     GPtrArray *extra_headers;
+    char *coalesce_key;
 } ns_fetch_ctx;
 
 static void
@@ -5250,7 +5276,37 @@ ns_fetch_ctx_free(gpointer data)
     g_free(ctx->content_type);
     g_free(ctx->body);
     if (ctx->extra_headers) g_ptr_array_free(ctx->extra_headers, TRUE);
+    g_free(ctx->coalesce_key);
     g_free(ctx);
+}
+
+static GMutex     g_fetch_coalesce_mutex;
+static GHashTable *g_fetch_coalesce;
+
+static void
+ns_fetch_coalesce_deliver(const char *key, ns_response *resp, const GError *err)
+{
+    if (!key) return;
+    GPtrArray *waiters = NULL;
+    g_mutex_lock(&g_fetch_coalesce_mutex);
+    if (g_fetch_coalesce) {
+        waiters = g_hash_table_lookup(g_fetch_coalesce, key);
+        g_hash_table_remove(g_fetch_coalesce, key);
+    }
+    g_mutex_unlock(&g_fetch_coalesce_mutex);
+    if (!waiters) return;
+    for (guint i = 0; i < waiters->len; i++) {
+        GTask *w = g_ptr_array_index(waiters, i);
+        if (resp)
+            g_task_return_pointer(w, ns_response_copy(resp),
+                                  (GDestroyNotify)ns_response_free);
+        else if (err)
+            g_task_return_error(w, g_error_copy(err));
+        else
+            g_task_return_new_error(w, NS_NET_DOMAIN, 0, "fetch failed");
+        g_object_unref(w);
+    }
+    g_ptr_array_free(waiters, TRUE);
 }
 
 #define NS_MAX_CONCURRENT_FETCHES 32
@@ -5349,6 +5405,8 @@ ns_fetch_thread(GTask        *task,
                                       ctx->body, ctx->body_len, ctx->content_type,
                                       ctx->extra_headers,
                                       cancellable, &err);
+    if (ctx->coalesce_key)
+        ns_fetch_coalesce_deliver(ctx->coalesce_key, resp, err);
     if (!resp) {
         if (g_log_fetches)
             ns_debug_log_emit(NS_DLOG_NET, "fetch", "failed %s: %s",
@@ -5479,9 +5537,30 @@ ns_net_fetch_async(const char        *url,
 
     if (ns_net_complete_blob(url, cancellable, callback, user_data)) return;
 
+    char *key = NULL;
+    if (!cancellable && ns_url_is_http_or_https(url)) {
+        key = g_strdup_printf("%s\n%s", url, top_url ? top_url : "");
+        g_mutex_lock(&g_fetch_coalesce_mutex);
+        if (!g_fetch_coalesce)
+            g_fetch_coalesce = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                     g_free, NULL);
+        GPtrArray *waiters = g_hash_table_lookup(g_fetch_coalesce, key);
+        if (waiters) {
+            GTask *joiner = g_task_new(NULL, NULL, callback, user_data);
+            g_task_set_source_tag(joiner, ns_net_fetch_async);
+            g_ptr_array_add(waiters, joiner);
+            g_mutex_unlock(&g_fetch_coalesce_mutex);
+            g_free(key);
+            return;
+        }
+        g_hash_table_insert(g_fetch_coalesce, g_strdup(key), g_ptr_array_new());
+        g_mutex_unlock(&g_fetch_coalesce_mutex);
+    }
+
     ns_fetch_ctx *ctx = g_new0(ns_fetch_ctx, 1);
     ctx->url = g_strdup(url);
     ctx->top_url = top_url ? g_strdup(top_url) : NULL;
+    ctx->coalesce_key = key;
 
     GTask *task = g_task_new(NULL, cancellable, callback, user_data);
     g_task_set_source_tag(task, ns_net_fetch_async);

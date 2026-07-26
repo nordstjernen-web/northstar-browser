@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* Concurrent fetches of the same subresource share one network
+  request. Three separate paths ask for a page's scripts and
+  stylesheets — the speculative preloader, the external-script
+  prefetcher, and the loader that actually consumes the bytes — and
+  each issued its own request. Because they overlap, none of them
+  could ever hit the HTTP cache, so an ordinary page fetched every
+  script three times and every stylesheet twice, as confirmed at the
+  origin. `ns_net_fetch_async` now keys uncancellable GETs on URL plus
+  top-level URL, lets the first caller do the transfer, and hands each
+  later caller its own copy of the response.
 * The root element's font reaches the rest of the page. The UA
   stylesheet declared `font-family: serif` on `html, body` together,
   and a UA declaration on `body` outranks inheritance from `html` — so
