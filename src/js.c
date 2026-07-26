@@ -21106,6 +21106,10 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
     ns_bind_ctor(ctx, global, "ExtendableEvent",        ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "FetchEvent",             ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "ExtendableMessageEvent", ns_window_event_ctor, 2);
+    ns_event_link_proto(ctx, global, "ExtendableEvent", "Event");
+    ns_event_link_proto(ctx, global, "FetchEvent", "ExtendableEvent");
+    ns_event_link_proto(ctx, global, "ExtendableMessageEvent",
+                        "ExtendableEvent");
     ns_bind_ctor(ctx, global, "Response", ns_window_response_ctor, 0);
     ns_bind_ctor(ctx, global, "Request",  ns_window_request_ctor,  1);
     ns_fetch_install_interface(ctx, global, "Response");
@@ -21121,7 +21125,7 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
         "if(body&&method!=='GET'&&method!=='HEAD')init.body=body;"
         "var req;try{req=new Request(url,init);}catch(e){req={url:url,method:method,headers:hobj};}"
         "var responded=false,captured=null;"
-        "var ev;try{ev=new Event('fetch');}catch(e){ev={type:'fetch'};}"
+        "var ev;try{ev=new FetchEvent('fetch',{request:req});}catch(e){ev={type:'fetch'};}"
         "ev.request=req;ev.clientId='';ev.resultingClientId='';"
         "ev.respondWith=function(r){responded=true;captured=r;};"
         "ev.waitUntil=function(){};"
@@ -21142,7 +21146,19 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
 static JSValue
 ns_sw_make_extendable_event(JSContext *ctx, const char *type)
 {
-    JSValue ev = JS_NewObject(ctx);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "ExtendableEvent");
+    JSValue type_value = JS_NewString(ctx, type ? type : "");
+    JSValueConst args[1] = { type_value };
+    JSValue ev = JS_IsFunction(ctx, ctor)
+        ? JS_CallConstructor(ctx, ctor, 1, args) : JS_NewObject(ctx);
+    if (JS_IsException(ev)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        ev = JS_NewObject(ctx);
+    }
+    JS_FreeValue(ctx, type_value);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
     JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, type ? type : ""));
     JS_SetPropertyStr(ctx, ev, "bubbles",          JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable",       JS_FALSE);
@@ -47118,6 +47134,7 @@ static const JSCFunctionListEntry ns_document_proto_accessors[] = {
     JS_CGETSET_DEF("defaultView",     ns_document_get_defaultView,     ns_element_noop_set),
     JS_CGETSET_DEF("implementation",  ns_document_implementation,      NULL),
     JS_CGETSET_DEF("cookie",          ns_document_get_cookie,          ns_document_set_cookie),
+    JS_CGETSET_DEF("referrer",        ns_document_get_referrer,        NULL),
     JS_CGETSET_DEF("readyState",      ns_document_get_readyState,      ns_element_noop_set),
     JS_CGETSET_DEF("xmlVersion",      ns_document_get_xmlVersion,      ns_element_noop_set),
 };
@@ -50611,6 +50628,34 @@ ns_js_run_iframe_modules(ns_js *js, GPtrArray *modules, const char *origin,
     JS_FreeValue(ctx, scope);
 }
 
+typedef struct ns_iframe_classic_source {
+    char *text;
+    gsize len;
+    char *url;
+} ns_iframe_classic_source;
+
+static void
+ns_iframe_classic_source_free(gpointer data)
+{
+    ns_iframe_classic_source *source = data;
+    if (!source) return;
+    g_free(source->text);
+    g_free(source->url);
+    g_free(source);
+}
+
+static void
+ns_iframe_classic_source_add(GPtrArray *sources, const char *text, gsize len,
+                             const char *url)
+{
+    if (!sources || !text || len == 0) return;
+    ns_iframe_classic_source *source = g_new0(ns_iframe_classic_source, 1);
+    source->text = g_strndup(text, len);
+    source->len = len;
+    source->url = g_strdup(url && *url ? url : "inline");
+    g_ptr_array_add(sources, source);
+}
+
 static void
 ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                          const char *origin, JSValue iframe_doc,
@@ -50620,6 +50665,8 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_collect_script_tasks(content_root, tasks);
     GString *concat = g_string_new(NULL);
+    GPtrArray *classic_sources =
+        g_ptr_array_new_with_free_func(ns_iframe_classic_source_free);
     GPtrArray *modules = g_ptr_array_new();
     GPtrArray *exposed_names = g_ptr_array_new_with_free_func(g_free);
     GHashTable *exposed_seen = g_hash_table_new(g_str_hash, g_str_equal);
@@ -50655,6 +50702,8 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                             r->body->len))
                         ns_js_iframe_collect_exposed_names(exposed_names, exposed_seen,
                             (const char *)r->body->data, r->body->len);
+                    ns_iframe_classic_source_add(classic_sources,
+                        (const char *)r->body->data, r->body->len, abs_url);
                     g_string_append_len(concat, (const char *)r->body->data,
                                         (gssize)r->body->len);
                     g_string_append(concat, "\n;\n");
@@ -50664,21 +50713,27 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                 g_free(abs_url);
             }
         } else {
+            GString *inline_source = g_string_new(NULL);
             for (const ns_node *c = n->first_child; c; c = c->next_sibling)
                 if (c->kind == NS_NODE_TEXT && c->text) {
                     gsize inline_len = strlen(c->text);
                     if (!ns_js_iframe_source_is_webpack_chunk(c->text, inline_len))
                         ns_js_iframe_collect_exposed_names(exposed_names, exposed_seen,
                             c->text, inline_len);
+                    g_string_append_len(inline_source, c->text,
+                                        (gssize)inline_len);
                     g_string_append(concat, c->text);
                 }
+            ns_iframe_classic_source_add(classic_sources,
+                inline_source->str, inline_source->len, origin);
+            g_string_free(inline_source, TRUE);
             g_string_append(concat, "\n;\n");
         }
     }
 
     JSContext *fctx = NULL;
     JSValue fwin = JS_NULL, floc = JS_NULL, fhist = JS_NULL;
-    if (concat->len > 0 || modules->len > 0)
+    if (classic_sources->len > 0 || modules->len > 0)
         fctx = ns_iframe_make_realm_context(js, iframe_doc, origin, sandbox,
                                             &fwin, &floc, &fhist);
 
@@ -50712,35 +50767,42 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         JS_FreeValue(js->ctx, outward_window);
     }
 
-    if (concat->len > 0 && fctx && JS_IsObject(fwin)) {
-        js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
-        js->eval_depth++;
-        JSValue v = JS_Eval(fctx, concat->str, concat->len,
-                            origin ? origin : "inline", JS_EVAL_TYPE_GLOBAL);
-        js->eval_depth--;
-        js->eval_deadline_us = 0;
-        if (js->eval_depth == 0) {
-            ns_js_flush_document_write(js);
-            ns_js_schedule_pending_script_drain(js);
-        }
-        if (JS_IsException(v)) {
-            JSValue ex = JS_GetException(fctx);
-            const char *m = JS_ToCString(fctx, ex);
-            if (m && js->log_cb) {
-                JSValue stk = JS_GetPropertyStr(fctx, ex, "stack");
-                const char *s = JS_ToCString(fctx, stk);
-                char *line = g_strdup_printf("JS error in %s: %s%s%s",
-                                             origin ? origin : "inline", m,
-                                             s ? "\n" : "", s ? s : "");
-                js->log_cb(line, js->log_user_data);
-                g_free(line);
-                if (s) JS_FreeCString(fctx, s);
-                JS_FreeValue(fctx, stk);
+    if (classic_sources->len > 0 && fctx && JS_IsObject(fwin)) {
+        gint64 iframe_deadline_us =
+            g_get_monotonic_time() + ns_js_eval_budget_us();
+        for (guint i = 0; i < classic_sources->len; i++) {
+            if (g_get_monotonic_time() >= iframe_deadline_us) break;
+            ns_iframe_classic_source *source =
+                g_ptr_array_index(classic_sources, i);
+            js->eval_deadline_us = iframe_deadline_us;
+            js->eval_depth++;
+            JSValue v = JS_Eval(fctx, source->text, source->len, source->url,
+                                JS_EVAL_TYPE_GLOBAL);
+            js->eval_depth--;
+            js->eval_deadline_us = 0;
+            if (js->eval_depth == 0) {
+                ns_js_flush_document_write(js);
+                ns_js_schedule_pending_script_drain(js);
             }
-            if (m) JS_FreeCString(fctx, m);
-            JS_FreeValue(fctx, ex);
+            if (JS_IsException(v)) {
+                JSValue ex = JS_GetException(fctx);
+                const char *m = JS_ToCString(fctx, ex);
+                if (m && js->log_cb) {
+                    JSValue stk = JS_GetPropertyStr(fctx, ex, "stack");
+                    const char *s = JS_ToCString(fctx, stk);
+                    char *line = g_strdup_printf("JS error in %s: %s%s%s",
+                                                 source->url, m,
+                                                 s ? "\n" : "", s ? s : "");
+                    js->log_cb(line, js->log_user_data);
+                    g_free(line);
+                    if (s) JS_FreeCString(fctx, s);
+                    JS_FreeValue(fctx, stk);
+                }
+                if (m) JS_FreeCString(fctx, m);
+                JS_FreeValue(fctx, ex);
+            }
+            JS_FreeValue(fctx, v);
         }
-        JS_FreeValue(fctx, v);
     } else if (concat->len > 0) {
         GString *w = g_string_new(
             "(function(window,self,globalThis,top,parent,document,location,history){\nwith(window){\n");
@@ -50827,6 +50889,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         JS_FreeValue(fctx, fhist);
     }
     g_string_free(concat, TRUE);
+    g_ptr_array_free(classic_sources, TRUE);
     g_ptr_array_free(modules, TRUE);
     g_hash_table_destroy(exposed_seen);
     g_ptr_array_free(exposed_names, TRUE);
