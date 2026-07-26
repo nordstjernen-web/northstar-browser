@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* Dedicated and service workers expose the standard `Headers` interface.
+  Worker-created and fetched `Request` and `Response` objects now retain
+  case-insensitive header lookup and the other `Headers` methods instead of
+  carrying a plain object. This lets Workbox inspect `Vary` while populating
+  its caches rather than rejecting the cache operation.
 * An `<iframe>` becomes visible as soon as its document loads, on a
   quiet page as well as a busy one. The UA sheet hides frames until the
   engine stamps `data-nd-frame-loaded` on them, but that stamp is

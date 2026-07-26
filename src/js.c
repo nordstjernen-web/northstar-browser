@@ -21439,6 +21439,9 @@ ns_worker_js_new(ns_worker_host *host)
     ns_fetch_install_interface(ctx, global, "Response");
     ns_fetch_install_interface(ctx, global, "Request");
     ns_fetch_install_static_response(ctx);
+    JS_SetPropertyStr(ctx, global, "__ndWorkerHeadersOnly", JS_TRUE);
+    ns_js_eval(js, ns_js_polyfills_src,
+               sizeof(ns_js_polyfills_src) - 1, "<worker-polyfills>");
     {
         JSValue crypto = JS_NewObject(ctx);
         ns_bind_fn(ctx, crypto, "getRandomValues", ns_window_getRandomValues, 1);

@@ -269,6 +269,21 @@
     nativeize(Headers, 'Headers');
     try { Object.defineProperty(Headers, 'length', { value: 0 }); } catch (e) {}
     defineCtor('Headers', Headers);
+    defineMethod(Headers.prototype, 'getSetCookie', function () {
+        var out = [];
+        var m = this._m;
+        if (m) {
+            var keys = Object.keys(m);
+            for (var i = 0; i < keys.length; i++) {
+                if (keys[i].toLowerCase() === 'set-cookie') out.push(m[keys[i]]);
+            }
+        }
+        return out;
+    });
+    if (global.__ndWorkerHeadersOnly) {
+        delete global.__ndWorkerHeadersOnly;
+        return;
+    }
 
     function utf8Encode(s) {
         var str = String(s);
@@ -4449,21 +4464,6 @@
                 }
             }
             return { read: read, written: written };
-        });
-    }
-
-    if (typeof Headers === 'function' && Headers.prototype &&
-        typeof Headers.prototype.getSetCookie !== 'function') {
-        defineMethod(Headers.prototype, 'getSetCookie', function () {
-            var out = [];
-            var m = this._m;
-            if (m) {
-                var keys = Object.keys(m);
-                for (var i = 0; i < keys.length; i++) {
-                    if (keys[i].toLowerCase() === 'set-cookie') out.push(m[keys[i]]);
-                }
-            }
-            return out;
         });
     }
 
