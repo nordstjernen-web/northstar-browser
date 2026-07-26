@@ -487,10 +487,19 @@ ns_js_pumped_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     if (pf->loop) g_main_loop_quit(pf->loop);
 }
 
+static const char *const ns_js_script_accept_headers[] = {
+    "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",
+    NULL
+};
+
 static ns_response *
 ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
                      const char *const *headers, GError **error)
 {
+    ns_debug_log_emit(NS_DLOG_NET, "SITE", "js_fetch_resource %s", url);
+    ns_response *preloaded = ns_net_preload_take(url);
+    if (preloaded) return preloaded;
+
     if (!js || js->worker_host)
         return ns_net_request_blocking(url, top_url, "GET", NULL, 0, NULL,
                                        headers, NULL, error);
@@ -49286,15 +49295,26 @@ typedef struct ns_prefetch_state {
     int        pending;
 } ns_prefetch_state;
 
+typedef struct ns_prefetch_item {
+    ns_prefetch_state *st;
+    char              *url;
+} ns_prefetch_item;
+
 static void
 ns_js_prefetch_done(GObject *src, GAsyncResult *res, gpointer user_data)
 {
     (void)src;
-    ns_prefetch_state *st = user_data;
+    ns_prefetch_item *item = user_data;
+    ns_prefetch_state *st = item->st;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(res, &err);
-    if (resp) ns_response_free(resp);
+    if (resp) {
+        ns_net_preload_put(item->url, resp);
+        ns_response_free(resp);
+    }
     g_clear_error(&err);
+    g_free(item->url);
+    g_free(item);
     if (--st->pending <= 0)
         g_main_loop_quit(st->loop);
 }
@@ -49321,7 +49341,12 @@ ns_js_prefetch_external_scripts(ns_js *js, const ns_node *doc,
     gint64 t0 = g_get_monotonic_time();
     for (guint i = 0; i < urls->len; i++) {
         const char *u = g_ptr_array_index(urls, i);
-        ns_net_fetch_async(u, origin, NULL, ns_js_prefetch_done, &st);
+        ns_prefetch_item *item = g_new0(ns_prefetch_item, 1);
+        item->st = &st;
+        item->url = g_strdup(u);
+        ns_net_request_async(u, origin, "GET", NULL, 0, NULL,
+                             ns_js_script_accept_headers, NULL,
+                             ns_js_prefetch_done, item);
     }
     gboolean saved = js->in_pump;
     js->in_pump = TRUE;
@@ -49537,12 +49562,9 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         }
         GError *err = NULL;
         gboolean loaded = FALSE;
-        static const char *const script_headers[] = {
-            "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",
-            NULL
-        };
         ns_response *resp = ns_js_fetch_resource(js, abs_url, origin,
-                                                 script_headers, &err);
+                                                 ns_js_script_accept_headers,
+                                                 &err);
         if (resp && ns_net_header_is_nosniff(resp->x_content_type_options) &&
             !content_type_is_javascript(resp->content_type)) {
             if (js->log_cb) {
@@ -50114,8 +50136,10 @@ ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe, gboolean force)
             return;
         }
     }
-    if (force)
+    if (force) {
         ns_element_remove_attr(iframe, "data-nd-frame-loaded");
+        ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", "1");
+    }
     if (js->deferred_iframe_loads)
         g_ptr_array_remove(js->deferred_iframe_loads, iframe);
     if (!js->pending_iframe_loads)
@@ -51063,6 +51087,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         const char *sd = ns_element_get_attr(iframe, "srcdoc");
         if ((!sv || !*sv) && (!sd || !*sd)) {
             ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
+            ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
             ns_js_dispatch_event(js, iframe, "load", NULL);
             return;
         }
@@ -51295,6 +51320,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 
     if (content_root && content_doc) {
         ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
+        ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
         ns_js_record_child_change(js, iframe, content_doc, NULL, NULL, NULL);
 
         const char *iorigin = abs_url && *abs_url ? abs_url : origin;
