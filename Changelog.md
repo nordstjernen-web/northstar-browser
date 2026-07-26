@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* A flex item in a column container is clamped by its own `max-height`
+  and floored by its own `min-height`. Only an explicit `min-height` was
+  consulted, and only to keep a shrinking item from collapsing, so
+  `height: calc(100% - 560px); max-height: 290px` kept the full
+  calculated height and pushed everything below it down the page.
 * A block that does not establish a block formatting context no longer
   grows to enclose the floats inside it. The float is registered with
   the enclosing formatting context instead, so it keeps shortening line

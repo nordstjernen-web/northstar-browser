@@ -8775,6 +8775,22 @@ layout_flex_column(ns_box *box, double cw,
         } else if (main_size < content_outer) {
             main_size = content_outer;
         }
+        const ns_css_value *cmxh = c->style
+            ? c->style->values[NS_CSS_MAX_HEIGHT] : NULL;
+        if (cmxh && (cmxh->kind == NS_CSS_V_LENGTH ||
+                     cmxh->kind == NS_CSS_V_CALC) &&
+            !(height_is_percent(cmxh) && percentage_basis_h < 0)) {
+            double max_outer = flex_main_height_outer(c, cmxh, cw,
+                                                      percentage_basis_h);
+            if (max_outer >= 0 && main_size > max_outer)
+                main_size = max_outer;
+        }
+        if (cmin_explicit &&
+            !(height_is_percent(cmnh) && percentage_basis_h < 0)) {
+            double min_outer = flex_main_height_outer(c, cmnh, cw,
+                                                      percentage_basis_h);
+            if (main_size < min_outer) main_size = min_outer;
+        }
         if (main_size < 0) main_size = 0;
 
         double item_outer_w = c->content_width
