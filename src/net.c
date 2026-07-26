@@ -3877,7 +3877,7 @@ static const char k_about_start_template[] =
     " margin:4px auto 0; line-height:1.25; max-width:36em; }\n"
     ".intro { color:#4b5563; text-align:center; line-height:1.5;"
     " margin:0 auto 22px; max-width:620px; }\n"
-    ".search { display:flex; gap:10px; margin:0 0 18px; }\n"
+    ".search { display:flex; gap:10px; max-width:96%; margin:0 auto 18px; }\n"
     ".search input { flex:1 1 auto; border:1px solid #c9cfd9;"
     " background:#ffffff; color:#111418; border-radius:10px;"
     " padding:13px 16px; font:inherit; font-size:1.03em; outline:none; }\n"

@@ -7888,19 +7888,26 @@ estimate_natural_width(const ns_box *b, double cap)
 }
 
 static double
-flex_item_box_extras(const ns_box *b)
-{
-    if (!b) return 0;
-    return b->padding.left + b->padding.right +
-           b->border.left  + b->border.right;
-}
-
-static double
 flex_content_basis_from_natural(ns_box *b)
 {
     double w = measure_natural_width(b, b->style);
-    double extras = flex_item_box_extras(b);
-    return w > extras ? w - extras : 0;
+    return w > 0 ? w : 0;
+}
+
+static double
+flex_item_min_main(ns_box *c, double cw, double basis)
+{
+    const ns_css_value *mnw = c->style ? c->style->values[NS_CSS_MIN_WIDTH] : NULL;
+    if (mnw && (mnw->kind == NS_CSS_V_LENGTH || mnw->kind == NS_CSS_V_CALC)) {
+        double mn = flex_border_box_to_content(c, length_resolve(mnw, cw, -1));
+        return mn > 0 ? mn : 0;
+    }
+    if (mnw && mnw->kind == NS_CSS_V_KEYWORD && !keyword_is(mnw, "auto"))
+        return 0;
+    if (box_clips_children(c)) return 0;
+    double mn = measure_min_width(c, c->style);
+    if (mn < 0) mn = 0;
+    return mn > basis ? basis : mn;
 }
 
 static double
@@ -8066,6 +8073,7 @@ layout_flex_row(ns_box *box, double cw,
     double total_grow = 0;
     int    implicit_count = 0;
     GArray *basis = g_array_new(FALSE, FALSE, sizeof(double));
+    GArray *mins = g_array_new(FALSE, FALSE, sizeof(double));
     GArray *explicit_flags = g_array_new(FALSE, FALSE, sizeof(gboolean));
     for (guint i = 0; i < items->len; i++) {
         ns_box *c = items->pdata[i];
@@ -8079,7 +8087,9 @@ layout_flex_row(ns_box *box, double cw,
         double b = 0;
         gboolean exp_flag = flex_main_basis_explicit(c, cw, &b);
         if (!exp_flag) b = flex_content_basis_from_natural(c);
+        double mn = flex_item_min_main(c, cw, b);
         g_array_append_val(basis, b);
+        g_array_append_val(mins, mn);
         g_array_append_val(explicit_flags, exp_flag);
         if (exp_flag) total_explicit += b;
         else          implicit_count++;
@@ -8175,11 +8185,7 @@ layout_flex_row(ns_box *box, double cw,
     }
     double min_deficit = 0;
     for (guint i = 0; i < items->len; i++) {
-        ns_box *c = items->pdata[i];
-        const ns_css_value *mnw = c->style ? c->style->values[NS_CSS_MIN_WIDTH] : NULL;
-        if (!mnw || (mnw->kind != NS_CSS_V_LENGTH && mnw->kind != NS_CSS_V_CALC))
-            continue;
-        double mn = flex_border_box_to_content(c, length_resolve(mnw, cw, -1));
+        double mn = g_array_index(mins, double, i);
         double a = g_array_index(assigned_main, double, i);
         if (mn > 0 && a < mn) {
             min_deficit += mn - a;
@@ -8191,13 +8197,7 @@ layout_flex_row(ns_box *box, double cw,
         gboolean use_arr = items->len <= NS_CSS_TRACKS_MAX;
         double total_reducible = 0;
         for (guint i = 0; i < items->len; i++) {
-            ns_box *c = items->pdata[i];
-            const ns_css_value *mnw = c->style ? c->style->values[NS_CSS_MIN_WIDTH] : NULL;
-            double mn = 0;
-            if (mnw && (mnw->kind == NS_CSS_V_LENGTH || mnw->kind == NS_CSS_V_CALC)) {
-                double r = flex_border_box_to_content(c, length_resolve(mnw, cw, -1));
-                if (r > 0) mn = r;
-            }
+            double mn = g_array_index(mins, double, i);
             double a = g_array_index(assigned_main, double, i);
             double room = a > mn ? a - mn : 0;
             if (use_arr) reducible[i] = room;
@@ -8370,6 +8370,7 @@ layout_flex_row(ns_box *box, double cw,
 
     *cursor_y_out = inner_y + cross_size;
     g_array_free(basis, TRUE);
+    g_array_free(mins, TRUE);
     g_array_free(explicit_flags, TRUE);
     g_array_free(assigned_main, TRUE);
     g_ptr_array_free(items, TRUE);
@@ -10549,11 +10550,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         if ((c->kind == NS_BOX_IMAGE || c->kind == NS_BOX_VIDEO ||
              c->kind == NS_BOX_TABLE) &&
             c->content_width < cw) {
-            double outer = c->content_width;
-            if (c->kind == NS_BOX_TABLE)
-                outer += c->padding.left + c->padding.right +
-                         c->border.left + c->border.right +
-                         c->margin.left + c->margin.right;
+            double outer = c->content_width +
+                           c->padding.left + c->padding.right +
+                           c->border.left + c->border.right +
+                           c->margin.left + c->margin.right;
             const ns_css_value *ta = child_inherited
                 ? child_inherited->values[NS_CSS_TEXT_ALIGN] : NULL;
             gboolean self_center = FALSE, self_right = FALSE;
@@ -10561,13 +10561,18 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 const char *al = c->dom ? ns_element_get_attr(c->dom, "align") : NULL;
                 if (al && g_ascii_strcasecmp(al, "center") == 0) self_center = TRUE;
                 else if (al && g_ascii_strcasecmp(al, "right") == 0) self_right = TRUE;
-                const ns_css_value *ml = c->style ? c->style->values[NS_CSS_MARGIN_LEFT] : NULL;
-                const ns_css_value *mr = c->style ? c->style->values[NS_CSS_MARGIN_RIGHT] : NULL;
-                if (keyword_is(ml, "auto") && keyword_is(mr, "auto")) self_center = TRUE;
             }
-            if ((keyword_is(ta, "center") || self_center) && outer < cw)
+            const ns_css_value *ml = c->style ? c->style->values[NS_CSS_MARGIN_LEFT] : NULL;
+            const ns_css_value *mr = c->style ? c->style->values[NS_CSS_MARGIN_RIGHT] : NULL;
+            if (keyword_is(ml, "auto") && keyword_is(mr, "auto")) self_center = TRUE;
+            else if (keyword_is(ml, "auto")) self_right = TRUE;
+            gboolean align_center = self_center ||
+                (!self_right && keyword_is(ta, "center"));
+            gboolean align_right = !align_center &&
+                (self_right || keyword_is(ta, "right") || keyword_is(ta, "end"));
+            if (align_center && outer < cw)
                 shift_box_tree(c, inner_x + (cw - outer) / 2.0 - c->x, 0);
-            else if ((keyword_is(ta, "right") || keyword_is(ta, "end") || self_right) && outer < cw)
+            else if (align_right && outer < cw)
                 shift_box_tree(c, inner_x + (cw - outer) - c->x, 0);
         }
     }

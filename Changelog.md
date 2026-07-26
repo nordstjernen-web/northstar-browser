@@ -4,6 +4,21 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* A flex item's content-based base size no longer has the item's own
+  padding and border subtracted from it. `measure_natural_width` already
+  returns a content-box size, so a padded item — a `<button>` above all —
+  was assigned a base size that was short by exactly its horizontal
+  padding, and its label was clipped.
+* Flex items honour the automatic minimum size of CSS Flexbox §4.5: an
+  item with `min-width: auto` and visible overflow never shrinks below
+  its min-content width, so the last item in an over-constrained row
+  keeps its label instead of being squeezed to nothing.
+* `margin-left: auto` and `margin-right: auto` centre — or, on their
+  own, right-align — a block-level replaced element, not just a table.
+  A centred `<img>` whose used width came from `max-width` stayed
+  against the left edge of its containing block.
+* about:start sizes the search row to the splash image, so the two share
+  the same left and right edges.
 * Flex items are sized by the flex algorithm rather than by their own
   `width`. `layout_block` read `width` back out of the style and ignored
   the main size the container had assigned, so nothing ever shrank —
