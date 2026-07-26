@@ -4,6 +4,20 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* The root element's font reaches the rest of the page. The UA
+  stylesheet declared `font-family: serif` on `html, body` together,
+  and a UA declaration on `body` outranks inheritance from `html` — so
+  a page styling only `html` (`html{font-family:"Helvetica Neue",
+  "Segoe UI",Arial,sans-serif}` on lite.duckduckgo.com) had its font
+  dropped at `body` and rendered in the UA serif default. The
+  declaration now sits on `html` alone and `body` inherits it.
+* A concrete font family is used when the system actually has it.
+  `Arial`, `Helvetica`, `Segoe UI`, `Roboto` and the SF Pro names were
+  rewritten to generic `sans-serif` unconditionally, which resolved
+  through fontconfig to whatever the default sans happened to be —
+  Noto Sans rather than the requested Segoe UI or Arial. Each name is
+  now resolved against the installed families first, and substituted
+  by `sans-serif` only when it is missing.
 * Container queries no longer defeat incremental restyle. ns_css_compute
   runs twice per relayout when a page has containers, and the second
   pass — the one with the container map set — failed the incr_want test
