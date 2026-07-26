@@ -18,6 +18,14 @@ Significant changes in each release:
   origin. `ns_net_fetch_async` now keys uncancellable GETs on URL plus
   top-level URL, lets the first caller do the transfer, and hands each
   later caller its own copy of the response.
+* `Worker.postMessage()` can transfer a `MessagePort` that also appears
+  inside the message payload. The structured clone now substitutes the
+  transferred endpoint during serialization, restores it in the receiving
+  worker, and exposes the same port object through both `event.data` and
+  `event.ports`; duplicate ports in a transfer list raise `DataCloneError`.
+  This allows worker-backed consent and advertising libraries used by large
+  news sites to initialize instead of failing before their message channel is
+  connected.
 * The root element's font reaches the rest of the page. The UA
   stylesheet declared `font-family: serif` on `html, body` together,
   and a UA declaration on `body` outranks inheritance from `html` — so
