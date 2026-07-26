@@ -4,6 +4,17 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* A block that does not establish a block formatting context no longer
+  grows to enclose the floats inside it. The float is registered with
+  the enclosing formatting context instead, so it keeps shortening line
+  boxes in the blocks that follow — a floated thumbnail followed by
+  sibling `<div>`s now has the post text beside it rather than beneath
+  a container stretched to the float's height.
+* `window.scrollX`, `window.scrollY`, `pageXOffset` and `pageYOffset`
+  are read-only accessors over the real viewport offset instead of
+  writable data properties. Page script that assigned to one of them
+  poisoned every reader, including `getBoundingClientRect`, which then
+  reported every element at the top of the viewport.
 * A flex item's content-based base size no longer has the item's own
   padding and border subtracted from it. `measure_natural_width` already
   returns a content-box size, so a padded item — a `<button>` above all —

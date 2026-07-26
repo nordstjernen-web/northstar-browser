@@ -170,6 +170,8 @@ struct ns_js {
     gboolean      halted;
     gboolean      in_pump;
     gboolean      in_scroll_dispatch;
+    double        viewport_scroll_x;
+    double        viewport_scroll_y;
     GPtrArray    *pending_scrollend;
     gboolean      pending_scrollend_doc;
     int           eval_depth;

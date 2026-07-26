@@ -49,6 +49,8 @@
 
 #include "js_internal.h"
 
+static double ns_window_scroll_prop(JSContext *ctx, const char *prop);
+
 #undef JS_CFUNC_DEF
 #define JS_CFUNC_DEF(name, length, func1) \
     { name, JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE, \
@@ -23032,20 +23034,8 @@ ns_io_root_rect(JSContext *ctx, ns_io_observer *o,
         JS_FreeValue(ctx, jh);
         JS_FreeValue(ctx, global);
     }
-    double scroll_x = 0, scroll_y = 0;
-    if (ctx) {
-        JSValue global = JS_GetGlobalObject(ctx);
-        JSValue jx = JS_GetPropertyStr(ctx, global, "scrollX");
-        JSValue jy = JS_GetPropertyStr(ctx, global, "scrollY");
-        double d;
-        if (JS_ToFloat64(ctx, &d, jx) == 0) scroll_x = d;
-        if (JS_ToFloat64(ctx, &d, jy) == 0) scroll_y = d;
-        JS_FreeValue(ctx, jx);
-        JS_FreeValue(ctx, jy);
-        JS_FreeValue(ctx, global);
-    }
-    *out_x = scroll_x;
-    *out_y = scroll_y;
+    *out_x = ns_window_scroll_prop(ctx, "scrollX");
+    *out_y = ns_window_scroll_prop(ctx, "scrollY");
     *out_w = vw;
     *out_h = vh;
     (void)layout_root;
@@ -29876,7 +29866,6 @@ ns_box_visual_border_box(const ns_box *box,
     *h = max_y - min_y;
 }
 
-static double ns_window_scroll_prop(JSContext *ctx, const char *prop);
 
 static JSValue
 ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
@@ -32708,13 +32697,27 @@ ns_element_is_scrolling_root(JSContext *ctx, JSValueConst this_val)
 static double
 ns_window_scroll_prop(JSContext *ctx, const char *prop)
 {
-    double v = 0;
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue jv = JS_GetPropertyStr(ctx, global, prop);
-    if (JS_IsNumber(jv)) JS_ToFloat64(ctx, &v, jv);
-    JS_FreeValue(ctx, jv);
-    JS_FreeValue(ctx, global);
-    return v;
+    const ns_js *js = js_from_ctx(ctx);
+    if (!js) return 0;
+    double v = strchr(prop, 'X') ? js->viewport_scroll_x
+                                 : js->viewport_scroll_y;
+    return isfinite(v) ? v : 0;
+}
+
+static JSValue
+ns_window_get_scroll_x(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return JS_NewFloat64(ctx, ns_window_scroll_prop(ctx, "scrollX"));
+}
+
+static JSValue
+ns_window_get_scroll_y(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return JS_NewFloat64(ctx, ns_window_scroll_prop(ctx, "scrollY"));
 }
 
 static JSValue
@@ -41974,14 +41977,11 @@ ns_js_note_viewport_scroll(ns_js *js, double x, double y)
 {
     if (!js || !js->ctx || js->halted) return;
     JSContext *ctx = js->ctx;
-    if (ns_window_scroll_prop(ctx, "scrollX") != x ||
-        ns_window_scroll_prop(ctx, "scrollY") != y)
+    if (js->viewport_scroll_x != x || js->viewport_scroll_y != y)
         js->pending_scrollend_doc = TRUE;
+    js->viewport_scroll_x = x;
+    js->viewport_scroll_y = y;
     JSValue global = JS_GetGlobalObject(ctx);
-    JS_SetPropertyStr(ctx, global, "scrollX", JS_NewFloat64(ctx, x));
-    JS_SetPropertyStr(ctx, global, "scrollY", JS_NewFloat64(ctx, y));
-    JS_SetPropertyStr(ctx, global, "pageXOffset", JS_NewFloat64(ctx, x));
-    JS_SetPropertyStr(ctx, global, "pageYOffset", JS_NewFloat64(ctx, y));
     if (js->in_scroll_dispatch) {
         JS_FreeValue(ctx, global);
         return;
@@ -43884,10 +43884,20 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "attachEvent",         ns_document_attachEvent,         2);
     ns_bind_fn(ctx, global, "detachEvent",         ns_document_detachEvent,         2);
     ns_bind_fn(ctx, global, "dispatchEvent",       ns_window_dispatchEvent,         1);
-    JS_SetPropertyStr(ctx, global, "scrollY", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, global, "scrollX", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, global, "pageYOffset", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, global, "pageXOffset", JS_NewInt32(ctx, 0));
+    struct { const char *name; JSCFunction *fn; } scroll_getters[] = {
+        { "scrollX",     ns_window_get_scroll_x },
+        { "scrollY",     ns_window_get_scroll_y },
+        { "pageXOffset", ns_window_get_scroll_x },
+        { "pageYOffset", ns_window_get_scroll_y },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(scroll_getters); i++) {
+        JSAtom a = JS_NewAtom(ctx, scroll_getters[i].name);
+        JS_DefinePropertyGetSet(ctx, global, a,
+            JS_NewCFunction(ctx, scroll_getters[i].fn,
+                            scroll_getters[i].name, 0),
+            JS_UNDEFINED, JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, a);
+    }
     ns_js_sync_window_metrics(js);
     ns_css_media_device media_device;
     ns_css_get_media_device(&media_device);

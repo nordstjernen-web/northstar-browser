@@ -6420,7 +6420,7 @@ typedef struct float_ref {
     gboolean intruding;
 } float_ref;
 
-static const GArray *g_bfc_floats;
+static GArray *g_bfc_floats;
 
 static void
 floats_offsets_at(const GArray *floats, double y, double cx0, double cx1,
@@ -7667,7 +7667,7 @@ layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_s
 {
     if (box_is_query_container(box)) g_cq_seen_container = TRUE;
     if (g_cq_seen_container) cq_set_dims_from_ancestors(box);
-    const GArray *entry_floats = g_bfc_floats;
+    GArray *entry_floats = g_bfc_floats;
     if (box_establishes_bfc(box)) g_bfc_floats = NULL;
     if (box->kind == NS_BOX_BLOCK) {
         layout_block(box, parent_content_width, inherited_style);
@@ -10366,7 +10366,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         else n_cols = 1;
     }
     GArray *floats = g_array_new(FALSE, FALSE, sizeof(float_ref));
-    const GArray *outer_floats = g_bfc_floats;
+    GArray *outer_floats = g_bfc_floats;
     if (n_cols == 1 && outer_floats) {
         for (guint i = 0; i < outer_floats->len; i++) {
             float_ref fr = g_array_index(outer_floats, float_ref, i);
@@ -10583,9 +10583,17 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         cursor_y += prev_margin_bottom;
     }
 
-    if (floats && floats->len > 0) {
-        double fb = floats_max_bottom(floats);
-        if (fb > cursor_y) cursor_y = fb;
+    if (floats->len > 0) {
+        if (box_establishes_bfc(box)) {
+            double fb = floats_max_bottom(floats);
+            if (fb > cursor_y) cursor_y = fb;
+        } else if (outer_floats && n_cols == 1) {
+            for (guint i = 0; i < floats->len; i++) {
+                float_ref fr = g_array_index(floats, float_ref, i);
+                if (fr.intruding) continue;
+                g_array_append_val(outer_floats, fr);
+            }
+        }
     }
     g_bfc_floats = outer_floats;
     g_array_free(floats, TRUE);
