@@ -11,6 +11,9 @@ libcurl, carrying no upstream browser engine.
   owns which job.
 - **[building.md](building.md)** — dependencies per distro, the meson/ninja
   build, meson options, headless mode, and the render-test fixtures.
+- **[preloading.md](preloading.md)** — the speculative preload scan, the
+  request key that identifies a fetch, and the four layers that keep a
+  subresource from being fetched twice.
 
 ## Related documents at the repository root
 

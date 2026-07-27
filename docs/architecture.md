@@ -51,7 +51,7 @@ and headless drivers share the same path).
 
 | Stage | File(s) | Job |
 |-------|---------|-----|
-| 1. Fetch | `net.c`, `netutil.c`, `cache.c` | libcurl async fetch (HTTP/2, HTTP/3 when available), TLS verification, redirect clamp, response-size cap, HSTS, Alt-Svc, per-site cookie jar and HTTP cache. |
+| 1. Fetch | `net.c`, `netutil.c`, `cache.c` | libcurl async fetch (HTTP/2, HTTP/3 when available), TLS verification, redirect clamp, response-size cap, HSTS, Alt-Svc, per-site cookie jar and HTTP cache. Subresources are preloaded and deduplicated by request identity — see [preloading.md](preloading.md). |
 | 2. Safety gate | `safebrowsing.c`, `csp.c` | Top-level host checked against the local SHA-256 blocklist; Content-Security-Policy parsed and enforced; Subresource-Integrity verified. |
 | 3. Parse | `html_lexbor.c`, `html.c`, `xml.c` | Bytes → DOM via lexbor (WHATWG HTML). `xml.c` handles XHTML/namespaced XML. Charset via uchardet. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
