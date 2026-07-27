@@ -36,6 +36,8 @@ ns_node *ns_html_parse_with_scripting(const char *input, gssize len,
                                       gboolean scripting);
 
 ns_node *ns_xml_parse(const char *input, gssize len);
+ns_node *ns_xml_parse_reporting(const char *input, gssize len,
+                                int *line, int *column);
 
 char *ns_html_mime_essence(const char *content_type);
 gboolean ns_html_mime_is_xml(const char *content_type);

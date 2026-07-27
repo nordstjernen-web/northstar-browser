@@ -611,9 +611,23 @@ xml_parse_element(xml_parser *xp, ns_node *parent, int depth)
     return xp->ok;
 }
 
-ns_node *
-ns_xml_parse(const char *input, gssize len)
+static void
+xml_offset_to_line_column(const char *input, gsize offset, int *line, int *column)
 {
+    int ln = 1, col = 1;
+    for (gsize i = 0; i < offset; i++) {
+        if (input[i] == '\n') { ln++; col = 1; }
+        else col++;
+    }
+    if (line) *line = ln;
+    if (column) *column = col;
+}
+
+ns_node *
+ns_xml_parse_reporting(const char *input, gssize len, int *line, int *column)
+{
+    if (line) *line = 1;
+    if (column) *column = 1;
     if (!input) return NULL;
     gsize n = (len < 0) ? strlen(input) : (gsize)len;
     xml_parser xp = {
@@ -651,8 +665,15 @@ ns_xml_parse(const char *input, gssize len)
     g_hash_table_destroy(xp.entities);
 
     if (!xp.ok || !root) {
+        xml_offset_to_line_column(input, (gsize)(xp.p - input), line, column);
         ns_node_free(doc);
         return NULL;
     }
     return doc;
+}
+
+ns_node *
+ns_xml_parse(const char *input, gssize len)
+{
+    return ns_xml_parse_reporting(input, len, NULL, NULL);
 }
