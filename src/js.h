@@ -34,6 +34,7 @@ typedef void (*ns_js_media_muted_cb)(const void *node, gboolean muted,
 typedef void (*ns_js_media_volume_cb)(const void *node, double volume,
                                       gpointer user_data);
 typedef void (*ns_js_scroll_to_cb)(const ns_node *target, gpointer user_data);
+typedef void (*ns_js_fragment_nav_cb)(const char *url, gpointer user_data);
 typedef void (*ns_js_form_submit_cb)(const ns_node *form, const ns_node *submitter,
                                      gpointer user_data);
 typedef void (*ns_js_soft_nav_cb)(const char *url, gboolean replace, gpointer user_data);
@@ -80,6 +81,12 @@ void   ns_js_set_media_muted_cb(ns_js *js, ns_js_media_muted_cb cb,
                                 gpointer user_data);
 void   ns_js_set_media_volume_cb(ns_js *js, ns_js_media_volume_cb cb,
                                  gpointer user_data);
+void   ns_js_set_scroll_to_cb(ns_js *js, ns_js_scroll_to_cb cb,
+                              gpointer user_data);
+void   ns_js_set_fragment_nav_cb(ns_js *js, ns_js_fragment_nav_cb cb,
+                                 gpointer user_data);
+void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb,
+                             gpointer user_data);
 void   ns_js_video_event(ns_js *js, const void *node, const char *kind, double value);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);

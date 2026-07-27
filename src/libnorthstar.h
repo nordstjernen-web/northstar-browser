@@ -67,6 +67,7 @@ char *ns_browser_media_at(ns_browser *browser, int x, int y,
                           int *out_is_video, int *out_stream);
 char *ns_browser_take_pending_audio(ns_browser *browser);
 char *ns_browser_take_pending_nav(ns_browser *browser);
+int ns_browser_take_pending_scroll_y(ns_browser *browser, int *out_scroll_y);
 char *ns_browser_take_pending_camera(ns_browser *browser);
 void ns_browser_resolve_camera(ns_browser *browser, const char *origin,
                                int allow);
