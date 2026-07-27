@@ -6412,6 +6412,16 @@ hit_children_stacked(const ns_box *parent, guint *out_n)
 static gboolean box_hit_untransform_point(const ns_box *b, double *x,
                                           double *y);
 
+static void
+inline_atomic_hit_point(const ns_box *owner, const ns_inline_atomic *atomic,
+                        double x, double y, double *child_x, double *child_y)
+{
+    double dx = owner->x + atomic->owner_offset_x - atomic->box->x;
+    double dy = owner->y + atomic->owner_offset_y - atomic->box->y;
+    *child_x = x - dx;
+    *child_y = y - dy;
+}
+
 static const ns_node *
 ns_form_hit_walk(const ns_box *box, double x, double y,
                  const ns_style *inherited)
@@ -6451,10 +6461,13 @@ ns_form_hit_walk(const ns_box *box, double x, double y,
     }
     if (box->inline_atomics)
         for (guint i = 0; i < box->inline_atomics->len; i++) {
-            const ns_box *ab =
-                g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
+            const ns_inline_atomic *atomic =
+                &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+            const ns_box *ab = atomic->box;
             if (!ab) continue;
-            const ns_node *m = ns_form_hit_walk(ab, cx, cy, child_inherited);
+            double ax, ay;
+            inline_atomic_hit_point(box, atomic, cx, cy, &ax, &ay);
+            const ns_node *m = ns_form_hit_walk(ab, ax, ay, child_inherited);
             if (m) best = m;
         }
     return best ? best : self_hit;
@@ -8524,6 +8537,16 @@ layout_flex_row_wrap(ns_box *box, double cw,
         double b = 0;
         gboolean exp = flex_main_basis_explicit(c, cw, &b);
         if (!exp) b = flex_content_basis_from_natural(c);
+        const ns_css_value *mxw = c->style
+            ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
+        if (mxw && (mxw->kind == NS_CSS_V_LENGTH ||
+                    mxw->kind == NS_CSS_V_CALC)) {
+            double mx = flex_border_box_to_content(
+                c, length_resolve(mxw, cw, -1));
+            if (mx >= 0 && b > mx) b = mx;
+        }
+        double mn = flex_item_min_main(c, cw, b);
+        if (b < mn) b = mn;
         g_array_index(basis_arr, double, n) = b;
     }
 
@@ -11774,12 +11797,14 @@ compute_paint_bounds(ns_box *b)
     }
     if (b->inline_atomics) {
         for (guint i = 0; i < b->inline_atomics->len; i++) {
-            ns_box *ab = g_array_index(b->inline_atomics,
-                                       ns_inline_atomic, i).box;
+            const ns_inline_atomic *atomic =
+                &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+            ns_box *ab = atomic->box;
             if (!ab) continue;
             compute_paint_bounds(ab);
-            if (ab->paint_top < top) top = ab->paint_top;
-            if (ab->paint_bottom > bottom) bottom = ab->paint_bottom;
+            double dy = b->y + atomic->owner_offset_y - ab->y;
+            if (ab->paint_top + dy < top) top = ab->paint_top + dy;
+            if (ab->paint_bottom + dy > bottom) bottom = ab->paint_bottom + dy;
         }
     }
     b->paint_top = top;
@@ -11824,6 +11849,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     gint64 t3 = profile_env ? g_get_monotonic_time() : 0;
     process_absolute_boxes(root, styles, viewport_width);
     gint64 t4 = profile_env ? g_get_monotonic_time() : 0;
+    ns_paint_sync_inline_atomic_offsets(root);
     compute_paint_bounds(root);
     gint64 t5 = profile_env ? g_get_monotonic_time() : 0;
 
@@ -12042,6 +12068,16 @@ ns_box_hit_scrollable(ns_box *root, double x, double y)
         ns_box *m = ns_box_hit_scrollable(c, cx, cy);
         if (m) return m;
     }
+    if (root->inline_atomics)
+        for (guint i = 0; i < root->inline_atomics->len; i++) {
+            const ns_inline_atomic *atomic =
+                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+            if (!atomic->box) continue;
+            double ax, ay;
+            inline_atomic_hit_point(root, atomic, cx, cy, &ax, &ay);
+            ns_box *m = ns_box_hit_scrollable(atomic->box, ax, ay);
+            if (m) return m;
+        }
     if (root->scrolls && (root->scroll_max_x > 0 || root->scroll_max_y > 0) &&
         box_padding_contains(root, x, y))
         return root;
@@ -12065,6 +12101,16 @@ ns_box_hit_scrollbar(ns_box *root, double x, double y, double *lx, double *ly)
         ns_box *m = ns_box_hit_scrollbar(c, cx, cy, lx, ly);
         if (m) return m;
     }
+    if (root->inline_atomics)
+        for (guint i = 0; i < root->inline_atomics->len; i++) {
+            const ns_inline_atomic *atomic =
+                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+            if (!atomic->box) continue;
+            double ax, ay;
+            inline_atomic_hit_point(root, atomic, cx, cy, &ax, &ay);
+            ns_box *m = ns_box_hit_scrollbar(atomic->box, ax, ay, lx, ly);
+            if (m) return m;
+        }
     if (root->scrolls && (root->scroll_max_x > 0 || root->scroll_max_y > 0) &&
         box_padding_contains(root, x, y)) {
         if (lx) *lx = x;
@@ -12109,10 +12155,13 @@ ns_box_hit_test(const ns_box *root, double x, double y)
     }
     if (root->inline_atomics)
         for (guint i = 0; i < root->inline_atomics->len; i++) {
-            const ns_box *ab =
-                g_array_index(root->inline_atomics, ns_inline_atomic, i).box;
+            const ns_inline_atomic *atomic =
+                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+            const ns_box *ab = atomic->box;
             if (!ab) continue;
-            const ns_box *m = ns_box_hit_test(ab, cx, cy);
+            double ax, ay;
+            inline_atomic_hit_point(root, atomic, cx, cy, &ax, &ay);
+            const ns_box *m = ns_box_hit_test(ab, ax, ay);
             if (m) best = m;
         }
     if (best) return best;
@@ -12212,9 +12261,12 @@ box_hit_stack_walk(const ns_box *root, double x, double y, GArray *hits)
     }
     if (root->inline_atomics)
         for (guint i = 0; i < root->inline_atomics->len; i++) {
-            const ns_box *ab =
-                g_array_index(root->inline_atomics, ns_inline_atomic, i).box;
-            if (ab) box_hit_stack_walk(ab, cx, cy, hits);
+            const ns_inline_atomic *atomic =
+                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+            if (!atomic->box) continue;
+            double ax, ay;
+            inline_atomic_hit_point(root, atomic, cx, cy, &ax, &ay);
+            box_hit_stack_walk(atomic->box, ax, ay, hits);
         }
 }
 
@@ -12276,11 +12328,15 @@ ns_box_hit_link_range(const ns_box *root, double x, double y)
     if (!box_hit_untransform_point(root, &x, &y)) return NULL;
     if (root->inline_atomics)
         for (guint i = 0; i < root->inline_atomics->len; i++) {
-            const ns_box *ab =
-                g_array_index(root->inline_atomics, ns_inline_atomic, i).box;
+            const ns_inline_atomic *atomic =
+                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+            const ns_box *ab = atomic->box;
             if (!ab) continue;
-            const ns_link_range *r = ns_box_hit_link_range(
-                ab, x + root->scroll_x, y + root->scroll_y);
+            double ax, ay;
+            inline_atomic_hit_point(root, atomic,
+                                    x + root->scroll_x,
+                                    y + root->scroll_y, &ax, &ay);
+            const ns_link_range *r = ns_box_hit_link_range(ab, ax, ay);
             if (r) return r;
         }
     if (!box_blocks_hit_testing(root) &&
@@ -12341,11 +12397,15 @@ ns_box_hit_inline_dom(const ns_box *root, double x, double y)
         return NULL;
     if (root->inline_atomics)
         for (guint i = 0; i < root->inline_atomics->len; i++) {
-            const ns_box *ab =
-                g_array_index(root->inline_atomics, ns_inline_atomic, i).box;
+            const ns_inline_atomic *atomic =
+                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+            const ns_box *ab = atomic->box;
             if (!ab) continue;
-            const ns_node *m = ns_box_hit_inline_dom(
-                ab, x + root->scroll_x, y + root->scroll_y);
+            double ax, ay;
+            inline_atomic_hit_point(root, atomic,
+                                    x + root->scroll_x,
+                                    y + root->scroll_y, &ax, &ay);
+            const ns_node *m = ns_box_hit_inline_dom(ab, ax, ay);
             if (m) return m;
         }
     if (!box_blocks_hit_testing(root) &&
@@ -12399,13 +12459,11 @@ ns_box_hit_inline_dom(const ns_box *root, double x, double y)
 }
 
 static gboolean
-hit_nodes_related(const ns_node *a, const ns_node *b)
+hit_node_refines(const ns_node *candidate, const ns_node *current)
 {
-    if (!a || !b) return FALSE;
-    for (const ns_node *n = a; n; n = n->parent)
-        if (n == b) return TRUE;
-    for (const ns_node *n = b; n; n = n->parent)
-        if (n == a) return TRUE;
+    if (!candidate || !current) return FALSE;
+    for (const ns_node *n = candidate; n; n = n->parent)
+        if (n == current) return TRUE;
     return FALSE;
 }
 
@@ -12415,10 +12473,10 @@ ns_box_hit_dom(const ns_box *root, double x, double y)
     const ns_box *hit = ns_box_hit_test(root, x, y);
     const ns_node *target = hit ? hit->dom : NULL;
     const ns_node *inline_target = ns_box_hit_inline_dom(root, x, y);
-    if (inline_target && (!target || hit_nodes_related(target, inline_target)))
+    if (inline_target && (!target || hit_node_refines(inline_target, target)))
         target = inline_target;
     const ns_node *form_target = ns_box_hit_form_dom(root, x, y);
-    if (form_target && (!target || hit_nodes_related(target, form_target)))
+    if (form_target && (!target || hit_node_refines(form_target, target)))
         target = form_target;
     return target;
 }
@@ -12460,11 +12518,15 @@ box_inline_union_for_dom(const ns_box *root, const ns_node *target,
         box_inline_union_for_dom(c, target, cdx, cdy, x0, y0, x1, y1, any);
     if (root->inline_atomics)
         for (guint i = 0; i < root->inline_atomics->len; i++) {
-            const ns_box *ab =
-                g_array_index(root->inline_atomics, ns_inline_atomic, i).box;
-            if (ab)
-                box_inline_union_for_dom(ab, target, cdx, cdy,
-                                         x0, y0, x1, y1, any);
+            const ns_inline_atomic *atomic =
+                &g_array_index(root->inline_atomics, ns_inline_atomic, i);
+            if (!atomic->box) continue;
+            double adx = cdx + root->x + atomic->owner_offset_x -
+                         atomic->box->x;
+            double ady = cdy + root->y + atomic->owner_offset_y -
+                         atomic->box->y;
+            box_inline_union_for_dom(atomic->box, target, adx, ady,
+                                     x0, y0, x1, y1, any);
         }
 }
 
