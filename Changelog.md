@@ -33,6 +33,16 @@ Significant changes in each release:
 * `DOMParser` reports the line and column of an XML parse error. The
   synthesized `parsererror` document carried the bare text "XML parsing
   error"; it now names the position the parser stopped at.
+* `Array.prototype.sort` calls the comparator for identical elements.
+  quickjs-ng skips the call when two slots hold the same JSValue and
+  assumes the comparator would have returned 0. That is permitted by
+  ECMAScript, which does not prescribe which comparisons a sort makes,
+  but jQuery's `uniqueSort` learns that a collection holds duplicates
+  precisely by being invoked with `a === b`, so duplicate nodes survived
+  `.siblings()`, `.parents()`, `.nextAll()`, `.prevAll()`, `.closest()`
+  and `.addBack()`. Carried as a wrap patch alongside the existing one,
+  so the engine is still consumed unforked. jQuery's traversing module
+  goes from 12 failing tests to 2.
 * `getComputedStyle(el).someUnknownName` is `undefined` rather than the
   empty string. The proxy in front of a computed declaration answered
   every string key through `getPropertyValue`; its `has` trap already
