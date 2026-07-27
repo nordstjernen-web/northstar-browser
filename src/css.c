@@ -11209,11 +11209,24 @@ typedef struct {
 static __thread GHashTable *g_cq_map;     /* ns_node* -> ns_cq_container* */
 static __thread GArray     *g_cq_stack;   /* ns_cq_container (by value) */
 static __thread GHashTable *g_var_adjust_cache; /* parent ns_var_map* -> adjusted ns_var_map* */
+static __thread gboolean    g_container_features_used;
 
 void
 ns_css_set_container_map(GHashTable *map)
 {
     g_cq_map = map;
+}
+
+void
+ns_css_container_features_begin(void)
+{
+    g_container_features_used = FALSE;
+}
+
+gboolean
+ns_css_container_features_used(void)
+{
+    return g_container_features_used;
 }
 
 static void
@@ -11451,6 +11464,7 @@ cq_select_axis(gboolean block_axis)
 static double
 container_unit_resolve(double v, ns_css_unit unit)
 {
+    if (g_cq_map) g_container_features_used = TRUE;
     const ns_cq_container *inline_container = cq_select_axis(FALSE);
     const ns_cq_container *block_container = cq_select_axis(TRUE);
     double inline_size = inline_container && inline_container->width > 0
@@ -11495,8 +11509,7 @@ container_cond_matches(const char *cond)
     const ns_cq_container *c = cq_select_container(name, nlen);
     if (!c) return FALSE;
     while (*q && is_ws(*q)) q++;
-    if (!*q) return TRUE;
-    return cq_eval_expr(q, c, 0);
+    return !*q || cq_eval_expr(q, c, 0);
 }
 
 static char *
@@ -16453,6 +16466,95 @@ static __thread guint *g_rule_matched = NULL;
 static __thread guint g_rule_matched_cap = 0;
 static __thread guint g_rule_match_epoch = 0;
 
+typedef struct {
+    const ns_css_rule     *rule;
+    const ns_css_selector *selector;
+    const ns_node         *element;
+    ns_css_pseudo_element  pseudo;
+} selector_cache_key;
+
+typedef struct {
+    int      scope_order;
+    gboolean matched;
+} selector_cache_value;
+
+#define NS_SELECTOR_CACHE_MAX 262144
+
+static __thread GHashTable *g_selector_cache;
+
+static guint
+selector_cache_hash(gconstpointer data)
+{
+    const selector_cache_key *key = data;
+    guintptr h = (guintptr)key->rule;
+    h ^= (guintptr)key->selector * 0x9e3779b1u;
+    h ^= (guintptr)key->element * 0x85ebca6bu;
+    h ^= (guintptr)key->pseudo * 0xc2b2ae35u;
+    return (guint)(h ^ (h >> 32));
+}
+
+static gboolean
+selector_cache_equal(gconstpointer a, gconstpointer b)
+{
+    const selector_cache_key *left = a;
+    const selector_cache_key *right = b;
+    return left->rule == right->rule &&
+           left->selector == right->selector &&
+           left->element == right->element &&
+           left->pseudo == right->pseudo;
+}
+
+void
+ns_css_selector_cache_begin(void)
+{
+    g_clear_pointer(&g_selector_cache, g_hash_table_destroy);
+    g_selector_cache = g_hash_table_new_full(selector_cache_hash,
+                                              selector_cache_equal,
+                                              g_free, g_free);
+}
+
+void
+ns_css_selector_cache_end(void)
+{
+    g_clear_pointer(&g_selector_cache, g_hash_table_destroy);
+}
+
+static gboolean
+selector_cache_lookup(const ns_css_rule *rule,
+                      const ns_css_selector *selector,
+                      const ns_node *element,
+                      ns_css_pseudo_element pseudo,
+                      gboolean *matched, int *scope_order)
+{
+    if (!g_selector_cache) return FALSE;
+    selector_cache_key probe = { rule, selector, element, pseudo };
+    gpointer cached;
+    if (!g_hash_table_lookup_extended(g_selector_cache, &probe, NULL,
+                                      &cached))
+        return FALSE;
+    selector_cache_value *value = cached;
+    *matched = value->matched;
+    *scope_order = value->scope_order;
+    return TRUE;
+}
+
+static void
+selector_cache_insert(const ns_css_rule *rule,
+                      const ns_css_selector *selector,
+                      const ns_node *element,
+                      ns_css_pseudo_element pseudo,
+                      gboolean matched, int scope_order)
+{
+    if (!g_selector_cache ||
+        g_hash_table_size(g_selector_cache) >= NS_SELECTOR_CACHE_MAX)
+        return;
+    selector_cache_key *key = g_new(selector_cache_key, 1);
+    *key = (selector_cache_key){ rule, selector, element, pseudo };
+    selector_cache_value *value = g_new(selector_cache_value, 1);
+    *value = (selector_cache_value){ scope_order, matched };
+    g_hash_table_insert(g_selector_cache, key, value);
+}
+
 static GArray *
 css_index_lookup_ci(GHashTable *table, const char *name, gsize nlen)
 {
@@ -16606,9 +16708,15 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
             ns_css_selector *sel = g_ptr_array_index(r->selectors, cand.selector_idx);
             if (sel && sel->pseudo_element != pe) continue;
             int scope_order = 0;
-            gboolean matched = rule_selector_matches(r, sel, el, pe,
-                                                     &scope_order);
+            gboolean matched = FALSE;
+            if (!selector_cache_lookup(r, sel, el, pe, &matched,
+                                       &scope_order)) {
+                matched = rule_selector_matches(r, sel, el, pe,
+                                                &scope_order);
+                selector_cache_insert(r, sel, el, pe, matched, scope_order);
+            }
             if (!matched) continue;
+            if (r->container_condition) g_container_features_used = TRUE;
             css_rule_match_accum *acc = &g_rule_accum[ri];
             if (acc->epoch != g_rule_match_epoch) {
                 acc->epoch = g_rule_match_epoch;
@@ -19062,6 +19170,84 @@ share_key_put_pending(GByteArray *b, const GArray *arr)
     }
 }
 
+static gboolean
+container_relative_unit(ns_css_unit unit)
+{
+    return unit == NS_CSS_UNIT_CQW || unit == NS_CSS_UNIT_CQH ||
+           unit == NS_CSS_UNIT_CQI || unit == NS_CSS_UNIT_CQB ||
+           unit == NS_CSS_UNIT_CQMIN || unit == NS_CSS_UNIT_CQMAX;
+}
+
+static gboolean
+text_has_container_unit(const char *text)
+{
+    if (!text) return FALSE;
+    static const char *units[] = {
+        "cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax"
+    };
+    for (const char *p = text; *p; p++)
+        for (guint i = 0; i < G_N_ELEMENTS(units); i++)
+            if (g_ascii_strncasecmp(p, units[i], strlen(units[i])) == 0)
+                return TRUE;
+    return FALSE;
+}
+
+static gboolean
+share_matches_need_container(const GArray *matches)
+{
+    if (!matches) return FALSE;
+    for (guint i = 0; i < matches->len; i++) {
+        const match_entry *e = &g_array_index((GArray *)matches,
+                                               match_entry, i);
+        if (e->prop == NS_CSS_FONT_SIZE && e->value &&
+            e->value->kind == NS_CSS_V_LENGTH &&
+            container_relative_unit(e->value->u.length.unit))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+share_vars_need_container(const GArray *matches)
+{
+    if (!matches) return FALSE;
+    for (guint i = 0; i < matches->len; i++) {
+        const var_match *e = &g_array_index((GArray *)matches, var_match, i);
+        if (text_has_container_unit(e->text)) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+share_pending_need_container(const GArray *matches)
+{
+    if (!matches) return FALSE;
+    for (guint i = 0; i < matches->len; i++) {
+        const pending_match *e = &g_array_index((GArray *)matches,
+                                                 pending_match, i);
+        if (e->pd && text_has_container_unit(e->pd->raw_vtext)) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+share_key_needs_container(const GArray *matches,
+                          const GArray *var_matches,
+                          const GArray *pending_matches,
+                          const ns_pe_gather *pe_g, int n_pe)
+{
+    if (share_matches_need_container(matches) ||
+        share_vars_need_container(var_matches) ||
+        share_pending_need_container(pending_matches))
+        return TRUE;
+    for (int i = 0; i < n_pe; i++)
+        if (share_matches_need_container(pe_g[i].m) ||
+            share_vars_need_container(pe_g[i].v) ||
+            share_pending_need_container(pe_g[i].p))
+            return TRUE;
+    return FALSE;
+}
+
 static void
 style_share_key(GByteArray *b,
                 const ns_style *parent_style, double root_px,
@@ -19073,7 +19259,10 @@ style_share_key(GByteArray *b,
     guint parent_id = parent_style ? parent_style->share_id : 0;
     g_byte_array_append(b, (const guint8 *)&parent_id, sizeof parent_id);
     g_byte_array_append(b, (const guint8 *)&root_px, sizeof root_px);
-    guint cq_len = g_cq_stack ? g_cq_stack->len : 0;
+    guint cq_len = g_cq_stack &&
+        share_key_needs_container(matches, var_matches, pending_matches,
+                                  pe_g, n_pe)
+        ? g_cq_stack->len : 0;
     g_byte_array_append(b, (const guint8 *)&cq_len, sizeof cq_len);
     if (cq_len)
         g_byte_array_append(b, (const guint8 *)g_cq_stack->data,

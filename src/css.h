@@ -1017,6 +1017,8 @@ void ns_css_append_unescaped(GString *out, const char **pp);
 GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
                            gsize                     n_sheets);
+void ns_css_selector_cache_begin(void);
+void ns_css_selector_cache_end(void);
 
 void ns_css_mark_restyle_dirty(ns_node *parent);
 void ns_css_mark_childlist_change(ns_node *parent, ns_node *added,
@@ -1031,6 +1033,8 @@ void ns_css_set_render_zoom(double zoom);
 
 void ns_css_set_container_map(GHashTable *map);
 void ns_css_set_container_dims(double inline_px, double block_px);
+void ns_css_container_features_begin(void);
+gboolean ns_css_container_features_used(void);
 GHashTable *ns_css_container_map_new(void);
 void ns_css_container_map_add(GHashTable *map, const void *node,
                               const char *type_kw, const char *name_kw,
