@@ -23,18 +23,30 @@ Significant changes in each release:
   wrapped line that contains them. Multi-line form controls and table
   cells now reserve the correct vertical space instead of allowing later
   lines to overlap following content, fixing the Google footer position.
-* The speculative preloader's bytes are handed to the loader that
-  needs them instead of being thrown away. `ns_engine_speculative_preload`
-  fetched every script and stylesheet on the page and freed each
-  response; the stylesheet loader and the script loader — which reach
-  the network through different entry points — then fetched the same
-  URLs again, so a page with eight scripts and five stylesheets issued
-  35 requests for 14 resources. Preload responses are now parked in a
-  small capped, expiring store keyed by URL, the two loaders take from
-  it before going to the network, and the script prefetcher skips URLs
-  the preloader is already fetching. The same page now issues 15
-  requests, and a Wikipedia article drops from three duplicated
-  subresources to none.
+* The speculative preloader hands its bytes to the loader that needs
+  them through a single deduplication point keyed on the request's
+  identity. Preload responses used to be parked in a private store
+  keyed on the bare URL and consulted ahead of the HTTP cache. That
+  store ignored the cache partition, so within its 20-second window one
+  site could be served bytes another site had fetched with that site's
+  cookies; it ignored `no-store`; it recorded a placeholder for every
+  fetch it started but only removed entries when a loader consumed one,
+  so failed preloads and preloaded images — which nothing consumed —
+  permanently occupied its 32 slots until the preloader silently
+  stopped preloading anything. Deduplication now happens in one place.
+  The in-flight coalescer keys on method, URL, cache partition and
+  request headers rather than URL plus referrer, and every entry point
+  joins it — `ns_net_request_async` and the blocking fetchers as well
+  as `ns_net_fetch_async` — so a loader that arrives while a preload is
+  still in flight waits for it instead of issuing a second request. A
+  preload that finishes first is held in a preload map under that same
+  key, handed over by the fetch layer itself so there is no window in
+  which a resource is in neither place, and dropped when the next
+  navigation begins. The preloader now sends the `Accept` header its
+  consumer will send, so content-negotiated resources match. The
+  separate external-script prefetcher, a third path over the same URLs,
+  is gone. A page with six scripts and five stylesheets issues exactly
+  one request per resource.
 * Concurrent fetches of the same subresource share one network
   request. Three separate paths ask for a page's scripts and
   stylesheets — the speculative preloader, the external-script

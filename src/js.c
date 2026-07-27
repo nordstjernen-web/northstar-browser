@@ -487,18 +487,10 @@ ns_js_pumped_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     if (pf->loop) g_main_loop_quit(pf->loop);
 }
 
-static const char *const ns_js_script_accept_headers[] = {
-    "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",
-    NULL
-};
-
 static ns_response *
 ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
                      const char *const *headers, GError **error)
 {
-    ns_response *preloaded = ns_net_preload_take(url);
-    if (preloaded) return preloaded;
-
     if (!js || js->worker_host)
         return ns_net_request_blocking(url, top_url, "GET", NULL, 0, NULL,
                                        headers, NULL, error);
@@ -49250,129 +49242,6 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     ns_drain_microtasks(js);
 }
 
-static void
-ns_js_collect_external_script_urls_rec(const ns_node *n, const char *origin,
-                                       GPtrArray *out, GHashTable *seen,
-                                       int depth)
-{
-    if (!n || depth >= 512) return;
-    if (ns_node_is_script_element(n)) {
-        const char *type = ns_element_get_attr(n, "type");
-        gboolean is_module = type && g_ascii_strcasecmp(type, "module") == 0;
-        gboolean ok_type = !type || !*type ||
-                           g_ascii_strcasecmp(type, "text/javascript") == 0 ||
-                           g_ascii_strcasecmp(type, "application/javascript") == 0 ||
-                           is_module;
-        gboolean nomodule_skip = !is_module &&
-            ns_element_get_attr(n, "nomodule") != NULL;
-        gboolean async_script =
-            ns_element_get_attr(n, "async") != NULL;
-        if (ok_type && !nomodule_skip && !async_script) {
-            const char *src = ns_element_get_attr(n, "src");
-            if (src && *src && !g_str_has_prefix(src, "data:")) {
-                char *abs_url = ns_url_resolve(origin, src);
-                if (ns_url_is_http_or_https(abs_url) &&
-                    !g_hash_table_contains(seen, abs_url)) {
-                    g_hash_table_add(seen, g_strdup(abs_url));
-                    g_ptr_array_add(out, abs_url);
-                    abs_url = NULL;
-                }
-                g_free(abs_url);
-            }
-        }
-    }
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_js_collect_external_script_urls_rec(c, origin, out, seen, depth + 1);
-}
-
-static void
-ns_js_collect_external_script_urls(const ns_node *n, const char *origin,
-                                   GPtrArray *out, GHashTable *seen)
-{
-    ns_js_collect_external_script_urls_rec(n, origin, out, seen, 0);
-}
-
-typedef struct ns_prefetch_state {
-    GMainLoop *loop;
-    int        pending;
-} ns_prefetch_state;
-
-typedef struct ns_prefetch_item {
-    ns_prefetch_state *st;
-    char              *url;
-} ns_prefetch_item;
-
-static void
-ns_js_prefetch_done(GObject *src, GAsyncResult *res, gpointer user_data)
-{
-    (void)src;
-    ns_prefetch_item *item = user_data;
-    ns_prefetch_state *st = item->st;
-    GError *err = NULL;
-    ns_response *resp = ns_net_fetch_finish(res, &err);
-    if (resp) {
-        ns_net_preload_put(item->url, resp);
-        ns_response_free(resp);
-    }
-    g_clear_error(&err);
-    g_free(item->url);
-    g_free(item);
-    if (--st->pending <= 0)
-        g_main_loop_quit(st->loop);
-}
-
-static void
-ns_js_prefetch_external_scripts(ns_js *js, const ns_node *doc,
-                                const char *origin)
-{
-    if (!js || !doc || !origin || !*origin) return;
-    GPtrArray *urls = g_ptr_array_new_with_free_func(g_free);
-    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                             g_free, NULL);
-    ns_js_collect_external_script_urls(doc, origin, urls, seen);
-    g_hash_table_destroy(seen);
-
-    if (urls->len < 2) {
-        g_ptr_array_free(urls, TRUE);
-        return;
-    }
-    GPtrArray *wanted = g_ptr_array_new();
-    for (guint i = 0; i < urls->len; i++) {
-        const char *u = g_ptr_array_index(urls, i);
-        if (!ns_net_preload_has(u)) g_ptr_array_add(wanted, (gpointer)u);
-    }
-    if (wanted->len == 0) {
-        g_ptr_array_free(wanted, TRUE);
-        g_ptr_array_free(urls, TRUE);
-        return;
-    }
-    ns_prefetch_state st = {0};
-    st.loop = g_main_loop_new(NULL, FALSE);
-    st.pending = (int)wanted->len;
-    gboolean profile = ns_js_profile_enabled();
-    gint64 t0 = g_get_monotonic_time();
-    for (guint i = 0; i < wanted->len; i++) {
-        const char *u = g_ptr_array_index(wanted, i);
-        ns_prefetch_item *item = g_new0(ns_prefetch_item, 1);
-        item->st = &st;
-        item->url = g_strdup(u);
-        ns_net_request_async(u, origin, "GET", NULL, 0, NULL,
-                             ns_js_script_accept_headers, NULL,
-                             ns_js_prefetch_done, item);
-    }
-    g_ptr_array_free(wanted, TRUE);
-    gboolean saved = js->in_pump;
-    js->in_pump = TRUE;
-    g_main_loop_run(st.loop);
-    js->in_pump = saved;
-    g_main_loop_unref(st.loop);
-    ns_js_credit_pumped_time(js, t0);
-    if (profile)
-        g_printerr("[profile] js prefetch %u scripts %6.1fms\n",
-                   urls->len, (g_get_monotonic_time() - t0) / 1000.0);
-    g_ptr_array_free(urls, TRUE);
-}
-
 typedef enum ns_script_schedule {
     NS_SCRIPT_BLOCKING,
     NS_SCRIPT_DEFERRED,
@@ -49575,9 +49444,10 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         }
         GError *err = NULL;
         gboolean loaded = FALSE;
-        ns_response *resp = ns_js_fetch_resource(js, abs_url, origin,
-                                                 ns_js_script_accept_headers,
-                                                 &err);
+        ns_response *resp =
+            ns_js_fetch_resource(js, abs_url, origin,
+                                 ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT),
+                                 &err);
         if (resp && ns_net_header_is_nosniff(resp->x_content_type_options) &&
             !content_type_is_javascript(resp->content_type)) {
             if (js->log_cb) {
@@ -51636,9 +51506,6 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
     }
     ns_js_schedule_static_iframes(js, doc);
     gint64 t_install = profile ? g_get_monotonic_time() : 0;
-    ns_js_prefetch_external_scripts(js, doc,
-                                    base_url && *base_url ? base_url : "inline");
-    gint64 t_prefetch = profile ? g_get_monotonic_time() : 0;
     const char *origin = base_url && *base_url ? base_url : "inline";
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_register_import_maps(js, doc);
@@ -51651,10 +51518,9 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
     js->lifecycle_start_us = t0;
     ns_js_lifecycle_schedule(js);
     if (profile)
-        g_printerr("[profile] js parser install=%.1f prefetch=%.1f blocking=%.1fms; lifecycle queued\n",
-                   (t_install - t0)        / 1000.0,
-                   (t_prefetch - t_install)/ 1000.0,
-                   (g_get_monotonic_time() - t_prefetch) / 1000.0);
+        g_printerr("[profile] js parser install=%.1f blocking=%.1fms; lifecycle queued\n",
+                   (t_install - t0) / 1000.0,
+                   (g_get_monotonic_time() - t_install) / 1000.0);
 }
 
 void
