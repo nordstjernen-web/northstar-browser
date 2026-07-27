@@ -4,6 +4,40 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* A frame document's own stylesheet can style its root element. Sheets
+  inside an iframe are rewritten to be scoped to the frame's root, and
+  every selector whose subject was not literally `html` or `:root` got a
+  descendant combinator — so `* { … }` or `.cls { … }` in a framed
+  document matched everything inside the frame except the frame's own
+  `<html>`, and `getComputedStyle` on that element reported no value for
+  any property. The scope marker now also attaches directly to the
+  subject compound, and lands before a pseudo-element rather than after
+  it. Shadow scopes are unchanged: a shadow host is still not styled by
+  its own shadow tree. Acid3 test 41 passes as a result.
+* `:empty` is re-evaluated when a text node gains or loses content.
+  Writing to `.data`/`.nodeValue`, or calling `appendData`,
+  `insertData`, `deleteData` or `replaceData`, changes whether the node
+  counts towards its parent's emptiness, but only child-list mutations
+  marked the parent for restyle, so an element that became non-empty by
+  having text written into an existing empty child kept its stale
+  `:empty` match. Acid3 test 38 passes as a result; Acid3 now scores
+  98/100, up from 96/100.
+* Removed the IE-only `attachEvent` and `detachEvent`. They were exposed
+  on Element, Document and Window as no-op stubs that returned true and
+  registered nothing. Libraries still feature-detect them to select a
+  legacy path: RequireJS, finding a native-looking `attachEvent`, bound
+  its script-load callback to `onreadystatechange` instead of
+  `addEventListener`, the stub swallowed it, and every module load ended
+  in "Load timeout for modules". jQuery's test suite could not get past
+  its RequireJS bootstrap before this.
+* `DOMParser` reports the line and column of an XML parse error. The
+  synthesized `parsererror` document carried the bare text "XML parsing
+  error"; it now names the position the parser stopped at.
+* `getComputedStyle(el).someUnknownName` is `undefined` rather than the
+  empty string. The proxy in front of a computed declaration answered
+  every string key through `getPropertyValue`; its `has` trap already
+  distinguished supported properties from unknown ones, and `get` now
+  draws the same line.
 * Fixed a double free of the response `Vary` header on the cancelled-fetch
   path in `net.c`. Cancelling a load — navigating away, pressing stop —
   freed `header_ctx.vary` twice, corrupting the heap whenever the
