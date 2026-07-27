@@ -22740,6 +22740,12 @@ ns_js_record_attr_change(ns_js *js, ns_node *target,
 static void
 ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value)
 {
+    if (target && target->kind == NS_NODE_TEXT) {
+        gboolean was_empty = !old_value || old_value[0] == '\0';
+        gboolean now_empty = !target->text || target->text[0] == '\0';
+        if (was_empty != now_empty)
+            ns_css_mark_text_emptiness_change(target);
+    }
     ns_mut_record_emit(js, "characterData", target, NULL, NULL,
                        NULL, NULL, NULL, NULL, old_value);
 }
