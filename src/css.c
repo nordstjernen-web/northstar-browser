@@ -18756,6 +18756,23 @@ incr_mark_empty_transition(ns_node *parent, ns_node *added, ns_node *removed)
 }
 
 void
+ns_css_mark_text_emptiness_change(ns_node *text)
+{
+    ns_node *parent = text ? text->parent : NULL;
+    if (!parent || parent->kind != NS_NODE_ELEMENT) return;
+    if (!g_struct_ready || g_struct_loose ||
+        incr_node_matches_keys(parent, g_struct_keys)) {
+        ns_css_mark_restyle_dirty(parent);
+        return;
+    }
+    for (const ns_node *a = parent; a; a = a->parent)
+        if (incr_node_matches_keys(a, g_struct_anc_keys)) {
+            ns_css_mark_restyle_dirty(parent);
+            return;
+        }
+}
+
+void
 ns_css_mark_childlist_change(ns_node *parent, ns_node *added, ns_node *removed,
                              ns_node *prev_sibling, ns_node *next_sibling)
 {
@@ -19594,34 +19611,76 @@ selector_first_compound_targets_root(const char *s, gsize clen)
     return FALSE;
 }
 
+static gsize
+selector_compound_simple_len(const char *s, gsize clen)
+{
+    static const char *const legacy[] = {
+        "before", "after", "first-line", "first-letter", NULL
+    };
+    int depth = 0;
+    for (gsize i = 0; i < clen; i++) {
+        char c = s[i];
+        if (c == '(' || c == '[') depth++;
+        else if (c == ')' || c == ']') { if (depth) depth--; }
+        else if (!depth && c == ':') {
+            if (i + 1 < clen && s[i + 1] == ':') return i;
+            for (int k = 0; legacy[k]; k++) {
+                gsize n = strlen(legacy[k]);
+                if (i + 1 + n <= clen &&
+                    g_ascii_strncasecmp(s + i + 1, legacy[k], n) == 0 &&
+                    (i + 1 + n == clen || !is_ident(s[i + 1 + n])))
+                    return i;
+            }
+        }
+    }
+    return clen;
+}
+
+static gboolean
+selector_first_compound_may_be_root(const char *s, gsize clen)
+{
+    if (!clen) return FALSE;
+    if (s[0] == '*') return TRUE;
+    return s[0] == '.' || s[0] == '#' || s[0] == '[' || s[0] == ':';
+}
+
 static void
 scope_one_selector(GString *out, const char *sel, gsize len,
-                   const char *marker, const char *host_id)
+                   const char *marker, const char *host_id,
+                   gboolean frame_scope)
 {
     while (len && is_ws(*sel)) { sel++; len--; }
     while (len && is_ws(sel[len - 1])) len--;
     if (!len) return;
     char *s = g_strndup(sel, len);
     gsize clen = selector_first_compound_len(s);
+    gsize simple = selector_compound_simple_len(s, clen);
     if (strstr(s, ":host") || strstr(s, "::slotted")) {
         char *r = rewrite_host_selectors(s, host_id);
         g_string_append(out, r);
         g_free(r);
     } else if (selector_first_compound_targets_root(s, clen)) {
-        g_string_append_len(out, s, (gssize)clen);
+        g_string_append_len(out, s, (gssize)simple);
         g_string_append(out, marker);
-        g_string_append(out, s + clen);
+        g_string_append(out, s + simple);
     } else {
         g_string_append(out, marker);
         g_string_append_c(out, ' ');
         g_string_append(out, s);
+        if (frame_scope && selector_first_compound_may_be_root(s, clen)) {
+            g_string_append(out, ", ");
+            g_string_append_len(out, s, (gssize)simple);
+            g_string_append(out, marker);
+            g_string_append(out, s + simple);
+        }
     }
     g_free(s);
 }
 
 static void
 scope_rule_list(GString *out, const char *p, const char *end,
-                const char *marker, const char *host_id, int depth)
+                const char *marker, const char *host_id, int depth,
+                gboolean frame_scope)
 {
     if (depth >= NS_CSS_MAX_AT_NESTING) {
         g_string_append_len(out, p, (gssize)(end - p));
@@ -19654,7 +19713,7 @@ scope_rule_list(GString *out, const char *p, const char *end,
                     g_string_append_c(out, '{');
                     const char *body_s = seg + 1;
                     scope_rule_list(out, body_s, css_block_body_end(body_s, be),
-                                    marker, host_id, depth + 1);
+                                    marker, host_id, depth + 1, frame_scope);
                     g_string_append_c(out, '}');
                 } else {
                     g_string_append_len(out, prelude, (gssize)(be - prelude));
@@ -19681,7 +19740,7 @@ scope_rule_list(GString *out, const char *p, const char *end,
                 if (!first) g_string_append(out, ", ");
                 first = FALSE;
                 scope_one_selector(out, segstart, (gsize)(q - segstart),
-                                   marker, host_id);
+                                   marker, host_id, frame_scope);
                 segstart = q + 1;
                 if (q == selend) break;
             } else if (quote) {
@@ -19704,12 +19763,13 @@ scope_rule_list(GString *out, const char *p, const char *end,
 }
 
 static char *
-scope_shadow_css(const char *flat_css, const char *host_id)
+scope_shadow_css(const char *flat_css, const char *host_id, gboolean frame_scope)
 {
     GString *out = g_string_new(NULL);
     char marker[96];
     g_snprintf(marker, sizeof marker, "[" NS_HOST_SCOPE_ATTR "=\"%s\"]", host_id);
-    scope_rule_list(out, flat_css, flat_css + strlen(flat_css), marker, host_id, 0);
+    scope_rule_list(out, flat_css, flat_css + strlen(flat_css), marker, host_id, 0,
+                    frame_scope);
     return g_string_free(out, FALSE);
 }
 
@@ -19725,11 +19785,15 @@ style_element_final_css(ns_node *style)
         g_string_free(buf, TRUE);
         return NULL;
     }
+    gboolean frame_scope = FALSE;
     char *host_id = style_host_scope_id(style);
-    if (!host_id) host_id = style_iframe_scope_id(style);
+    if (!host_id) {
+        host_id = style_iframe_scope_id(style);
+        frame_scope = host_id != NULL;
+    }
     if (host_id) {
         char *flat = css_flatten_nesting(buf->str, (gssize)buf->len);
-        char *rewritten = scope_shadow_css(flat, host_id);
+        char *rewritten = scope_shadow_css(flat, host_id, frame_scope);
         g_free(flat);
         g_free(host_id);
         g_string_free(buf, TRUE);
