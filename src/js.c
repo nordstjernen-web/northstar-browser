@@ -14304,10 +14304,13 @@ static const char *const ns_css_computed_props[] = {
 static int
 ns_css_computed_count(void)
 {
+    static int cached_count = -1;
+    if (cached_count >= 0) return cached_count;
     int count = 0;
     for (gsize i = 0; i < G_N_ELEMENTS(ns_css_computed_props); i++)
         if (ns_css_named_property_supported(ns_css_computed_props[i])) count++;
-    return count;
+    cached_count = count;
+    return cached_count;
 }
 
 static const char *
@@ -14332,14 +14335,28 @@ ns_computed_item(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     JS_FreeValue(ctx, length_value);
     if (i < 0 || i >= length)
         return JS_NewString(ctx, "");
-    if (i >= ns_css_computed_count()) {
-        JSValue value = JS_GetPropertyUint32(ctx, this_val, (uint32_t)i);
-        if (JS_IsString(value)) return value;
-        JS_FreeValue(ctx, value);
-        return JS_NewString(ctx, "");
+    int standard_count = ns_css_computed_count();
+    if (i < standard_count) {
+        const char *name = ns_css_computed_name(i);
+        return JS_NewString(ctx, name ? name : "");
     }
-    const char *name = ns_css_computed_name(i);
-    return JS_NewString(ctx, name ? name : "");
+    JSValue node_value = JS_GetPropertyStr(ctx, this_val, "_node");
+    const ns_node *node = ns_unwrap_element(node_value);
+    JS_FreeValue(ctx, node_value);
+    ns_js *js = js_from_ctx(ctx);
+    if (!node || !js) return JS_NewString(ctx, "");
+    ns_js_flush_style(js);
+    const ns_style *style = js->style_table
+        ? g_hash_table_lookup(js->style_table, node) : NULL;
+    GPtrArray *custom_names = style && style->vars
+        ? ns_var_map_names(style->vars) : NULL;
+    int custom_index = i - standard_count;
+    const char *name = custom_names && custom_index >= 0 &&
+        custom_index < (int)custom_names->len
+        ? g_ptr_array_index(custom_names, (guint)custom_index) : NULL;
+    JSValue result = JS_NewString(ctx, name ? name : "");
+    if (custom_names) g_ptr_array_unref(custom_names);
+    return result;
 }
 
 static JSValue
@@ -14541,12 +14558,7 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
                                          ns_css_computed_count() +
                                          custom_count),
                               JS_PROP_CONFIGURABLE);
-    for (int i = 0; i < custom_count; i++)
-        JS_DefinePropertyValueUint32(
-            ctx, cs, (uint32_t)(ns_css_computed_count() + i),
-            JS_NewString(ctx, g_ptr_array_index(custom_names, (guint)i)),
-            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-    if (custom_names) g_ptr_array_free(custom_names, TRUE);
+    if (custom_names) g_ptr_array_unref(custom_names);
     ns_bind_fn(ctx, cs, "item", ns_computed_item, 1);
 
     ns_js *jsx = js_from_ctx(ctx);
@@ -14574,6 +14586,19 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
             "   if (/^[0-9]+$/.test(k)) return +k < o.length;"
             "   var kb = kebab(k);"
             "   return __ns_css_supported(kb) || o.getPropertyValue(kb) !== '';"
+            "  },"
+            "  ownKeys: function(o) {"
+            "   var keys = [];"
+            "   for (var i = 0; i < o.length; i++) keys.push(String(i));"
+            "   var own = Reflect.ownKeys(o);"
+            "   for (var j = 0; j < own.length; j++)"
+            "    if (keys.indexOf(own[j]) < 0) keys.push(own[j]);"
+            "   return keys;"
+            "  },"
+            "  getOwnPropertyDescriptor: function(o, k) {"
+            "   if (typeof k === 'string' && /^[0-9]+$/.test(k) && +k < o.length)"
+            "    return { value: o.item(+k), writable: false, enumerable: true, configurable: true };"
+            "   return Reflect.getOwnPropertyDescriptor(o, k);"
             "  }"
             " });"
             "})";

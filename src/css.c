@@ -8175,6 +8175,7 @@ typedef struct ns_var_map {
     int ref;
     GHashTable *own;
     struct ns_var_map *parent;
+    GPtrArray *names;
 } ns_var_map;
 
 static __thread GHashTable *g_registered_props;
@@ -8202,6 +8203,7 @@ ns_var_map_unref(ns_var_map *m)
     while (m && --m->ref <= 0) {
         ns_var_map *parent = m->parent;
         if (m->own) g_hash_table_destroy(m->own);
+        if (m->names) g_ptr_array_unref(m->names);
         g_free(m);
         m = parent;
     }
@@ -8230,13 +8232,14 @@ ns_var_name_compare(gconstpointer a, gconstpointer b)
 GPtrArray *
 ns_var_map_names(const ns_var_map *m)
 {
+    if (m && m->names) return g_ptr_array_ref(m->names);
     GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
     GHashTable *seen = g_hash_table_new(g_str_hash, g_str_equal);
-    for (; m; m = m->parent) {
-        if (!m->own) continue;
+    for (const ns_var_map *current = m; current; current = current->parent) {
+        if (!current->own) continue;
         GHashTableIter iter;
         gpointer key, value;
-        g_hash_table_iter_init(&iter, m->own);
+        g_hash_table_iter_init(&iter, current->own);
         while (g_hash_table_iter_next(&iter, &key, &value)) {
             if (g_hash_table_contains(seen, key)) continue;
             g_hash_table_add(seen, key);
@@ -8246,7 +8249,9 @@ ns_var_map_names(const ns_var_map *m)
     }
     g_hash_table_destroy(seen);
     g_ptr_array_sort(names, ns_var_name_compare);
-    return names;
+    if (!m) return names;
+    ((ns_var_map *)m)->names = names;
+    return g_ptr_array_ref(names);
 }
 
 #define NS_CSS_VAR_EXPAND_MAX   ((gsize)1024 * 1024)
