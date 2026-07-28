@@ -4,5 +4,7 @@ option('gtk', type: 'feature', value: 'auto',
        description: 'Build the GTK 4 desktop shell (on by default when GTK 4 is present). Disable for an engine-only build that needs no GTK 4 toolkit at all.')
 option('wasm', type: 'feature', value: 'auto',
        description: 'Build the WebAssembly JS API over the vendored WAMR interpreter (on by default; disable on platforms WAMR does not support, e.g. NetBSD).')
+option('avif', type: 'feature', value: 'auto',
+       description: 'Decode AVIF images through libavif (on by default when libavif is present). AVIF is a rare format on the web and libavif pulls in a full AV1 decoder; disable to drop it.')
 option('audio', type: 'feature', value: 'auto',
        description: 'Enable in-process audio playback (SDL2 output + minimp3/pl_mpeg decode). Auto-detects SDL2; disable for engine-only builds without SDL2.')

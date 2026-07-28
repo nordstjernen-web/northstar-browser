@@ -39,7 +39,8 @@ Windows; the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang),
   for MP2, and, when the optional `opusfile`/`vorbisfile` libraries are
   present, Ogg Opus/Vorbis — and outputs through SDL2's audio device.
 - Images decode in-tree: PNG, GIF, BMP and JPEG through
-  [Wuffs](https://github.com/google/wuffs); AVIF through libavif; SVG
+  [Wuffs](https://github.com/google/wuffs); AVIF through libavif when
+  it is present; SVG
   in-engine (`src/svg.c`); any other format a GdkPixbuf loader is installed for as
   a last-resort fallback.
 - UI strings are English-source and translated to the operating-system
@@ -127,7 +128,8 @@ provides the CSS and WHATWG URL modules the browser uses.
 
 Images: PNG/GIF/BMP/JPEG through the vendored
 [Wuffs](https://github.com/google/wuffs) (`subprojects/wuffs/`), AVIF
-through libavif, SVG in-engine (`src/svg.c`), other formats through GdkPixbuf.
+through libavif when built with it, SVG in-engine (`src/svg.c`), other
+formats through GdkPixbuf.
 Charset detection is delegated to uchardet. WebCrypto (`crypto.subtle`) is
 implemented in `src/webcrypto.c` over OpenSSL's libcrypto. The
 `WebAssembly` JS API (`src/wasm.c`) runs over a vendored subset of the
@@ -139,7 +141,7 @@ System packages required on Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
+    libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev
 ```
 
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)

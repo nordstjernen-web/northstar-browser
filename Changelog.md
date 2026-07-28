@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* libavif is optional. It was a hard `dependency()`, so a tree without
+  it would not configure at all, even though every AVIF call site was
+  already behind `NS_HAVE_AVIF` and `image_avif.c` was already compiled
+  conditionally. The new `avif` meson feature defaults to `auto`, so a
+  host that has libavif still decodes AVIF exactly as before;
+  `-Davif=disabled` drops the dependency and AVIF images simply fail to
+  decode. This matters because libavif pulls in a complete AV1 decoder
+  (dav1d or libaom) for a format that is rare on the web, which is a
+  large thing to require of anyone building from source.
+
 * `var()` resolves inside SVG presentation attributes. A custom property
   set by a stylesheet rule now reaches `r="var(--radii)"` or
   `fill="var(--tint)"`, so a class can retheme an inline icon's colour

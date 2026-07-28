@@ -10,7 +10,7 @@ Debian / Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
+    libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev
 ```
 
 Fedora / RHEL:
@@ -18,7 +18,7 @@ Fedora / RHEL:
 ```sh
 sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
     openssl-devel uchardet-devel libpsl-devel sqlite-devel \
-    libseccomp-devel libavif-devel SDL2-devel
+    libseccomp-devel SDL2-devel
 ```
 
 openSUSE:
@@ -26,13 +26,15 @@ openSUSE:
 ```sh
 sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
     libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libavif-devel libSDL2-devel
+    libseccomp-devel libSDL2-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it. On
 macOS and Windows it is unused and the syscall filter is a no-op.
 
-**Optional, auto-detected:** `libenchant-2-dev` (+ a dictionary such as
+**Optional, auto-detected:** `libavif-dev` (AVIF images — it pulls in a
+full AV1 decoder for a format that is rare on the web, so
+`-Davif=disabled` drops it), `libenchant-2-dev` (+ a dictionary such as
 `hunspell-en-us`) enables on-screen spell-checking; `opusfile` /
 `vorbisfile` dev packages add native Ogg Opus/Vorbis decode to the
 in-process mixer. The build works without them.
@@ -43,7 +45,7 @@ With Homebrew:
 
 ```sh
 brew install meson ninja pkg-config cmake gtk4 curl openssl@3 uchardet libpsl \
-    sqlite libavif sdl2
+    sqlite sdl2
 ```
 
 Export `PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig"`

@@ -45,7 +45,8 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
   ride the render-response `X-Audio` side-channel to the shell, which
   queues them to the in-process mixer (`src/gtk/procview.c`).
 - Images decode in-tree: PNG, GIF, BMP and JPEG through
-  [Wuffs](https://github.com/google/wuffs); AVIF through libavif; SVG
+  [Wuffs](https://github.com/google/wuffs); AVIF through libavif when
+  it is present; SVG
   in-engine (`src/svg.c`); any other format a GdkPixbuf loader is installed for as
   a last-resort fallback.
 - UI strings are English-source and translated to the operating-system
@@ -148,7 +149,8 @@ transpiled-to-C image-decoder library. The single-file release is
 vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static
 subproject. `src/image_wuffs.c::ns_image_decode_wuffs` is tried
 first; it returns NULL for any other format, in which case
-`src/image.c::ns_image_decode_bytes` falls back to libavif (AVIF),
+`src/image.c::ns_image_decode_bytes` falls back to libavif (AVIF, when
+built with it),
 then GDK-Pixbuf (for TIFF / ICO / other installed loaders) and,
 last, to the in-engine SVG renderer (`src/svg.c`).
 
@@ -187,21 +189,24 @@ System packages required on Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
+    libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev
 ```
 
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
 enables on-screen spell-checking of editable text. It is auto-detected —
 the build works without it and simply does no spell-checking. The
 `opusfile` / `vorbisfile` dev packages, likewise optional, add native Ogg
-Opus/Vorbis decode to the in-process mixer.
+Opus/Vorbis decode to the in-process mixer. `libavif-dev` is optional
+too and adds AVIF decoding; it drags in a full AV1 decoder for a format
+that is rare on the web, so `-Davif=disabled` drops it and AVIF images
+simply fail to decode.
 
 On Fedora/RHEL:
 
 ```sh
 sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
     openssl-devel uchardet-devel libpsl-devel sqlite-devel \
-    libseccomp-devel libavif-devel SDL2-devel
+    libseccomp-devel SDL2-devel
 ```
 
 On openSUSE:
@@ -209,7 +214,7 @@ On openSUSE:
 ```sh
 sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
     libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libavif-devel libSDL2-devel
+    libseccomp-devel libSDL2-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.

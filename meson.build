@@ -184,7 +184,7 @@ if have_freetype
 endif
 
 
-libavif = dependency('libavif')
+libavif = dependency('libavif', required: get_option('avif'))
 have_avif = libavif.found()
 if have_avif
   add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
@@ -372,6 +372,7 @@ install_data(
 )
 
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
+summary({'AVIF images (libavif)': have_avif}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')
 
 subdir('src')
