@@ -44,7 +44,8 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
   emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands that
   ride the render-response `X-Audio` side-channel to the shell, which
   queues them to the in-process mixer (`src/gtk/procview.c`).
-- Images decode in-tree: PNG, GIF, BMP and JPEG through
+- Images decode in-tree: PNG (including animated APNG), GIF, BMP
+  and JPEG through
   [Wuffs](https://github.com/google/wuffs), which also covers still WebP
   (lossy VP8 and lossless VP8L, with alpha); AVIF through libavif when
   it is present; SVG

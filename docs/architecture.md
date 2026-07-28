@@ -121,7 +121,7 @@ partitioning and permission model.
 `image.c` decodes lazily, trying decoders in order:
 
 1. **`image_ico.c`** — ICO, unwrapped and handed to Wuffs.
-2. **Wuffs** (`image_wuffs.c`) — PNG, GIF, BMP, JPEG and still WebP
+2. **Wuffs** (`image_wuffs.c`) — PNG/APNG, GIF, BMP, JPEG and still WebP
    (memory-safe, transpiled-to-C). An animated WebP is reduced to its
    first frame by walking the RIFF container, since Wuffs decodes only
    still WebP.

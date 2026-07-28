@@ -1,4 +1,4 @@
-/* Northstar — memory-safe PNG/GIF/BMP/JPEG/WebP decode via Wuffs.
+/* Northstar — memory-safe PNG/APNG/GIF/BMP/JPEG/WebP decode via Wuffs.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -120,6 +120,26 @@ ns_webp_still_from_animation(const guchar *data, gsize len, gsize *out_len)
     memcpy(out + off, body, body_len);
     *out_len = total;
     return out;
+}
+
+gboolean
+ns_image_png_is_animated(const guchar *data, gsize len)
+{
+    static const guchar sig[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+    if (!data || len < 8 + 8 || memcmp(data, sig, sizeof sig) != 0) return FALSE;
+
+    gsize pos = 8;
+    while (pos + 8 <= len) {
+        guint32 size = ((guint32)data[pos] << 24) | ((guint32)data[pos + 1] << 16) |
+                       ((guint32)data[pos + 2] << 8) | (guint32)data[pos + 3];
+        const guchar *tag = data + pos + 4;
+        if (memcmp(tag, "IDAT", 4) == 0) return FALSE;
+        if (memcmp(tag, "acTL", 4) == 0) return TRUE;
+        if (memcmp(tag, "IEND", 4) == 0) return FALSE;
+        if (size > len - pos - 8) return FALSE;
+        pos += 12 + (gsize)size;
+    }
+    return FALSE;
 }
 
 static wuffs_base__image_decoder *
@@ -281,12 +301,12 @@ ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
                                      int *out_w, int *out_h)
 {
     if (!data || len < 6) return NULL;
-    if (!(data[0] == 'G' && data[1] == 'I' && data[2] == 'F' &&
-          data[3] == '8' && (data[4] == '7' || data[4] == '9') &&
-          data[5] == 'a')) return NULL;
+    ns_wuffs_format kind = ns_wuffs_detect(data, len);
+    if (kind != NS_WUFFS_GIF &&
+        !(kind == NS_WUFFS_PNG && ns_image_png_is_animated(data, len)))
+        return NULL;
 
-    wuffs_base__image_decoder *dec =
-        wuffs_gif__decoder__alloc_as__wuffs_base__image_decoder();
+    wuffs_base__image_decoder *dec = ns_wuffs_pick_decoder(data, len);
     if (!dec) return NULL;
 
     wuffs_base__io_buffer src = wuffs_base__make_io_buffer(
@@ -345,8 +365,8 @@ ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
 
     GArray *frames = g_array_new(FALSE, FALSE, sizeof(ns_image_pixel_frame));
     g_array_set_clear_func(frames, ns_image_pixel_frame_clear);
-    enum { NS_GIF_MAX_FRAMES = 1024 };
-    const gsize NS_GIF_MAX_TOTAL_BYTES = (gsize)512 * 1024 * 1024;
+    enum { NS_ANIM_MAX_FRAMES = 1024 };
+    const gsize NS_ANIM_MAX_TOTAL_BYTES = (gsize)512 * 1024 * 1024;
     gsize anim_bytes_total = 0;
 
     uint8_t prev_disposal = WUFFS_BASE__ANIMATION_DISPOSAL__NONE;
@@ -354,7 +374,7 @@ ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
     uint8_t *backup = NULL;
     gsize    pix_bytes_total = (gsize)pix_len64;
 
-    while (frames->len < NS_GIF_MAX_FRAMES) {
+    while (frames->len < NS_ANIM_MAX_FRAMES) {
         wuffs_base__frame_config fc = {0};
         st = wuffs_base__image_decoder__decode_frame_config(dec, &fc, &src);
         if (!wuffs_base__status__is_ok(&st)) break;
@@ -395,7 +415,7 @@ ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
         gsize frame_bytes = (gsize)tab.stride * (gsize)h;
         if (frame_bytes > pix_bytes_total) break;
         anim_bytes_total += frame_bytes;
-        if (anim_bytes_total > NS_GIF_MAX_TOTAL_BYTES) break;
+        if (anim_bytes_total > NS_ANIM_MAX_TOTAL_BYTES) break;
         uint8_t *copy = g_try_malloc(frame_bytes);
         if (!copy) break;
         memcpy(copy, pix, frame_bytes);

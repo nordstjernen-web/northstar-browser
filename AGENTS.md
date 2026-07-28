@@ -38,7 +38,8 @@ Windows; the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang),
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (`subprojects/plmpeg/`)
   for MP2, and, when the optional `opusfile`/`vorbisfile` libraries are
   present, Ogg Opus/Vorbis — and outputs through SDL2's audio device.
-- Images decode in-tree: PNG, GIF, BMP and JPEG through
+- Images decode in-tree: PNG (including animated APNG), GIF, BMP
+  and JPEG through
   [Wuffs](https://github.com/google/wuffs), which also covers still WebP
   (lossy VP8 and lossless VP8L, with alpha); AVIF through libavif when
   it is present; SVG
