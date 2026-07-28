@@ -7832,7 +7832,11 @@
         }
 
         var proto = Object.getPrototypeOf(document.createElement('video'));
-        var nativeReadyState = Object.getOwnPropertyDescriptor(proto, 'readyState');
+        var nativeReadyState = null;
+        for (var rsProto = proto; rsProto; rsProto = Object.getPrototypeOf(rsProto)) {
+            nativeReadyState = Object.getOwnPropertyDescriptor(rsProto, 'readyState');
+            if (nativeReadyState) break;
+        }
 
         function isMedia(el) {
             var nm = el && el.tagName ? el.tagName.toLowerCase() : '';

@@ -143,7 +143,18 @@ already carry, and MPEG-1's patents have expired.
 Decoded frames become the same `ns_image_pixel_frame` list an animated
 GIF produces, so the image cache's fetch, frame timing, repaint
 scheduling and eviction serve video unchanged, and `paint_video` draws
-the current frame where it used to draw a placeholder. One consequence of
+the current frame where it used to draw a placeholder.
+
+The media element API drives that timeline rather than sitting beside it.
+`ns_image_anim_duration`, `ns_image_anim_position`,
+`ns_image_anim_set_paused` and `ns_image_anim_seek` are the whole of the
+playback surface, and `duration`, `readyState`, `paused`, `play()`,
+`pause()` and `currentTime` in `src/js.c` resolve through them by looking
+the element's source up in the image cache. Because that cache is keyed by
+URL, two `<video>` elements with the same source share one timeline. A
+clip autoplays and loops; it carries no audio, so this is the muted
+autoplay browsers already permit, and there is no controls UI to start it
+by hand. One consequence of
 decoding up front is that a clip is bounded rather than streamed: decoding
 stops at `NS_VIDEO_MAX_FRAMES` frames or `NS_VIDEO_MAX_TOTAL_BYTES`
 (256 MB) of decoded pixels, whichever comes first, and a longer clip plays

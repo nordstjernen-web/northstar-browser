@@ -4,6 +4,24 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* `<video>` responds to the media element API. A decoded clip reports its
+  real `duration` and a `readyState` of `HAVE_ENOUGH_DATA`, `paused`
+  reflects whether the frames are actually advancing, `play()` and
+  `pause()` start and stop them, and assigning `currentTime` moves the
+  displayed frame -- seeking to 0.20 s in a 25 fps clip shows frame 5, not
+  merely a changed number. Reading `currentTime` reports the live position.
+  Playback state lives on the decoded clip, which the image cache keys by
+  URL, so two `<video>` elements sharing one source share playback.
+  A clip still starts playing on load and loops: it is always silent, so
+  this matches what Chrome allows for muted video, and Northstar has
+  neither video controls nor click-to-play to start it otherwise.
+* `readyState` on `<video>` and `<audio>` is no longer always zero. The
+  polyfill that gives `<track>` elements a `readyState` replaced the
+  property on the media prototype and delegated to the native getter it
+  had captured -- but it looked that getter up as an own property of the
+  element's immediate prototype, where it does not live, so the captured
+  descriptor was null and every media element reported zero regardless of
+  state. The lookup now walks the prototype chain.
 * `<video>` plays MPEG-1. The tree already vendored pl_mpeg for its MP2
   audio decoder and switched the video half off with one call
   (`plm_set_video_enabled(plm, 0)`), so the decoder for an ISO standard

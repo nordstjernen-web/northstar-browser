@@ -289,6 +289,8 @@ static JSValue ns_window_url_create_object(JSContext *ctx, JSValueConst this_val
 static JSValue ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
 static const char *ns_http_status_text(int status);
+static gboolean ns_node_is_media_element(const ns_node *n);
+static char *ns_media_resolve_src(JSContext *ctx, ns_node *node);
 static void ns_attach_body_consumers(JSContext *ctx, JSValueConst obj);
 static char *ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob,
                                      gsize *out_len);
@@ -36808,8 +36810,26 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
         const ns_box *b = ns_box_find_by_dom(js->layout_root, el);
         if (b && b->media && b->media->image)
             return (const ns_image *)b->media->image;
+        if (b && b->media && b->media->video)
+            return (const ns_image *)b->media->video;
     }
     return NULL;
+}
+
+static ns_image *
+ns_media_animation_for(JSContext *ctx, JSValueConst this_val)
+{
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    if (!ns_node_is_media_element(el)) return NULL;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->image_cache) return NULL;
+    ns_image *img = (ns_image *)ns_js_image_for_node(js, el);
+    if (!ns_image_is_animation(img)) {
+        char *url = ns_media_resolve_src(ctx, el);
+        img = url ? ns_image_cache_peek(js->image_cache, url) : NULL;
+        g_free(url);
+    }
+    return ns_image_is_animation(img) ? img : NULL;
 }
 
 
@@ -37954,6 +37974,8 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
 static JSValue
 ns_media_get_paused(JSContext *ctx, JSValueConst this_val)
 {
+    const ns_image *anim = ns_media_animation_for(ctx, this_val);
+    if (anim) return JS_NewBool(ctx, anim->anim_paused);
     JSValue playing_v = JS_GetPropertyStr(ctx, this_val, "_nd_playing");
     gboolean playing = JS_ToBool(ctx, playing_v);
     JS_FreeValue(ctx, playing_v);
@@ -37967,6 +37989,7 @@ ns_media_get_readyState(JSContext *ctx, JSValueConst this_val)
     int32_t rs = 0;
     if (!JS_IsUndefined(v)) JS_ToInt32(ctx, &rs, v);
     JS_FreeValue(ctx, v);
+    if (rs == 0 && ns_media_animation_for(ctx, this_val)) rs = 4;
     return JS_NewInt32(ctx, rs);
 }
 
@@ -38074,6 +38097,11 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
         ns_js_dispatch_event(js, el, "play", NULL);
         if (js->media_play_cb)
             js->media_play_cb(el, TRUE, js->media_play_user_data);
+        ns_image *anim = ns_media_animation_for(ctx, this_val);
+        if (anim) {
+            ns_image_anim_set_paused(anim, FALSE, g_get_monotonic_time());
+            ns_js_request_repaint(js);
+        }
         char *url = ns_media_resolve_src(ctx, el);
         gboolean audio_element = ns_node_is_element_named(el, "audio");
         if (url && js->audio_cb && audio_element) {
@@ -38098,6 +38126,10 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
 static JSValue
 ns_media_get_current_time(JSContext *ctx, JSValueConst this_val)
 {
+    const ns_image *anim = ns_media_animation_for(ctx, this_val);
+    if (anim)
+        return JS_NewFloat64(ctx,
+            ns_image_anim_position(anim, g_get_monotonic_time()));
     JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_pos");
     if (JS_IsNumber(v)) return v;
     JS_FreeValue(ctx, v);
@@ -38110,6 +38142,8 @@ ns_media_get_duration(JSContext *ctx, JSValueConst this_val)
     JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_duration");
     if (JS_IsNumber(v)) return v;
     JS_FreeValue(ctx, v);
+    const ns_image *anim = ns_media_animation_for(ctx, this_val);
+    if (anim) return JS_NewFloat64(ctx, ns_image_anim_duration(anim));
     return JS_NewFloat64(ctx, NAN);
 }
 
@@ -38411,6 +38445,12 @@ ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
     if (!el || !js) return JS_UNDEFINED;
     gboolean handled = js->media_seek_cb &&
         js->media_seek_cb(el, t, js->media_seek_user_data);
+    ns_image *anim = ns_media_animation_for(ctx, this_val);
+    if (anim) {
+        ns_image_anim_seek(anim, t, g_get_monotonic_time());
+        ns_js_request_repaint(js);
+        handled = TRUE;
+    }
     if (!handled && js->audio_cb) {
         JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
         if (JS_IsString(tv)) {
@@ -38508,6 +38548,8 @@ ns_media_pause(JSContext *ctx, JSValueConst this_val,
         ns_js_dispatch_event(js, el, "pause", NULL);
         if (js->media_play_cb)
             js->media_play_cb(el, FALSE, js->media_play_user_data);
+        ns_image *anim = ns_media_animation_for(ctx, this_val);
+        if (anim) ns_image_anim_set_paused(anim, TRUE, g_get_monotonic_time());
     }
     return JS_UNDEFINED;
 }

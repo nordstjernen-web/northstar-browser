@@ -751,6 +751,76 @@ ns_image_cache_peek(ns_image_cache *cache, const char *url)
 }
 
 gboolean
+ns_image_is_animation(const ns_image *img)
+{
+    return img && img->loaded && img->anim_frames &&
+           img->anim_frames->len > 1 && img->anim_total_ms > 0;
+}
+
+double
+ns_image_anim_duration(const ns_image *img)
+{
+    return ns_image_is_animation(img) ? img->anim_total_ms / 1000.0 : 0.0;
+}
+
+static int
+ns_image_anim_phase_ms(const ns_image *img, gint64 now_us)
+{
+    if (!ns_image_is_animation(img)) return 0;
+    if (img->anim_paused) return img->anim_paused_phase_ms;
+    gint64 elapsed_ms = (now_us - img->anim_start_us) / 1000;
+    if (elapsed_ms < 0) elapsed_ms = 0;
+    return (int)(elapsed_ms % img->anim_total_ms);
+}
+
+double
+ns_image_anim_position(const ns_image *img, gint64 now_us)
+{
+    return ns_image_anim_phase_ms(img, now_us) / 1000.0;
+}
+
+void
+ns_image_anim_set_paused(ns_image *img, gboolean paused, gint64 now_us)
+{
+    if (!ns_image_is_animation(img) || img->anim_paused == paused) return;
+    if (paused) {
+        img->anim_paused_phase_ms = ns_image_anim_phase_ms(img, now_us);
+        img->anim_paused = TRUE;
+        return;
+    }
+    img->anim_paused = FALSE;
+    img->anim_start_us = now_us - (gint64)img->anim_paused_phase_ms * 1000;
+}
+
+void
+ns_image_anim_seek(ns_image *img, double seconds, gint64 now_us)
+{
+    if (!ns_image_is_animation(img)) return;
+    if (!(seconds >= 0.0)) seconds = 0.0;
+    int phase = (int)(seconds * 1000.0) % img->anim_total_ms;
+    if (img->anim_paused) img->anim_paused_phase_ms = phase;
+    else img->anim_start_us = now_us - (gint64)phase * 1000;
+}
+
+static gboolean
+ns_image_apply_phase(ns_image *img, int phase)
+{
+    int idx = 0, acc = 0;
+    for (guint i = 0; i < img->anim_frames->len; i++) {
+        ns_image_anim_frame *f =
+            &g_array_index(img->anim_frames, ns_image_anim_frame, i);
+        acc += f->delay_ms;
+        if (phase < acc) { idx = (int)i; break; }
+        idx = (int)i;
+    }
+    if (idx == img->anim_current) return FALSE;
+    img->anim_current = idx;
+    img->texture =
+        g_array_index(img->anim_frames, ns_image_anim_frame, idx).texture;
+    return TRUE;
+}
+
+gboolean
 ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
 {
     if (!cache) return FALSE;
@@ -760,26 +830,9 @@ ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
     g_hash_table_iter_init(&it, cache->by_url);
     while (g_hash_table_iter_next(&it, &key, &value)) {
         ns_image *img = value;
-        if (!img->anim_frames || img->anim_frames->len < 2) continue;
-        if (img->anim_total_ms <= 0) continue;
-        gint64 elapsed_ms = (now_us - img->anim_start_us) / 1000;
-        if (elapsed_ms < 0) elapsed_ms = 0;
-        int phase = (int)(elapsed_ms % img->anim_total_ms);
-        int idx = 0, acc = 0;
-        for (guint i = 0; i < img->anim_frames->len; i++) {
-            ns_image_anim_frame *f =
-                &g_array_index(img->anim_frames, ns_image_anim_frame, i);
-            acc += f->delay_ms;
-            if (phase < acc) { idx = (int)i; break; }
-            idx = (int)i;
-        }
-        if (idx != img->anim_current) {
-            img->anim_current = idx;
-            ns_image_anim_frame *f =
-                &g_array_index(img->anim_frames, ns_image_anim_frame, idx);
-            img->texture = f->texture;
+        if (!ns_image_is_animation(img)) continue;
+        if (ns_image_apply_phase(img, ns_image_anim_phase_ms(img, now_us)))
             any = TRUE;
-        }
     }
     return any;
 }
@@ -793,8 +846,7 @@ ns_image_cache_animating(const ns_image_cache *cache)
     g_hash_table_iter_init(&it, cache->by_url);
     while (g_hash_table_iter_next(&it, &key, &value)) {
         const ns_image *img = value;
-        if (img->loaded && img->anim_frames && img->anim_frames->len > 1)
-            return TRUE;
+        if (ns_image_is_animation(img) && !img->anim_paused) return TRUE;
     }
     return FALSE;
 }

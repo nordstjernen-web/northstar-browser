@@ -36,7 +36,9 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
   process through the vendored pl_mpeg, which already supplies the MP2
   audio decoder — the format costs no new dependency, and its patents have
   expired. Frames are decoded up front and played back through the same
-  animation path as an animated GIF, so a clip is bounded by
+  animation path as an animated GIF -- with `play()`, `pause()`,
+  `currentTime`, `duration` and `readyState` driving that timeline -- so a
+  clip is bounded by
   `NS_VIDEO_MAX_TOTAL_BYTES` (256 MB of decoded frames) and
   `NS_VIDEO_MAX_FRAMES`; longer video is truncated, not streamed. No other
   video codec is present, and MPEG-1 is not a format the web serves, so
