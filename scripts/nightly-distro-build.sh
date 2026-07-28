@@ -19,7 +19,7 @@ install_apt() {
         build-essential clang pkg-config ninja-build cmake git zip unzip curl \
         python3-pip dpkg-dev patchelf ca-certificates \
         libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev libpsl-dev \
-        libsqlite3-dev librsvg2-dev libseccomp-dev libavif-dev libsdl2-dev
+        libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
     apt-get install -y --no-install-recommends \
         libfontconfig-dev libpango1.0-dev || true
     pip3 install --break-system-packages --upgrade 'meson>=1.4' \
@@ -45,7 +45,7 @@ install_zypper() {
         gcc gcc-c++ clang pkgconf-pkg-config meson ninja cmake git zip unzip curl \
         rpm-build patchelf ca-certificates \
         gtk4-devel libcurl-devel libopenssl-devel libuchardet-devel libpsl-devel \
-        sqlite3-devel librsvg-devel libseccomp-devel libavif-devel libSDL2-devel
+        sqlite3-devel libseccomp-devel libavif-devel libSDL2-devel
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         fontconfig-devel pango-devel || true
 }
@@ -55,7 +55,7 @@ install_apk() {
     apk add --no-cache \
         build-base clang pkgconf meson ninja cmake git zip alpine-sdk \
         linux-headers gtk4.0-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
-        librsvg-dev libseccomp-dev libavif-dev sdl2-dev
+        libseccomp-dev libavif-dev sdl2-dev
     apk add --no-cache \
         fontconfig-dev pango-dev || true
 }

@@ -2,7 +2,7 @@
 # Build a portable Northstar RPM by repackaging the bundle that
 # pack-linux.sh produces. The binary is already statically linked
 # against the in-tree engine (lexbor, quickjs, wuffs); the RPM only
-# needs to declare the dynamic GTK / curl / rsvg system deps, and rpm's
+# needs to declare the dynamic GTK / curl system deps, and rpm's
 # auto-Requires picks those up from the binary's SONAMEs.
 set -euo pipefail
 
@@ -72,7 +72,7 @@ AutoReqProv:    yes
 Northstar is a small free-software web browser written from scratch in
 C with GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint
 and JavaScript glue contain no third-party browser engine. SVG images
-are rendered with librsvg. Licensed GPL-3.0-or-later.
+are rendered in-engine. Licensed GPL-3.0-or-later.
 
 %prep
 # nothing to prep; binary is prebuilt

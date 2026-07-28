@@ -2654,11 +2654,7 @@ about_diagnostics_html(void)
 #else
     diag_feature(s, "AVIF images", FALSE);
 #endif
-#ifdef NS_HAVE_LIBRSVG
-    diag_feature(s, "SVG images (librsvg)", TRUE);
-#else
-    diag_feature(s, "SVG images (librsvg)", FALSE);
-#endif
+    diag_feature(s, "SVG images", TRUE);
 #ifdef NS_HAVE_ENCHANT
     diag_feature(s, "Spell checking", TRUE);
 #else

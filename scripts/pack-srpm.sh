@@ -59,7 +59,6 @@ BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libcurl)
 BuildRequires:  pkgconfig(libcrypto)
 BuildRequires:  pkgconfig(uchardet)
-BuildRequires:  pkgconfig(librsvg-2.0)
 BuildRequires:  pkgconfig(libpsl)
 BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  pkgconfig(libavif)
@@ -69,13 +68,12 @@ BuildRequires:  pkgconfig(sdl2)
 Requires:       gtk4
 Requires:       libcurl
 Requires:       uchardet
-Requires:       librsvg2
 
 %description
 Northstar is a small free-software web browser written from scratch in
 C with GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint
 and JavaScript glue contain no third-party browser engine. SVG images
-are rendered with librsvg. Licensed GPL-3.0-or-later.
+are rendered in-engine. Licensed GPL-3.0-or-later.
 
 %prep
 %setup -q

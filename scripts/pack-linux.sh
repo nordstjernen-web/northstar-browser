@@ -39,7 +39,7 @@ fi
 
 if [ "$LIBC" = musl ]; then
     LIBC_REQ='- musl libc (Alpine 3.19+ era and later)'
-    RUNTIME_INSTALL='    sudo apk add gtk4.0 libcurl uchardet librsvg libavif \
+    RUNTIME_INSTALL='    sudo apk add gtk4.0 libcurl uchardet libavif \
         libseccomp libpsl sqlite-libs ca-certificates font-dejavu sdl2 # Alpine (musl)'
 else
     # Don't guess the glibc floor — read it from the binary we just built.
@@ -47,11 +47,11 @@ else
         | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -t. -k1,1V -k2,2n -u \
         | tail -1 | cut -d_ -f2)
     LIBC_REQ="- glibc ${GLIBC_MIN:-2.38}+ (the build container's generation; check with: ldd --version)"
-    RUNTIME_INSTALL='    sudo apt   install libgtk-4-1 libcurl4 libuchardet0 librsvg2-2 \
+    RUNTIME_INSTALL='    sudo apt   install libgtk-4-1 libcurl4 libuchardet0 \
         libavif16 libpsl5 libseccomp2 libsqlite3-0 libsdl2-2.0-0   # Debian/Ubuntu
-    sudo dnf   install gtk4 libcurl libuchardet librsvg2 \
+    sudo dnf   install gtk4 libcurl libuchardet \
         libavif libpsl libseccomp sqlite-libs SDL2                 # Fedora/RHEL
-    sudo zypper install libgtk-4-1 libcurl4 libuchardet0 librsvg-2-2 \
+    sudo zypper install libgtk-4-1 libcurl4 libuchardet0 \
         libavif16 libpsl5 libseccomp2 libsqlite3-0 libSDL2-2_0-0   # openSUSE'
 fi
 
@@ -86,7 +86,6 @@ ${LIBC_REQ}
 - GTK 4.6+, with gio, gobject, pango, cairo, gdk-pixbuf
 - libcurl with a TLS backend; OpenSSL 3 (libcrypto)
 - libuchardet
-- librsvg (SVG rendering)
 - libavif 16 (AVIF images — only in recent distro releases)
 - libpsl, libseccomp, libsqlite3
 - SDL2 (in-process audio playback)

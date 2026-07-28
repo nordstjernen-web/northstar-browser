@@ -88,6 +88,7 @@ fi
 # GDK-PixBuf loader cache + loader DLLs (image decode for <img>). Copied
 # *before* the DLL chase so the loaders' transitive deps (notably
 # librsvg-2-2.dll, pulled in only by pixbufloader_svg.dll) get bundled too.
+# The browser renders SVG itself; these loaders only serve GTK's icon theme.
 # GdkPixbuf loads these dynamically via loaders.cache, so their import edges
 # don't appear in northstar.exe's static-import graph.
 if [ -d "$MINGW_PREFIX/lib/gdk-pixbuf-2.0" ]; then

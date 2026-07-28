@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a portable Northstar .deb by repackaging the bundle that
 # pack-linux.sh produces. The binary statically links the in-tree engine
-# (lexbor, quickjs, wuffs). Stable desktop deps (GTK, curl, rsvg, …) are
+# (lexbor, quickjs, wuffs). Stable desktop deps (GTK, curl, …) are
 # computed from the binary's SONAMEs with dpkg-shlibdeps, falling back to
 # a hand-maintained list. The image-codec libraries whose SONAMEs differ
 # per distro release (libavif and its AV1 codecs) are bundled in
@@ -123,7 +123,7 @@ fi
 
 INSTALLED_KB=$(du -sk "$PKGROOT/usr" | cut -f1)
 
-FALLBACK_DEPS="libgtk-4-1, libcurl4 | libcurl4t64, libuchardet0, librsvg2-2, libpsl5 | libpsl5t64, libsqlite3-0, libseccomp2, libfontconfig1, libsdl2-2.0-0"
+FALLBACK_DEPS="libgtk-4-1, libcurl4 | libcurl4t64, libuchardet0, libpsl5 | libpsl5t64, libsqlite3-0, libseccomp2, libfontconfig1, libsdl2-2.0-0"
 
 RUNTIME_DEPS=""
 if command -v dpkg-shlibdeps >/dev/null 2>&1; then
@@ -171,7 +171,7 @@ Description: Northstar web browser — minimalist GTK 4 browser, GPL edition
  Northstar is a small free-software web browser written from scratch in
  C with GTK 4 and libcurl. The HTML parser, CSS engine, layout, paint
  and JavaScript glue contain no third-party browser engine. SVG images
- are rendered with librsvg. Licensed GPL-3.0-or-later.
+ are rendered in-engine. Licensed GPL-3.0-or-later.
 EOF
 
 cat > "$PKGROOT/DEBIAN/postinst" <<'EOF'
