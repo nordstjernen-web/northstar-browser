@@ -1563,8 +1563,6 @@ ns_proc_view_end_task(NsProcView *v)
     g_mutex_unlock(&v->proc_lock);
 }
 
-double ns_proc_view_zoom(NsProcView *v) { return cur_scale(v); }
-
 void ns_proc_view_focus(NsProcView *v)
 {
     if (v->area)

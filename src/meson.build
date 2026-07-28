@@ -78,7 +78,6 @@ northstar_engine_sources = files(
   'paint.c',
   'render.c',
   'safebrowsing.c',
-  'secretbox.c',
   'security.c',
   'selection.c',
   'spellcheck.c',

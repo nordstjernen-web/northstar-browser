@@ -50,6 +50,25 @@
 
 #include "js_internal.h"
 
+ns_js_navigation_timing
+ns_js_navigation_timing_from_response(const ns_response *response)
+{
+    if (!response) return (ns_js_navigation_timing){0};
+    return (ns_js_navigation_timing){
+        .origin_us = response->request_start_us,
+        .origin_real_ms = response->request_start_real_ms,
+        .domain_lookup_start_ms = 0,
+        .domain_lookup_end_ms = response->domain_lookup_ms,
+        .connect_start_ms = response->domain_lookup_ms,
+        .connect_end_ms = response->connect_ms,
+        .secure_connection_start_ms =
+            response->connect_ms < response->tls_ms ? response->connect_ms : 0,
+        .request_start_ms = response->pretransfer_ms,
+        .response_start_ms = response->response_start_ms,
+        .response_end_ms = response->response_end_ms,
+    };
+}
+
 static double ns_window_scroll_prop(JSContext *ctx, const char *prop);
 
 #undef JS_CFUNC_DEF
@@ -25625,16 +25644,6 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
 static gboolean ns_path_has_active_listener(ns_js *js, const ns_node *target,
                                             const char *type);
 
-gboolean
-ns_js_node_has_click_handler(ns_js *js, const ns_node *target)
-{
-    if (!js || !target) return FALSE;
-    return ns_path_has_active_listener(js, target, "click") ||
-           ns_path_has_active_listener(js, target, "pointerdown") ||
-           ns_path_has_active_listener(js, target, "mousedown") ||
-           ns_path_has_active_listener(js, target, "touchstart");
-}
-
 static gboolean
 ns_path_has_active_listener(ns_js *js, const ns_node *target, const char *type)
 {
@@ -37012,27 +37021,7 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
     JSValue blob = JS_NULL;
     if (el && js_from_ctx(ctx)) {
         ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
-        if (st && st->surf) {
-            GByteArray *buf = g_byte_array_new();
-            cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
-                ns_canvas_png_write, buf);
-            if (s == CAIRO_STATUS_SUCCESS) {
-                JSValue ab = JS_NewArrayBufferCopy(ctx, buf->data, buf->len);
-                JSValue global = JS_GetGlobalObject(ctx);
-                JSValue u8c = JS_GetPropertyStr(ctx, global, "Uint8Array");
-                JS_FreeValue(ctx, global);
-                JSValueConst u8args[1] = { ab };
-                JSValue u8a = JS_CallConstructor(ctx, u8c, 1, u8args);
-                JS_FreeValue(ctx, u8c);
-                JS_FreeValue(ctx, ab);
-                blob = JS_NewObject(ctx);
-                JS_SetPropertyStr(ctx, blob, "_b", u8a);
-                JS_SetPropertyStr(ctx, blob, "size", JS_NewInt64(ctx, buf->len));
-                JS_SetPropertyStr(ctx, blob, "type",
-                                  JS_NewString(ctx, "image/png"));
-            }
-            g_byte_array_free(buf, TRUE);
-        }
+        if (st) blob = ns_canvas_blob_from_surface(ctx, st->surf);
     }
     JSValueConst cb_args[1] = { blob };
     JSValue r = JS_Call(ctx, cb, JS_UNDEFINED, 1, cb_args);
@@ -38135,8 +38124,6 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (el && js) {
         ns_js_dispatch_event(js, el, "play", NULL);
-        if (js->media_play_cb)
-            js->media_play_cb(el, TRUE, js->media_play_user_data);
         ns_image *anim = ns_media_animation_for(ctx, this_val);
         if (anim) {
             ns_image_anim_set_paused(anim, FALSE, g_get_monotonic_time());
@@ -38483,8 +38470,7 @@ ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
     ns_node *el = ns_unwrap_element_mut(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (!el || !js) return JS_UNDEFINED;
-    gboolean handled = js->media_seek_cb &&
-        js->media_seek_cb(el, t, js->media_seek_user_data);
+    gboolean handled = FALSE;
     ns_image *anim = ns_media_animation_for(ctx, this_val);
     if (anim) {
         ns_image_anim_seek(anim, t, g_get_monotonic_time());
@@ -38586,8 +38572,6 @@ ns_media_pause(JSContext *ctx, JSValueConst this_val,
         }
         JS_FreeValue(ctx, tv);
         ns_js_dispatch_event(js, el, "pause", NULL);
-        if (js->media_play_cb)
-            js->media_play_cb(el, FALSE, js->media_play_user_data);
         ns_image *anim = ns_media_animation_for(ctx, this_val);
         if (anim) ns_image_anim_set_paused(anim, TRUE, g_get_monotonic_time());
     }
@@ -51999,39 +51983,6 @@ ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data)
 }
 
 void
-ns_js_set_media_seek_cb(ns_js *js, ns_js_media_seek_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->media_seek_cb = cb;
-    js->media_seek_user_data = user_data;
-}
-
-void
-ns_js_set_media_play_cb(ns_js *js, ns_js_media_play_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->media_play_cb = cb;
-    js->media_play_user_data = user_data;
-}
-
-void
-ns_js_set_media_muted_cb(ns_js *js, ns_js_media_muted_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->media_muted_cb = cb;
-    js->media_muted_user_data = user_data;
-}
-
-void
-ns_js_set_media_volume_cb(ns_js *js, ns_js_media_volume_cb cb,
-                          gpointer user_data)
-{
-    if (!js) return;
-    js->media_volume_cb = cb;
-    js->media_volume_user_data = user_data;
-}
-
-void
 ns_js_set_scroll_to_cb(ns_js *js, ns_js_scroll_to_cb cb, gpointer user_data)
 {
     if (!js) return;
@@ -52066,68 +52017,6 @@ ns_js_emit_audio(ns_js *js, const char *fmt, ...)
     va_end(ap);
     js->audio_cb(cmd, js->audio_user_data);
     g_free(cmd);
-}
-
-void
-ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
-{
-    if (!js || !js->ctx || !node || !kind) return;
-    JSContext *ctx = js->ctx;
-    const ns_node *n = node;
-    JSValue el = ns_make_element(ctx, n);
-    if (strcmp(kind, "meta") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_duration", JS_NewFloat64(ctx, value));
-        JS_SetPropertyStr(ctx, el, "_nd_readyState", JS_NewInt32(ctx, 4));
-        JS_SetPropertyStr(ctx, el, "_nd_networkState", JS_NewInt32(ctx, 1));
-        JS_DefinePropertyValueStr(ctx, el, "readyState", JS_NewInt32(ctx, 4),
-                                  JS_PROP_C_W_E);
-        ns_js_dispatch_event(js, n, "loadedmetadata", NULL);
-        ns_js_dispatch_event(js, n, "durationchange", NULL);
-        ns_js_dispatch_event(js, n, "canplay", NULL);
-        ns_js_dispatch_event(js, n, "canplaythrough", NULL);
-    } else if (strcmp(kind, "vwidth") == 0) {
-        JS_DefinePropertyValueStr(ctx, el, "videoWidth",
-                                  JS_NewInt32(ctx, (int)value), JS_PROP_C_W_E);
-    } else if (strcmp(kind, "vheight") == 0) {
-        JS_DefinePropertyValueStr(ctx, el, "videoHeight",
-                                  JS_NewInt32(ctx, (int)value), JS_PROP_C_W_E);
-        ns_js_dispatch_event(js, n, "resize", NULL);
-    } else if (strcmp(kind, "waiting") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
-        JS_DefinePropertyValueStr(ctx, el, "readyState", JS_NewInt32(ctx, 2),
-                                  JS_PROP_C_W_E);
-        ns_js_dispatch_event(js, n, "timeupdate", NULL);
-        ns_js_dispatch_event(js, n, "waiting", NULL);
-    } else if (strcmp(kind, "resumed") == 0) {
-        JS_DefinePropertyValueStr(ctx, el, "readyState", JS_NewInt32(ctx, 4),
-                                  JS_PROP_C_W_E);
-        ns_js_dispatch_event(js, n, "canplay", NULL);
-        ns_js_dispatch_event(js, n, "playing", NULL);
-    } else if (strcmp(kind, "unmuted") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_muted", JS_FALSE);
-        ns_js_dispatch_event(js, n, "volumechange", NULL);
-    } else if (strcmp(kind, "buf") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_buffered", JS_NewFloat64(ctx, value));
-        ns_js_dispatch_event(js, n, "progress", NULL);
-    } else if (strcmp(kind, "pos") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
-        ns_js_dispatch_event(js, n, "timeupdate", NULL);
-    } else if (strcmp(kind, "play") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_playing", JS_TRUE);
-        JS_SetPropertyStr(ctx, el, "_nd_ended", JS_FALSE);
-        ns_js_dispatch_event(js, n, "play", NULL);
-        ns_js_dispatch_event(js, n, "playing", NULL);
-    } else if (strcmp(kind, "pause") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_playing", JS_FALSE);
-        ns_js_dispatch_event(js, n, "pause", NULL);
-    } else if (strcmp(kind, "ended") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
-        JS_SetPropertyStr(ctx, el, "_nd_playing", JS_FALSE);
-        JS_SetPropertyStr(ctx, el, "_nd_ended", JS_TRUE);
-        ns_js_dispatch_event(js, n, "timeupdate", NULL);
-        ns_js_dispatch_event(js, n, "ended", NULL);
-    }
-    JS_FreeValue(ctx, el);
 }
 
 void

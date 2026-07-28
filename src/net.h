@@ -243,6 +243,7 @@ void  ns_net_set_log_fetches(gboolean on);
 void  ns_net_perf_snapshot(guint64 *fetches, guint64 *bytes,
                            double *sum_ms, double *span_ms);
 char *ns_net_proxy_mask(const char *proxy_url);
+char *ns_executable_dir(void);
 void  ns_net_apply_curl_proxy(void *curl_handle, const char *url);
 void  ns_net_apply_curl_tls(void *curl_handle);
 const char *ns_net_proxy_override(void);

@@ -64,7 +64,6 @@ void        ns_proc_view_end_task(NsProcView *view);
 void   ns_proc_view_zoom_in(NsProcView *view);
 void   ns_proc_view_zoom_out(NsProcView *view);
 void   ns_proc_view_zoom_reset(NsProcView *view);
-double ns_proc_view_zoom(NsProcView *view);
 void   ns_proc_view_focus(NsProcView *view);
 void   ns_proc_view_find_open(NsProcView *view);
 

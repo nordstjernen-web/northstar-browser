@@ -44,8 +44,6 @@ typedef struct {
     char                *audio;
 } ns_rproc_http_frame;
 
-ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,
-                                   int max_height);
 ns_rproc_http *ns_rproc_http_spawn_shm(const char *renderer_path,
                                        int max_width, int max_height);
 
@@ -93,15 +91,7 @@ int   ns_rproc_http_scroll(ns_rproc_http *r, int x, int y, int dx, int dy);
 int   ns_rproc_http_scrollbar(ns_rproc_http *r, int kind, int x, int y);
 int   ns_rproc_http_drop_files(ns_rproc_http *r, int x, int y,
                                const char *const *paths, int n_paths);
-int   ns_rproc_http_release(ns_rproc_http *r);
 char *ns_rproc_http_release_full(ns_rproc_http *r, int *out_changed);
-int   ns_rproc_http_focused_editable(ns_rproc_http *r);
-char *ns_rproc_http_focused_editable_value(ns_rproc_http *r,
-                                           size_t *out_caret,
-                                           size_t *out_anchor);
-int   ns_rproc_http_set_focused_editable_selection(ns_rproc_http *r,
-                                                   size_t caret,
-                                                   size_t anchor);
 int   ns_rproc_http_find(ns_rproc_http *r, const char *query,
                          int case_sensitive, int direction, int from_y,
                          int *out_total, int *out_current, int *out_scroll_y);

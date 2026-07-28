@@ -298,7 +298,6 @@ ns_security_refuse_root(void)
 }
 
 static GPtrArray *ns_extra_writable_dirs = NULL;
-static GPtrArray *ns_extra_exec_dirs = NULL;
 
 void
 ns_security_add_writable_dir(const char *dir)
@@ -307,15 +306,6 @@ ns_security_add_writable_dir(const char *dir)
     if (!ns_extra_writable_dirs)
         ns_extra_writable_dirs = g_ptr_array_new_with_free_func(g_free);
     g_ptr_array_add(ns_extra_writable_dirs, g_strdup(dir));
-}
-
-void
-ns_security_add_exec_dir(const char *dir)
-{
-    if (!dir || !*dir) return;
-    if (!ns_extra_exec_dirs)
-        ns_extra_exec_dirs = g_ptr_array_new_with_free_func(g_free);
-    g_ptr_array_add(ns_extra_exec_dirs, g_strdup(dir));
 }
 
 #ifdef __linux__
@@ -526,13 +516,6 @@ ns_security_sandbox_init(const char *self_exe)
         for (guint i = 0; i < ns_extra_writable_dirs->len; i++) {
             const char *p = g_ptr_array_index(ns_extra_writable_dirs, i);
             add_path_rw(rfd, fs_rw, p);
-        }
-    }
-
-    if (ns_extra_exec_dirs) {
-        for (guint i = 0; i < ns_extra_exec_dirs->len; i++) {
-            const char *p = g_ptr_array_index(ns_extra_exec_dirs, i);
-            add_path_rw(rfd, fs_read | fs_exec, p);
         }
     }
 

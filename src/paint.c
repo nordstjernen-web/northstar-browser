@@ -65,8 +65,8 @@ paint_create_layout(void)
     return pango_layout_new(cached_ctx);
 }
 
-static PangoWeight
-pango_weight_from_css(int weight)
+PangoWeight
+ns_paint_pango_weight(int weight)
 {
     if (weight <= 100) return PANGO_WEIGHT_THIN;
     if (weight <= 200) return PANGO_WEIGHT_ULTRALIGHT;
@@ -80,8 +80,8 @@ pango_weight_from_css(int weight)
     return (PangoWeight)weight;
 }
 
-static PangoStretch
-pango_stretch_from_css(int rank)
+PangoStretch
+ns_paint_pango_stretch(int rank)
 {
     static const PangoStretch map[] = {
         PANGO_STRETCH_ULTRA_CONDENSED,
@@ -400,84 +400,13 @@ style_uniform_solid_border(const ns_style *s, double *out_w, rgba *out_color)
 }
 
 static double
-inline_control_dim_px(const ns_css_value *v, double font_size, double basis)
-{
-    if (!v) return 0;
-    if (v->kind == NS_CSS_V_CALC) {
-        double out = v->u.calc.px;
-        if (basis > 0) out += v->u.calc.pct * basis / 100.0;
-        return out > 0 ? out : 0;
-    }
-    if (v->kind != NS_CSS_V_LENGTH) return 0;
-    switch (v->u.length.unit) {
-    case NS_CSS_UNIT_PX:
-    case NS_CSS_UNIT_NUMBER:
-        return v->u.length.v;
-    case NS_CSS_UNIT_EM:
-        return v->u.length.v * font_size;
-    case NS_CSS_UNIT_REM:
-        return v->u.length.v * 16.0;
-    case NS_CSS_UNIT_PERCENT:
-        return basis > 0 ? v->u.length.v * basis / 100.0 : 0;
-    case NS_CSS_UNIT_VW:
-        return v->u.length.v * ns_css_viewport_w() / 100.0;
-    case NS_CSS_UNIT_VH:
-        return v->u.length.v * ns_css_viewport_h() / 100.0;
-    case NS_CSS_UNIT_VMIN:
-        return v->u.length.v * MIN(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
-    case NS_CSS_UNIT_VMAX:
-        return v->u.length.v * MAX(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
-    case NS_CSS_UNIT_CQW:
-    case NS_CSS_UNIT_CQI:
-        return v->u.length.v * (ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w()) / 100.0;
-    case NS_CSS_UNIT_CQH:
-    case NS_CSS_UNIT_CQB:
-        return v->u.length.v * (ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h()) / 100.0;
-    case NS_CSS_UNIT_CQMIN: {
-        double cw = ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w();
-        double ch = ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h();
-        return v->u.length.v * MIN(cw, ch) / 100.0;
-    }
-    case NS_CSS_UNIT_CQMAX: {
-        double cw = ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w();
-        double ch = ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h();
-        return v->u.length.v * MAX(cw, ch) / 100.0;
-    }
-    case NS_CSS_UNIT_EX:
-    case NS_CSS_UNIT_CH:
-        return v->u.length.v * font_size * 0.5;
-    case NS_CSS_UNIT_CAP:
-        return v->u.length.v * font_size * 0.7;
-    case NS_CSS_UNIT_IC:
-        return v->u.length.v * font_size;
-    default:
-        break;
-    }
-    return 0;
-}
-
-static double
-inline_control_dim_px_clamped(const ns_style *s, ns_css_prop value_prop,
-                              ns_css_prop min_prop, ns_css_prop max_prop,
-                              double font_size, double basis)
-{
-    if (!s) return 0;
-    double out = inline_control_dim_px(s->values[value_prop], font_size, basis);
-    double mn = inline_control_dim_px(s->values[min_prop], font_size, basis);
-    double mx = inline_control_dim_px(s->values[max_prop], font_size, basis);
-    if (mn > 0 && out > 0 && out < mn) out = mn;
-    if (mx > 0 && out > mx) out = mx;
-    return out;
-}
-
-static double
 inline_control_css_width(const ns_inline_attr *r, const ns_box *b)
 {
     if (!r || !r->style) return r && r->box_w > 0 ? r->box_w : 0;
     double fs = length_or(r->style->values[NS_CSS_FONT_SIZE], 16);
-    double w = inline_control_dim_px_clamped(r->style, NS_CSS_WIDTH,
-                                             NS_CSS_MIN_WIDTH, NS_CSS_MAX_WIDTH,
-                                             fs, b ? b->content_width : 0);
+    double w = ns_css_clamped_dimension_px(
+        r->style, NS_CSS_WIDTH, NS_CSS_MIN_WIDTH, NS_CSS_MAX_WIDTH,
+        fs, b ? b->content_width : 0);
     if (w > 0) w += ns_control_css_extra_w(r->dom, r->style);
     return w > 0 ? w : r->box_w;
 }
@@ -487,8 +416,8 @@ inline_control_css_min_width(const ns_inline_attr *r, const ns_box *b)
 {
     if (!r || !r->style) return 0;
     double fs = length_or(r->style->values[NS_CSS_FONT_SIZE], 16);
-    double mn = inline_control_dim_px(r->style->values[NS_CSS_MIN_WIDTH], fs,
-                                      b ? b->content_width : 0);
+    double mn = ns_css_dimension_px(r->style->values[NS_CSS_MIN_WIDTH], fs,
+                                    b ? b->content_width : 0);
     if (mn > 0) mn += ns_control_css_extra_w(r->dom, r->style);
     return mn;
 }
@@ -1656,9 +1585,10 @@ ns_paint_apply_inline_font(PangoLayout *layout, const ns_style *s)
     const ns_css_value *fw = s ? s->values[NS_CSS_FONT_WEIGHT] : NULL;
     int font_weight = ns_css_font_weight_number(fw, -1);
     if (font_weight > 0)
-        pango_font_description_set_weight(desc, pango_weight_from_css(font_weight));
+        pango_font_description_set_weight(desc,
+                                          ns_paint_pango_weight(font_weight));
     pango_font_description_set_stretch(desc,
-        pango_stretch_from_css(ns_css_font_stretch_rank(
+        ns_paint_pango_stretch(ns_css_font_stretch_rank(
             s ? s->values[NS_CSS_FONT_STRETCH] : NULL)));
     if (keyword_is(s ? s->values[NS_CSS_FONT_STYLE] : NULL, "italic"))
         pango_font_description_set_style(desc, PANGO_STYLE_ITALIC);
@@ -1701,8 +1631,8 @@ ns_paint_apply_inline_font(PangoLayout *layout, const ns_style *s)
     }
 }
 
-static void
-apply_text_align(PangoLayout *layout, const ns_style *s)
+void
+ns_paint_apply_text_align(PangoLayout *layout, const ns_style *s)
 {
     const ns_css_value *ta = s ? s->values[NS_CSS_TEXT_ALIGN] : NULL;
     gboolean rtl = pango_context_get_base_dir(
@@ -1796,11 +1726,12 @@ apply_first_line_attrs(PangoAttrList *attrs, const ns_style *fl,
             start, len);
     int fw = ns_css_font_weight_number(fl->values[NS_CSS_FONT_WEIGHT], -1);
     if (fw > 0)
-        attr_insert_range(attrs, pango_attr_weight_new(pango_weight_from_css(fw)),
+        attr_insert_range(attrs,
+                          pango_attr_weight_new(ns_paint_pango_weight(fw)),
                           start, len);
     if (fl->values[NS_CSS_FONT_STRETCH])
         attr_insert_range(attrs,
-            pango_attr_stretch_new(pango_stretch_from_css(
+            pango_attr_stretch_new(ns_paint_pango_stretch(
                 ns_css_font_stretch_rank(fl->values[NS_CSS_FONT_STRETCH]))),
             start, len);
     if (keyword_is(fl->values[NS_CSS_FONT_STYLE], "italic") ||
@@ -2185,10 +2116,11 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
             case NS_INLINE_BOLD:
                 a = pango_attr_weight_new(PANGO_WEIGHT_BOLD); break;
             case NS_INLINE_FONT_WEIGHT:
-                a = pango_attr_weight_new(pango_weight_from_css(r->font_weight)); break;
+                a = pango_attr_weight_new(
+                    ns_paint_pango_weight(r->font_weight)); break;
             case NS_INLINE_FONT_STRETCH:
                 a = pango_attr_stretch_new(
-                    pango_stretch_from_css(r->font_stretch)); break;
+                    ns_paint_pango_stretch(r->font_stretch)); break;
             case NS_INLINE_FONT_FEATURES:
                 a = ns_paint_font_features_attr_from_values(
                     r->font_kerning, r->font_ligatures, r->font_features); break;
@@ -2359,7 +2291,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     ns_inline_layout_set_attrs(layout, attrs, b);
     pango_attr_list_unref(attrs);
 
-    apply_text_align(layout, s);
+    ns_paint_apply_text_align(layout, s);
     apply_nowrap_align_width(layout, b);
     const ns_css_value *ta = s ? s->values[NS_CSS_TEXT_ALIGN] : NULL;
     if (keyword_is(ta, "justify"))
@@ -2869,10 +2801,11 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
             switch (r->kind) {
             case NS_INLINE_BOLD:      a = pango_attr_weight_new(PANGO_WEIGHT_BOLD); break;
             case NS_INLINE_FONT_WEIGHT:
-                a = pango_attr_weight_new(pango_weight_from_css(r->font_weight)); break;
+                a = pango_attr_weight_new(
+                    ns_paint_pango_weight(r->font_weight)); break;
             case NS_INLINE_FONT_STRETCH:
                 a = pango_attr_stretch_new(
-                    pango_stretch_from_css(r->font_stretch)); break;
+                    ns_paint_pango_stretch(r->font_stretch)); break;
             case NS_INLINE_FONT_FEATURES:
                 a = ns_paint_font_features_attr_from_values(
                     r->font_kerning, r->font_ligatures, r->font_features); break;
@@ -2904,7 +2837,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
     ns_inline_layout_set_attrs(layout, attrs, b);
     pango_attr_list_unref(attrs);
 
-    apply_text_align(layout, s);
+    ns_paint_apply_text_align(layout, s);
     apply_nowrap_align_width(layout, b);
     return layout;
 }

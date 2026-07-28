@@ -40,13 +40,6 @@ ns_texture_new(int width, int height, ns_texture_format format,
     return t;
 }
 
-ns_texture *
-ns_texture_ref(ns_texture *texture)
-{
-    if (texture) g_atomic_int_inc(&texture->ref_count);
-    return texture;
-}
-
 void
 ns_texture_unref(ns_texture *texture)
 {

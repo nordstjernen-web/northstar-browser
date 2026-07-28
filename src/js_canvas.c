@@ -3431,6 +3431,33 @@ ns_canvas_png_write(void *closure, const unsigned char *data, unsigned int lengt
 }
 
 JSValue
+ns_canvas_blob_from_surface(JSContext *ctx, cairo_surface_t *surface)
+{
+    if (!surface) return JS_NULL;
+    GByteArray *buf = g_byte_array_new();
+    cairo_status_t status = cairo_surface_write_to_png_stream(
+        surface, ns_canvas_png_write, buf);
+    if (status != CAIRO_STATUS_SUCCESS) {
+        g_byte_array_free(buf, TRUE);
+        return JS_NULL;
+    }
+    JSValue ab = JS_NewArrayBufferCopy(ctx, buf->data, buf->len);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue u8c = JS_GetPropertyStr(ctx, global, "Uint8Array");
+    JS_FreeValue(ctx, global);
+    JSValueConst args[1] = { ab };
+    JSValue bytes = JS_CallConstructor(ctx, u8c, 1, args);
+    JS_FreeValue(ctx, u8c);
+    JS_FreeValue(ctx, ab);
+    JSValue blob = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, blob, "_b", bytes);
+    JS_SetPropertyStr(ctx, blob, "size", JS_NewInt64(ctx, buf->len));
+    JS_SetPropertyStr(ctx, blob, "type", JS_NewString(ctx, "image/png"));
+    g_byte_array_free(buf, TRUE);
+    return blob;
+}
+
+JSValue
 ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
@@ -3442,27 +3469,7 @@ ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
     JSValue blob = JS_NULL;
     if (el && js_from_ctx(ctx)) {
         ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
-        if (st && st->surf) {
-            GByteArray *buf = g_byte_array_new();
-            cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
-                ns_canvas_png_write, buf);
-            if (s == CAIRO_STATUS_SUCCESS) {
-                JSValue ab = JS_NewArrayBufferCopy(ctx, buf->data, buf->len);
-                JSValue global = JS_GetGlobalObject(ctx);
-                JSValue u8c = JS_GetPropertyStr(ctx, global, "Uint8Array");
-                JS_FreeValue(ctx, global);
-                JSValueConst u8args[1] = { ab };
-                JSValue u8a = JS_CallConstructor(ctx, u8c, 1, u8args);
-                JS_FreeValue(ctx, u8c);
-                JS_FreeValue(ctx, ab);
-                blob = JS_NewObject(ctx);
-                JS_SetPropertyStr(ctx, blob, "_b", u8a);
-                JS_SetPropertyStr(ctx, blob, "size", JS_NewInt64(ctx, buf->len));
-                JS_SetPropertyStr(ctx, blob, "type",
-                                  JS_NewString(ctx, "image/png"));
-            }
-            g_byte_array_free(buf, TRUE);
-        }
+        if (st) blob = ns_canvas_blob_from_surface(ctx, st->surf);
     }
     JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, &blob);
     JS_FreeValue(ctx, blob);

@@ -594,6 +594,8 @@ const ns_css_value *ns_css_value_layer(const ns_css_value *head, int index);
 int                 ns_css_value_layer_count(const ns_css_value *head);
 
 double   ns_css_length_or(const ns_css_value *v, double fallback);
+double   ns_css_dimension_px(const ns_css_value *v, double font_size,
+                             double basis);
 gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);
 char    *ns_css_font_family_for_pango(const char *css_family);
 void     ns_css_set_font_available_cb(gboolean (*cb)(const char *family));
@@ -735,8 +737,6 @@ typedef struct ns_css_selector {
 GPtrArray *ns_css_parse_selector_list(const char *text);
 GPtrArray *ns_css_parse_selector_list_checked(const char *text,
                                               gboolean *out_valid);
-
-gboolean   ns_css_supports_selector(const char *text);
 
 const ns_node *ns_css_set_match_scope(const ns_node *scope);
 
@@ -925,6 +925,12 @@ typedef struct ns_style {
     struct ns_var_map *vars;
 } ns_style;
 
+double ns_css_clamped_dimension_px(const ns_style *s,
+                                   ns_css_prop value_prop,
+                                   ns_css_prop min_prop,
+                                   ns_css_prop max_prop,
+                                   double font_size, double basis);
+
 ns_display ns_css_display_of(const ns_style *s);
 ns_display ns_css_display_from_keyword(const char *canonical);
 ns_display ns_css_display_blockified(ns_display d);
@@ -1054,7 +1060,6 @@ void ns_css_mark_text_emptiness_change(ns_node *text);
 void ns_css_mark_attr_dirty(ns_node *target, const char *name,
                             const char *old_value);
 gboolean ns_css_attr_may_affect_style(const ns_node *target, const char *name);
-void ns_css_restyle_invalidate(void);
 void ns_css_set_render_zoom(double zoom);
 
 void ns_css_set_container_map(GHashTable *map);
@@ -1086,7 +1091,6 @@ char *ns_css_individual_transform_serialize(const ns_css_value *v, int prop);
 char *ns_css_math_canonical(const char *value);
 char *ns_css_transform_canonical(const char *value);
 char *ns_css_display_canonical(const char *value);
-char *ns_css_display_blockify(const char *d);
 char *ns_css_specified_canonical(const char *prop, const char *value);
 char *ns_css_time_specified(const char *value);
 char *ns_css_time_computed(const char *value);

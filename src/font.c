@@ -80,33 +80,6 @@ ns_font_init(void)
     ns_paint_register_font_oracle();
 }
 
-void
-ns_font_shutdown(void)
-{
-    if (!g_entries) return;
-    GHashTableIter it;
-    gpointer k, v;
-    g_hash_table_iter_init(&it, g_entries);
-    while (g_hash_table_iter_next(&it, &k, &v)) {
-        ns_font_entry *e = v;
-        if (e->cancel) {
-            g_cancellable_cancel(e->cancel);
-            g_object_unref(e->cancel);
-        }
-        g_free(e->family);
-        g_free(e->url);
-        g_free(e);
-    }
-    g_hash_table_destroy(g_entries);
-    g_entries = NULL;
-    if (g_pending_by_url) {
-        g_hash_table_destroy(g_pending_by_url);
-        g_pending_by_url = NULL;
-    }
-    g_free(g_cache_dir);
-    g_cache_dir = NULL;
-}
-
 gboolean
 ns_font_available(void)
 {

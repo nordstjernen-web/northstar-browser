@@ -46,8 +46,6 @@ ns_node *ns_html_parse_document(const char *input, gssize len,
 
 gboolean ns_xml_well_formed(const char *input, gssize len, char **out_root_ns);
 
-ns_node *ns_html_parse_fragment_in(const char *context_tag,
-                                   const char *input, gssize len);
 ns_node *ns_html_parse_fragment_with_scripting(const char *context_tag,
                                                const char *input, gssize len,
                                                gboolean scripting);
@@ -71,8 +69,6 @@ char *ns_html_decode_body_full(const char *body, gsize len,
 char *ns_html_image_document(const char *url);
 
 char *ns_html_json_document(const char *url, const char *json, gsize len);
-char *ns_html_xml_document(const char *url, const char *xml, gsize len);
-
 G_END_DECLS
 
 #endif

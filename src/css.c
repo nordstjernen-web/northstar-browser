@@ -752,6 +752,86 @@ ns_css_length_or(const ns_css_value *v, double fallback)
     return fallback;
 }
 
+double
+ns_css_dimension_px(const ns_css_value *v, double font_size, double basis)
+{
+    if (!v) return 0;
+    if (v->kind == NS_CSS_V_CALC) {
+        double out = v->u.calc.px;
+        if (basis > 0) out += v->u.calc.pct * basis / 100.0;
+        return out > 0 ? out : 0;
+    }
+    if (v->kind != NS_CSS_V_LENGTH) return 0;
+    switch (v->u.length.unit) {
+    case NS_CSS_UNIT_PX:
+    case NS_CSS_UNIT_NUMBER:
+        return v->u.length.v;
+    case NS_CSS_UNIT_EM:
+        return v->u.length.v * font_size;
+    case NS_CSS_UNIT_REM:
+        return v->u.length.v * 16.0;
+    case NS_CSS_UNIT_PERCENT:
+        return basis > 0 ? v->u.length.v * basis / 100.0 : 0;
+    case NS_CSS_UNIT_VW:
+        return v->u.length.v * ns_css_viewport_w() / 100.0;
+    case NS_CSS_UNIT_VH:
+        return v->u.length.v * ns_css_viewport_h() / 100.0;
+    case NS_CSS_UNIT_VMIN:
+        return v->u.length.v *
+               MIN(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
+    case NS_CSS_UNIT_VMAX:
+        return v->u.length.v *
+               MAX(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
+    case NS_CSS_UNIT_CQW:
+    case NS_CSS_UNIT_CQI:
+        return v->u.length.v *
+               (ns_css_container_w() > 0 ? ns_css_container_w()
+                                         : ns_css_viewport_w()) / 100.0;
+    case NS_CSS_UNIT_CQH:
+    case NS_CSS_UNIT_CQB:
+        return v->u.length.v *
+               (ns_css_container_h() > 0 ? ns_css_container_h()
+                                         : ns_css_viewport_h()) / 100.0;
+    case NS_CSS_UNIT_CQMIN: {
+        double cw = ns_css_container_w() > 0 ? ns_css_container_w()
+                                             : ns_css_viewport_w();
+        double ch = ns_css_container_h() > 0 ? ns_css_container_h()
+                                             : ns_css_viewport_h();
+        return v->u.length.v * MIN(cw, ch) / 100.0;
+    }
+    case NS_CSS_UNIT_CQMAX: {
+        double cw = ns_css_container_w() > 0 ? ns_css_container_w()
+                                             : ns_css_viewport_w();
+        double ch = ns_css_container_h() > 0 ? ns_css_container_h()
+                                             : ns_css_viewport_h();
+        return v->u.length.v * MAX(cw, ch) / 100.0;
+    }
+    case NS_CSS_UNIT_EX:
+    case NS_CSS_UNIT_CH:
+        return v->u.length.v * font_size * 0.5;
+    case NS_CSS_UNIT_CAP:
+        return v->u.length.v * font_size * 0.7;
+    case NS_CSS_UNIT_IC:
+        return v->u.length.v * font_size;
+    default:
+        return 0;
+    }
+}
+
+double
+ns_css_clamped_dimension_px(const ns_style *s, ns_css_prop value_prop,
+                            ns_css_prop min_prop, ns_css_prop max_prop,
+                            double font_size, double basis)
+{
+    if (!s) return 0;
+    double out = ns_css_dimension_px(s->values[value_prop], font_size, basis);
+    double mn = ns_css_dimension_px(s->values[min_prop], font_size, basis);
+    double mx = ns_css_dimension_px(s->values[max_prop], font_size, basis);
+    if (mn > 0 && out > 0 && out < mn) out = mn;
+    if (mx > 0 && out > mx) out = mx;
+    return out;
+}
+
 static double
 column_len_px(const ns_css_value *v, double basis, double fallback)
 {
@@ -6091,17 +6171,6 @@ ns_css_display_canonical(const char *value)
     return r;
 }
 
-char *
-ns_css_display_blockify(const char *d)
-{
-    if (!d) return NULL;
-    ns_display parsed;
-    if (!display_parse(d, &parsed)) return NULL;
-    ns_display blockified = ns_css_display_blockified(parsed);
-    if (memcmp(&parsed, &blockified, sizeof parsed) == 0) return NULL;
-    return ns_css_display_serialize(blockified);
-}
-
 static gboolean
 is_math_fn_start(const char *s)
 {
@@ -11183,13 +11252,6 @@ supports_selector_matches(const char *src, gsize len)
             ok = FALSE;
     g_ptr_array_free(list, TRUE);
     return ok;
-}
-
-gboolean
-ns_css_supports_selector(const char *text)
-{
-    if (!text) return FALSE;
-    return supports_selector_matches(text, strlen(text));
 }
 
 static gboolean
@@ -19247,13 +19309,6 @@ ns_css_attr_may_affect_style(const ns_node *target, const char *name)
         affects = strcmp(low, intrinsic[i]) == 0;
     g_free(low);
     return affects;
-}
-
-void
-ns_css_restyle_invalidate(void)
-{
-    g_incr_prev_styles = NULL;
-    g_incr_prev_doc = NULL;
 }
 
 static gboolean

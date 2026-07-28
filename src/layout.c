@@ -1636,77 +1636,6 @@ inline_run_at_line_start(const GString *out)
     return FALSE;
 }
 
-static double
-control_dim_px_basis(const ns_css_value *v, double font_size, double basis)
-{
-    if (!v) return 0;
-    if (v->kind == NS_CSS_V_CALC) {
-        double out = v->u.calc.px;
-        if (basis > 0) out += v->u.calc.pct * basis / 100.0;
-        return out > 0 ? out : 0;
-    }
-    if (v->kind != NS_CSS_V_LENGTH) return 0;
-    switch (v->u.length.unit) {
-    case NS_CSS_UNIT_PX:
-    case NS_CSS_UNIT_NUMBER:
-        return v->u.length.v;
-    case NS_CSS_UNIT_EM:
-        return v->u.length.v * font_size;
-    case NS_CSS_UNIT_REM:
-        return v->u.length.v * 16.0;
-    case NS_CSS_UNIT_PERCENT:
-        return basis > 0 ? v->u.length.v * basis / 100.0 : 0;
-    case NS_CSS_UNIT_VW:
-        return v->u.length.v * ns_css_viewport_w() / 100.0;
-    case NS_CSS_UNIT_VH:
-        return v->u.length.v * ns_css_viewport_h() / 100.0;
-    case NS_CSS_UNIT_VMIN:
-        return v->u.length.v * MIN(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
-    case NS_CSS_UNIT_VMAX:
-        return v->u.length.v * MAX(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
-    case NS_CSS_UNIT_CQW:
-    case NS_CSS_UNIT_CQI:
-        return v->u.length.v * (ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w()) / 100.0;
-    case NS_CSS_UNIT_CQH:
-    case NS_CSS_UNIT_CQB:
-        return v->u.length.v * (ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h()) / 100.0;
-    case NS_CSS_UNIT_CQMIN: {
-        double cw = ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w();
-        double ch = ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h();
-        return v->u.length.v * MIN(cw, ch) / 100.0;
-    }
-    case NS_CSS_UNIT_CQMAX: {
-        double cw = ns_css_container_w() > 0 ? ns_css_container_w() : ns_css_viewport_w();
-        double ch = ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h();
-        return v->u.length.v * MAX(cw, ch) / 100.0;
-    }
-    case NS_CSS_UNIT_EX:
-    case NS_CSS_UNIT_CH:
-        return v->u.length.v * font_size * 0.5;
-    case NS_CSS_UNIT_CAP:
-        return v->u.length.v * font_size * 0.7;
-    case NS_CSS_UNIT_IC:
-        return v->u.length.v * font_size;
-    default:
-        break;
-    }
-    return 0;
-}
-
-static double
-control_dim_px_clamped(const ns_style *s, ns_css_prop value_prop,
-                       ns_css_prop min_prop, ns_css_prop max_prop,
-                       double font_size, double basis)
-{
-    if (!s) return 0;
-    double out = control_dim_px_basis(s->values[value_prop], font_size, basis);
-    double mn = control_dim_px_basis(s->values[min_prop], font_size, basis);
-    double mx = control_dim_px_basis(s->values[max_prop], font_size, basis);
-    if (mn > 0 && out > 0 && out < mn) out = mn;
-    if (mx > 0 && out > mx) out = mx;
-    return out;
-}
-
 static gboolean
 control_is_border_box(const ns_node *dom, const ns_style *s)
 {
@@ -1752,9 +1681,9 @@ inline_attr_control_width(const ns_inline_attr *r, const ns_box *box)
 {
     if (!r || !r->style) return r && r->box_w > 0 ? r->box_w : 0;
     double fs = length_or(r->style->values[NS_CSS_FONT_SIZE], 16);
-    double w = control_dim_px_clamped(r->style, NS_CSS_WIDTH,
-                                      NS_CSS_MIN_WIDTH, NS_CSS_MAX_WIDTH,
-                                      fs, box ? box->content_width : 0);
+    double w = ns_css_clamped_dimension_px(
+        r->style, NS_CSS_WIDTH, NS_CSS_MIN_WIDTH, NS_CSS_MAX_WIDTH,
+        fs, box ? box->content_width : 0);
     if (w > 0) w += ns_control_css_extra_w(r->dom, r->style);
     return w > 0 ? w : r->box_w;
 }
@@ -1854,12 +1783,12 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
         s = g_hash_table_lookup(styles, dom);
         if (s) {
             fs = length_or(s->values[NS_CSS_FONT_SIZE], 16);
-            bw = control_dim_px_clamped(s, NS_CSS_WIDTH,
-                                        NS_CSS_MIN_WIDTH, NS_CSS_MAX_WIDTH,
-                                        fs, 0);
-            bh = control_dim_px_clamped(s, NS_CSS_HEIGHT,
-                                        NS_CSS_MIN_HEIGHT, NS_CSS_MAX_HEIGHT,
-                                        fs, 0);
+            bw = ns_css_clamped_dimension_px(s, NS_CSS_WIDTH,
+                                             NS_CSS_MIN_WIDTH,
+                                             NS_CSS_MAX_WIDTH, fs, 0);
+            bh = ns_css_clamped_dimension_px(s, NS_CSS_HEIGHT,
+                                             NS_CSS_MIN_HEIGHT,
+                                             NS_CSS_MAX_HEIGHT, fs, 0);
             if (bw > 0) bw += ns_control_css_extra_w(dom, s);
             if (bh > 0) bh += ns_control_css_extra_h(dom, s);
             const ns_css_value *bg = s->values[NS_CSS_BACKGROUND_IMAGE];
@@ -5029,40 +4958,6 @@ apply_inline_spacing(PangoAttrList *list, const ns_style *style, const char *tex
     }
 }
 
-static PangoWeight
-layout_pango_weight_from_css(int weight)
-{
-    if (weight <= 100) return PANGO_WEIGHT_THIN;
-    if (weight <= 200) return PANGO_WEIGHT_ULTRALIGHT;
-    if (weight <= 300) return PANGO_WEIGHT_LIGHT;
-    if (weight <= 400) return PANGO_WEIGHT_NORMAL;
-    if (weight <= 500) return PANGO_WEIGHT_MEDIUM;
-    if (weight <= 600) return PANGO_WEIGHT_SEMIBOLD;
-    if (weight <= 700) return PANGO_WEIGHT_BOLD;
-    if (weight <= 800) return PANGO_WEIGHT_ULTRABOLD;
-    if (weight <= 900) return PANGO_WEIGHT_HEAVY;
-    return (PangoWeight)weight;
-}
-
-static PangoStretch
-layout_pango_stretch_from_css(int rank)
-{
-    static const PangoStretch map[] = {
-        PANGO_STRETCH_ULTRA_CONDENSED,
-        PANGO_STRETCH_EXTRA_CONDENSED,
-        PANGO_STRETCH_CONDENSED,
-        PANGO_STRETCH_SEMI_CONDENSED,
-        PANGO_STRETCH_NORMAL,
-        PANGO_STRETCH_SEMI_EXPANDED,
-        PANGO_STRETCH_EXPANDED,
-        PANGO_STRETCH_EXTRA_EXPANDED,
-        PANGO_STRETCH_ULTRA_EXPANDED,
-    };
-    if (rank < 0) rank = 0;
-    if (rank > 8) rank = 8;
-    return map[rank];
-}
-
 static void
 layout_attr_insert_range(PangoAttrList *attrs, PangoAttribute *a,
                          gsize start, gsize len)
@@ -5086,11 +4981,11 @@ apply_inline_layout_attrs(PangoAttrList *attrs, const ns_box *box)
             a = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
             break;
         case NS_INLINE_FONT_WEIGHT:
-            a = pango_attr_weight_new(layout_pango_weight_from_css(r->font_weight));
+            a = pango_attr_weight_new(ns_paint_pango_weight(r->font_weight));
             break;
         case NS_INLINE_FONT_STRETCH:
             a = pango_attr_stretch_new(
-                layout_pango_stretch_from_css(r->font_stretch));
+                ns_paint_pango_stretch(r->font_stretch));
             break;
         case NS_INLINE_FONT_FEATURES:
             a = ns_paint_font_features_attr_from_values(r->font_kerning,
@@ -5508,25 +5403,6 @@ measure_inline_ascii_min_width(ns_box *box, const ns_style *parent_style)
 static void shift_box_tree(ns_box *b, double dx, double dy);
 
 static void
-inline_apply_text_align(PangoLayout *layout, const ns_style *s)
-{
-    const ns_css_value *ta = s ? s->values[NS_CSS_TEXT_ALIGN] : NULL;
-    gboolean rtl = pango_context_get_base_dir(
-        pango_layout_get_context(layout)) == PANGO_DIRECTION_RTL;
-    if (keyword_is(ta, "center"))
-        pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
-    else if (keyword_is(ta, "right") ||
-             (keyword_is(ta, "end") && !rtl) ||
-             (keyword_is(ta, "start") && rtl) ||
-             (!ta && rtl))
-        pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-    else if (keyword_is(ta, "justify"))
-        pango_layout_set_justify(layout, TRUE);
-    else
-        pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT);
-}
-
-static void
 ns_vertical_measure(ns_box *box, const ns_style *ps,
                     double *thickness, double *length)
 {
@@ -5612,7 +5488,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         pango_layout_set_width(layout, (int)(content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
     if (box->inline_atomics && box->inline_atomics->len > 0)
-        inline_apply_text_align(layout, parent_style);
+        ns_paint_apply_text_align(layout, parent_style);
     if (!(box->inline_atomics && box->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, parent_style);
     {

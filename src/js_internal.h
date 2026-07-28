@@ -69,14 +69,6 @@ struct ns_js {
     gpointer      download_user_data;
     ns_js_audio_cb audio_cb;
     gpointer      audio_user_data;
-    ns_js_media_seek_cb media_seek_cb;
-    gpointer      media_seek_user_data;
-    ns_js_media_play_cb media_play_cb;
-    gpointer      media_play_user_data;
-    ns_js_media_muted_cb media_muted_cb;
-    gpointer      media_muted_user_data;
-    ns_js_media_volume_cb media_volume_cb;
-    gpointer      media_volume_user_data;
     guint         next_audio_token;
     ns_js_scroll_to_cb scroll_to_cb;
     gpointer      scroll_to_user_data;
@@ -646,6 +638,7 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv);
 cairo_status_t
 ns_canvas_png_write(void *closure, const unsigned char *data, unsigned int length);
+JSValue ns_canvas_blob_from_surface(JSContext *ctx, cairo_surface_t *surface);
 JSValue
 ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv);
@@ -665,7 +658,6 @@ gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,
 double ns_perf_now_ms(const ns_js *js);
 void ns_perf_add_resource(ns_js *js, const char *url, const char *initiator,
                           double start_ms, double duration_ms, gint64 size);
-double ns_perf_clamp_ms(gint64 delta_us);
 double ns_perf_relative_ms(gint64 now_us, gint64 origin_us);
 void ns_perf_entry_free(gpointer p);
 JSValue ns_perf_supported_entry_types(JSContext *ctx);

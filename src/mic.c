@@ -9,7 +9,6 @@
 
 gboolean ns_mic_acquire(void) { return FALSE; }
 void     ns_mic_release(void) {}
-gboolean ns_mic_active(void) { return FALSE; }
 void ns_mic_fill_time_domain(guint8 *out, int n) {
     if (out && n > 0) memset(out, 128, (gsize)n);
 }

@@ -20,7 +20,6 @@ typedef struct ns_texture ns_texture;
 ns_texture *ns_texture_new(int width, int height, ns_texture_format format,
                            GBytes *bytes, gsize stride);
 
-ns_texture *ns_texture_ref(ns_texture *texture);
 void        ns_texture_unref(ns_texture *texture);
 void        ns_texture_clear(ns_texture **texture);
 
