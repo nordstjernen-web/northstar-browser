@@ -1,4 +1,4 @@
-/* Northstar — memory-safe PNG/GIF/BMP/JPEG decode via Wuffs.
+/* Northstar — memory-safe PNG/GIF/BMP/JPEG/WebP decode via Wuffs.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -22,6 +22,7 @@ typedef enum {
     NS_WUFFS_GIF,
     NS_WUFFS_BMP,
     NS_WUFFS_JPEG,
+    NS_WUFFS_WEBP,
 } ns_wuffs_format;
 
 static ns_wuffs_format
@@ -38,7 +39,87 @@ ns_wuffs_detect(const guchar *data, gsize len)
         return NS_WUFFS_BMP;
     if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF)
         return NS_WUFFS_JPEG;
+    if (len >= 12 && memcmp(data, "RIFF", 4) == 0 &&
+        memcmp(data + 8, "WEBP", 4) == 0)
+        return NS_WUFFS_WEBP;
     return NS_WUFFS_NONE;
+}
+
+static guint32
+ns_riff_u32le(const guchar *p)
+{
+    return (guint32)p[0] | ((guint32)p[1] << 8) |
+           ((guint32)p[2] << 16) | ((guint32)p[3] << 24);
+}
+
+static gboolean
+ns_webp_is_animated(const guchar *data, gsize len)
+{
+    if (len < 21 || memcmp(data + 12, "VP8X", 4) != 0) return FALSE;
+    return (data[20] & 0x02) != 0;
+}
+
+static guint8 *
+ns_webp_still_from_animation(const guchar *data, gsize len, gsize *out_len)
+{
+    enum { NS_WEBP_ANMF_HEADER = 16 };
+    if (len < 12 + 8) return NULL;
+    gsize riff_len = (gsize)ns_riff_u32le(data + 4) + 8;
+    if (riff_len > len) riff_len = len;
+
+    gsize pos = 12;
+    const guchar *alph = NULL, *body = NULL;
+    gsize alph_len = 0, body_len = 0;
+    char body_tag[5] = {0};
+
+    while (pos + 8 <= riff_len) {
+        const guchar *tag = data + pos;
+        gsize size = ns_riff_u32le(data + pos + 4);
+        gsize payload = pos + 8;
+        if (size > riff_len - payload) break;
+
+        if (memcmp(tag, "ANMF", 4) == 0) {
+            if (size <= NS_WEBP_ANMF_HEADER) return NULL;
+            gsize sub = payload + NS_WEBP_ANMF_HEADER;
+            gsize sub_end = payload + size;
+            while (sub + 8 <= sub_end) {
+                const guchar *stag = data + sub;
+                gsize ssize = ns_riff_u32le(data + sub + 4);
+                gsize spayload = sub + 8;
+                if (ssize > sub_end - spayload) break;
+                if (memcmp(stag, "ALPH", 4) == 0) {
+                    alph = data + sub;
+                    alph_len = ssize + 8;
+                } else if (memcmp(stag, "VP8 ", 4) == 0 ||
+                           memcmp(stag, "VP8L", 4) == 0) {
+                    body = data + sub;
+                    body_len = ssize + 8;
+                    memcpy(body_tag, stag, 4);
+                    break;
+                }
+                sub = spayload + ssize + (ssize & 1);
+            }
+            break;
+        }
+        pos = payload + size + (size & 1);
+    }
+    if (!body || body_len < 8) return NULL;
+
+    gsize total = 12 + alph_len + body_len;
+    guint8 *out = g_try_malloc(total);
+    if (!out) return NULL;
+    memcpy(out, "RIFF", 4);
+    guint32 riff_size = (guint32)(total - 8);
+    out[4] = (guint8)(riff_size & 0xff);
+    out[5] = (guint8)((riff_size >> 8) & 0xff);
+    out[6] = (guint8)((riff_size >> 16) & 0xff);
+    out[7] = (guint8)((riff_size >> 24) & 0xff);
+    memcpy(out + 8, "WEBP", 4);
+    gsize off = 12;
+    if (alph && alph_len) { memcpy(out + off, alph, alph_len); off += alph_len; }
+    memcpy(out + off, body, body_len);
+    *out_len = total;
+    return out;
 }
 
 static wuffs_base__image_decoder *
@@ -49,6 +130,7 @@ ns_wuffs_pick_decoder(const guchar *data, gsize len)
     case NS_WUFFS_GIF:  return wuffs_gif__decoder__alloc_as__wuffs_base__image_decoder();
     case NS_WUFFS_BMP:  return wuffs_bmp__decoder__alloc_as__wuffs_base__image_decoder();
     case NS_WUFFS_JPEG: return wuffs_jpeg__decoder__alloc_as__wuffs_base__image_decoder();
+    case NS_WUFFS_WEBP: return wuffs_webp__decoder__alloc_as__wuffs_base__image_decoder();
     default:            return NULL;
     }
 }
@@ -59,8 +141,8 @@ ns_image_wuffs_supports_bytes(const guchar *data, gsize len)
     return ns_wuffs_detect(data, len) != NS_WUFFS_NONE;
 }
 
-guint8 *
-ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
+static guint8 *
+ns_wuffs_decode_still_to_bgra(const guchar *data, gsize len,
                               int *out_w, int *out_h,
                               gsize *out_stride, gsize *out_buf_len)
 {
@@ -151,6 +233,25 @@ ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
     if (out_h) *out_h = (int)h;
     if (out_stride) *out_stride = (gsize)tab.stride;
     if (out_buf_len) *out_buf_len = (gsize)pix_len64;
+    return pix;
+}
+
+guint8 *
+ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
+                              int *out_w, int *out_h,
+                              gsize *out_stride, gsize *out_buf_len)
+{
+    if (ns_wuffs_detect(data, len) != NS_WUFFS_WEBP ||
+        !ns_webp_is_animated(data, len))
+        return ns_wuffs_decode_still_to_bgra(data, len, out_w, out_h,
+                                             out_stride, out_buf_len);
+
+    gsize still_len = 0;
+    guint8 *still = ns_webp_still_from_animation(data, len, &still_len);
+    if (!still) return NULL;
+    guint8 *pix = ns_wuffs_decode_still_to_bgra(still, still_len, out_w, out_h,
+                                                out_stride, out_buf_len);
+    g_free(still);
     return pix;
 }
 

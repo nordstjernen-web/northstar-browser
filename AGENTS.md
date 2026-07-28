@@ -17,8 +17,8 @@ this codebase and must not be reintroduced without an explicit request:
 tabs and the process-per-tab architecture (rendering is always
 single-process, in the shell process), a per-tab renderer executable,
 WebGL, WebGPU, inline video decoding and the video helpers, the local-AI
-(llama.cpp) feature, the inline PDF viewer (poppler), in-tree WebP
-decoding, and the Android, Java and iOS builds and the embeddable
+(llama.cpp) feature, the inline PDF viewer (poppler), and the Android,
+Java and iOS builds and the embeddable
 `libnorthstar` library API. The build targets Linux (primary), macOS and
 Windows; the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang),
 `macos.yml` and `windows.yml`.
@@ -39,7 +39,8 @@ Windows; the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang),
   for MP2, and, when the optional `opusfile`/`vorbisfile` libraries are
   present, Ogg Opus/Vorbis — and outputs through SDL2's audio device.
 - Images decode in-tree: PNG, GIF, BMP and JPEG through
-  [Wuffs](https://github.com/google/wuffs); AVIF through libavif when
+  [Wuffs](https://github.com/google/wuffs), which also covers still WebP
+  (lossy VP8 and lossless VP8L, with alpha); AVIF through libavif when
   it is present; SVG
   in-engine (`src/svg.c`). There is no other image fallback: a format the
   in-tree decoders do not cover simply fails to decode.

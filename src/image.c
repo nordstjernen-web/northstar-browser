@@ -1,4 +1,4 @@
-/* Northstar — image cache (PNG/JPEG/GIF/SVG).
+/* Northstar — image cache (PNG/JPEG/GIF/WebP/SVG).
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -17,6 +17,7 @@ ns_image_builtin_supports_mime(const char *bare)
     for (int i = 0; types[i]; i++)
         if (g_str_equal(bare, types[i])) return TRUE;
     if (g_str_equal(bare, "image/svg+xml")) return TRUE;
+    if (g_str_equal(bare, "image/webp")) return TRUE;
 #ifdef NS_HAVE_AVIF
     if (g_str_equal(bare, "image/avif")) return TRUE;
 #endif
@@ -225,7 +226,8 @@ ns_image_accept_header_fragment(void)
         GString *out = g_string_new(
             "image/png,image/jpeg,image/x-icon,image/vnd.microsoft.icon");
         const char *extras[] = {
-            "image/gif", "image/svg+xml", "image/bmp", "image/avif",
+            "image/gif", "image/svg+xml", "image/bmp", "image/webp",
+            "image/avif",
             NULL
         };
         for (int i = 0; extras[i]; i++) {

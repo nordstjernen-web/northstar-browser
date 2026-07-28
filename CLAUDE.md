@@ -19,8 +19,8 @@ this codebase and must not be reintroduced without an explicit request:
 tabs and the process-per-tab architecture (rendering is always
 single-process, in the shell process), a per-tab renderer executable,
 WebGL, WebGPU, inline video decoding and the video helpers, the local-AI
-(llama.cpp) feature, the inline PDF viewer (poppler), in-tree WebP
-decoding, and the Android, Java and iOS builds and the embeddable
+(llama.cpp) feature, the inline PDF viewer (poppler), and the Android,
+Java and iOS builds and the embeddable
 `libnorthstar` library API. The build targets Linux (primary), macOS and
 Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
 (Debian/gcc), `musl.yml` (Alpine/clang), `macos.yml` and `windows.yml`.
@@ -45,7 +45,8 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
   ride the render-response `X-Audio` side-channel to the shell, which
   queues them to the in-process mixer (`src/gtk/procview.c`).
 - Images decode in-tree: PNG, GIF, BMP and JPEG through
-  [Wuffs](https://github.com/google/wuffs); AVIF through libavif when
+  [Wuffs](https://github.com/google/wuffs), which also covers still WebP
+  (lossy VP8 and lossless VP8L, with alpha); AVIF through libavif when
   it is present; SVG
   in-engine (`src/svg.c`). There is no other image fallback: a format the
   in-tree decoders do not cover simply fails to decode.
@@ -143,7 +144,7 @@ standard `<lexbor/...>` headers.
 
 ### Image decoding: Wuffs
 
-PNG, GIF, BMP, and JPEG bytes are decoded through
+PNG, GIF, BMP, JPEG and WebP bytes are decoded through
 [Wuffs](https://github.com/google/wuffs), a memory-safe
 transpiled-to-C image-decoder library. The single-file release is
 vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static

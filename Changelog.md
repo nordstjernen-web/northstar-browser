@@ -4,6 +4,19 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* WebP images decode. The vendored Wuffs already carried its WEBP and
+  VP8 modules, and the build already enabled them, so lossy VP8,
+  lossless VP8L and alpha all decode through the same memory-safe path
+  as PNG, GIF, BMP and JPEG -- no new dependency, no new decoder, and
+  `image/webp` now appears in the `Accept` header so content-negotiating
+  servers will send it. Wuffs decodes only still WebP: an animated file
+  is reduced to its first frame by walking the RIFF container for the
+  first `ANMF` chunk and re-wrapping its `VP8 `/`VP8L` payload (with any
+  `ALPH`) as a still image. Without that, advertising `image/webp` would
+  have made pages worse, because a server picking between animated WebP
+  and animated GIF on the strength of the header would have started
+  sending a format that rendered as nothing.
+
 * gdk-pixbuf no longer decodes page images. Every format the web
   actually uses is already handled in-tree -- ICO, then Wuffs for PNG,
   GIF, BMP and JPEG, then libavif, then the in-engine SVG renderer --
