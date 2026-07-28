@@ -970,12 +970,14 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
 }
 
 static char *g_pending_referrer;
+static gboolean g_pending_user_activated;
 
 void
-ns_browser_set_next_referrer(const char *url)
+ns_browser_set_next_navigation(const char *referrer, int user_activated)
 {
     g_free(g_pending_referrer);
-    g_pending_referrer = (url && *url) ? g_strdup(url) : NULL;
+    g_pending_referrer = (referrer && *referrer) ? g_strdup(referrer) : NULL;
+    g_pending_user_activated = user_activated != 0;
 }
 
 static ns_browser *
@@ -987,6 +989,8 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
 
     g_autofree char *referrer = g_pending_referrer;
     g_pending_referrer = NULL;
+    gboolean user_activated = g_pending_user_activated;
+    g_pending_user_activated = FALSE;
 
     if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME)) {
         char *real = g_strdup(url + strlen(NS_UNSAFE_CONTINUE_SCHEME));
@@ -1028,7 +1032,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
 
     GError *err = NULL;
     ns_response *resp = NULL;
-    ns_net_set_navigation_fetch(TRUE);
+    ns_net_set_navigation_fetch(TRUE, user_activated);
     if (https_url) {
         resp = ns_engine_fetch_blocking(https_url, referrer, &err);
         if (resp && !resp->error && resp->body) {
@@ -1044,7 +1048,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             ? ns_engine_post_blocking(fetch_url, referrer, body, body_len,
                                       content_type, &err)
             : ns_engine_fetch_blocking(fetch_url, referrer, &err);
-    ns_net_set_navigation_fetch(FALSE);
+    ns_net_set_navigation_fetch(FALSE, FALSE);
     if (resp && resp->error && !body &&
         g_str_has_prefix(fetch_url, "https://") &&
         (!resp->body || resp->body->len == 0)) {

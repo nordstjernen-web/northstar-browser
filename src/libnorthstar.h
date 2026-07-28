@@ -79,7 +79,8 @@ int ns_browser_set_caret_blink_active(ns_browser *browser, int active);
 int ns_browser_caret_blinking(ns_browser *browser);
 char *ns_browser_title(ns_browser *browser);
 char *ns_browser_url(ns_browser *browser);
-void ns_browser_set_next_referrer(const char *url);
+void ns_browser_set_next_navigation(const char *referrer,
+                                    int user_activated);
 int ns_browser_security(ns_browser *browser, const char **out_ip);
 int ns_browser_bfcache_eligible(ns_browser *browser);
 void ns_browser_bfcache_park(ns_browser *browser);

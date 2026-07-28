@@ -4458,22 +4458,67 @@ static gboolean ns_fetch_is_navigation(const char *top_url,
                                        GPtrArray *extra_headers);
 
 static gboolean g_navigation_fetch;
+static gboolean g_navigation_user_activated;
 
 void
-ns_net_set_navigation_fetch(gboolean navigation)
+ns_net_set_navigation_fetch(gboolean navigation, gboolean user_activated)
 {
     g_navigation_fetch = navigation;
+    g_navigation_user_activated = navigation && user_activated;
 }
 
 static const char *const ns_script_accept_headers[] = {
     "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",
+    "X-ND-Fetch-Dest: script",
+    NULL
+};
+
+static const char *const ns_style_accept_headers[] = {
+    "Accept: text/css,*/*;q=0.1",
+    "X-ND-Fetch-Dest: style",
+    NULL
+};
+
+static const char *const ns_image_accept_headers[] = {
+    "Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "X-ND-Fetch-Dest: image",
+    NULL
+};
+
+static const char *const ns_font_accept_headers[] = {
+    "Accept: font/woff2,font/woff,application/font-woff,application/octet-stream;q=0.8,*/*;q=0.5",
+    "X-ND-Fetch-Dest: font",
     NULL
 };
 
 const char *const *
 ns_net_accept_headers_for(ns_fetch_destination dest)
 {
-    return dest == NS_FETCH_DEST_SCRIPT ? ns_script_accept_headers : NULL;
+    switch (dest) {
+    case NS_FETCH_DEST_SCRIPT: return ns_script_accept_headers;
+    case NS_FETCH_DEST_STYLE: return ns_style_accept_headers;
+    case NS_FETCH_DEST_IMAGE: return ns_image_accept_headers;
+    case NS_FETCH_DEST_FONT: return ns_font_accept_headers;
+    default: return NULL;
+    }
+}
+
+static const char *
+ns_net_fetch_destination(GPtrArray *extra_headers)
+{
+    static const char prefix[] = "X-ND-Fetch-Dest:";
+    for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
+        const char *h = g_ptr_array_index(extra_headers, i);
+        if (!h || g_ascii_strncasecmp(h, prefix, sizeof prefix - 1) != 0)
+            continue;
+        h += sizeof prefix - 1;
+        while (*h == ' ' || *h == '\t') h++;
+        if (g_ascii_strcasecmp(h, "script") == 0) return "script";
+        if (g_ascii_strcasecmp(h, "style") == 0) return "style";
+        if (g_ascii_strcasecmp(h, "image") == 0) return "image";
+        if (g_ascii_strcasecmp(h, "font") == 0) return "font";
+    }
+    return "empty";
 }
 
 static char *
@@ -4529,11 +4574,12 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                   const void *body, gsize body_len, const char *content_type,
                   GPtrArray *extra_headers,
                   GCancellable *cancellable, GError **error,
-                  gboolean follow_redirects, char **location_out)
+                  gboolean follow_redirects, char **location_out,
+                  gboolean navigation, gboolean user_activated)
 {
     if (location_out) *location_out = NULL;
     gboolean is_navigation = ns_fetch_is_navigation(top_url, extra_headers)
-                             || g_navigation_fetch;
+                             || navigation;
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
 
@@ -4807,7 +4853,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         headers = curl_slist_append(headers, mode_h);
         g_free(mode_h);
 
-        const char *fetch_dest = is_navigation ? "document" : "empty";
+        const char *fetch_dest = is_navigation
+            ? "document" : ns_net_fetch_destination(extra_headers);
         char *dest_h = g_strdup_printf("Sec-Fetch-Dest: %s", fetch_dest);
         headers = curl_slist_append(headers, dest_h);
         g_free(dest_h);
@@ -4815,6 +4862,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         if (is_navigation) {
             headers = curl_slist_append(headers,
                                         "Upgrade-Insecure-Requests: 1");
+            if (user_activated)
+                headers = curl_slist_append(headers, "Sec-Fetch-User: ?1");
         }
 
         const char *platform = "\"" NS_UA_HINT_PLATFORM "\"";
@@ -4889,7 +4938,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         for (guint i = 0; i < extra_headers->len; i++) {
             const char *h = g_ptr_array_index(extra_headers, i);
             if (!h || !*h) continue;
-            if (g_str_has_prefix(h, "X-ND-")) continue;
+            if (g_ascii_strncasecmp(h, "X-ND-", 5) == 0) continue;
             if (strpbrk(h, "\r\n")) continue;
             headers = curl_slist_append(headers, h);
         }
@@ -5180,7 +5229,8 @@ static ns_response *
 ns_fetch_sync(const char *url, const char *top_url, const char *method,
               const void *body, gsize body_len, const char *content_type,
               GPtrArray *extra_headers,
-              GCancellable *cancellable, GError **error)
+              GCancellable *cancellable, GError **error,
+              gboolean navigation, gboolean user_activated)
 {
     GBytes *extension_bytes = NULL;
     char *extension_type = NULL;
@@ -5208,7 +5258,7 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
         g_free(extension_error);
         return extension;
     }
-    if (!ns_fetch_is_navigation(top_url, extra_headers) &&
+    if (!ns_fetch_is_navigation(top_url, extra_headers) && !navigation &&
         ns_ext_should_block(url, top_url)) {
         ns_response *blocked = g_new0(ns_response, 1);
         blocked->body = g_byte_array_new();
@@ -5237,7 +5287,8 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
         resp = ns_fetch_sync_hop(cur_url, cur_top, cur_method,
                                  cur_body, cur_len, cur_ct,
                                  extra_headers, cancellable, error,
-                                 FALSE, &location);
+                                 FALSE, &location, navigation,
+                                 user_activated);
         if (!resp) {
             g_free(location);
             break;
@@ -5304,6 +5355,8 @@ typedef struct ns_fetch_ctx {
     gsize body_len;
     GPtrArray *extra_headers;
     char *coalesce_key;
+    gboolean navigation;
+    gboolean user_activated;
 } ns_fetch_ctx;
 
 static void
@@ -5649,7 +5702,8 @@ ns_fetch_thread(GTask        *task,
     ns_response *resp = ns_fetch_sync(ctx->url, ctx->top_url, ctx->method,
                                       ctx->body, ctx->body_len, ctx->content_type,
                                       ctx->extra_headers,
-                                      cancellable, &err);
+                                      cancellable, &err, ctx->navigation,
+                                      ctx->user_activated);
     if (ctx->coalesce_key)
         ns_fetch_coalesce_deliver(ctx->coalesce_key, resp, err);
     if (!resp) {
@@ -5837,6 +5891,8 @@ ns_net_request_async(const char         *url,
     ctx->url = g_strdup(url);
     ctx->top_url = top_url ? g_strdup(top_url) : NULL;
     ctx->coalesce_key = key;
+    ctx->navigation = g_navigation_fetch;
+    ctx->user_activated = g_navigation_user_activated;
     if (method && *method) ctx->method = g_strdup(method);
     if (content_type && *content_type) ctx->content_type = g_strdup(content_type);
     if (body && body_len > 0) {
@@ -5883,9 +5939,12 @@ ns_net_request_blocking(const char        *url,
             g_ptr_array_add(hdrs, g_strdup(extra_headers[i]));
     }
     GError *failure = NULL;
+    gboolean navigation = g_navigation_fetch;
+    gboolean user_activated = g_navigation_user_activated;
     ns_response *resp = ns_fetch_sync(url, top_url, method,
                                       body, body_len, content_type,
-                                      hdrs, cancellable, &failure);
+                                      hdrs, cancellable, &failure,
+                                      navigation, user_activated);
     if (key) {
         ns_fetch_coalesce_deliver(key, resp, failure);
         g_free(key);

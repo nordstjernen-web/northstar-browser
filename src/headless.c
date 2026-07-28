@@ -96,6 +96,7 @@ typedef struct headless_nav_capture {
     char *pending_post_body;
     gsize pending_post_len;
     char *pending_post_ct;
+    gboolean user_activated;
 } headless_nav_capture;
 
 static void
@@ -208,7 +209,8 @@ headless_js_form_submit(const ns_node *form, const ns_node *submitter,
 static int ns_headless_run_one(const ns_headless_opts *opts,
                                const char *fetch_url, int hop,
                                const char *post_body, gsize post_len,
-                               const char *post_ct);
+                               const char *post_ct, const char *top_url,
+                               gboolean user_activated);
 
 typedef struct {
     const char *name;
@@ -237,12 +239,14 @@ rdrv_drain_console(ns_rproc_http *r)
 }
 
 static char *
-rdrv_follow_nav(ns_rproc_http *r, char *href, int vw, int vh, int settle_ms)
+rdrv_follow_nav(ns_rproc_http *r, char *href, int vw, int vh, int settle_ms,
+                gboolean user_activated)
 {
     int hops = 0;
     while (href && *href && hops < 6) {
         ns_rproc_http_page pg;
-        if (ns_rproc_http_open(r, href, vw, vh, settle_ms, &pg) != 0) {
+        if (ns_rproc_http_open_ex(r, href, vw, vh, settle_ms, 0,
+                                  user_activated, &pg) != 0) {
             ns_rproc_http_page_clear(&pg);
             break;
         }
@@ -250,6 +254,7 @@ rdrv_follow_nav(ns_rproc_http *r, char *href, int vw, int vh, int settle_ms)
         g_free(href);
         href = pg.nav ? g_strdup(pg.nav) : NULL;
         ns_rproc_http_page_clear(&pg);
+        user_activated = FALSE;
         hops++;
     }
     g_free(href);
@@ -293,7 +298,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
             int changed = 0;
             char *href = ns_rproc_http_release_full(r, &changed);
             if (href && *href)
-                rdrv_follow_nav(r, href, vw, vh, settle_ms);
+                rdrv_follow_nav(r, href, vw, vh, settle_ms, TRUE);
             else
                 g_free(href);
         } else if (g_str_has_prefix(a, "rightclick ")) {
@@ -321,7 +326,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                 }
             char *h = ns_rproc_http_key(r, 0, jskey, jskey, code, 0);
             if (h && *h)
-                rdrv_follow_nav(r, g_strdup(h), vw, vh, settle_ms);
+                rdrv_follow_nav(r, g_strdup(h), vw, vh, settle_ms, TRUE);
             g_free(h);
             char *hu = ns_rproc_http_key(r, 1, jskey, jskey, code, 0);
             g_free(hu);
@@ -330,7 +335,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
             fprintf(stdout, "act-eval: %s\n", res ? res : "(null)");
             free(res);
             char *nav = rdrv_tick_take_nav(r, vw, vh);
-            if (nav) rdrv_follow_nav(r, nav, vw, vh, settle_ms);
+            if (nav) rdrv_follow_nav(r, nav, vw, vh, settle_ms, FALSE);
         } else if (g_str_has_prefix(a, "evalfile ")) {
             char *src = NULL;
             if (g_file_get_contents(g_strstrip(a + 9), &src, NULL, NULL)) {
@@ -339,7 +344,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                 free(res);
                 g_free(src);
                 char *nav = rdrv_tick_take_nav(r, vw, vh);
-                if (nav) rdrv_follow_nav(r, nav, vw, vh, settle_ms);
+                if (nav) rdrv_follow_nav(r, nav, vw, vh, settle_ms, FALSE);
             } else {
                 fprintf(stderr, "[headless] evalfile: cannot read %s\n", a + 9);
             }
@@ -403,7 +408,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                     free(fr.download);
                     free(fr.audio);
                     if (nav) {
-                        rdrv_follow_nav(r, nav, vw, vh, settle_ms);
+                        rdrv_follow_nav(r, nav, vw, vh, settle_ms, FALSE);
                         continue;
                     }
                     }
@@ -452,7 +457,7 @@ rdrv_thread(gpointer data)
     char *nav = pg.nav ? g_strdup(pg.nav) : NULL;
     ns_rproc_http_page_clear(&pg);
     if (nav)
-        rdrv_follow_nav(r, nav, vw, vh, o->settle_ms);
+        rdrv_follow_nav(r, nav, vw, vh, o->settle_ms, FALSE);
     rdrv_drain_console(r);
 
     if (o->actions && *o->actions) {
@@ -529,7 +534,8 @@ ns_headless_run(const ns_headless_opts *opts)
                                           GUINT_TO_POINTER(opts->debug_levels));
     int rc = ns_headless_renderer_capable(opts)
              ? ns_headless_run_via_renderer(opts)
-             : ns_headless_run_one(opts, opts->url, 0, NULL, 0, NULL);
+             : ns_headless_run_one(opts, opts->url, 0, NULL, 0, NULL,
+                                   NULL, FALSE);
     if (dlog_sub) ns_debug_log_unsubscribe(dlog_sub);
     return rc;
 }
@@ -1289,6 +1295,8 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
     for (int i = 0; acts[i]; i++) {
         char *a = g_strstrip(acts[i]);
         if (!*a) continue;
+        gboolean activation_action = g_str_has_prefix(a, "click ") ||
+                                     g_str_has_prefix(a, "key ");
         if (g_str_has_prefix(a, "click ")) {
             double x = 0, y = 0;
             if (sscanf(a + 6, "%lf , %lf", &x, &y) == 2) {
@@ -1393,6 +1401,8 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
             fprintf(stderr, "[headless] unknown action: %s\n", a);
         }
         headless_relayout(fc);
+        if (activation_action && nav && nav->pending_url)
+            nav->user_activated = TRUE;
         if (nav && nav->pending_url) break;
     }
     g_strfreev(acts);
@@ -1661,13 +1671,16 @@ headless_inspect_at(const ns_box *layout, double x, double y, GString *out)
 
 static int
 ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop,
-                    const char *post_body, gsize post_len, const char *post_ct)
+                    const char *post_body, gsize post_len, const char *post_ct,
+                    const char *top_url, gboolean user_activated)
 {
     GError *err = NULL;
+    ns_net_set_navigation_fetch(TRUE, user_activated);
     ns_response *resp = post_body
-        ? ns_engine_post_blocking(fetch_url, NULL, post_body, post_len,
+        ? ns_engine_post_blocking(fetch_url, top_url, post_body, post_len,
                                   post_ct, &err)
-        : ns_engine_fetch_blocking(fetch_url, NULL, &err);
+        : ns_engine_fetch_blocking(fetch_url, top_url, &err);
+    ns_net_set_navigation_fetch(FALSE, FALSE);
     if (!resp) {
         const char *emsg = err ? err->message : "unknown error";
         fprintf(stderr, "headless: fetch failed: %s\n", emsg);
@@ -1850,6 +1863,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         char *next_post_body = nav_cap.pending_post_body;
         gsize next_post_len = nav_cap.pending_post_len;
         char *next_post_ct = nav_cap.pending_post_ct;
+        char *next_top_url = g_strdup(resp->final_url
+            ? resp->final_url : fetch_url);
         nav_cap.pending_post_body = NULL;
         nav_cap.pending_post_ct = NULL;
         nav_cap.pending_post_len = 0;
@@ -1874,8 +1889,10 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_response_free(resp);
         int rc2 = ns_headless_run_one(opts, next, hop + 1,
                                       next_post_body, next_post_len,
-                                      next_post_ct);
+                                      next_post_ct, next_top_url,
+                                      nav_cap.user_activated);
         g_free(next);
+        g_free(next_top_url);
         g_free(next_post_body);
         g_free(next_post_ct);
         return rc2;

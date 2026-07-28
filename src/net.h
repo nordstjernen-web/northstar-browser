@@ -113,7 +113,8 @@ void ns_net_shutdown(void);
  * Sec-Fetch-Mode/Dest/User reflect a navigation even when a referrer
  * (top_url) is supplied. Set around the main document fetch and cleared
  * after; subresource fetches must run with it off. */
-void ns_net_set_navigation_fetch(gboolean navigation);
+void ns_net_set_navigation_fetch(gboolean navigation,
+                                 gboolean user_activated);
 gboolean ns_net_idle(void);
 
 const char *ns_net_default_accept_language(void);
@@ -159,6 +160,8 @@ typedef enum {
     NS_FETCH_DEST_DEFAULT = 0,
     NS_FETCH_DEST_SCRIPT,
     NS_FETCH_DEST_STYLE,
+    NS_FETCH_DEST_IMAGE,
+    NS_FETCH_DEST_FONT,
 } ns_fetch_destination;
 
 const char *const *ns_net_accept_headers_for(ns_fetch_destination dest);
