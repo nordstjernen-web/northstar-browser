@@ -1240,6 +1240,82 @@ svg_clip_path_children(svg_ctx *ctx, const ns_node *clip, const svg_state *st)
     }
 }
 
+static cairo_surface_t *
+svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
+{
+    const char *mv = svg_prop(n, "mask");
+    if (!mv) return NULL;
+    char *id = svg_url_id(mv, NULL);
+    if (!id) return NULL;
+    const ns_node *mask = svg_by_id(ctx, id);
+    g_free(id);
+    if (!mask || !mask->name || strcmp(mask->name, "mask") != 0) return NULL;
+    if (ctx->depth >= NS_SVG_MAX_DEPTH) return NULL;
+
+    cairo_surface_t *target = cairo_get_target(ctx->cr);
+    double ox = 0, oy = 0;
+    cairo_surface_get_device_offset(target, &ox, &oy);
+    double cx1, cy1, cx2, cy2;
+    cairo_clip_extents(ctx->cr, &cx1, &cy1, &cx2, &cy2);
+    cairo_matrix_t ctm;
+    cairo_get_matrix(ctx->cr, &ctm);
+    cairo_matrix_transform_point(&ctm, &cx1, &cy1);
+    cairo_matrix_transform_point(&ctm, &cx2, &cy2);
+    int w = (int)ceil(MAX(cx1, cx2) + ox);
+    int h = (int)ceil(MAX(cy1, cy2) + oy);
+    if (w <= 0 || h <= 0 || (double)w * h > (double)NS_SVG_MAX_PIXELS) return NULL;
+
+    cairo_surface_t *rgb = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    if (cairo_surface_status(rgb) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(rgb);
+        return NULL;
+    }
+    cairo_t *mcr = cairo_create(rgb);
+    cairo_set_matrix(mcr, &ctm);
+
+    cairo_t *saved = ctx->cr;
+    ctx->cr = mcr;
+    ctx->depth++;
+    svg_state ms;
+    svg_state_copy(&ms, st);
+    svg_paint_clear(&ms.fill);
+    ms.fill.kind = SVG_PAINT_COLOR;
+    ms.fill.r = ms.fill.g = ms.fill.b = ms.fill.a = 1.0;
+    for (const ns_node *c = mask->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT) svg_render_node(ctx, c, &ms);
+    svg_state_clear(&ms);
+    ctx->depth--;
+    ctx->cr = saved;
+    cairo_destroy(mcr);
+    cairo_surface_flush(rgb);
+
+    cairo_surface_t *a8 = cairo_image_surface_create(CAIRO_FORMAT_A8, w, h);
+    if (cairo_surface_status(a8) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(rgb);
+        cairo_surface_destroy(a8);
+        return NULL;
+    }
+    const unsigned char *src = cairo_image_surface_get_data(rgb);
+    unsigned char *dst = cairo_image_surface_get_data(a8);
+    int sstride = cairo_image_surface_get_stride(rgb);
+    int dstride = cairo_image_surface_get_stride(a8);
+    for (int y = 0; y < h; y++) {
+        const guint32 *srow = (const guint32 *)(gconstpointer)(src + (gsize)y * sstride);
+        unsigned char *drow = dst + (gsize)y * dstride;
+        for (int x = 0; x < w; x++) {
+            guint32 px = srow[x];
+            double r = ((px >> 16) & 0xff) / 255.0;
+            double g = ((px >> 8) & 0xff) / 255.0;
+            double b = (px & 0xff) / 255.0;
+            double lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            drow[x] = (unsigned char)CLAMP(lum * 255.0, 0.0, 255.0);
+        }
+    }
+    cairo_surface_mark_dirty(a8);
+    cairo_surface_destroy(rgb);
+    return a8;
+}
+
 static void
 svg_apply_clip(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 {
@@ -1437,10 +1513,12 @@ svg_render_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
 
     cairo_t *cr = ctx->cr;
     cairo_save(cr);
-    gboolean grouped = opacity < 1.0;
+    svg_apply_transform_attr(ctx, n, "transform");
+
+    cairo_surface_t *mask = svg_mask_surface(ctx, n, &st);
+    gboolean grouped = opacity < 1.0 || mask != NULL;
     if (grouped) cairo_push_group(cr);
 
-    svg_apply_transform_attr(ctx, n, "transform");
     svg_apply_clip(ctx, n, &st);
 
     if (strcmp(tag, "g") == 0 || strcmp(tag, "a") == 0) {
@@ -1514,8 +1592,23 @@ svg_render_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
 
     if (grouped) {
         cairo_pop_group_to_source(cr);
-        cairo_paint_with_alpha(cr, opacity);
+        if (mask) {
+            cairo_save(cr);
+            cairo_identity_matrix(cr);
+            if (opacity < 1.0) {
+                cairo_push_group(cr);
+                cairo_mask_surface(cr, mask, 0, 0);
+                cairo_pop_group_to_source(cr);
+                cairo_paint_with_alpha(cr, opacity);
+            } else {
+                cairo_mask_surface(cr, mask, 0, 0);
+            }
+            cairo_restore(cr);
+        } else {
+            cairo_paint_with_alpha(cr, opacity);
+        }
     }
+    if (mask) cairo_surface_destroy(mask);
     cairo_restore(cr);
     svg_state_clear(&st);
 }

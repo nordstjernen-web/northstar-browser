@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* `mask` is honoured on SVG elements. The referenced `<mask>` renders to
+  an offscreen surface whose sRGB luminance becomes the alpha the element
+  is composited through, so a white mask shows the element, black hides
+  it, and a gradient fades it. Group opacity and masking combine.
+
 * A square border is painted inside its border box rather than centred
   on the edge. Each side was stroked along the border-box boundary with
   the line width set to the border width, and Cairo centres a stroke on
