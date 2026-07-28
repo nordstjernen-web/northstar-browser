@@ -73,7 +73,7 @@ engines are unchanged.
 
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
-    libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
+    libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
 meson setup builddir && meson compile -C builddir
 ./builddir/src/gtk/northstar
@@ -106,7 +106,7 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 | [minimp3](https://github.com/lieff/minimp3) (CC0) | In-process MP3 audio decode |
 
 **Required system libraries:** GTK 4 (≥ 4.14), GLib/Pango/Cairo/gdk-pixbuf,
-libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet, libpsl, SQLite, librsvg
+libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet, libpsl, SQLite
 (≥ 2.54), libavif, SDL2, and libseccomp (Linux only).
 
 **Optional** (auto-detected): opusfile / vorbisfile (in-process Ogg audio),

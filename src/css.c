@@ -385,6 +385,32 @@ static const ns_css_property_meta kProperty[NS_CSS_PROP_COUNT] = {
     [NS_CSS_MIN_INLINE_SIZE]      = PL("min-inline-size", NS_CSS_MIN_WIDTH, 9),
     [NS_CSS_MAX_BLOCK_SIZE]       = PL("max-block-size", NS_CSS_MAX_WIDTH, 10),
     [NS_CSS_MAX_INLINE_SIZE]      = PL("max-inline-size", NS_CSS_MAX_WIDTH, 10),
+    [NS_CSS_FILL]                 = PI("fill"),
+    [NS_CSS_FILL_OPACITY]         = PI("fill-opacity"),
+    [NS_CSS_FILL_RULE]            = PI("fill-rule"),
+    [NS_CSS_STROKE]               = PI("stroke"),
+    [NS_CSS_STROKE_WIDTH]         = PI("stroke-width"),
+    [NS_CSS_STROKE_OPACITY]       = PI("stroke-opacity"),
+    [NS_CSS_STROKE_LINECAP]       = PI("stroke-linecap"),
+    [NS_CSS_STROKE_LINEJOIN]      = PI("stroke-linejoin"),
+    [NS_CSS_STROKE_MITERLIMIT]    = PI("stroke-miterlimit"),
+    [NS_CSS_STROKE_DASHARRAY]     = PI("stroke-dasharray"),
+    [NS_CSS_STROKE_DASHOFFSET]    = PI("stroke-dashoffset"),
+    [NS_CSS_STOP_COLOR]           = P("stop-color"),
+    [NS_CSS_STOP_OPACITY]         = P("stop-opacity"),
+    [NS_CSS_CLIP_RULE]            = PI("clip-rule"),
+    [NS_CSS_TEXT_ANCHOR]          = PI("text-anchor"),
+    [NS_CSS_DOMINANT_BASELINE]    = P("dominant-baseline"),
+    [NS_CSS_PAINT_ORDER]          = PI("paint-order"),
+    [NS_CSS_VECTOR_EFFECT]        = P("vector-effect"),
+    [NS_CSS_SHAPE_RENDERING]      = PI("shape-rendering"),
+    [NS_CSS_SVG_X]                = P("x"),
+    [NS_CSS_SVG_Y]                = P("y"),
+    [NS_CSS_CX]                   = P("cx"),
+    [NS_CSS_CY]                   = P("cy"),
+    [NS_CSS_R]                    = P("r"),
+    [NS_CSS_RX]                   = P("rx"),
+    [NS_CSS_RY]                   = P("ry"),
 };
 
 #undef P
@@ -7121,6 +7147,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_TEXT_DECORATION_COLOR:
     case NS_CSS_COLUMN_RULE_COLOR:
     case NS_CSS_CARET_COLOR:
+    case NS_CSS_STOP_COLOR:
     case NS_CSS_ACCENT_COLOR: {
         guint8 r, g, b, a;
         if (parse_color(t, &r, &g, &b, &a)) {
@@ -7143,6 +7170,108 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         break;
     }
+    case NS_CSS_FILL:
+    case NS_CSS_STROKE: {
+        guint8 r, g, b, a;
+        if (parse_color(t, &r, &g, &b, &a)) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_COLOR;
+            v->u.color.r = r; v->u.color.g = g; v->u.color.b = b; v->u.color.a = a;
+            break;
+        }
+        char *kw = ascii_lower(t, strlen(t));
+        if (kw && (strcmp(kw, "none") == 0 ||
+                   strcmp(kw, "currentcolor") == 0 ||
+                   strcmp(kw, "transparent") == 0 ||
+                   strcmp(kw, "context-fill") == 0 ||
+                   strcmp(kw, "context-stroke") == 0 ||
+                   g_str_has_prefix(kw, "url("))) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = kw;
+        } else {
+            g_free(kw);
+        }
+        break;
+    }
+    case NS_CSS_FILL_RULE:
+    case NS_CSS_CLIP_RULE:
+        v = parse_keyword_choice(t, "nonzero evenodd");
+        break;
+    case NS_CSS_STROKE_LINECAP:
+        v = parse_keyword_choice(t, "butt round square");
+        break;
+    case NS_CSS_STROKE_LINEJOIN:
+        v = parse_keyword_choice(t, "miter round bevel miter-clip arcs");
+        break;
+    case NS_CSS_TEXT_ANCHOR:
+        v = parse_keyword_choice(t, "start middle end");
+        break;
+    case NS_CSS_DOMINANT_BASELINE:
+        v = parse_keyword_choice(t,
+            "auto text-bottom alphabetic ideographic middle central "
+            "mathematical hanging text-top");
+        break;
+    case NS_CSS_VECTOR_EFFECT:
+        v = parse_keyword_choice(t,
+            "none non-scaling-stroke non-scaling-size non-rotation "
+            "fixed-position");
+        break;
+    case NS_CSS_SHAPE_RENDERING:
+        v = parse_keyword_choice(t,
+            "auto optimizespeed crispedges geometricprecision");
+        break;
+    case NS_CSS_PAINT_ORDER: {
+        char *kw = ascii_lower(t, strlen(t));
+        gboolean ok = kw && *kw;
+        if (ok && strcmp(kw, "normal") != 0) {
+            char **parts = g_strsplit_set(kw, " \t\r\n", -1);
+            int seen = 0;
+            for (int i = 0; parts[i]; i++) {
+                if (!*parts[i]) continue;
+                if (strcmp(parts[i], "fill") != 0 &&
+                    strcmp(parts[i], "stroke") != 0 &&
+                    strcmp(parts[i], "markers") != 0) { ok = FALSE; break; }
+                if (++seen > 3) { ok = FALSE; break; }
+            }
+            if (seen == 0) ok = FALSE;
+            g_strfreev(parts);
+        }
+        if (ok) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = kw;
+        } else {
+            g_free(kw);
+        }
+        break;
+    }
+    case NS_CSS_STROKE_DASHARRAY: {
+        char *kw = ascii_lower(t, strlen(t));
+        gboolean ok = kw && *kw;
+        if (ok && strcmp(kw, "none") != 0) {
+            char **parts = g_strsplit_set(kw, " \t\r\n,", -1);
+            int seen = 0;
+            for (int i = 0; parts[i]; i++) {
+                if (!*parts[i]) continue;
+                char *end = NULL;
+                double d = g_ascii_strtod(parts[i], &end);
+                while (end && *end && strchr("%epxtcmnihra", *end)) end++;
+                if (!end || *end || d < 0) { ok = FALSE; break; }
+                seen++;
+            }
+            if (seen == 0) ok = FALSE;
+            g_strfreev(parts);
+        }
+        if (ok) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = kw;
+        } else {
+            g_free(kw);
+        }
+        break;
+    }
     case NS_CSS_FONT_SIZE:
     case NS_CSS_MARGIN_TOP: case NS_CSS_MARGIN_RIGHT:
     case NS_CSS_MARGIN_BOTTOM: case NS_CSS_MARGIN_LEFT:
@@ -7156,6 +7285,12 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_LETTER_SPACING: case NS_CSS_WORD_SPACING:
     case NS_CSS_TEXT_INDENT:
     case NS_CSS_OPACITY:
+    case NS_CSS_FILL_OPACITY: case NS_CSS_STROKE_OPACITY:
+    case NS_CSS_STOP_OPACITY: case NS_CSS_STROKE_MITERLIMIT:
+    case NS_CSS_STROKE_WIDTH: case NS_CSS_STROKE_DASHOFFSET:
+    case NS_CSS_SVG_X: case NS_CSS_SVG_Y:
+    case NS_CSS_CX: case NS_CSS_CY: case NS_CSS_R:
+    case NS_CSS_RX: case NS_CSS_RY:
     case NS_CSS_BORDER_RADIUS:
     case NS_CSS_BORDER_TOP_LEFT_RADIUS:
     case NS_CSS_BORDER_TOP_RIGHT_RADIUS:
@@ -17823,6 +17958,9 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             NS_CSS_COLUMN_RULE_COLOR,
             NS_CSS_ACCENT_COLOR,
             NS_CSS_CARET_COLOR,
+            NS_CSS_FILL,
+            NS_CSS_STROKE,
+            NS_CSS_STOP_COLOR,
         };
         for (gsize i = 0; i < G_N_ELEMENTS(color_props); i++) {
             ns_css_value *v = out->values[color_props[i]];

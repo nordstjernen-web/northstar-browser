@@ -125,7 +125,7 @@ partitioning and permission model.
 2. **libavif** (`image_avif.c`) — AVIF.
 3. **GdkPixbuf** — TIFF, ICO (`image_ico.c`), and any other installed
    loader.
-4. **librsvg** — SVG.
+4. **`src/svg.c`** — SVG, rendered in-engine onto Cairo.
 
 ## Security-relevant modules
 

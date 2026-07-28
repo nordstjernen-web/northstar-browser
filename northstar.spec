@@ -27,7 +27,6 @@ BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libcrypto)
 BuildRequires:  pkgconfig(libcurl) >= 7.85
 BuildRequires:  pkgconfig(libpsl)
-BuildRequires:  pkgconfig(librsvg-2.0) >= 2.46
 BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  pkgconfig(libavif)
 BuildRequires:  pkgconfig(sdl2)

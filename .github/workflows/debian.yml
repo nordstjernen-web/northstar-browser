@@ -45,7 +45,7 @@ jobs:
           apt-get install -y \
             build-essential ccache pkg-config meson ninja-build cmake git \
             libgtk-4-dev libcurl4-openssl-dev libssl-dev \
-            libuchardet-dev librsvg2-dev libpsl-dev libsqlite3-dev \
+            libuchardet-dev libpsl-dev libsqlite3-dev \
             libseccomp-dev libavif-dev libsdl2-dev \
             fontconfig fonts-dejavu-core ca-certificates file
           apt-get install -y libenchant-2-dev hunspell-en-us || \

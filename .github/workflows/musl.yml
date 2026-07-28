@@ -33,7 +33,7 @@ jobs:
           apk add --no-cache \
             build-base clang ccache pkgconf meson ninja git cmake python3 \
             gtk4.0-dev curl-dev openssl-dev uchardet-dev libpsl-dev \
-            sqlite-dev libavif-dev sdl2-dev librsvg-dev libseccomp-dev \
+            sqlite-dev libavif-dev sdl2-dev libseccomp-dev \
             fontconfig font-dejavu ca-certificates file
 
       - uses: actions/checkout@v6

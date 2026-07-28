@@ -46,7 +46,7 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
   queues them to the in-process mixer (`src/gtk/procview.c`).
 - Images decode in-tree: PNG, GIF, BMP and JPEG through
   [Wuffs](https://github.com/google/wuffs); AVIF through libavif; SVG
-  through librsvg; any other format a GdkPixbuf loader is installed for as
+  in-engine (`src/svg.c`); any other format a GdkPixbuf loader is installed for as
   a last-resort fallback.
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
@@ -150,7 +150,7 @@ subproject. `src/image_wuffs.c::ns_image_decode_wuffs` is tried
 first; it returns NULL for any other format, in which case
 `src/image.c::ns_image_decode_bytes` falls back to libavif (AVIF),
 then GDK-Pixbuf (for TIFF / ICO / other installed loaders) and,
-last, to librsvg for SVG.
+last, to the in-engine SVG renderer (`src/svg.c`).
 
 ### URL parsing: lexbor URL module
 
@@ -186,7 +186,7 @@ System packages required on Debian/Ubuntu:
 
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
-    libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
+    libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
 ```
 
@@ -200,7 +200,7 @@ On Fedora/RHEL:
 
 ```sh
 sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
-    openssl-devel uchardet-devel librsvg2-devel libpsl-devel sqlite-devel \
+    openssl-devel uchardet-devel libpsl-devel sqlite-devel \
     libseccomp-devel libavif-devel SDL2-devel
 ```
 
@@ -208,7 +208,7 @@ On openSUSE:
 
 ```sh
 sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
-    libopenssl-devel libuchardet-devel librsvg-devel libpsl-devel sqlite3-devel \
+    libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
     libseccomp-devel libavif-devel libSDL2-devel
 ```
 

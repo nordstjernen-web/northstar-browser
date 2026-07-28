@@ -9,7 +9,7 @@ Debian / Ubuntu:
 
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
-    libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
+    libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev libavif-dev libsdl2-dev
 ```
 
@@ -17,7 +17,7 @@ Fedora / RHEL:
 
 ```sh
 sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
-    openssl-devel uchardet-devel librsvg2-devel libpsl-devel sqlite-devel \
+    openssl-devel uchardet-devel libpsl-devel sqlite-devel \
     libseccomp-devel libavif-devel SDL2-devel
 ```
 
@@ -25,7 +25,7 @@ openSUSE:
 
 ```sh
 sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
-    libopenssl-devel libuchardet-devel librsvg-devel libpsl-devel sqlite3-devel \
+    libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
     libseccomp-devel libavif-devel libSDL2-devel
 ```
 
@@ -43,7 +43,7 @@ With Homebrew:
 
 ```sh
 brew install meson ninja pkg-config cmake gtk4 curl openssl@3 uchardet libpsl \
-    sqlite librsvg libavif sdl2
+    sqlite libavif sdl2
 ```
 
 Export `PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig"`

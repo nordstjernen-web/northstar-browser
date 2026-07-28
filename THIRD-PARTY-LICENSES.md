@@ -260,18 +260,6 @@ Mozilla Public License 1.1. See:
 - <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
 - <https://www.mozilla.org/MPL/1.1/>
 
-### librsvg — GNU LGPL 2.1 or later
-
-> SVG image decoder. A required dependency on all platforms
-> (`librsvg-2.0 >= 2.54`); the engine calls it directly to rasterise
-> SVG documents.
-> <https://gitlab.gnome.org/GNOME/librsvg>
->
-> Copyright the GNU Project and contributors.
-
-Licensed under the GNU Lesser General Public License version 2.1 or
-later. See the LGPL section above for terms and obligations.
-
 ### libavif — BSD 2-Clause
 
 > AVIF image decoding (AV1 still images). A required dependency

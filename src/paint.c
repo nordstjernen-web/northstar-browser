@@ -20,6 +20,7 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "image.h"
 #include "mathml.h"
 #include "selection.h"
+#include "svg.h"
 
 typedef struct rgba {
     double r, g, b, a;
@@ -3728,6 +3729,21 @@ paint_failed_image(cairo_t *cr, const ns_box *b)
 }
 
 static void
+paint_svg(cairo_t *cr, const ns_box *b)
+{
+    if (!b->dom) return;
+    double w = b->content_width;
+    double h = b->content_height;
+    if (w <= 0 || h <= 0) return;
+    double x = b->x + b->margin.left + b->border.left + b->padding.left;
+    double y = b->y + b->margin.top  + b->border.top  + b->padding.top;
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    ns_svg_render_node(cr, b->dom, w, h, b->svg_styles, b->style);
+    cairo_restore(cr);
+}
+
+static void
 paint_math(cairo_t *cr, const ns_box *b)
 {
     if (!b->dom) return;
@@ -5671,7 +5687,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             b->kind == NS_BOX_TABLE_CAPTION ||
             b->kind == NS_BOX_TABLE_ROW || b->kind == NS_BOX_TABLE_CELL ||
             b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
-            b->kind == NS_BOX_MATH) {
+            b->kind == NS_BOX_MATH || b->kind == NS_BOX_SVG) {
             if (g_paint_collect_stats) g_paint_stats.blocks++;
             paint_block(cr, b);
             if (g_dbg_paint_x >= 0) {
@@ -5714,6 +5730,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
         if (b->kind == NS_BOX_MATH)
             paint_math(cr, b);
+        if (b->kind == NS_BOX_SVG)
+            paint_svg(cr, b);
     }
     if (ns_node_is_element_named(b->dom, "canvas") && g_paint_js) {
         if (g_paint_collect_stats) g_paint_stats.canvases++;

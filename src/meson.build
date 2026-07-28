@@ -59,6 +59,7 @@ northstar_engine_sources = files(
   'html.c',
   'i18n.c',
   'image.c',
+  'svg.c',
   'image_ico.c',
   'image_wuffs.c',
   'idb.c',
@@ -126,7 +127,6 @@ northstar_deps = [
   libuchardet,
   liblexbor,
   libwamr,
-  librsvg,
   sqlite3,
   zlib,
 ]

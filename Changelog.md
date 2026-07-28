@@ -4,6 +4,27 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* SVG is rendered by the engine instead of librsvg. `librsvg` is gone
+  from the dependency list; `src/svg.c` walks the SVG DOM and paints it
+  through the same Cairo surface, cascade and font stack that HTML uses.
+  Inline `<svg>` was previously re-serialised to XML and handed to
+  librsvg as an opaque raster, so the document's own stylesheet could
+  never reach inside it: `fill: currentColor`, `svg .icon { fill: … }`
+  and any script-driven change to SVG geometry were invisible. SVG
+  elements now take part in the normal cascade, so `fill`, `stroke`,
+  `stroke-width`, `stroke-dasharray`, `fill-rule`, `stop-color`,
+  `text-anchor`, `paint-order` and the SVG geometry properties `x`, `y`,
+  `cx`, `cy`, `r`, `rx`, `ry` are real CSS properties that inherit and
+  animate like the rest. Covered: paths (including elliptical arcs and
+  smooth curve continuation), rect/circle/ellipse/line/polyline/polygon,
+  `viewBox` and `preserveAspectRatio`, nested `<svg>`, `<g>`, `<use>`,
+  `<symbol>`, `<switch>`, `<defs>`, linear and radial gradients with
+  `href` inheritance, `spreadMethod`, `gradientUnits` and
+  `gradientTransform`, `clipPath`, group opacity, dashing, and `<text>`
+  shaped through Pango. A standalone `.svg` document now sizes to the
+  viewport rather than to a 300x150 default. `<img src="…svg">` and
+  CSS `url(…svg)` go through the same renderer.
+
 * Media queries inside a frame evaluate against the frame's own size,
   not a 300x150 guess. The viewport pushed while collecting a frame's
   stylesheets came from the frame's inline `style` attribute or its

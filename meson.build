@@ -161,12 +161,6 @@ libpsl = dependency('libpsl')
 
 sqlite3 = dependency('sqlite3')
 
-librsvg = dependency('librsvg-2.0', version: '>=2.54')
-have_librsvg = librsvg.found()
-if have_librsvg
-  add_project_arguments('-DNS_HAVE_LIBRSVG=1', language: 'c')
-endif
-
 have_gdk_pixbuf = true
 if have_gdk_pixbuf
   add_project_arguments('-DNS_HAVE_GDK_PIXBUF=1', language: 'c')
