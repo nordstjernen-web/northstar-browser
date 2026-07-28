@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* A square border is painted inside its border box rather than centred
+  on the edge. Each side was stroked along the border-box boundary with
+  the line width set to the border width, and Cairo centres a stroke on
+  its path, so every bordered element rendered half a border wider than
+  it laid out on each side -- a 4px border occupied 6..9 and 60..63
+  where the box model puts it at 8..11 and 58..61. Layout was always
+  right; only the paint was wrong, so borders overlapped whatever sat
+  next to them. Rounded borders already inset correctly and are
+  unchanged.
+
 * SVG is rendered by the engine instead of librsvg. `librsvg` is gone
   from the dependency list; `src/svg.c` walks the SVG DOM and paints it
   through the same Cairo surface, cascade and font stack that HTML uses.
