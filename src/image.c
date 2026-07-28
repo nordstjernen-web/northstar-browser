@@ -448,7 +448,7 @@ ns_image_decode_body(const guchar *data, gsize len)
         frames = ns_image_anim_frames_from_pixels(pixel_frames, &w, &h, NULL);
         g_array_free(pixel_frames, TRUE);
     }
-    if (frames && frames->len > 1) {
+    if (frames && frames->len > 0) {
         d.frames = frames;
         d.w = w;
         d.h = h;
@@ -886,12 +886,12 @@ ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
     int w = 0, h = 0;
     {
         GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
-        if (pixel_frames && pixel_frames->len > 1) {
+        if (pixel_frames && pixel_frames->len > 0) {
             int fw = 0, fh = 0, total = 0;
             GArray *frames = ns_image_anim_frames_from_pixels(pixel_frames,
                                                               &fw, &fh, &total);
             g_array_free(pixel_frames, TRUE);
-            if (frames && frames->len > 1) {
+            if (frames && frames->len > 0) {
                 ns_image *img = g_new0(ns_image, 1);
                 img->url = g_strdup(url);
                 img->anim_frames = frames;

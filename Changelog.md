@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* A single-frame MPEG-1 clip displays instead of failing. Both decode
+  paths treated a frame list as an animation only when it held more than
+  one frame, and discarded a shorter one to retry through the still-image
+  decoder -- which has no MPEG-1 support, so a one-frame video decoded
+  correctly and was then thrown away. A list of one frame is now kept and
+  shown as a still; `ns_image_is_animation` still requires two, so nothing
+  starts ticking for it.
 * `<video>` responds to the media element API. A decoded clip reports its
   real `duration` and a `readyState` of `HAVE_ENOUGH_DATA`, `paused`
   reflects whether the frames are actually advancing, `play()` and

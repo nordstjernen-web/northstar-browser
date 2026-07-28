@@ -106,7 +106,7 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 |-----------|------|
 | [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (subset) | WebAssembly interpreter |
 | [Wuffs](https://github.com/google/wuffs) v0.4 | Memory-safe image decoding — PNG/APNG, GIF, BMP, JPEG, WebP |
-| [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | In-process MP2 audio decode |
+| [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | In-process MPEG-1 video and MP2 audio decode |
 | [minimp3](https://github.com/lieff/minimp3) (CC0) | In-process MP3 audio decode |
 
 **Required system libraries:** GTK 4 (≥ 4.14), GLib/Pango/Cairo,
