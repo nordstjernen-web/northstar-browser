@@ -18516,6 +18516,39 @@ static gboolean       g_state_has_focus_within;
 static gboolean       g_state_has_hover;
 static gboolean       g_state_has_active;
 
+static gboolean incr_node_matches_keys(const ns_node *n, GHashTable *keyset);
+static gboolean incr_node_matches_attr_preds(const ns_node *n,
+                                             const GPtrArray *preds);
+
+static void
+incr_mark_has_subjects(ns_node *changed)
+{
+    if (!changed || !g_incr_eligible || g_has_cq_loose) return;
+    if ((!g_has_cq_keys || g_hash_table_size(g_has_cq_keys) == 0) &&
+        (!g_has_cq_attrs || g_has_cq_attrs->len == 0))
+        return;
+    if (!g_incr_dirty)
+        g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
+    for (ns_node *a = changed; a; a = a->parent) {
+        if (a->kind == NS_NODE_ELEMENT &&
+            (incr_node_matches_keys(a, g_has_cq_keys) ||
+             incr_node_matches_attr_preds(a, g_has_cq_attrs)))
+            g_hash_table_add(g_incr_dirty, a);
+        guint scanned = 0;
+        for (ns_node *s = a->prev_sibling; s; s = s->prev_sibling) {
+            if (s->kind != NS_NODE_ELEMENT) continue;
+            if (++scanned > 256) {
+                if (a->parent)
+                    g_hash_table_add(g_incr_dirty, a->parent);
+                break;
+            }
+            if (incr_node_matches_keys(s, g_has_cq_keys) ||
+                incr_node_matches_attr_preds(s, g_has_cq_attrs))
+                g_hash_table_add(g_incr_dirty, s);
+        }
+    }
+}
+
 void
 ns_css_set_render_zoom(double zoom)
 {
@@ -18529,6 +18562,7 @@ ns_css_mark_restyle_dirty(ns_node *parent)
     if (!g_incr_dirty)
         g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_hash_table_add(g_incr_dirty, parent);
+    incr_mark_has_subjects(parent);
 }
 
 static gboolean incr_pc_is_structural(ns_css_pseudo k)
@@ -19087,6 +19121,7 @@ ns_css_mark_text_emptiness_change(ns_node *text)
 {
     ns_node *parent = text ? text->parent : NULL;
     if (!parent || parent->kind != NS_NODE_ELEMENT) return;
+    incr_mark_has_subjects(parent);
     if (!g_struct_ready || g_struct_loose ||
         incr_node_matches_keys(parent, g_struct_keys) ||
         incr_node_matches_attr_preds(parent, g_struct_attrs)) {
@@ -19106,6 +19141,7 @@ ns_css_mark_childlist_change(ns_node *parent, ns_node *added, ns_node *removed,
                              ns_node *prev_sibling, ns_node *next_sibling)
 {
     if (!parent) return;
+    incr_mark_has_subjects(parent);
     if (!g_struct_ready || g_struct_loose || g_struct_nth_last ||
         incr_node_matches_keys(parent, g_struct_keys) ||
         incr_node_matches_attr_preds(parent, g_struct_attrs)) {
@@ -19660,11 +19696,7 @@ cascade_walk(ns_node *node,
     gboolean nd_recurse_dirty = under_dirty;
     if (node->kind == NS_NODE_ELEMENT) {
         gboolean nd_node_dirty = under_dirty ||
-            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node)) ||
-            (g_incr_pass_active &&
-             ((g_has_cq_keys &&
-               incr_node_matches_keys(node, g_has_cq_keys)) ||
-              incr_node_matches_attr_preds(node, g_has_cq_attrs)));
+            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node));
         ns_style *nd_prev =
             (g_incr_pass_active && !nd_node_dirty && g_incr_prev_styles)
             ? g_hash_table_lookup(g_incr_prev_styles, node) : NULL;
