@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* `var()` resolves inside SVG presentation attributes. A custom property
+  set by a stylesheet rule now reaches `r="var(--radii)"` or
+  `fill="var(--tint)"`, so a class can retheme an inline icon's colour
+  and geometry the way it does for ordinary CSS properties.
+
 * `marker-start`, `marker-mid` and `marker-end` draw their `<marker>` on
   path, line, polyline and polygon vertices. Vertices and their tangents
   come from the built Cairo path, so arcs and curves orient the same way
