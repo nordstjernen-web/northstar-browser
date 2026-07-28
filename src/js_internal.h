@@ -57,6 +57,7 @@ struct ns_js {
     JSContext    *ctx;
     JSContext    *module_ctx;
     GPtrArray    *frame_ctxs;
+    GHashTable   *frame_contexts;
     GHashTable   *frame_windows;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;
