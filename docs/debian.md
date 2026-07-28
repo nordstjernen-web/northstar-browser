@@ -2,7 +2,7 @@
 
 Status and playbook for getting Northstar into Debian sid (unstable).
 
-## Status (2026-07-23)
+## Status (2026-07-28)
 
 - **ITP filed: [#1142659](https://bugs.debian.org/1142659)**
   ("ITP: northstar -- new web browser with an original engine written
@@ -11,7 +11,7 @@ Status and playbook for getting Northstar into Debian sid (unstable).
 - **Packaging is complete and validated** in `debian/`:
   - Builds cleanly in Debian **sid** and **forky** chroots
     (podman containers, `dpkg-buildpackage`).
-  - **Lintian-clean: zero warnings** as of the `1.0.4-1` changelog.
+  - **Lintian-clean: zero warnings** as of the `1.0.5-1` changelog.
   - `debian/rules` installs with `meson install --skip-subprojects` so
     the vendored subprojects' artifacts (`qjs`, `qjsc`, headers,
     static libs) stay out of the package — `/usr/bin/qjs` would
@@ -25,10 +25,9 @@ Status and playbook for getting Northstar into Debian sid (unstable).
   `lexbor >= 3.0.0` before falling back to the wrap-git cmake
   subproject. Debian ships `liblexbor-dev` 3.0.0-1 — the exact version
   Northstar pins — and the container build against it links
-  `liblexbor.so.3`. Note this landed after the 1.0.4 tag, so the
-  1.0.4-1 Debian upload still builds the vendored copy; the next
-  upstream release can switch by adding `liblexbor-dev` to
-  Build-Depends.
+  `liblexbor.so.3`. `debian/control` does not yet list
+  `liblexbor-dev` in Build-Depends, so the 1.0.5-1 upload still builds
+  the vendored copy; adding it is the switch.
 - **quickjs-ng stays vendored**: Debian's `quickjs-ng` source package
   ships no shared library or `-dev` package, so Northstar statically
   links its pinned copy (documented in `debian/README.source`).
@@ -79,7 +78,7 @@ from forky.
      `debian/control` at it.
 3. Source-only signed upload to mentors:
    `dpkg-buildpackage -S` then
-   `dput mentors northstar_1.0.4-1_source.changes`.
+   `dput mentors northstar_1.0.5-1_source.changes`.
 4. File an RFS bug against `sponsorship-requests`
    (mentors.debian.net generates the template) and mail
    `debian-mentors@lists.debian.org`.

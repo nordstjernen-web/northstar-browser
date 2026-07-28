@@ -59,6 +59,19 @@
   </branding>
 
   <releases>
+    <release version="1.0.5" date="2026-07-28">
+      <description>
+        <p>Media and graphics release.</p>
+        <ul>
+          <li>SVG is rendered by the engine instead of librsvg, so page stylesheets reach inside inline icons.</li>
+          <li>&lt;video&gt; plays MPEG-1, decoded in-tree, and responds to play, pause, currentTime, duration and readyState.</li>
+          <li>Animated PNG plays, and lossy WebP decodes through the memory-safe path.</li>
+          <li>gdk-pixbuf no longer decodes page images, so the set of decoders reachable from a web page is fixed at build time.</li>
+          <li>Square borders are painted inside the border box rather than centred on its edge.</li>
+          <li>Fixed an out-of-bounds read in the vendored MPEG-1 decoder, found by fuzzing.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.4" date="2026-07-23">
       <description>
         <p>Debian packaging and portability release, adding Debian 13 and sid CI builds.</p>
