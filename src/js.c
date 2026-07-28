@@ -3137,9 +3137,13 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
     if (!js || !js->dom_protos_set || !node) return JS_UNDEFINED;
     switch (node->kind) {
     case NS_NODE_ELEMENT:
-        if (node->flags & NS_NODE_SVG_NS)
+        if (node->flags & NS_NODE_SVG_NS) {
+            if (node->name && g_ascii_strcasecmp(node->name, "a") == 0 &&
+                JS_IsObject(js->proto_svgaelement))
+                return js->proto_svgaelement;
             return JS_IsObject(js->proto_svgelement)
                 ? js->proto_svgelement : js->proto_element;
+        }
         if (node->flags & NS_NODE_FOREIGN_NS)
             return js->proto_element;
         if (node->name && js->per_tag_protos) {
@@ -43035,7 +43039,7 @@ ns_install_tostringtag(JSContext *ctx, JSValueConst global)
         "HTMLElement", "Element", "Node", "CharacterData", "Text",
         "Comment", "CDATASection", "ProcessingInstruction", "Document",
         "HTMLDocument", "XMLDocument", "DocumentFragment", "ShadowRoot",
-        "DocumentType", "Attr", "SVGElement", "SVGSVGElement",
+        "DocumentType", "Attr", "SVGElement", "SVGAElement", "SVGSVGElement",
         "Event", "UIEvent", "MouseEvent", "KeyboardEvent", "FocusEvent",
         "InputEvent", "CompositionEvent", "TextEvent", "TouchEvent",
         "PointerEvent", "WheelEvent", "DragEvent", "CustomEvent",
@@ -43269,6 +43273,8 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     ns_chain_proto(ctx, global, "SVGElement", elem_proto);
     ns_chain_proto(ctx, global, "SVGSVGElement", elem_proto);
     JSValue svg_proto = ns_proto_of(ctx, global, "SVGElement");
+    ns_chain_proto(ctx, global, "SVGAElement", svg_proto);
+    JSValue svga_proto = ns_proto_of(ctx, global, "SVGAElement");
     if (JS_IsObject(svg_proto))
         ns_proto_define_getset(ctx, svg_proto, "dataset",
                                ns_element_get_dataset, NULL);
@@ -43323,6 +43329,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     js->proto_element     = elem_proto;
     js->proto_htmlelement = htmlelem_proto;
     js->proto_svgelement  = svg_proto;
+    js->proto_svgaelement = svga_proto;
     js->proto_chardata    = chardata_proto;
     js->proto_text        = text_proto;
     js->proto_comment     = comment_proto;
@@ -44361,7 +44368,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     static const ns_fn_def event_base_ctors[] = {
         { "EventTarget", 0 }, { "Node", 0 }, { "Element", 0 },
-        { "HTMLElement", 0 }, { "SVGElement", 0 }, { "SVGSVGElement", 0 },
+        { "HTMLElement", 0 }, { "SVGElement", 0 }, { "SVGAElement", 0 },
+        { "SVGSVGElement", 0 },
         { "HTMLDocument", 0 },
         { "Window", 0 },
     };
@@ -48480,6 +48488,7 @@ ns_js_free(ns_js *js)
         JS_FreeValue(js->ctx, js->proto_element);
         JS_FreeValue(js->ctx, js->proto_htmlelement);
         JS_FreeValue(js->ctx, js->proto_svgelement);
+        JS_FreeValue(js->ctx, js->proto_svgaelement);
         JS_FreeValue(js->ctx, js->proto_chardata);
         JS_FreeValue(js->ctx, js->proto_text);
         JS_FreeValue(js->ctx, js->proto_comment);
@@ -49687,6 +49696,24 @@ ns_js_run_script_schedule(ns_js *js, GArray *tasks, ns_script_schedule schedule,
     ns_ce_upgrade_subtree_all(js, js->current_doc);
 }
 
+static gboolean
+ns_js_run_next_script_schedule(ns_js *js, GArray *tasks,
+                               ns_script_schedule schedule,
+                               const char *origin)
+{
+    if (!js || !tasks) return FALSE;
+    for (guint i = 0; i < tasks->len; i++) {
+        ns_script_task *task = &g_array_index(tasks, ns_script_task, i);
+        if (task->schedule != schedule ||
+            ns_element_get_attr(task->node, NS_SCRIPT_ALREADY_STARTED))
+            continue;
+        ns_js_run_script_element(js, task->node, origin);
+        ns_ce_upgrade_subtree_all(js, js->current_doc);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static void
 ns_subtree_scan_special(const ns_node *n, int depth, gboolean *script,
                         gboolean *link, gboolean *frame)
@@ -50518,7 +50545,8 @@ ns_js_iframe_restore_event_targets(JSContext *ctx)
     ns_bind_fn(ctx, g, "removeEventListener", ns_window_removeEventListener, 2);
     ns_bind_fn(ctx, g, "dispatchEvent",       ns_window_dispatchEvent,         1);
     static const char *const carriers[] = {
-        "Node", "Element", "HTMLElement", "SVGElement", "SVGSVGElement",
+        "Node", "Element", "HTMLElement", "SVGElement", "SVGAElement",
+        "SVGSVGElement",
         "Document", "HTMLDocument", "DocumentFragment", NULL
     };
     for (guint i = 0; carriers[i]; i++) {
@@ -51429,6 +51457,12 @@ ns_js_lifecycle_tick(gpointer data)
         ns_js_lifecycle_clear(js);
         return G_SOURCE_REMOVE;
     }
+    if (js->eval_depth > 0 || js->callback_depth > 0 ||
+        js->draining_microtasks) {
+        js->lifecycle_source =
+            ns_js_attach_timeout(js, 4, ns_js_lifecycle_tick, js);
+        return G_SOURCE_REMOVE;
+    }
     ns_node *doc = js->lifecycle_doc;
     const char *origin = js->lifecycle_origin && *js->lifecycle_origin
         ? js->lifecycle_origin : "inline";
@@ -51437,8 +51471,16 @@ ns_js_lifecycle_tick(gpointer data)
             &js->navigation_timing.dom_interactive_ms, "domInteractive");
         js->ready_state = 1;
         ns_js_dispatch_event(js, doc, "readystatechange", NULL);
-        ns_js_run_script_schedule(js, js->lifecycle_tasks,
-                                  NS_SCRIPT_DEFERRED, origin);
+        js->lifecycle_phase = 1;
+        ns_js_lifecycle_schedule(js);
+        return G_SOURCE_REMOVE;
+    }
+    if (js->lifecycle_phase == 1) {
+        if (ns_js_run_next_script_schedule(js, js->lifecycle_tasks,
+                                           NS_SCRIPT_DEFERRED, origin)) {
+            ns_js_lifecycle_schedule(js);
+            return G_SOURCE_REMOVE;
+        }
         ns_js_set_navigation_milestone(js,
             &js->navigation_timing.dom_content_loaded_event_start_ms,
             "domContentLoadedEventStart");
@@ -51447,19 +51489,22 @@ ns_js_lifecycle_tick(gpointer data)
             &js->navigation_timing.dom_content_loaded_event_end_ms,
             "domContentLoadedEventEnd");
         ns_ce_upgrade_subtree_all(js, doc);
-        js->lifecycle_phase = 1;
+        js->lifecycle_phase = 2;
         ns_js_lifecycle_schedule(js);
         return G_SOURCE_REMOVE;
     }
-    if (js->lifecycle_phase == 1) {
-        ns_js_run_script_schedule(js, js->lifecycle_tasks,
-                                  NS_SCRIPT_ASYNC, origin);
+    if (js->lifecycle_phase == 2) {
+        if (ns_js_run_next_script_schedule(js, js->lifecycle_tasks,
+                                           NS_SCRIPT_ASYNC, origin)) {
+            ns_js_lifecycle_schedule(js);
+            return G_SOURCE_REMOVE;
+        }
         ns_js_drain_deferred_scripts(js);
         ns_js_drain_async_script_roots(js);
         ns_js_process_pending_iframes(js);
         ns_drain_microtasks(js);
         ns_js_schedule_pending_script_drain(js);
-        js->lifecycle_phase = 2;
+        js->lifecycle_phase = 3;
         ns_js_lifecycle_schedule(js);
         return G_SOURCE_REMOVE;
     }
