@@ -1,20 +1,21 @@
-Northstar web browser (open source GPL edition)
-==================================================
+# Northstar web browser (GPL edition)
 
-Northstar is a web browser, written from scratch in C,
-focused on supporting the HTML and CSS standards. 
-The browser runs on Linux, macOS and Windows.
+Northstar is a minimalist web browser written from scratch in C. Its
+engine targets practical HTML5, modern CSS and JavaScript compatibility
+without embedding Gecko, WebKit, Blink or another browser engine. Linux
+is the primary platform; macOS and Windows are also supported.
 
-Northstar is open source software, licensed under the GNU General Public License, version 3 or later. 
-
-The Northstar web browser is a project related to [Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
+This repository is the open-source GPL edition of the
+[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
+Northstar is licensed under the GNU General Public License, version 3 or
+later.
 
 ![Northstar showing its about:start page](docs/screenshot.png)
 
 ![Best viewed in Northstar](docs/best-viewed-in-northstar.gif)
 
-**HTML Standards:** Behaviour is measured against the spec text, section
-by section, not against another browser.
+**Web standards:** Behaviour is measured against the specification text,
+section by section, not against another browser.
 
 **Security:** on Linux the browser runs behind a Landlock filesystem
 sandbox (plus `PR_SET_NO_NEW_PRIVS`), with a default-deny seccomp syscall
@@ -22,7 +23,7 @@ filter in both GUI and headless/tooling modes · no JIT.
 See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 
 **Minimalism:** one window, one page, one process. The engine is a
-compact body of C — about 142,000 lines of original C (excluding
+compact body of C — about 141,000 lines of original C (excluding
 the vendored WAMR, Wuffs and audio decoders) — small enough for one
 person to read and audit end-to-end.
 
@@ -31,16 +32,18 @@ person to read and audit end-to-end.
 This edition strips Northstar down to a single-window, single-page,
 single-process desktop browser, based on the
 [Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
+It deliberately omits tabs, per-tab renderer processes, WebGL, WebGPU,
+an embedded PDF viewer and AI-style web APIs. It does not send telemetry
+or update pings.
 
 Audio still plays in-process (MP3, MP2, Ogg Opus/Vorbis), including audio
-streams assembled through Media Source Extensions. Images still
-decode (PNG/GIF/BMP/JPEG via Wuffs, plus AVIF and
-SVG), and the JavaScript, CSS, networking, WebAssembly and WebCrypto
-engines are unchanged.
+streams assembled through Media Source Extensions. Images decode
+in-tree (PNG/APNG, GIF, BMP, JPEG and WebP via Wuffs, AVIF through
+libavif when available, and SVG in the engine).
 
 ## Browser features
 
-- **HTML/CSS** via the lexbor parser — modern cascade, flex, grid,
+- **HTML/CSS** via lexbor — modern cascade, flex, grid,
   transforms, gradients, `@keyframes`.
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
@@ -57,7 +60,8 @@ engines are unchanged.
 - **Safe browsing** — before a top-level navigation is fetched, its host
   is checked against a local SHA-256 blocklist. The check runs entirely
   on-device.
-- **Media** — images (PNG, GIF, BMP, JPEG, AVIF, SVG); audio (`<audio>`)
+- **Media** — images (PNG/APNG, GIF, BMP, JPEG, WebP, optional AVIF,
+  SVG); audio (`<audio>`)
   decodes and plays in the browser process, including audio MSE streams.
   `<video>` plays MPEG-1 (`video/mpeg`), decoded in-tree by the same
   pl_mpeg that already handles MP2 audio. MPEG-1 is an ISO standard whose
@@ -66,22 +70,44 @@ engines are unchanged.
   local and self-hosted clips rather than for streaming sites.
 - **MathML** — a minimalist presentation-MathML renderer.
 - **Spell checking** — optional, via the Enchant library.
-- **WebAssembly** — the full JS API over a vendored WAMR interpreter.
+- **WebAssembly** — the JavaScript API over a vendored WAMR interpreter.
 - **Single window / single process** — the browser shows one page in one
   window, and the page engine runs in the shell process (no per-tab
   renderer processes).
 - **UI** — bookmarks, find-in-page, save-to-PDF, JS console, settings,
   headless mode.
 
-## Build
+## Build and run
+
+On Debian or Ubuntu, install the required development packages:
 
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev
-meson setup builddir && meson compile -C builddir
+    libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev zlib1g-dev
+meson setup builddir
+meson compile -C builddir
 ./builddir/src/gtk/northstar
 ```
+
+The development helper configures the default build directory when
+needed and runs the same compile command:
+
+```sh
+./scripts/dev.sh build
+./scripts/dev.sh smoke
+```
+
+The smoke command renders deterministic local fixtures through the
+headless engine and compares them with the checked-in baselines. A
+single page can also be rendered directly:
+
+```sh
+./builddir/src/gtk/northstar --headless --dump=text about:start
+```
+
+Meson feature options include `-Davif=disabled`, `-Daudio=disabled`,
+`-Dwasm=disabled` and `-Dgtk=disabled` for smaller or engine-only builds.
 
 WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree. lexbor and
 quickjs-ng are fetched by `meson setup` as pinned upstream subprojects
@@ -109,13 +135,14 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 | [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | In-process MPEG-1 video and MP2 audio decode |
 | [minimp3](https://github.com/lieff/minimp3) (CC0) | In-process MP3 audio decode |
 
-**Required system libraries:** GTK 4 (≥ 4.14), GLib/Pango/Cairo,
-libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet, libpsl, SQLite,
-SDL2, and libseccomp (Linux only).
+**Required system libraries:** GTK 4 (≥ 4.14; ≥ 4.22.1 on Windows),
+GLib/Pango/Cairo, libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet,
+libpsl, SQLite and zlib. Linux builds also require libseccomp. SDL2 is
+required when in-process audio is enabled.
 
-**Optional** (auto-detected): libavif (AVIF images; `-Davif=disabled`
-drops it), opusfile / vorbisfile (in-process Ogg audio),
-Enchant (spell-checking), fontconfig / pangoft2.
+**Optional** (auto-detected): libavif (AVIF images), opusfile /
+vorbisfile (in-process Ogg audio), Enchant (spell-checking), fontconfig,
+pangoft2 and FreeType.
 
 ## License
 
