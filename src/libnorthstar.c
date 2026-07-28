@@ -65,6 +65,7 @@ struct ns_browser {
     guint           image_arrivals_since_layout;
     GHashTable     *img_requested;
     gboolean        dirty;
+    gboolean        cascade_dirty;
     gboolean        relaying;
     char           *pending_nav;
     char           *pending_download;
@@ -267,6 +268,7 @@ browser_relayout(ns_browser *b)
                                    b->hover_node,
                                    b->caret_byte, b->sel_anchor_byte,
                                    &b->layout);
+    b->cascade_dirty = FALSE;
     b->relaying = FALSE;
     if (g_hash_table_size(scroll_save) > 0)
         browser_restore_scroll(b->layout, scroll_save);
@@ -435,8 +437,11 @@ browser_flush_style(gpointer user_data)
 {
     ns_browser *b = user_data;
     if (!b || !b->js) return;
-    if (ns_js_consume_mutated(b->js)) b->dirty = TRUE;
-    if (b->styles && !b->dirty) return;
+    if (ns_js_consume_mutated(b->js)) {
+        b->dirty = TRUE;
+        b->cascade_dirty = TRUE;
+    }
+    if (b->styles && !b->cascade_dirty) return;
     if (!b->layout || b->relaying) {
         browser_flush(user_data);
         return;
@@ -450,6 +455,7 @@ browser_flush_style(gpointer user_data)
     ns_css_set_doc_language(b->doc_language);
     b->styles = ns_engine_compute_cascade(b->doc, b->base_url, b->css_cache);
     ns_js_set_style_table(b->js, b->styles);
+    b->cascade_dirty = FALSE;
 }
 
 static char *
@@ -643,7 +649,14 @@ browser_js_log(const char *line, gpointer ud)
     g_string_append(b->console_buf, line);
     g_string_append_c(b->console_buf, '\n');
 }
-static void browser_js_mutated(gpointer ud) { ns_browser *b = ud; if (b) b->dirty = TRUE; }
+static void
+browser_js_mutated(gpointer user_data)
+{
+    ns_browser *browser = user_data;
+    if (!browser) return;
+    browser->dirty = TRUE;
+    browser->cascade_dirty = TRUE;
+}
 
 static gboolean
 browser_allows_navigation_url(ns_browser *b, const char *url)
