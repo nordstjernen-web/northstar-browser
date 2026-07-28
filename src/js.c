@@ -50654,6 +50654,7 @@ typedef struct ns_iframe_classic_source {
     char *text;
     gsize len;
     char *url;
+    ns_node *script;
 } ns_iframe_classic_source;
 
 static void
@@ -50668,13 +50669,14 @@ ns_iframe_classic_source_free(gpointer data)
 
 static void
 ns_iframe_classic_source_add(GPtrArray *sources, const char *text, gsize len,
-                             const char *url)
+                             const char *url, ns_node *script)
 {
     if (!sources || !text || len == 0) return;
     ns_iframe_classic_source *source = g_new0(ns_iframe_classic_source, 1);
     source->text = g_strndup(text, len);
     source->len = len;
     source->url = g_strdup(url && *url ? url : "inline");
+    source->script = script;
     g_ptr_array_add(sources, source);
 }
 
@@ -50725,7 +50727,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                         ns_js_iframe_collect_exposed_names(exposed_names, exposed_seen,
                             (const char *)r->body->data, r->body->len);
                     ns_iframe_classic_source_add(classic_sources,
-                        (const char *)r->body->data, r->body->len, abs_url);
+                        (const char *)r->body->data, r->body->len, abs_url, n);
                     g_string_append_len(concat, (const char *)r->body->data,
                                         (gssize)r->body->len);
                     g_string_append(concat, "\n;\n");
@@ -50747,7 +50749,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                     g_string_append(concat, c->text);
                 }
             ns_iframe_classic_source_add(classic_sources,
-                inline_source->str, inline_source->len, origin);
+                inline_source->str, inline_source->len, origin, n);
             g_string_free(inline_source, TRUE);
             g_string_append(concat, "\n;\n");
         }
@@ -50796,12 +50798,15 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             if (g_get_monotonic_time() >= iframe_deadline_us) break;
             ns_iframe_classic_source *source =
                 g_ptr_array_index(classic_sources, i);
+            ns_node *previous_script = js->current_script;
+            js->current_script = source->script;
             js->eval_deadline_us = iframe_deadline_us;
             js->eval_depth++;
             JSValue v = JS_Eval(fctx, source->text, source->len, source->url,
                                 JS_EVAL_TYPE_GLOBAL);
             js->eval_depth--;
             js->eval_deadline_us = 0;
+            js->current_script = previous_script;
             if (js->eval_depth == 0) {
                 ns_js_flush_document_write(js);
                 ns_js_schedule_pending_script_drain(js);
