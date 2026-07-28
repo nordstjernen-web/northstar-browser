@@ -3009,12 +3009,9 @@ int plm_video_decode_sequence_header(plm_video_t *self) {
 	size_t chroma_plane_size = self->chroma_width * self->chroma_height;
 	size_t frame_data_size = (luma_plane_size + 2 * chroma_plane_size);
 
-	// Northstar: half-pel motion compensation reads up to one row plus one
-	// byte past the plane it samples (plm_video_process_macroblock bounds
-	// only s[si], not s[si + 1], s[si + dw] or s[si + dw + 1]). Interior
-	// planes absorb that in the next plane; the last one ran off the
-	// allocation. Pad the chunk so the read stays inside it, and zero it so
-	// a corrupt stream decodes deterministically.
+	// Northstar local patch: plm_video_process_macroblock bounds only
+	// s[si], not the half-pel s[si + 1] / s[si + dw] / s[si + dw + 1], which
+	// read one row past the plane. Pad and zero the chunk so they stay in it.
 	size_t frames_data_size = frame_data_size * 3 + self->luma_width + 1;
 	self->frames_data = (uint8_t*)PLM_MALLOC(frames_data_size);
 	memset(self->frames_data, 0, frames_data_size);
