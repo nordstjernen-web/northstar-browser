@@ -101,7 +101,8 @@ public domain worldwide. See:
 
 ### pl_mpeg — MIT License
 
-> MPEG-1 Audio Layer II (MP2) decoder for in-process audio playback.
+> MPEG-1 Part 2 video decoder for `<video>` and MPEG-1 Audio Layer II
+> (MP2) decoder for in-process audio playback.
 > Fetched as the `plmpeg` meson subproject
 > (`subprojects/plmpeg/pl_mpeg.h`).
 > <https://github.com/phoboslab/pl_mpeg>

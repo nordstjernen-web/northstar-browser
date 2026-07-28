@@ -4155,6 +4155,13 @@ build_video_box(const ns_node *n)
     box->dom = n;
     ns_box_media *m = ns_box_media_ensure(box);
     if (src) m->video_src = g_strdup(src);
+    if (src && g_image_cache_for_layout) {
+        char *abs = g_base_url_for_layout
+            ? ns_url_resolve(g_base_url_for_layout, src) : NULL;
+        m->video = ns_image_cache_peek(g_image_cache_for_layout,
+                                       abs ? abs : src);
+        g_free(abs);
+    }
     const char *poster = ns_element_get_attr(n, "poster");
     const char *data_poster = ns_element_get_attr(n, "data-poster");
     const char *fallback_poster = ns_element_get_attr(n, NS_MEDIA_POSTER_ATTR);
@@ -4167,8 +4174,17 @@ build_video_box(const ns_node *n)
     const char *ws = ns_element_get_attr(n, "width");
     const char *hs = ns_element_get_attr(n, "height");
     gboolean metadata = node_has_media_metadata(n);
-    box->content_width  = ws ? g_ascii_strtod(ws, NULL) : (metadata ? 640 : 300);
-    box->content_height = hs ? g_ascii_strtod(hs, NULL) : (metadata ? 360 : 150);
+    const ns_image *decoded = m->video;
+    int intrinsic_w = decoded && decoded->loaded ? decoded->natural_width : 0;
+    int intrinsic_h = decoded && decoded->loaded ? decoded->natural_height : 0;
+    double default_w = intrinsic_w > 0 ? intrinsic_w : (metadata ? 640 : 300);
+    double default_h = intrinsic_h > 0 ? intrinsic_h : (metadata ? 360 : 150);
+    box->content_width  = ws ? g_ascii_strtod(ws, NULL) : default_w;
+    box->content_height = hs ? g_ascii_strtod(hs, NULL) : default_h;
+    if (ws && !hs && intrinsic_w > 0 && intrinsic_h > 0)
+        box->content_height = box->content_width * intrinsic_h / intrinsic_w;
+    else if (hs && !ws && intrinsic_w > 0 && intrinsic_h > 0)
+        box->content_width = box->content_height * intrinsic_w / intrinsic_h;
     const char *audio = ns_element_get_attr(n, "data-audio-src");
     if (audio && *audio) m->video_audio_src = g_strdup(audio);
     return box;

@@ -3818,6 +3818,13 @@ paint_image(cairo_t *cr, const ns_box *b)
 static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
+    const ns_image *decoded = b->media ? b->media->video : NULL;
+    if (decoded && decoded->loaded && decoded->texture) {
+        cairo_save(cr);
+        paint_texture(cr, b, decoded->texture);
+        cairo_restore(cr);
+        return;
+    }
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
         double x = b->x, y = b->y, w = b->content_width, h = b->content_height;
         if (!(w > 0) || !(h > 0)) return;

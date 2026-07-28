@@ -3009,7 +3009,15 @@ int plm_video_decode_sequence_header(plm_video_t *self) {
 	size_t chroma_plane_size = self->chroma_width * self->chroma_height;
 	size_t frame_data_size = (luma_plane_size + 2 * chroma_plane_size);
 
-	self->frames_data = (uint8_t*)PLM_MALLOC(frame_data_size * 3);
+	// Northstar: half-pel motion compensation reads up to one row plus one
+	// byte past the plane it samples (plm_video_process_macroblock bounds
+	// only s[si], not s[si + 1], s[si + dw] or s[si + dw + 1]). Interior
+	// planes absorb that in the next plane; the last one ran off the
+	// allocation. Pad the chunk so the read stays inside it, and zero it so
+	// a corrupt stream decodes deterministically.
+	size_t frames_data_size = frame_data_size * 3 + self->luma_width + 1;
+	self->frames_data = (uint8_t*)PLM_MALLOC(frames_data_size);
+	memset(self->frames_data, 0, frames_data_size);
 	plm_video_init_frame(self, &self->frame_current, self->frames_data + frame_data_size * 0);
 	plm_video_init_frame(self, &self->frame_forward, self->frames_data + frame_data_size * 1);
 	plm_video_init_frame(self, &self->frame_backward, self->frames_data + frame_data_size * 2);

@@ -23,6 +23,7 @@ per-origin renderer process; every page shares one address space.
     │   ├─ QuickJS runtime for the current top-level page
     │   └─ asynchronous audio worker           (src/audio/audio.c)
     │          <audio> decode (minimp3 / pl_mpeg / opus / vorbis) → SDL2
+    │   └─ <video> decode: MPEG-1 via pl_mpeg           (src/video.c)
     │
     └─ no renderer or media child processes
 ```
@@ -36,7 +37,7 @@ per-origin renderer process; every page shares one address space.
   the in-process render path so no renderer subprocess is spawned.
 - **Audio mixer** (`src/audio/audio.c`) — downloads and decodes `<audio>`
   on an in-process worker thread, then outputs through SDL2. Per-view audio
-  contexts keep page state separate. `<video>` lays out but is not decoded.
+  contexts keep page state separate.
 
 A single internal HTTP/JSON request protocol (`renderer_serve.c`,
 `rproc_http.c`) still describes each render as a request/response; in
@@ -131,6 +132,27 @@ partitioning and permission model.
 Nothing follows. A format none of these cover fails to decode rather
 than falling through to a plugin-loaded decoder.
 
+## Video
+
+`<video>` plays MPEG-1 and nothing else. `video.c` recognises an MPEG-1
+Program Stream or elementary video stream by its start code and decodes
+every frame up front through the vendored pl_mpeg, which already supplies
+the MP2 audio decoder — so video costs no dependency the tree did not
+already carry, and MPEG-1's patents have expired.
+
+Decoded frames become the same `ns_image_pixel_frame` list an animated
+GIF produces, so the image cache's fetch, frame timing, repaint
+scheduling and eviction serve video unchanged, and `paint_video` draws
+the current frame where it used to draw a placeholder. One consequence of
+decoding up front is that a clip is bounded rather than streamed: decoding
+stops at `NS_VIDEO_MAX_FRAMES` frames or `NS_VIDEO_MAX_TOTAL_BYTES`
+(256 MB) of decoded pixels, whichever comes first, and a longer clip plays
+its prefix.
+
+MPEG-1 is not a format the modern web serves. This is video for local and
+self-hosted clips; streaming sites need adaptive streaming over Media
+Source Extensions and a modern codec, neither of which this edition has.
+
 ## Security-relevant modules
 
 | File | Role |
@@ -144,7 +166,7 @@ than falling through to a plugin-loaded decoder.
 
 Fetched by `meson setup` as pinned subprojects: **lexbor** (HTML/CSS/URL)
 and **quickjs-ng** (JS). Vendored in-tree: **Wuffs** (images), **pl_mpeg**
-(MP2 audio), **WAMR** (WebAssembly, `src/wamr/`) and **minimp3** (MP3,
+(MPEG-1 video and MP2 audio), **WAMR** (WebAssembly, `src/wamr/`) and **minimp3** (MP3,
 `src/audio/minimp3.h`). See [`../THIRD-PARTY-LICENSES.md`](../THIRD-PARTY-LICENSES.md).
 
 ## UI translation

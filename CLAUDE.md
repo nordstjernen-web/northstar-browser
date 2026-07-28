@@ -18,7 +18,7 @@ This is the minimalist desktop edition. The following are **not** part of
 this codebase and must not be reintroduced without an explicit request:
 tabs and the process-per-tab architecture (rendering is always
 single-process, in the shell process), a per-tab renderer executable,
-WebGL, WebGPU, inline video decoding and the video helpers, the local-AI
+WebGL, WebGPU, the out-of-process video helpers, the local-AI
 (llama.cpp) feature, the inline PDF viewer (poppler), and the Android,
 Java and iOS builds and the embeddable
 `libnorthstar` library API. The build targets Linux (primary), macOS and
@@ -32,8 +32,15 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
 - HTML5 + modern CSS + modern JavaScript, supported pragmatically as
   far as is feasible without bloat.
 - **No** AI-style web APIs, **no** WebGL, **no** WebGPU.
-- **Media.** There is no inline video: a `<video>` element lays out but
-  does not decode in this edition. Audio plays in the browser process through
+- **Media.** `<video>` decodes MPEG-1 (`video/mpeg`) in the browser
+  process through the vendored pl_mpeg, which already supplies the MP2
+  audio decoder — the format costs no new dependency, and its patents have
+  expired. Frames are decoded up front and played back through the same
+  animation path as an animated GIF, so a clip is bounded by
+  `NS_VIDEO_MAX_TOTAL_BYTES` (256 MB of decoded frames) and
+  `NS_VIDEO_MAX_FRAMES`; longer video is truncated, not streamed. No other
+  video codec is present, and MPEG-1 is not a format the web serves, so
+  this does not play streaming sites. Audio plays in the browser process through
   the asynchronous mixer (`src/audio/audio.c`), which decodes
   in-tree — the vendored CC0 [minimp3](https://github.com/lieff/minimp3)
   (`src/audio/minimp3.h`) for `.mp3`, the vendored MIT

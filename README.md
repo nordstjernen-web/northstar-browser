@@ -59,7 +59,11 @@ engines are unchanged.
   on-device.
 - **Media** — images (PNG, GIF, BMP, JPEG, AVIF, SVG); audio (`<audio>`)
   decodes and plays in the browser process, including audio MSE streams.
-  `<video>` lays out but does not decode in this edition.
+  `<video>` plays MPEG-1 (`video/mpeg`), decoded in-tree by the same
+  pl_mpeg that already handles MP2 audio. MPEG-1 is an ISO standard whose
+  patents have expired, so it costs no dependency and no licence; it is
+  also not a format the modern web serves, so this is video support for
+  local and self-hosted clips rather than for streaming sites.
 - **MathML** — a minimalist presentation-MathML renderer.
 - **Spell checking** — optional, via the Enchant library.
 - **WebAssembly** — the full JS API over a vendored WAMR interpreter.

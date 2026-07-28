@@ -36,6 +36,7 @@
 #include "html.h"
 #include "idb.h"
 #include "image.h"
+#include "video.h"
 #include "js_date.h"
 #include "js_intl.h"
 #include "js_realm.h"
@@ -37902,6 +37903,7 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
     gboolean container_ok =
         strcmp(container, "audio/mpeg") == 0 ||
         strcmp(container, "audio/mp3") == 0 ||
+        ns_video_supports_mime(container) ||
         (native_ogg && (strcmp(container, "audio/ogg") == 0 ||
                         strcmp(container, "application/ogg") == 0)) ||
         (native_opus && strcmp(container, "audio/opus") == 0);
@@ -37929,6 +37931,9 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
                     strstr(cd, "mp3") != NULL ||
                     g_str_has_prefix(cd, "mp4a.69") ||
                     g_str_has_prefix(cd, "mp4a.6b") ||
+                    strstr(cd, "mp1v") != NULL ||
+                    strstr(cd, "mp2v") != NULL ||
+                    strstr(cd, "mpeg1") != NULL ||
                     (native_vorbis && strstr(cd, "vorbis") != NULL) ||
                     (native_opus && strstr(cd, "opus") != NULL);
                 if (!ok) all_ok = FALSE;

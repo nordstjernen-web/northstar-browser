@@ -30,6 +30,7 @@ ns_image_builtin_supports_mime(const char *bare)
 #include "config.h"
 #include "net.h"
 #include "svg.h"
+#include "video.h"
 
 #ifdef G_OS_WIN32
 static gboolean
@@ -418,6 +419,17 @@ ns_image_anim_frames_from_pixels(GArray *pixel_frames,
     return frames;
 }
 
+static GArray *
+ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h)
+{
+    if (ns_video_bytes_are_mpeg1(data, len))
+        return ns_video_decode_mpeg1_to_pixels(data, len, out_w, out_h);
+    if ((len >= 6 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F') ||
+        ns_image_png_is_animated(data, len))
+        return ns_image_decode_wuffs_anim_to_pixels(data, len, out_w, out_h);
+    return NULL;
+}
+
 typedef struct {
     ns_texture *tex;
     GArray     *frames;
@@ -431,9 +443,10 @@ ns_image_decode_body(const guchar *data, gsize len)
     ns_img_decoded d = { NULL, NULL, 0, 0 };
     int w = 0, h = 0;
     GArray *frames = NULL;
-    if ((len >= 6 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F') ||
-        ns_image_png_is_animated(data, len)) {
-        frames = ns_image_decode_wuffs_anim(data, len, &w, &h);
+    GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
+    if (pixel_frames) {
+        frames = ns_image_anim_frames_from_pixels(pixel_frames, &w, &h, NULL);
+        g_array_free(pixel_frames, TRUE);
     }
     if (frames && frames->len > 1) {
         d.frames = frames;
@@ -820,11 +833,7 @@ ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
 
     int w = 0, h = 0;
     {
-        GArray *pixel_frames = NULL;
-        if ((len >= 6 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F') ||
-            ns_image_png_is_animated(data, len))
-            pixel_frames = ns_image_decode_wuffs_anim_to_pixels(data, len,
-                                                                &w, &h);
+        GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
         if (pixel_frames && pixel_frames->len > 1) {
             int fw = 0, fh = 0, total = 0;
             GArray *frames = ns_image_anim_frames_from_pixels(pixel_frames,

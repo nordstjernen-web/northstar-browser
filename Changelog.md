@@ -4,6 +4,44 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* `<video>` plays MPEG-1. The tree already vendored pl_mpeg for its MP2
+  audio decoder and switched the video half off with one call
+  (`plm_set_video_enabled(plm, 0)`), so the decoder for an ISO standard
+  whose patents have expired was being compiled and discarded. `video.c`
+  turns it back on: an MPEG-1 Program Stream or elementary video stream is
+  recognised by its start code, and every frame is decoded to the same
+  `ns_image_pixel_frame` list an animated GIF produces. The image cache's
+  fetch, frame timing, repaint scheduling and eviction then serve video
+  with no new machinery, and `paint_video` draws the frame where it drew a
+  placeholder. A `<video>` sizes to its intrinsic dimensions and keeps its
+  aspect ratio when given only `width` or `height`, and `canPlayType`
+  answers for `video/mpeg`. No new dependency: pl_mpeg moves from the
+  audio helper's link line to the engine's.
+  Decoding is up front rather than streamed, so a clip is bounded by
+  `NS_VIDEO_MAX_FRAMES` and 256 MB of decoded pixels and a longer one
+  plays its prefix. MPEG-1 is not a format the modern web serves; this is
+  video for local and self-hosted clips, not for streaming sites.
+* The vendored pl_mpeg no longer reads past a frame plane. Half-pel motion
+  compensation samples `s[si + 1]`, `s[si + dw]` and `s[si + dw + 1]`, but
+  `plm_video_process_macroblock` bounds only `s[si]`, so a macroblock on
+  the bottom row reads up to one row plus one byte beyond the plane it
+  samples -- absorbed by the next plane for interior planes, and off the
+  end of the allocation for the last one. Fuzzing the decoder under
+  AddressSanitizer with mutated streams reported it as a heap-buffer
+  overflow read. The three frames are allocated as one chunk, which is now
+  padded by that overshoot and zeroed, so the read stays inside the
+  allocation and a corrupt stream decodes deterministically. Valid video is
+  unaffected: no bound is tightened, so no macroblock that decoded before
+  is rejected now. The overshoot was unreachable until this release
+  because the video decoder was switched off.
+* Animated images decode as animations on the engine's own fetch path.
+  `ns_image_decode_body` routed GIF and APNG to the animation decoder, but
+  the two fetch handlers in `engine.c` -- the ones headless rendering and
+  the browser's own image pass use -- called `ns_image_decode_bytes`
+  instead, which only ever returns a still frame. An animated GIF fetched
+  through those paths therefore froze on frame one. Both now go through
+  `ns_image_cache_insert_encoded`, and the still-versus-animated decision
+  lives in one function rather than three copies that had already drifted.
 * Animated PNG plays. Wuffs already decoded APNG frames -- the animation
   loop that GIF uses is format-agnostic -- but two things kept it from
   running: the callers only routed GIF magic to the animation path, and

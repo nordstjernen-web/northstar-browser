@@ -752,11 +752,8 @@ on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
     if (resp && !resp->error && resp->body && resp->body->len > 0) {
-        int w = 0, h = 0;
-        ns_texture *tex = ns_image_decode_bytes(resp->body->data,
-                                                resp->body->len, &w, &h);
-        if (tex)
-            ns_image_cache_insert_loaded(it->st->cache, it->abs, tex, w, h);
+        ns_image_cache_insert_encoded(it->st->cache, it->abs,
+                                      resp->body->data, resp->body->len);
     }
     if (resp) ns_response_free(resp);
     g_clear_error(&err);
@@ -797,6 +794,7 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
 {
     GPtrArray *imgs = g_ptr_array_new();
     ns_layout_collect_images(root, imgs);
+    ns_layout_collect_videos(root, imgs);
     GHashTable *wanted = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                g_free, NULL);
     double lazy_limit = (viewport_h > 0.0)
@@ -820,6 +818,8 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
             g_ptr_array_add(srcs, box->media->bg_image_src);
         if (box->media->marker_image_src)
             g_ptr_array_add(srcs, box->media->marker_image_src);
+        if (box->media->video_src)
+            g_ptr_array_add(srcs, box->media->video_src);
         const char *box_base = engine_node_frame_base(box->dom, base_url);
         for (guint si = 0; si < srcs->len; si++) {
             const char *src = g_ptr_array_index(srcs, si);
@@ -871,11 +871,8 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
     ns_response *resp = ns_net_fetch_finish(result, &err);
     if (!s->dead && resp && !resp->error && resp->body &&
         resp->body->len > 0) {
-        int w = 0, h = 0;
-        ns_texture *tex = ns_image_decode_bytes(resp->body->data,
-                                                resp->body->len, &w, &h);
-        if (tex)
-            ns_image_cache_insert_loaded(s->cache, it->abs, tex, w, h);
+        ns_image_cache_insert_encoded(s->cache, it->abs,
+                                      resp->body->data, resp->body->len);
     }
     if (resp) ns_response_free(resp);
     g_clear_error(&err);
