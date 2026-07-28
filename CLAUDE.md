@@ -22,8 +22,8 @@ WebGL, WebGPU, the out-of-process video helpers, the local-AI
 (llama.cpp) feature, the inline PDF viewer (poppler), and the Android,
 Java and iOS builds and the embeddable
 `libnorthstar` library API. The build targets Linux (primary), macOS and
-Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
-(Debian/gcc), `musl.yml` (Alpine/clang), `macos.yml` and `windows.yml`.
+Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `musl.yml`
+(Alpine/clang), `macos.yml` and `windows.yml`.
 
 ## Design constraints
 
@@ -110,7 +110,7 @@ This repo is driven by Claude in long uninterrupted sessions.
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
   — that's the per-change correctness gate, not CI.
-- **CI is enabled.** The Linux (Ubuntu gcc), Debian, musl (Alpine), macOS and Windows workflows run on
+- **CI is enabled.** The Linux (Ubuntu gcc), musl (Alpine), macOS and Windows workflows run on
   every push to `main` and every PR targeting `main`, plus manual
   `workflow_dispatch`. Local Linux is still the primary correctness
   gate before pushing; CI provides cross-platform sanity coverage.
