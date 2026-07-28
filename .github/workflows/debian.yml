@@ -52,10 +52,10 @@ jobs:
             echo "optional spell-check packages not installable; building without enchant"
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Restore ccache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /root/.cache/ccache
           key: ccache-debian-${{ matrix.debian }}-${{ github.sha }}
