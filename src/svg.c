@@ -1168,7 +1168,7 @@ svg_apply_stroke_params(svg_ctx *ctx, const svg_state *st)
     cairo_set_line_join(cr, st->line_join);
     cairo_set_miter_limit(cr, st->miter_limit);
     if (st->dashes && st->dashes->len > 0)
-        cairo_set_dash(cr, (const double *)st->dashes->data,
+        cairo_set_dash(cr, &g_array_index(st->dashes, double, 0),
                        (int)st->dashes->len, st->dash_offset);
     else
         cairo_set_dash(cr, NULL, 0, 0.0);
