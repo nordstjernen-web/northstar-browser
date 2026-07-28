@@ -1447,6 +1447,216 @@ svg_render_text(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     svg_paint_current_path(ctx, st);
 }
 
+typedef struct {
+    double x, y;
+    double in_angle, out_angle;
+    gboolean has_in, has_out;
+} svg_vertex;
+
+static void
+svg_vertex_add(GArray *out, double x, double y)
+{
+    svg_vertex v = { .x = x, .y = y };
+    g_array_append_val(out, v);
+}
+
+static void
+svg_vertex_link(GArray *out, double fromx, double fromy, double tox, double toy)
+{
+    if (out->len == 0) return;
+    svg_vertex *prev = &g_array_index(out, svg_vertex, out->len - 1);
+    double dx = tox - fromx, dy = toy - fromy;
+    if (dx == 0 && dy == 0) return;
+    double a = atan2(dy, dx);
+    if (!prev->has_out) { prev->out_angle = a; prev->has_out = TRUE; }
+}
+
+static GArray *
+svg_path_vertices(cairo_t *cr)
+{
+    cairo_path_t *path = cairo_copy_path(cr);
+    if (!path) return NULL;
+    if (path->status != CAIRO_STATUS_SUCCESS) {
+        cairo_path_destroy(path);
+        return NULL;
+    }
+    GArray *out = g_array_new(FALSE, TRUE, sizeof(svg_vertex));
+    double cx = 0, cy = 0, sx = 0, sy = 0;
+    for (int i = 0; i < path->num_data; i += path->data[i].header.length) {
+        cairo_path_data_t *d = &path->data[i];
+        switch (d->header.type) {
+        case CAIRO_PATH_MOVE_TO:
+            cx = sx = d[1].point.x;
+            cy = sy = d[1].point.y;
+            svg_vertex_add(out, cx, cy);
+            break;
+        case CAIRO_PATH_LINE_TO:
+            svg_vertex_link(out, cx, cy, d[1].point.x, d[1].point.y);
+            svg_vertex_add(out, d[1].point.x, d[1].point.y);
+            if (out->len >= 2) {
+                svg_vertex *v = &g_array_index(out, svg_vertex, out->len - 1);
+                if (d[1].point.x != cx || d[1].point.y != cy) {
+                    v->in_angle = atan2(d[1].point.y - cy, d[1].point.x - cx);
+                    v->has_in = TRUE;
+                }
+            }
+            cx = d[1].point.x; cy = d[1].point.y;
+            break;
+        case CAIRO_PATH_CURVE_TO: {
+            double c1x = d[1].point.x, c1y = d[1].point.y;
+            double c2x = d[2].point.x, c2y = d[2].point.y;
+            double ex = d[3].point.x, ey = d[3].point.y;
+            svg_vertex_link(out, cx, cy, c1x, c1y);
+            svg_vertex_add(out, ex, ey);
+            svg_vertex *v = &g_array_index(out, svg_vertex, out->len - 1);
+            double tx = ex - c2x, ty = ey - c2y;
+            if (tx == 0 && ty == 0) { tx = ex - c1x; ty = ey - c1y; }
+            if (tx == 0 && ty == 0) { tx = ex - cx;  ty = ey - cy;  }
+            if (tx != 0 || ty != 0) { v->in_angle = atan2(ty, tx); v->has_in = TRUE; }
+            cx = ex; cy = ey;
+            break;
+        }
+        case CAIRO_PATH_CLOSE_PATH:
+            svg_vertex_link(out, cx, cy, sx, sy);
+            svg_vertex_add(out, sx, sy);
+            if (sx != cx || sy != cy) {
+                svg_vertex *v = &g_array_index(out, svg_vertex, out->len - 1);
+                v->in_angle = atan2(sy - cy, sx - cx);
+                v->has_in = TRUE;
+            }
+            cx = sx; cy = sy;
+            break;
+        default:
+            break;
+        }
+    }
+    cairo_path_destroy(path);
+    return out;
+}
+
+static const ns_node *
+svg_marker_ref(svg_ctx *ctx, const ns_node *n, const char *prop)
+{
+    const char *v = svg_prop(n, prop);
+    if (!v) v = svg_prop(n, "marker");
+    if (!v) return NULL;
+    char *id = svg_url_id(v, NULL);
+    if (!id) return NULL;
+    const ns_node *m = svg_by_id(ctx, id);
+    g_free(id);
+    if (!m || !m->name || strcmp(m->name, "marker") != 0) return NULL;
+    return m;
+}
+
+static void
+svg_draw_marker(svg_ctx *ctx, const ns_node *marker, const svg_state *st,
+                double x, double y, double angle)
+{
+    if (ctx->depth >= NS_SVG_MAX_DEPTH) return;
+    cairo_t *cr = ctx->cr;
+    double fs = st->font_size;
+    double mw = svg_attr_length(marker, "markerWidth", ctx->vw, fs, 3);
+    double mh = svg_attr_length(marker, "markerHeight", ctx->vh, fs, 3);
+    if (mw <= 0 || mh <= 0) return;
+
+    const char *units = ns_element_get_attr(marker, "markerUnits");
+    gboolean stroke_units = !units || g_ascii_strcasecmp(units, "strokeWidth") == 0;
+
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    const char *orient = ns_element_get_attr(marker, "orient");
+    if (!orient || g_ascii_strcasecmp(orient, "auto") == 0 ||
+        g_ascii_strcasecmp(orient, "auto-start-reverse") == 0)
+        cairo_rotate(cr, angle);
+    else
+        cairo_rotate(cr, svg_length_str(orient, 0, fs, 0) * G_PI / 180.0);
+    if (stroke_units && st->stroke_width > 0)
+        cairo_scale(cr, st->stroke_width, st->stroke_width);
+
+    cairo_matrix_t vm;
+    svg_viewbox_matrix(marker, mw, mh, &vm);
+
+    double rx = svg_attr_length(marker, "refX", ctx->vw, fs, 0);
+    double ry = svg_attr_length(marker, "refY", ctx->vh, fs, 0);
+    cairo_matrix_transform_point(&vm, &rx, &ry);
+    cairo_translate(cr, -rx, -ry);
+
+    const char *ov = svg_prop(marker, "overflow");
+    gboolean clip = !ov || (g_ascii_strcasecmp(ov, "visible") != 0 &&
+                            g_ascii_strcasecmp(ov, "auto") != 0);
+    if (clip) {
+        cairo_rectangle(cr, 0, 0, mw, mh);
+        cairo_clip(cr);
+        cairo_new_path(cr);
+    }
+
+    cairo_transform(cr, &vm);
+
+    double ow = ctx->vw, oh = ctx->vh;
+    const char *vb = ns_element_get_attr(marker, "viewBox");
+    if (vb) {
+        const char *q = vb;
+        double a, b, c, dd;
+        if (svg_num(&q, &a) && svg_num(&q, &b) &&
+            svg_num(&q, &c) && svg_num(&q, &dd) && c > 0 && dd > 0) {
+            ctx->vw = c; ctx->vh = dd;
+        }
+    }
+
+    svg_state ms;
+    svg_state_init(&ms);
+    ms.color_r = st->color_r; ms.color_g = st->color_g;
+    ms.color_b = st->color_b; ms.color_a = st->color_a;
+    ms.font_size = st->font_size;
+    ctx->depth++;
+    for (const ns_node *c = marker->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT) svg_render_node(ctx, c, &ms);
+    ctx->depth--;
+    svg_state_clear(&ms);
+
+    ctx->vw = ow; ctx->vh = oh;
+    cairo_restore(cr);
+}
+
+static void
+svg_render_markers(svg_ctx *ctx, const ns_node *n, const svg_state *st)
+{
+    const ns_node *ms = svg_marker_ref(ctx, n, "marker-start");
+    const ns_node *mm = svg_marker_ref(ctx, n, "marker-mid");
+    const ns_node *me = svg_marker_ref(ctx, n, "marker-end");
+    if (!ms && !mm && !me) return;
+
+    GArray *verts = svg_path_vertices(ctx->cr);
+    if (!verts) return;
+    if (verts->len == 0) { g_array_free(verts, TRUE); return; }
+
+    for (guint i = 0; i < verts->len; i++) {
+        const svg_vertex *v = &g_array_index(verts, svg_vertex, i);
+        const ns_node *m = (i == 0) ? ms
+                         : (i == verts->len - 1) ? me : mm;
+        if (!m) continue;
+        double a;
+        if (v->has_in && v->has_out) {
+            double dx = cos(v->in_angle) + cos(v->out_angle);
+            double dy = sin(v->in_angle) + sin(v->out_angle);
+            a = (dx == 0 && dy == 0) ? v->in_angle : atan2(dy, dx);
+        } else if (v->has_in) {
+            a = v->in_angle;
+        } else if (v->has_out) {
+            a = v->out_angle;
+        } else {
+            a = 0;
+        }
+        if (i == 0 && m == ms) {
+            const char *o = ns_element_get_attr(m, "orient");
+            if (o && g_ascii_strcasecmp(o, "auto-start-reverse") == 0)
+                a += G_PI;
+        }
+        svg_draw_marker(ctx, m, st, v->x, v->y, a);
+    }
+    g_array_free(verts, TRUE);
+}
+
 static void
 svg_render_children(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 {
@@ -1585,8 +1795,20 @@ svg_render_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
         svg_render_text(ctx, n, &st);
     } else {
         cairo_new_path(cr);
-        if (svg_shape_path(ctx, n, &st))
+        if (svg_shape_path(ctx, n, &st)) {
+            gboolean markable = strcmp(tag, "path") == 0 ||
+                                strcmp(tag, "line") == 0 ||
+                                strcmp(tag, "polyline") == 0 ||
+                                strcmp(tag, "polygon") == 0;
+            cairo_path_t *kept = markable ? cairo_copy_path(cr) : NULL;
             svg_paint_current_path(ctx, &st);
+            if (kept) {
+                cairo_new_path(cr);
+                cairo_append_path(cr, kept);
+                cairo_path_destroy(kept);
+                svg_render_markers(ctx, n, &st);
+            }
+        }
         cairo_new_path(cr);
     }
 

@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* `marker-start`, `marker-mid` and `marker-end` draw their `<marker>` on
+  path, line, polyline and polygon vertices. Vertices and their tangents
+  come from the built Cairo path, so arcs and curves orient the same way
+  straight segments do, and a mid vertex uses the bisector of its two
+  tangents. `markerUnits="strokeWidth"` scales the marker with the
+  stroke, `orient="auto"` and `auto-start-reverse` rotate it, and the
+  marker viewport clips unless `overflow` says otherwise. `refX`/`refY`
+  are mapped through the marker's own `viewBox` before positioning, so
+  the reference point lands on the vertex.
+
 * `mask` is honoured on SVG elements. The referenced `<mask>` renders to
   an offscreen surface whose sRGB luminance becomes the alpha the element
   is composited through, so a white mask shows the element, black hides
