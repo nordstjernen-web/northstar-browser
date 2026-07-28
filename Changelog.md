@@ -4,6 +4,21 @@ Significant changes in each release:
 
 1.0.5:
 ======
+* Extended-container WebP images decode. Wuffs accepts only a bare
+  `RIFF....WEBP` holding one `VP8 ` or `VP8L` chunk, and rejects the
+  `VP8X` container outright -- which is what every encoder emits for a
+  lossy image with transparency, so those failed with "could not decode
+  image" rather than rendering. The container is now unwrapped to the
+  bitstream Wuffs understands, and the `ALPH` chunk is decoded here:
+  uncompressed alpha directly, lossless alpha by prefixing a synthesized
+  `VP8L` header onto the stream and reading the green channel back out,
+  then unfiltering with the horizontal, vertical or gradient predictor.
+  The recovered alpha plane is bit-exact against libwebp for every
+  filter and both compression methods.
+* The still frame lifted out of an animated WebP decodes. It was
+  reassembled without RIFF's even-size padding, so a chunk of odd length
+  produced an odd `RIFF` size that Wuffs rejects before reading anything,
+  and it prepended an `ALPH` chunk that Wuffs cannot parse at all.
 * A single-frame MPEG-1 clip displays instead of failing. Both decode
   paths treated a frame list as an animation only when it held more than
   one frame, and discarded a shorter one to retry through the still-image

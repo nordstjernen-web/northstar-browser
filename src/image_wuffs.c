@@ -52,34 +52,47 @@ ns_riff_u32le(const guchar *p)
            ((guint32)p[2] << 16) | ((guint32)p[3] << 24);
 }
 
+typedef struct ns_webp_chunks {
+    const guchar *alpha;
+    gsize         alpha_len;
+    const guchar *body;
+    gsize         body_len;
+    char          body_tag[4];
+} ns_webp_chunks;
+
 static gboolean
-ns_webp_is_animated(const guchar *data, gsize len)
+ns_webp_is_extended(const guchar *data, gsize len)
 {
-    if (len < 21 || memcmp(data + 12, "VP8X", 4) != 0) return FALSE;
-    return (data[20] & 0x02) != 0;
+    return len >= 21 && memcmp(data + 12, "VP8X", 4) == 0;
 }
 
-static guint8 *
-ns_webp_still_from_animation(const guchar *data, gsize len, gsize *out_len)
+static gboolean
+ns_webp_find_chunks(const guchar *data, gsize len, ns_webp_chunks *out)
 {
     enum { NS_WEBP_ANMF_HEADER = 16 };
-    if (len < 12 + 8) return NULL;
+    if (len < 12 + 8) return FALSE;
     gsize riff_len = (gsize)ns_riff_u32le(data + 4) + 8;
     if (riff_len > len) riff_len = len;
 
-    gsize pos = 12;
-    const guchar *alph = NULL, *body = NULL;
-    gsize alph_len = 0, body_len = 0;
-    char body_tag[5] = {0};
+    memset(out, 0, sizeof *out);
 
+    gsize pos = 12;
     while (pos + 8 <= riff_len) {
         const guchar *tag = data + pos;
         gsize size = ns_riff_u32le(data + pos + 4);
         gsize payload = pos + 8;
         if (size > riff_len - payload) break;
 
-        if (memcmp(tag, "ANMF", 4) == 0) {
-            if (size <= NS_WEBP_ANMF_HEADER) return NULL;
+        if (memcmp(tag, "ALPH", 4) == 0) {
+            out->alpha = data + payload;
+            out->alpha_len = size;
+        } else if (memcmp(tag, "VP8 ", 4) == 0 ||
+                   memcmp(tag, "VP8L", 4) == 0) {
+            out->body = data + payload;
+            out->body_len = size;
+            memcpy(out->body_tag, tag, 4);
+            return TRUE;
+        } else if (memcmp(tag, "ANMF", 4) == 0 && size > NS_WEBP_ANMF_HEADER) {
             gsize sub = payload + NS_WEBP_ANMF_HEADER;
             gsize sub_end = payload + size;
             while (sub + 8 <= sub_end) {
@@ -88,14 +101,14 @@ ns_webp_still_from_animation(const guchar *data, gsize len, gsize *out_len)
                 gsize spayload = sub + 8;
                 if (ssize > sub_end - spayload) break;
                 if (memcmp(stag, "ALPH", 4) == 0) {
-                    alph = data + sub;
-                    alph_len = ssize + 8;
+                    out->alpha = data + spayload;
+                    out->alpha_len = ssize;
                 } else if (memcmp(stag, "VP8 ", 4) == 0 ||
                            memcmp(stag, "VP8L", 4) == 0) {
-                    body = data + sub;
-                    body_len = ssize + 8;
-                    memcpy(body_tag, stag, 4);
-                    break;
+                    out->body = data + spayload;
+                    out->body_len = ssize;
+                    memcpy(out->body_tag, stag, 4);
+                    return TRUE;
                 }
                 sub = spayload + ssize + (ssize & 1);
             }
@@ -103,10 +116,18 @@ ns_webp_still_from_animation(const guchar *data, gsize len, gsize *out_len)
         }
         pos = payload + size + (size & 1);
     }
-    if (!body || body_len < 8) return NULL;
+    return FALSE;
+}
 
-    gsize total = 12 + alph_len + body_len;
-    guint8 *out = g_try_malloc(total);
+static guint8 *
+ns_webp_bare_container(const char tag[4], const guchar *payload, gsize payload_len,
+                       gsize *out_len)
+{
+    if (!payload || payload_len == 0 || payload_len > G_MAXUINT32 - 32)
+        return NULL;
+    gsize padded = payload_len + (payload_len & 1);
+    gsize total = 12 + 8 + padded;
+    guint8 *out = g_try_malloc0(total);
     if (!out) return NULL;
     memcpy(out, "RIFF", 4);
     guint32 riff_size = (guint32)(total - 8);
@@ -115,9 +136,12 @@ ns_webp_still_from_animation(const guchar *data, gsize len, gsize *out_len)
     out[6] = (guint8)((riff_size >> 16) & 0xff);
     out[7] = (guint8)((riff_size >> 24) & 0xff);
     memcpy(out + 8, "WEBP", 4);
-    gsize off = 12;
-    if (alph && alph_len) { memcpy(out + off, alph, alph_len); off += alph_len; }
-    memcpy(out + off, body, body_len);
+    memcpy(out + 12, tag, 4);
+    out[16] = (guint8)(payload_len & 0xff);
+    out[17] = (guint8)((payload_len >> 8) & 0xff);
+    out[18] = (guint8)((payload_len >> 16) & 0xff);
+    out[19] = (guint8)((payload_len >> 24) & 0xff);
+    memcpy(out + 20, payload, payload_len);
     *out_len = total;
     return out;
 }
@@ -162,7 +186,7 @@ ns_image_wuffs_supports_bytes(const guchar *data, gsize len)
 }
 
 static guint8 *
-ns_wuffs_decode_still_to_bgra(const guchar *data, gsize len,
+ns_wuffs_decode_still_to_bgra(const guchar *data, gsize len, gboolean premultiply,
                               int *out_w, int *out_h,
                               gsize *out_stride, gsize *out_buf_len)
 {
@@ -193,7 +217,8 @@ ns_wuffs_decode_still_to_bgra(const guchar *data, gsize len,
     }
 
     wuffs_base__pixel_config__set(&ic.pixcfg,
-        WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL,
+        premultiply ? WUFFS_BASE__PIXEL_FORMAT__BGRA_PREMUL
+                    : WUFFS_BASE__PIXEL_FORMAT__BGRA_NONPREMUL,
         WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, w, h);
 
     uint64_t pix_len64 = wuffs_base__pixel_config__pixbuf_len(&ic.pixcfg);
@@ -256,22 +281,144 @@ ns_wuffs_decode_still_to_bgra(const guchar *data, gsize len,
     return pix;
 }
 
+static void
+ns_webp_alpha_unfilter(guint8 *plane, int w, int h, int method)
+{
+    if (method == 0) return;
+    for (int y = 0; y < h; y++) {
+        guint8 *row = plane + (gsize)y * (gsize)w;
+        const guint8 *prev = y ? row - w : NULL;
+        if (!prev || method == 1) {
+            int pred = prev ? prev[0] : 0;
+            for (int x = 0; x < w; x++) {
+                row[x] = (guint8)(row[x] + pred);
+                pred = row[x];
+            }
+        } else if (method == 2) {
+            for (int x = 0; x < w; x++) row[x] = (guint8)(row[x] + prev[x]);
+        } else {
+            int left = prev[0], top_left = prev[0];
+            for (int x = 0; x < w; x++) {
+                int top = prev[x];
+                int g = left + top - top_left;
+                if (g < 0) g = 0; else if (g > 255) g = 255;
+                left = (guint8)(row[x] + g);
+                top_left = top;
+                row[x] = (guint8)left;
+            }
+        }
+    }
+}
+
+static guint8 *
+ns_webp_alpha_plane(const guchar *alph, gsize alph_len, int w, int h)
+{
+    if (!alph || alph_len < 2 || w <= 0 || h <= 0) return NULL;
+    int method     = alph[0] & 0x03;
+    int filtering  = (alph[0] >> 2) & 0x03;
+    gsize pixels   = (gsize)w * (gsize)h;
+
+    guint8 *plane = NULL;
+    if (method == 0) {
+        if (alph_len - 1 < pixels) return NULL;
+        plane = g_try_malloc(pixels);
+        if (!plane) return NULL;
+        memcpy(plane, alph + 1, pixels);
+    } else if (method == 1) {
+        gsize vp8l_len = 5 + (alph_len - 1);
+        guint8 *vp8l = g_try_malloc(vp8l_len);
+        if (!vp8l) return NULL;
+        guint32 dims = (guint32)(w - 1) | ((guint32)(h - 1) << 14);
+        vp8l[0] = 0x2f;
+        vp8l[1] = (guint8)(dims & 0xff);
+        vp8l[2] = (guint8)((dims >> 8) & 0xff);
+        vp8l[3] = (guint8)((dims >> 16) & 0xff);
+        vp8l[4] = (guint8)((dims >> 24) & 0xff);
+        memcpy(vp8l + 5, alph + 1, alph_len - 1);
+
+        gsize bare_len = 0;
+        guint8 *bare = ns_webp_bare_container("VP8L", vp8l, vp8l_len, &bare_len);
+        g_free(vp8l);
+        if (!bare) return NULL;
+
+        int aw = 0, ah = 0;
+        gsize astride = 0, abuf = 0;
+        guint8 *apix = ns_wuffs_decode_still_to_bgra(bare, bare_len, FALSE,
+                                                     &aw, &ah, &astride, &abuf);
+        g_free(bare);
+        if (!apix) return NULL;
+        if (aw != w || ah != h) { g_free(apix); return NULL; }
+
+        plane = g_try_malloc(pixels);
+        if (!plane) { g_free(apix); return NULL; }
+        for (int y = 0; y < h; y++) {
+            const guint8 *src = apix + (gsize)y * astride;
+            guint8 *dst = plane + (gsize)y * (gsize)w;
+            for (int x = 0; x < w; x++) dst[x] = src[(gsize)x * 4 + 1];
+        }
+        g_free(apix);
+    } else {
+        return NULL;
+    }
+
+    ns_webp_alpha_unfilter(plane, w, h, filtering);
+    return plane;
+}
+
+static void
+ns_webp_apply_alpha(guint8 *pix, gsize stride, int w, int h, const guint8 *plane)
+{
+    for (int y = 0; y < h; y++) {
+        guint8 *row = pix + (gsize)y * stride;
+        const guint8 *src = plane + (gsize)y * (gsize)w;
+        for (int x = 0; x < w; x++) {
+            guint8 *p = row + (gsize)x * 4;
+            guint a = src[x];
+            p[0] = (guint8)((p[0] * a + 127) / 255);
+            p[1] = (guint8)((p[1] * a + 127) / 255);
+            p[2] = (guint8)((p[2] * a + 127) / 255);
+            p[3] = (guint8)a;
+        }
+    }
+}
+
 guint8 *
 ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
                               int *out_w, int *out_h,
                               gsize *out_stride, gsize *out_buf_len)
 {
     if (ns_wuffs_detect(data, len) != NS_WUFFS_WEBP ||
-        !ns_webp_is_animated(data, len))
-        return ns_wuffs_decode_still_to_bgra(data, len, out_w, out_h,
+        !ns_webp_is_extended(data, len))
+        return ns_wuffs_decode_still_to_bgra(data, len, TRUE, out_w, out_h,
                                              out_stride, out_buf_len);
 
-    gsize still_len = 0;
-    guint8 *still = ns_webp_still_from_animation(data, len, &still_len);
-    if (!still) return NULL;
-    guint8 *pix = ns_wuffs_decode_still_to_bgra(still, still_len, out_w, out_h,
-                                                out_stride, out_buf_len);
-    g_free(still);
+    ns_webp_chunks parts;
+    if (!ns_webp_find_chunks(data, len, &parts)) return NULL;
+
+    gsize bare_len = 0;
+    guint8 *bare = ns_webp_bare_container(parts.body_tag, parts.body,
+                                          parts.body_len, &bare_len);
+    if (!bare) return NULL;
+
+    int w = 0, h = 0;
+    gsize stride = 0, buf_len = 0;
+    guint8 *pix = ns_wuffs_decode_still_to_bgra(bare, bare_len, TRUE,
+                                                &w, &h, &stride, &buf_len);
+    g_free(bare);
+    if (!pix) return NULL;
+
+    if (parts.alpha && memcmp(parts.body_tag, "VP8 ", 4) == 0) {
+        guint8 *plane = ns_webp_alpha_plane(parts.alpha, parts.alpha_len, w, h);
+        if (plane) {
+            ns_webp_apply_alpha(pix, stride, w, h, plane);
+            g_free(plane);
+        }
+    }
+
+    if (out_w) *out_w = w;
+    if (out_h) *out_h = h;
+    if (out_stride) *out_stride = stride;
+    if (out_buf_len) *out_buf_len = buf_len;
     return pix;
 }
 
