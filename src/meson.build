@@ -117,7 +117,6 @@ northstar_deps = [
   cairo,
   pango,
   pangocairo,
-  gdkpixbuf,
   gmodule,
   libcurl,
   libcrypto,

@@ -47,8 +47,8 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `debian.yml`
 - Images decode in-tree: PNG, GIF, BMP and JPEG through
   [Wuffs](https://github.com/google/wuffs); AVIF through libavif when
   it is present; SVG
-  in-engine (`src/svg.c`); any other format a GdkPixbuf loader is installed for as
-  a last-resort fallback.
+  in-engine (`src/svg.c`). There is no other image fallback: a format the
+  in-tree decoders do not cover simply fails to decode.
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue

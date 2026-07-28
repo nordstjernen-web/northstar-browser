@@ -129,7 +129,6 @@ gio        = dependency('gio-2.0')
 cairo      = dependency('cairo')
 pango      = dependency('pango')
 pangocairo = dependency('pangocairo')
-gdkpixbuf  = dependency('gdk-pixbuf-2.0')
 
 have_gtk = false
 if gtk_feature.allowed()
@@ -160,11 +159,6 @@ libuchardet = dependency('uchardet')
 libpsl = dependency('libpsl')
 
 sqlite3 = dependency('sqlite3')
-
-have_gdk_pixbuf = true
-if have_gdk_pixbuf
-  add_project_arguments('-DNS_HAVE_GDK_PIXBUF=1', language: 'c')
-endif
 
 libfontconfig = dependency('fontconfig', required: false)
 have_fontconfig = libfontconfig.found()

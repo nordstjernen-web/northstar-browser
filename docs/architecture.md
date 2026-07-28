@@ -120,12 +120,14 @@ partitioning and permission model.
 
 `image.c` decodes lazily, trying decoders in order:
 
-1. **Wuffs** (`image_wuffs.c`) — PNG, GIF, BMP, JPEG (memory-safe,
+1. **`image_ico.c`** — ICO, unwrapped and handed to Wuffs.
+2. **Wuffs** (`image_wuffs.c`) — PNG, GIF, BMP, JPEG (memory-safe,
    transpiled-to-C).
-2. **libavif** (`image_avif.c`) — AVIF.
-3. **GdkPixbuf** — TIFF, ICO (`image_ico.c`), and any other installed
-   loader.
-4. **`src/svg.c`** — SVG, rendered in-engine onto Cairo.
+3. **libavif** (`image_avif.c`) — AVIF, when built with it.
+4. **`svg.c`** — SVG, rendered in-engine onto Cairo.
+
+Nothing follows. A format none of these cover fails to decode rather
+than falling through to a plugin-loaded decoder.
 
 ## Security-relevant modules
 

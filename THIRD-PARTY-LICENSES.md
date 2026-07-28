@@ -263,7 +263,7 @@ Mozilla Public License 1.1. See:
 ### libavif — BSD 2-Clause
 
 > AVIF image decoding (AV1 still images). A required dependency
-> (`libavif`); tried before the GdkPixbuf fallback for AVIF bytes.
+> (`libavif`), optional; decodes AVIF bytes.
 > <https://github.com/AOMediaCodec/libavif>
 >
 > Copyright the AOMedia / libavif authors.

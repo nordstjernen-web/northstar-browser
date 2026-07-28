@@ -105,7 +105,7 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 | [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | In-process MP2 audio decode |
 | [minimp3](https://github.com/lieff/minimp3) (CC0) | In-process MP3 audio decode |
 
-**Required system libraries:** GTK 4 (≥ 4.14), GLib/Pango/Cairo/gdk-pixbuf,
+**Required system libraries:** GTK 4 (≥ 4.14), GLib/Pango/Cairo,
 libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet, libpsl, SQLite,
 SDL2, and libseccomp (Linux only).
 

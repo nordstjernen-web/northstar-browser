@@ -41,8 +41,8 @@ Windows; the CI workflows are `linux.yml` (gcc), `musl.yml` (Alpine/clang),
 - Images decode in-tree: PNG, GIF, BMP and JPEG through
   [Wuffs](https://github.com/google/wuffs); AVIF through libavif when
   it is present; SVG
-  in-engine (`src/svg.c`); any other format a GdkPixbuf loader is installed for as
-  a last-resort fallback.
+  in-engine (`src/svg.c`). There is no other image fallback: a format the
+  in-tree decoders do not cover simply fails to decode.
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue
@@ -129,7 +129,7 @@ provides the CSS and WHATWG URL modules the browser uses.
 Images: PNG/GIF/BMP/JPEG through the vendored
 [Wuffs](https://github.com/google/wuffs) (`subprojects/wuffs/`), AVIF
 through libavif when built with it, SVG in-engine (`src/svg.c`), other
-formats through GdkPixbuf.
+formats are not decoded.
 Charset detection is delegated to uchardet. WebCrypto (`crypto.subtle`) is
 implemented in `src/webcrypto.c` over OpenSSL's libcrypto. The
 `WebAssembly` JS API (`src/wasm.c`) runs over a vendored subset of the
