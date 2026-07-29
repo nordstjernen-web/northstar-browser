@@ -1706,6 +1706,202 @@ parse_oklab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
     return TRUE;
 }
 
+typedef enum {
+    NS_PREDEF_SRGB,
+    NS_PREDEF_SRGB_LINEAR,
+    NS_PREDEF_DISPLAY_P3,
+    NS_PREDEF_A98_RGB,
+    NS_PREDEF_PROPHOTO_RGB,
+    NS_PREDEF_REC2020,
+    NS_PREDEF_XYZ_D65,
+    NS_PREDEF_XYZ_D50,
+} ns_predefined_space;
+
+static gboolean
+predefined_space_by_name(const char *name, gsize len, ns_predefined_space *out)
+{
+    static const struct { const char *name; ns_predefined_space space; } spaces[] = {
+        { "srgb",          NS_PREDEF_SRGB },
+        { "srgb-linear",   NS_PREDEF_SRGB_LINEAR },
+        { "display-p3",    NS_PREDEF_DISPLAY_P3 },
+        { "a98-rgb",       NS_PREDEF_A98_RGB },
+        { "prophoto-rgb",  NS_PREDEF_PROPHOTO_RGB },
+        { "rec2020",       NS_PREDEF_REC2020 },
+        { "xyz",           NS_PREDEF_XYZ_D65 },
+        { "xyz-d65",       NS_PREDEF_XYZ_D65 },
+        { "xyz-d50",       NS_PREDEF_XYZ_D50 },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(spaces); i++) {
+        if (strlen(spaces[i].name) == len &&
+            g_ascii_strncasecmp(name, spaces[i].name, len) == 0) {
+            *out = spaces[i].space;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static void
+mat3_apply(const double m[9], const double v[3], double out[3])
+{
+    for (int i = 0; i < 3; i++)
+        out[i] = m[i * 3] * v[0] + m[i * 3 + 1] * v[1] + m[i * 3 + 2] * v[2];
+}
+
+static void
+xyz_d65_to_linear_srgb(const double xyz[3], double out[3])
+{
+    static const double m[9] = {
+         3.2404542, -1.5371385, -0.4985314,
+        -0.9692660,  1.8760108,  0.0415560,
+         0.0556434, -0.2040259,  1.0572252,
+    };
+    mat3_apply(m, xyz, out);
+}
+
+static double
+a98_decode(double c)
+{
+    double v = pow(fabs(c), 563.0 / 256.0);
+    return c < 0 ? -v : v;
+}
+
+static double
+prophoto_decode(double c)
+{
+    double a = fabs(c);
+    double v = a < 16.0 / 512.0 ? a / 16.0 : pow(a, 1.8);
+    return c < 0 ? -v : v;
+}
+
+static double
+rec2020_decode(double c)
+{
+    static const double alpha = 1.09929682680944;
+    static const double beta  = 0.018053968510807;
+    double a = fabs(c);
+    double v = a < beta * 4.5 ? a / 4.5
+                              : pow((a + alpha - 1.0) / alpha, 1.0 / 0.45);
+    return c < 0 ? -v : v;
+}
+
+static void
+predefined_to_linear_srgb(ns_predefined_space space, const double in[3],
+                          double out[3])
+{
+    static const double p3_to_xyz[9] = {
+        0.4865709486, 0.2656676932, 0.1982172852,
+        0.2289745641, 0.6917385218, 0.0792869141,
+        0.0000000000, 0.0451133819, 1.0439443689,
+    };
+    static const double a98_to_xyz[9] = {
+        0.5766690429, 0.1855582379, 0.1882286462,
+        0.2973449753, 0.6273635663, 0.0752914585,
+        0.0270313614, 0.0706888525, 0.9913375368,
+    };
+    static const double prophoto_to_xyz_d50[9] = {
+        0.7977604896, 0.1351757162, 0.0313534242,
+        0.2880711198, 0.7118432022, 0.0000856779,
+        0.0000000000, 0.0000000000, 0.8251046025,
+    };
+    static const double rec2020_to_xyz[9] = {
+        0.6369580483, 0.1446169036, 0.1688809752,
+        0.2627002120, 0.6779980715, 0.0593017165,
+        0.0000000000, 0.0280726930, 1.0609850577,
+    };
+    static const double d50_to_d65[9] = {
+         0.9555766, -0.0230393, 0.0631636,
+        -0.0282895,  1.0099416, 0.0210077,
+         0.0122982, -0.0204830, 1.3299098,
+    };
+    double linear[3], xyz[3], adapted[3];
+    switch (space) {
+    case NS_PREDEF_SRGB:
+        for (int i = 0; i < 3; i++) out[i] = srgb_decode_gamma(in[i]);
+        return;
+    case NS_PREDEF_SRGB_LINEAR:
+        for (int i = 0; i < 3; i++) out[i] = in[i];
+        return;
+    case NS_PREDEF_DISPLAY_P3:
+        for (int i = 0; i < 3; i++) linear[i] = srgb_decode_gamma(in[i]);
+        mat3_apply(p3_to_xyz, linear, xyz);
+        break;
+    case NS_PREDEF_A98_RGB:
+        for (int i = 0; i < 3; i++) linear[i] = a98_decode(in[i]);
+        mat3_apply(a98_to_xyz, linear, xyz);
+        break;
+    case NS_PREDEF_PROPHOTO_RGB:
+        for (int i = 0; i < 3; i++) linear[i] = prophoto_decode(in[i]);
+        mat3_apply(prophoto_to_xyz_d50, linear, adapted);
+        mat3_apply(d50_to_d65, adapted, xyz);
+        break;
+    case NS_PREDEF_REC2020:
+        for (int i = 0; i < 3; i++) linear[i] = rec2020_decode(in[i]);
+        mat3_apply(rec2020_to_xyz, linear, xyz);
+        break;
+    case NS_PREDEF_XYZ_D65:
+        for (int i = 0; i < 3; i++) xyz[i] = in[i];
+        break;
+    case NS_PREDEF_XYZ_D50:
+        for (int i = 0; i < 3; i++) adapted[i] = in[i];
+        mat3_apply(d50_to_d65, adapted, xyz);
+        break;
+    default:
+        return;
+    }
+    xyz_d65_to_linear_srgb(xyz, out);
+}
+
+static gboolean
+parse_color_function(const char *s, guint8 *r, guint8 *g, guint8 *b,
+                     guint8 *alpha)
+{
+    if (g_ascii_strncasecmp(s, "color(", 6) != 0) return FALSE;
+    if (strchr(s, ',')) return FALSE;
+    const char *p = s + 6;
+    while (is_ws(*p)) p++;
+    const char *name = p;
+    while (*p && (g_ascii_isalnum(*p) || *p == '-')) p++;
+    ns_predefined_space space;
+    if (!predefined_space_by_name(name, (gsize)(p - name), &space)) return FALSE;
+
+    double values[4] = { 0, 0, 0, 1 };
+    int count = 0;
+    while (*p && *p != ')' && count < 4) {
+        while (is_ws(*p) || *p == '/') p++;
+        if (!*p || *p == ')') break;
+        if (g_ascii_strncasecmp(p, "none", 4) == 0 && !is_ident(p[4])) {
+            values[count] = count == 3 ? 1.0 : 0.0;
+            count++;
+            p += 4;
+            continue;
+        }
+        char *end = NULL;
+        double v = g_ascii_strtod(p, &end);
+        if (!end || end == p) return FALSE;
+        if (*end == '%') {
+            v /= 100.0;
+            end++;
+        } else if (is_ident(*end)) {
+            return FALSE;
+        }
+        values[count++] = v;
+        p = end;
+    }
+    while (is_ws(*p)) p++;
+    if (*p != ')' || count < 3) return FALSE;
+
+    double linear[3];
+    predefined_to_linear_srgb(space, values, linear);
+    for (int i = 0; i < 3; i++)
+        linear[i] = srgb_encode_linear(linear[i]);
+    *r  = (guint8)CLAMP((int)(linear[0] * 255 + 0.5), 0, 255);
+    *g  = (guint8)CLAMP((int)(linear[1] * 255 + 0.5), 0, 255);
+    *b  = (guint8)CLAMP((int)(linear[2] * 255 + 0.5), 0, 255);
+    *alpha = (guint8)CLAMP((int)(CLAMP(values[3], 0.0, 1.0) * 255 + 0.5), 0, 255);
+    return TRUE;
+}
+
 static gboolean
 color_mix_percent(const char *s, double *out)
 {
@@ -1973,6 +2169,7 @@ parse_color_depth(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
     if (parse_hwb_func(s, r, g, b, a)) return TRUE;
     if (parse_lab_func(s, r, g, b, a)) return TRUE;
     if (parse_oklab_func(s, r, g, b, a)) return TRUE;
+    if (parse_color_function(s, r, g, b, a)) return TRUE;
     if (parse_color_mix_func(s, r, g, b, a, depth)) return TRUE;
     if (s[0] == '#') {
         gsize n = strlen(s + 1);
