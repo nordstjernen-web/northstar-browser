@@ -77,7 +77,15 @@ harness reported OK.
 | `css/css-backgrounds` | 474 / 1055 | 44.9% |
 | `css/css-transforms` | 310 / 705 | 44.0% |
 | `html/semantics/document-metadata` | 68 / 171 | 39.8% |
+| `html/semantics/scripting-1` | see note | — |
 | `css/css-flexbox` | 780 / 3905 | 20.0% |
+
+`html/semantics/scripting-1` has no stable figure to quote: roughly a
+quarter of its 474 files load modules or iframes over the network and
+time out under load, so its denominator swings by tens of subtests
+between runs (1944 and 1962 on two runs of the same binary). Judge it
+per file instead — its largest, `script-type-and-language-js.html`, went
+from 91 to 456 of 456 subtests on this branch.
 
 `html/dom` is the largest single area in WPT and the one most ordinary
 pages depend on. `css/css-flexbox` is the weakest and the most
@@ -194,6 +202,17 @@ Changes on this branch, each verified against the tests named:
   `display-p3`, `a98-rgb`, `prophoto-rgb`, `rec2020`, `xyz`, `xyz-d50`
   and `xyz-d65` parse and convert to sRGB, with number, percentage and
   `none` components and an optional alpha.
+- **`<script>` type handling.** Only two of the sixteen JavaScript MIME
+  type essences the spec lists were accepted, so a script labelled
+  `application/ecmascript`, `text/jscript`, `text/livescript` or any of
+  the `text/javascript1.0`–`1.5` series was silently skipped — and a
+  skipped script leaves no trace. The type is now stripped of
+  surrounding whitespace and matched against the full list, a
+  `language` attribute with no `type` beside it contributes
+  `text/` + its value, and the comparison runs over the attribute's real
+  byte length so an embedded NUL no longer truncates
+  `type="text/javascript\0"` into a match.
+  `script-type-and-language-js.html`: 91 → 456 of 456 subtests.
 
 ## Keeping this current
 
