@@ -84,7 +84,9 @@ On Debian or Ubuntu, install the required development packages:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev zlib1g-dev
+    libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
+    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev \
+    zlib1g-dev
 meson setup builddir
 meson compile -C builddir
 ./builddir/src/gtk/northstar

@@ -233,7 +233,8 @@ System packages required on Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev
+    libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
+    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev
 ```
 
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
@@ -249,7 +250,8 @@ On Fedora/RHEL:
 
 ```sh
 sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
-    openssl-devel uchardet-devel libpsl-devel sqlite-devel \
+    openssl-devel uchardet-devel harfbuzz-devel fribidi-devel cairo-devel \
+    fontconfig-devel freetype-devel libpsl-devel sqlite-devel \
     libseccomp-devel SDL2-devel
 ```
 
@@ -257,7 +259,8 @@ On openSUSE:
 
 ```sh
 sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
-    libopenssl-devel libuchardet-devel libpsl-devel sqlite3-devel \
+    libopenssl-devel libuchardet-devel harfbuzz-devel fribidi-devel \
+    cairo-devel fontconfig-devel freetype2-devel libpsl-devel sqlite3-devel \
     libseccomp-devel libSDL2-devel
 ```
 
