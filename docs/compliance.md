@@ -58,29 +58,70 @@ Two caveats when reading any of this:
 
 ## Current scores
 
-Measured at `4992f1f` against a WPT checkout of 2026-07-29, 8 s per-test
+Measured at `7b38d66` against a WPT checkout of 2026-07-29, 8 s per-test
 timeout. "Files" counts test files where every subtest passed and the
 harness reported OK.
 
-| Area | Files | Subtests | Pass rate |
-| --- | --- | --- | --- |
-| `html/dom` | 104 / 259 | 60099 / 60879 | 98.7% |
-| `css/cssom` | 97 / 188 | 3230 / 3508 | 92.1% |
-| `dom/nodes` | 182 / 285 | 11518 / 12351 | 93.3% |
-| `css/selectors` | 132 / 276 | 4775 / 5749 | 83.1% |
-| `css/css-cascade` | 43 / 96 | 951 / 1111 | 85.6% |
-| `html/semantics/text-level-semantics` | 7 / 10 | 27 / 38 | 71.1% |
-| `html/semantics/forms` | 145 / 443 | 3270 / 4857 | 67.3% |
-| `css/css-values` | 60 / 266 | 3468 / 5879 | 59.0% |
-| `css/css-color` | 10 / 62 | 5219 / 11006 | 47.4% |
-| `html/semantics/document-metadata` | 17 / 103 | 68 / 171 | 39.8% |
+| Area | Subtests | Pass rate |
+| --- | --- | --- |
+| `html/dom` | 60099 / 60879 | 98.7% |
+| `dom/nodes` | 11465 / 11680 | 98.2% |
+| `dom/events` | 738 / 781 | 94.5% |
+| `css/cssom` | 3230 / 3508 | 92.1% |
+| `css/css-cascade` | 951 / 1111 | 85.6% |
+| `css/selectors` | 4775 / 5749 | 83.1% |
+| `html/semantics/text-level-semantics` | 27 / 38 | 71.1% |
+| `html/semantics/forms` | 3270 / 4857 | 67.3% |
+| `css/css-values` | 3468 / 5879 | 59.0% |
+| `css/css-color` | 5219 / 11006 | 47.4% |
+| `css/css-backgrounds` | 474 / 1055 | 44.9% |
+| `css/css-transforms` | 310 / 705 | 44.0% |
+| `html/semantics/document-metadata` | 68 / 171 | 39.8% |
+| `css/css-flexbox` | 780 / 3905 | 20.0% |
 
 `html/dom` is the largest single area in WPT and the one most ordinary
-pages depend on; `css/css-color` is the lowest, and almost all of its
-failures are the two structural gaps described below rather than
-scattered bugs.
+pages depend on. `css/css-flexbox` is the weakest and the most
+consequential for real pages — see below. `css/css-color` is nearly as
+low, but almost all of its failures are the two structural gaps
+described below rather than scattered bugs.
+
+### Effect of the fixes on this branch
+
+Same runner, same WPT checkout, the commit before this work versus
+`7b38d66`:
+
+| Area | Before | After |
+| --- | --- | --- |
+| `css/css-cascade` | 639 | 951 |
+| `css/css-backgrounds` | 421 | 474 |
+| `css/css-transforms` | 265 | 310 |
+| `css/css-color` | 5156 | 5219 |
+| `css/css-values` | 3445 | 3468 |
+| `css/css-flexbox` | 760 | 780 |
+| `css/cssom` | 3229 | 3230 |
+
+No area regressed. `dom/nodes` is not in that table because its
+denominator is not stable between runs: the before run reached 12351
+subtests with 3 files timing out and the after run 11680 with 18, the
+machine being busier. On the metric that does not move, files where
+every subtest passed, it went from 182 to 184, and its failure count
+from 213 to 209.
 
 ## Known gaps
+
+### Flex layout is the weakest area
+
+At 20% this is the lowest score in the table and, unlike `css/css-color`,
+it is about layout rather than serialization — so it is the gap most
+likely to make a real page render wrong. Simple cases are correct: a
+row of `flex: 1 1 auto` / `flex: 2 1 0` / fixed-width items resolves to
+the same geometry a browser produces, and `flex-direction: column` with
+`align-items` and `justify-content` places items correctly. The
+failures are concentrated in the harder parts of the algorithm —
+`min-width: auto` on flex items, percentage resolution against an
+indefinite container, wrapping with `align-content`, nested flex
+containers, and the intrinsic-size contribution of a flex container to
+its parent. This deserves attention before any further colour work.
 
 ### Computed values keep no colour space
 
