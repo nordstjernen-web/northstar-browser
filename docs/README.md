@@ -14,6 +14,9 @@ libcurl, carrying no upstream browser engine.
 - **[preloading.md](preloading.md)** — the speculative preload scan, the
   request key that identifies a fetch, and the four layers that keep a
   subresource from being fetched twice.
+- **[compliance.md](compliance.md)** — where the engine stands against the
+  HTML and CSS specifications, how to reproduce the web-platform-tests
+  scores, and the known structural gaps.
 
 ## Related documents at the repository root
 

@@ -2,6 +2,49 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.6:
+======
+* The DOM insertion methods run the insertion steps. `append`,
+  `prepend`, `before`, `after`, `replaceWith` and `replaceChildren`
+  moved nodes into the tree without the work `appendChild`,
+  `insertBefore`, `replaceChild` and `insertAdjacentElement` already
+  did, so a `<script>` inserted through any of them never executed and
+  a custom element never got its `connectedCallback`. Cloning a
+  `<template>`'s content and handing it to `replaceWith` -- the
+  ordinary way to stamp a template -- therefore dropped every script in
+  it. `innerHTML` still marks its scripts already-started, so it keeps
+  not executing them.
+* `getComputedStyle` resolves every property it enumerates. It listed
+  218 properties but returned the empty string for 126 of them, because
+  the initial-value fallback was a hand-written `strcmp` chain covering
+  about fifty longhands -- so reading `flex-grow`, `align-items`,
+  `max-width` or `object-fit` off an element that never set them gave
+  "" rather than the initial value. Properties whose initial value is
+  `currentcolor` resolve to the element's computed `color`, and an
+  inherited property with no entry of its own walks up to the nearest
+  styled ancestor, so elements outside the styled tree report inherited
+  values instead of "".
+* Computed `<position>` values are normalized. `background-position`
+  and `object-position` kept their specified text, so `10% center`
+  stayed `10% center` instead of resolving to `10% 50%`, and the
+  four-value edge-offset form was mis-split: `right 30% top 60px`
+  produced x=100% y=30% rather than x=70% y=60px. Both shorthands now
+  share one splitter that resolves an edge keyword against its offset,
+  and assemble their computed value from the two longhands.
+* `transform-origin` and `perspective-origin` serialized as
+  `translate(0%, 0%)`, which is not a valid value for either property.
+  They resolve against the border box and serialize as lengths, so
+  `left top` reads back as `0px 0px` and `center` on a 100x50 box as
+  `50px 25px`.
+* The CSS `color()` function parses. `color(srgb ...)` and the
+  `srgb-linear`, `display-p3`, `a98-rgb`, `prophoto-rgb`, `rec2020`,
+  `xyz`, `xyz-d50` and `xyz-d65` spaces convert to sRGB, with number,
+  percentage and `none` components and an optional alpha. Previously
+  the whole declaration was dropped as invalid.
+* `docs/compliance.md` records where the engine stands against the HTML
+  and CSS specifications, how to reproduce the web-platform-tests
+  scores, and the known structural gaps.
+
 1.0.5:
 ======
 * Extended-container WebP images decode. Wuffs accepts only a bare
