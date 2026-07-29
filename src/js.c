@@ -47158,8 +47158,12 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 
     g_free(js->cookie_value);
     js->cookie_value = jar;
-    if (js->current_url && *js->current_url)
+    if (js->current_url && *js->current_url) {
         ns_net_cookie_store_from_js(js->current_url, s);
+        char *visible = ns_net_cookies_for_js(js->current_url);
+        g_free(js->cookie_value);
+        js->cookie_value = visible ? visible : g_strdup("");
+    }
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }

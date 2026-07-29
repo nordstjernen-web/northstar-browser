@@ -1370,10 +1370,13 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
             secure = TRUE;
         } else if (klen == 7 && g_ascii_strncasecmp(p, "max-age", 7) == 0 && aeq) {
             g_autofree char *tmp = g_strndup(av, avlen);
-            gint64 ma = g_ascii_strtoll(tmp, NULL, 10);
-            has_expiry = TRUE;
-            if (ma <= 0) expired = TRUE;
-            else expiry = now + ma;
+            char *end = NULL;
+            gint64 ma = g_ascii_strtoll(tmp, &end, 10);
+            if (end != tmp) {
+                has_expiry = TRUE;
+                expired = ma <= 0;
+                if (ma > 0) expiry = now + ma;
+            }
         } else if (klen == 7 && g_ascii_strncasecmp(p, "expires", 7) == 0 && aeq &&
                    !has_expiry) {
             g_autofree char *tmp = g_strndup(av, avlen);
