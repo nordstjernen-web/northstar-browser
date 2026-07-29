@@ -13669,6 +13669,9 @@ ns_computed_initial_value(const char *name)
         { "mix-blend-mode",             "normal" },
         { "object-fit",                 "fill" },
         { "object-position",            "50% 50%" },
+        { "object-position-x",          "50%" },
+        { "object-position-y",          "50%" },
+        { "background-position",        "0% 0%" },
         { "order",                      "0" },
         { "outline-offset",             "0px" },
         { "outline-style",              "none" },
@@ -14219,6 +14222,19 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (strcmp(name, "inset") == 0)
         return ns_computed_box_shorthand(ctx, n, "top", "right",
                                          "bottom", "left");
+    if (strcmp(name, "object-position") == 0 ||
+        strcmp(name, "background-position") == 0) {
+        gboolean is_bg = name[0] == 'b';
+        char *x = ns_computed_lookup(ctx, n,
+            is_bg ? "background-position-x" : "object-position-x");
+        char *y = ns_computed_lookup(ctx, n,
+            is_bg ? "background-position-y" : "object-position-y");
+        char *out = g_strdup_printf("%s %s", x && *x ? x : "50%",
+                                             y && *y ? y : "50%");
+        g_free(x);
+        g_free(y);
+        return out;
+    }
     if (strcmp(name, "gap") == 0 || strcmp(name, "grid-gap") == 0) {
         char *row = ns_computed_lookup(ctx, n, "row-gap");
         char *col = ns_computed_lookup(ctx, n, "column-gap");
@@ -14264,6 +14280,32 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 
     if (strcmp(name, "transform") == 0)
         return ns_computed_transform_matrix(computed, lbox);
+
+    if (strcmp(name, "transform-origin") == 0 ||
+        strcmp(name, "perspective-origin") == 0) {
+        gboolean has_z = name[0] == 't';
+        double ax = 50, ay = 50, az = 0;
+        gboolean ax_pct = TRUE, ay_pct = TRUE;
+        const ns_css_value *ov = (computed && property_id >= 0)
+                                 ? computed->values[property_id] : NULL;
+        if (ov && ov->kind == NS_CSS_V_TRANSFORM && ov->u.transform.n_ops > 0) {
+            const ns_css_transform_op *o = &ov->u.transform.ops[0];
+            ax = o->a; ay = o->b; az = o->c;
+            ax_pct = o->a_is_percent; ay_pct = o->b_is_percent;
+        }
+        double bw = 0, bh = 0;
+        if (lbox) {
+            bw = lbox->content_width + lbox->padding.left + lbox->padding.right +
+                 lbox->border.left + lbox->border.right;
+            bh = lbox->content_height + lbox->padding.top + lbox->padding.bottom +
+                 lbox->border.top + lbox->border.bottom;
+        }
+        double px = ax_pct ? ax / 100.0 * bw : ax;
+        double py = ay_pct ? ay / 100.0 * bh : ay;
+        if (has_z && az != 0)
+            return g_strdup_printf("%gpx %gpx %gpx", px, py, az);
+        return g_strdup_printf("%gpx %gpx", px, py);
+    }
 
     if (strcmp(name, "direction") == 0) {
         if (computed && computed->values[NS_CSS_DIRECTION])

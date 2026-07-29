@@ -8495,6 +8495,80 @@ split_ws(const char *s, char *out[4])
     return split_ws_limit(s, out, 4);
 }
 
+static gboolean
+position_is_h_edge(const char *t)
+{
+    return g_ascii_strcasecmp(t, "left") == 0 ||
+           g_ascii_strcasecmp(t, "right") == 0;
+}
+
+static gboolean
+position_is_v_edge(const char *t)
+{
+    return g_ascii_strcasecmp(t, "top") == 0 ||
+           g_ascii_strcasecmp(t, "bottom") == 0;
+}
+
+static gboolean
+position_is_keyword(const char *t)
+{
+    return position_is_h_edge(t) || position_is_v_edge(t) ||
+           g_ascii_strcasecmp(t, "center") == 0;
+}
+
+static char *
+position_from_edge(const char *edge, const char *offset)
+{
+    gboolean far = g_ascii_strcasecmp(edge, "right") == 0 ||
+                   g_ascii_strcasecmp(edge, "bottom") == 0;
+    if (!offset) return g_strdup(far ? "100%" : "0%");
+    if (!far) return g_strdup(offset);
+    char *unit = NULL;
+    double v = g_ascii_strtod(offset, &unit);
+    if (unit && g_strcmp0(unit, "%") == 0)
+        return g_strdup_printf("%g%%", 100.0 - v);
+    return g_strdup_printf("calc(100%% - %s)", offset);
+}
+
+static void
+position_split(const char *text, char **out_x, char **out_y)
+{
+    char *tok[4] = {0};
+    int n = split_ws_limit(text, tok, 4);
+    char *x = NULL, *y = NULL;
+    gboolean used[4] = { FALSE, FALSE, FALSE, FALSE };
+
+    for (int i = 0; i < n; i++) {
+        if (used[i] || !position_is_h_edge(tok[i])) continue;
+        const char *off = (i + 1 < n && !position_is_keyword(tok[i + 1]))
+                          ? tok[i + 1] : NULL;
+        g_free(x);
+        x = position_from_edge(tok[i], off);
+        used[i] = TRUE;
+        if (off) used[i + 1] = TRUE;
+    }
+    for (int i = 0; i < n; i++) {
+        if (used[i] || !position_is_v_edge(tok[i])) continue;
+        const char *off = (i + 1 < n && !position_is_keyword(tok[i + 1]))
+                          ? tok[i + 1] : NULL;
+        g_free(y);
+        y = position_from_edge(tok[i], off);
+        used[i] = TRUE;
+        if (off) used[i + 1] = TRUE;
+    }
+    for (int i = 0; i < n; i++) {
+        if (used[i]) continue;
+        gboolean center = g_ascii_strcasecmp(tok[i], "center") == 0;
+        char *v = g_strdup(center ? "50%" : tok[i]);
+        if (!x) x = v;
+        else if (!y) y = v;
+        else g_free(v);
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    *out_x = x ? x : g_strdup("50%");
+    *out_y = y ? y : g_strdup("50%");
+}
+
 static char *
 substitute_var_fallbacks(const char *vtext, int depth)
 {
@@ -9686,30 +9760,8 @@ parse_declaration_block(const char **pp, const char *end,
                 const char *sseg = css_scan_until(sp, send, ",", &sterm);
                 char *layer = css_trim_dup_range(sp, sseg);
                 sp = sterm == ',' ? sseg + 1 : sseg;
-                char *tokens[4] = {0};
-                int n = split_ws(layer, tokens);
-                const char *xs = NULL, *ys = NULL;
-                if (n == 1) {
-                    xs = tokens[0];
-                    ys = (g_ascii_strcasecmp(tokens[0], "top") == 0 ||
-                          g_ascii_strcasecmp(tokens[0], "bottom") == 0) ? tokens[0] : "center";
-                    if (g_ascii_strcasecmp(tokens[0], "top") == 0 ||
-                        g_ascii_strcasecmp(tokens[0], "bottom") == 0) xs = "center";
-                } else if (n >= 2) {
-                    xs = tokens[0];
-                    ys = tokens[1];
-                    gboolean first_is_v =
-                        g_ascii_strcasecmp(xs, "top") == 0 ||
-                        g_ascii_strcasecmp(xs, "bottom") == 0;
-                    gboolean second_is_h =
-                        g_ascii_strcasecmp(ys, "left") == 0 ||
-                        g_ascii_strcasecmp(ys, "right") == 0;
-                    if (first_is_v && second_is_h) {
-                        const char *tmp = xs;
-                        xs = ys;
-                        ys = tmp;
-                    }
-                }
+                char *xs = NULL, *ys = NULL;
+                position_split(layer, &xs, &ys);
                 if (xs) {
                     ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_POSITION_X, xs);
                     if (v) {
@@ -9726,7 +9778,8 @@ parse_declaration_block(const char **pp, const char *end,
                         vy_tail = v;
                     }
                 }
-                for (int i = 0; i < n; i++) g_free(tokens[i]);
+                g_free(xs);
+                g_free(ys);
                 g_free(layer);
             }
             if (vx_head) {
@@ -9744,30 +9797,8 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         if (strcmp(pname, "object-position") == 0) {
-            char *tokens[4] = {0};
-            int n = split_ws(vtext, tokens);
-            const char *xs = NULL, *ys = NULL;
-            if (n == 1) {
-                xs = tokens[0];
-                ys = (g_ascii_strcasecmp(tokens[0], "top") == 0 ||
-                      g_ascii_strcasecmp(tokens[0], "bottom") == 0) ? tokens[0] : "center";
-                if (g_ascii_strcasecmp(tokens[0], "top") == 0 ||
-                    g_ascii_strcasecmp(tokens[0], "bottom") == 0) xs = "center";
-            } else if (n >= 2) {
-                xs = tokens[0];
-                ys = tokens[1];
-                gboolean first_is_v =
-                    g_ascii_strcasecmp(xs, "top") == 0 ||
-                    g_ascii_strcasecmp(xs, "bottom") == 0;
-                gboolean second_is_h =
-                    g_ascii_strcasecmp(ys, "left") == 0 ||
-                    g_ascii_strcasecmp(ys, "right") == 0;
-                if (first_is_v && second_is_h) {
-                    const char *tmp = xs;
-                    xs = ys;
-                    ys = tmp;
-                }
-            }
+            char *xs = NULL, *ys = NULL;
+            position_split(vtext, &xs, &ys);
             if (xs) {
                 ns_css_value *v = parse_value_for(NS_CSS_OBJECT_POSITION_X, xs);
                 if (v) {
@@ -9782,7 +9813,8 @@ parse_declaration_block(const char **pp, const char *end,
                     g_array_append_val(decls_out, d);
                 }
             }
-            for (int i = 0; i < n; i++) g_free(tokens[i]);
+            g_free(xs);
+            g_free(ys);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
