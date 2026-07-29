@@ -20421,9 +20421,15 @@ typedef struct {
     double vh;
 } ns_style_el_cached;
 
+typedef struct {
+    ns_css_stylesheet *sheet;
+    guint64 stamp;
+} ns_merged_style_cached;
+
 static GHashTable *g_style_el_cache;
 static GHashTable *g_merged_style_cache;
 static GHashTable *g_link_sheet_cache;
+static guint64 g_merged_style_cache_clock;
 
 static void
 ns_style_el_cached_free(gpointer data)
@@ -20436,6 +20442,50 @@ ns_style_el_cached_free(gpointer data)
         ns_css_stylesheet_free(e->sheet);
     }
     g_free(e);
+}
+
+static void
+ns_merged_style_cached_free(gpointer data)
+{
+    ns_merged_style_cached *e = data;
+    if (!e) return;
+    if (e->sheet) {
+        e->sheet->cached = FALSE;
+        ns_css_stylesheet_free(e->sheet);
+    }
+    g_free(e);
+}
+
+static void
+ns_cached_stylesheet_free(gpointer data)
+{
+    ns_css_stylesheet *sh = data;
+    if (!sh) return;
+    sh->cached = FALSE;
+    ns_css_stylesheet_free(sh);
+}
+
+static void
+ns_merged_style_cache_trim(void)
+{
+    if (!g_merged_style_cache ||
+        g_hash_table_size(g_merged_style_cache) <= 64)
+        return;
+    while (g_hash_table_size(g_merged_style_cache) > 48) {
+        GHashTableIter it;
+        gpointer key, value, victim = NULL;
+        guint64 oldest = G_MAXUINT64;
+        g_hash_table_iter_init(&it, g_merged_style_cache);
+        while (g_hash_table_iter_next(&it, &key, &value)) {
+            ns_merged_style_cached *e = value;
+            if (e->stamp < oldest) {
+                oldest = e->stamp;
+                victim = key;
+            }
+        }
+        if (!victim) break;
+        g_hash_table_remove(g_merged_style_cache, victim);
+    }
 }
 
 static int g_css_relayout_depth;
@@ -20458,19 +20508,9 @@ ns_css_style_element_cache_begin(void)
     if (g_css_relayout_depth > 1) return;
     if (g_style_el_cache && g_hash_table_size(g_style_el_cache) > 2048)
         g_hash_table_remove_all(g_style_el_cache);
-    if (g_merged_style_cache && g_hash_table_size(g_merged_style_cache) > 4)
-        g_hash_table_remove_all(g_merged_style_cache);
+    ns_merged_style_cache_trim();
     if (g_link_sheet_cache && g_hash_table_size(g_link_sheet_cache) > 256)
         g_hash_table_remove_all(g_link_sheet_cache);
-}
-
-static void
-ns_merged_style_cached_free(gpointer data)
-{
-    ns_css_stylesheet *sh = data;
-    if (!sh) return;
-    sh->cached = FALSE;
-    ns_css_stylesheet_free(sh);
 }
 
 ns_css_stylesheet *
@@ -20486,10 +20526,12 @@ ns_css_merged_styles_cached(const char *css, gssize len)
                                 ns_css_media_viewport_current_w(),
                                 ns_css_media_viewport_current_h(),
                                 (int)len, css);
-    ns_css_stylesheet *hit = g_hash_table_lookup(g_merged_style_cache, key);
+    ns_merged_style_cached *hit =
+        g_hash_table_lookup(g_merged_style_cache, key);
     if (hit) {
+        hit->stamp = ++g_merged_style_cache_clock;
         g_free(key);
-        return hit;
+        return hit->sheet;
     }
     ns_css_stylesheet *sh = ns_css_stylesheet_parse(css, len);
     if (!sh) {
@@ -20497,7 +20539,10 @@ ns_css_merged_styles_cached(const char *css, gssize len)
         return NULL;
     }
     sh->cached = TRUE;
-    g_hash_table_replace(g_merged_style_cache, key, sh);
+    ns_merged_style_cached *entry = g_new0(ns_merged_style_cached, 1);
+    entry->sheet = sh;
+    entry->stamp = ++g_merged_style_cache_clock;
+    g_hash_table_replace(g_merged_style_cache, key, entry);
     return sh;
 }
 
@@ -20509,7 +20554,7 @@ ns_css_stylesheet_parse_url_cached(const char *url, const char *css, gssize len)
     if (!g_link_sheet_cache)
         g_link_sheet_cache =
             g_hash_table_new_full(g_str_hash, g_str_equal,
-                                  g_free, ns_merged_style_cached_free);
+                                  g_free, ns_cached_stylesheet_free);
     char *key = g_strdup_printf("%.0fx%.0f|%s",
                                 ns_css_media_viewport_current_w(),
                                 ns_css_media_viewport_current_h(), url);
