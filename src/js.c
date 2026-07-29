@@ -50583,15 +50583,18 @@ typedef struct ns_parser_tail {
 static gboolean
 ns_script_type_string(const ns_node *n, const char **out, size_t *out_len)
 {
-    const char *s = ns_element_get_attr(n, "type");
+    gsize raw_len = 0;
+    const char *s = ns_element_get_attr_len(n, "type", &raw_len);
     if (!s) {
-        const char *lang = ns_element_get_attr(n, "language");
-        if (!lang || !*lang) return FALSE;
+        gsize lang_len = 0;
+        const char *lang = ns_element_get_attr_len(n, "language", &lang_len);
+        if (!lang || lang_len == 0) return FALSE;
         *out = lang;
-        *out_len = strlen(lang);
+        *out_len = lang_len;
         return TRUE;
     }
-    const char *e = s + strlen(s);
+    if (raw_len == 0) return FALSE;
+    const char *e = s + raw_len;
     while (s < e && g_ascii_isspace(*s)) s++;
     while (e > s && g_ascii_isspace(e[-1])) e--;
     *out = s;
@@ -50635,13 +50638,15 @@ ns_script_type_supported(const ns_node *n)
     const char *s;
     size_t len;
     if (!ns_script_type_string(n, &s, &len)) return TRUE;
-    if (len == 0) return TRUE;
     if (ns_element_get_attr(n, "type")) {
         if (len == 6 && g_ascii_strncasecmp(s, "module", 6) == 0) return TRUE;
         return ns_js_mime_essence_match(s, len);
     }
-    g_autofree char *joined = g_strconcat("text/", s, NULL);
-    return ns_js_mime_essence_match(joined, strlen(joined));
+    g_autofree char *joined = g_malloc(len + 6);
+    memcpy(joined, "text/", 5);
+    memcpy(joined + 5, s, len);
+    joined[len + 5] = '\0';
+    return ns_js_mime_essence_match(joined, len + 5);
 }
 
 static gboolean
