@@ -4531,6 +4531,12 @@ static const struct ns_box *ns_box_for_this(JSContext *ctx,
                                             JSValueConst this_val);
 static void ns_box_border_box(const struct ns_box *b,
                               double *x, double *y, double *w, double *h);
+static void ns_box_visual_border_box(const struct ns_box *b,
+                                     double *x, double *y,
+                                     double *w, double *h);
+static void ns_box_visual_padding_box(const struct ns_box *b,
+                                      double *x, double *y,
+                                      double *w, double *h);
 static JSValue ns_element_img_natural_width(JSContext *ctx,
                                             JSValueConst this_val);
 static JSValue ns_element_img_natural_height(JSContext *ctx,
@@ -23691,30 +23697,6 @@ ns_io_overflow_clips(const ns_box *box)
     return FALSE;
 }
 
-static void
-ns_io_visual_border_box(const ns_box *box,
-                        double *x, double *y, double *w, double *h)
-{
-    ns_box_border_box(box, x, y, w, h);
-    for (const ns_box *parent = box->parent; parent; parent = parent->parent) {
-        *x -= parent->scroll_x;
-        *y -= parent->scroll_y;
-    }
-}
-
-static void
-ns_io_visual_padding_box(const ns_box *box,
-                         double *x, double *y, double *w, double *h)
-{
-    ns_io_visual_border_box(box, x, y, w, h);
-    *x += box->border.left;
-    *y += box->border.top;
-    *w -= box->border.left + box->border.right;
-    *h -= box->border.top + box->border.bottom;
-    if (*w < 0) *w = 0;
-    if (*h < 0) *h = 0;
-}
-
 static gboolean
 ns_io_intersect_rect(double clip_x, double clip_y,
                      double clip_w, double clip_h,
@@ -23748,9 +23730,9 @@ ns_io_root_rect(JSContext *ctx, ns_io_observer *o,
             const struct ns_box *rb = ns_box_find_by_dom(layout_root, rn);
             if (rb) {
                 if (ns_io_overflow_clips(rb))
-                    ns_io_visual_padding_box(rb, out_x, out_y, out_w, out_h);
+                    ns_box_visual_padding_box(rb, out_x, out_y, out_w, out_h);
                 else
-                    ns_io_visual_border_box(rb, out_x, out_y, out_w, out_h);
+                    ns_box_visual_border_box(rb, out_x, out_y, out_w, out_h);
                 return;
             }
         }
@@ -23806,7 +23788,7 @@ ns_io_compute_entry(JSContext *ctx, ns_io_observer *o,
     if (!target || !layout_root) return FALSE;
     const struct ns_box *tb = ns_box_find_by_dom(layout_root, target);
     if (!tb) return FALSE;
-    ns_io_visual_border_box(tb, tx, ty, tw, th);
+    ns_box_visual_border_box(tb, tx, ty, tw, th);
     *ix = *tx;
     *iy = *ty;
     *iw = *tw;
@@ -23822,7 +23804,8 @@ ns_io_compute_entry(JSContext *ctx, ns_io_observer *o,
         }
         if (ns_io_overflow_clips(parent)) {
             double clip_x, clip_y, clip_w, clip_h;
-            ns_io_visual_padding_box(parent, &clip_x, &clip_y, &clip_w, &clip_h);
+            ns_box_visual_padding_box(parent, &clip_x, &clip_y,
+                                      &clip_w, &clip_h);
             if (!ns_io_intersect_rect(clip_x, clip_y, clip_w, clip_h,
                                       ix, iy, iw, ih))
                 intersects = FALSE;
@@ -30982,27 +30965,35 @@ ns_box_accumulate_transform(const ns_box *box, ns_mat4 *out)
     ns_mat4_identity(out);
     gboolean any = FALSE;
     for (const ns_box *b = box; b; b = b->parent) {
-        if (!b->style) continue;
-        if (!(b->style->values[NS_CSS_TRANSFORM] ||
-              b->style->values[NS_CSS_TRANSLATE] ||
-              b->style->values[NS_CSS_ROTATE] ||
-              b->style->values[NS_CSS_SCALE]))
-            continue;
-        ns_css_transform eff;
-        eff.n_ops = 0;
-        ns_css_style_effective_transform(b->style, NULL, &eff);
-        if (eff.n_ops == 0) continue;
-        double bx, by, bw, bh;
-        ns_box_border_box(b, &bx, &by, &bw, &bh);
-        double ox, oy, oz;
-        ns_box_transform_origin_2d(b, bx, by, bw, bh, &ox, &oy, &oz);
-        ns_mat4 tm;
-        ns_css_transform_to_mat4(&eff, bw, bh, &tm);
         ns_mat4 m;
         ns_mat4_identity(&m);
-        ns_mat4_translate(&m, ox, oy, oz);
-        ns_mat4_multiply(&m, &tm, &m);
-        ns_mat4_translate(&m, -ox, -oy, -oz);
+        gboolean local = FALSE;
+        if (b->style &&
+            (b->style->values[NS_CSS_TRANSFORM] ||
+             b->style->values[NS_CSS_TRANSLATE] ||
+             b->style->values[NS_CSS_ROTATE] ||
+             b->style->values[NS_CSS_SCALE])) {
+            ns_css_transform eff;
+            eff.n_ops = 0;
+            ns_css_style_effective_transform(b->style, NULL, &eff);
+            if (eff.n_ops > 0) {
+                double bx, by, bw, bh;
+                ns_box_border_box(b, &bx, &by, &bw, &bh);
+                double ox, oy, oz;
+                ns_box_transform_origin_2d(b, bx, by, bw, bh, &ox, &oy, &oz);
+                ns_mat4 tm;
+                ns_css_transform_to_mat4(&eff, bw, bh, &tm);
+                ns_mat4_translate(&m, ox, oy, oz);
+                ns_mat4_multiply(&m, &tm, &m);
+                ns_mat4_translate(&m, -ox, -oy, -oz);
+                local = TRUE;
+            }
+        }
+        if (b != box && (b->scroll_x != 0 || b->scroll_y != 0)) {
+            ns_mat4_translate(&m, -b->scroll_x, -b->scroll_y, 0);
+            local = TRUE;
+        }
+        if (!local) continue;
         ns_mat4_multiply(&m, out, out);
         any = TRUE;
     }
@@ -31010,28 +31001,50 @@ ns_box_accumulate_transform(const ns_box *box, ns_mat4 *out)
 }
 
 static void
+ns_box_apply_visual_transform(const ns_box *box,
+                              double *x, double *y, double *w, double *h)
+{
+    ns_mat4 transform;
+    if (ns_box_accumulate_transform(box, &transform)) {
+        double cx[4] = { *x, *x + *w, *x, *x + *w };
+        double cy[4] = { *y, *y, *y + *h, *y + *h };
+        double min_x = 1e18, min_y = 1e18, max_x = -1e18, max_y = -1e18;
+        for (int i = 0; i < 4; i++) {
+            double px, py, pz, pw;
+            ns_mat4_apply(&transform, cx[i], cy[i], 0, &px, &py, &pz, &pw);
+            if (fabs(pw) > 1e-9) { px /= pw; py /= pw; }
+            if (px < min_x) min_x = px;
+            if (px > max_x) max_x = px;
+            if (py < min_y) min_y = py;
+            if (py > max_y) max_y = py;
+        }
+        *x = min_x;
+        *y = min_y;
+        *w = max_x - min_x;
+        *h = max_y - min_y;
+    }
+}
+
+static void
 ns_box_visual_border_box(const ns_box *box,
                          double *x, double *y, double *w, double *h)
 {
     ns_box_border_box(box, x, y, w, h);
-    ns_mat4 transform;
-    if (!ns_box_accumulate_transform(box, &transform)) return;
-    double cx[4] = { *x, *x + *w, *x, *x + *w };
-    double cy[4] = { *y, *y, *y + *h, *y + *h };
-    double min_x = 1e18, min_y = 1e18, max_x = -1e18, max_y = -1e18;
-    for (int i = 0; i < 4; i++) {
-        double px, py, pz, pw;
-        ns_mat4_apply(&transform, cx[i], cy[i], 0, &px, &py, &pz, &pw);
-        if (fabs(pw) > 1e-9) { px /= pw; py /= pw; }
-        if (px < min_x) min_x = px;
-        if (px > max_x) max_x = px;
-        if (py < min_y) min_y = py;
-        if (py > max_y) max_y = py;
-    }
-    *x = min_x;
-    *y = min_y;
-    *w = max_x - min_x;
-    *h = max_y - min_y;
+    ns_box_apply_visual_transform(box, x, y, w, h);
+}
+
+static void
+ns_box_visual_padding_box(const ns_box *box,
+                          double *x, double *y, double *w, double *h)
+{
+    ns_box_border_box(box, x, y, w, h);
+    *x += box->border.left;
+    *y += box->border.top;
+    *w -= box->border.left + box->border.right;
+    *h -= box->border.top + box->border.bottom;
+    if (*w < 0) *w = 0;
+    if (*h < 0) *h = 0;
+    ns_box_apply_visual_transform(box, x, y, w, h);
 }
 
 
