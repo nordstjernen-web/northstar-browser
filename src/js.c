@@ -13488,75 +13488,238 @@ ns_make_navigation(JSContext *ctx, ns_js *js)
 }
 
 
+static gboolean
+ns_computed_prop_defaults_to_color(const char *name)
+{
+    static const char *const from_color[] = {
+        "border-top-color", "border-right-color",
+        "border-bottom-color", "border-left-color",
+        "outline-color", "text-decoration-color", "column-rule-color",
+        "text-emphasis-color", "-webkit-text-fill-color",
+        "-webkit-text-stroke-color",
+    };
+    if (!name) return FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(from_color); i++)
+        if (strcmp(name, from_color[i]) == 0) return TRUE;
+    return FALSE;
+}
+
 static const char *
 ns_computed_initial_value(const char *name)
 {
+    static const struct { const char *name; const char *value; } initials[] = {
+        { "padding-top",                "0px" },
+        { "padding-right",              "0px" },
+        { "padding-bottom",             "0px" },
+        { "padding-left",               "0px" },
+        { "margin-top",                 "0px" },
+        { "margin-right",               "0px" },
+        { "margin-bottom",              "0px" },
+        { "margin-left",                "0px" },
+        { "border-top-width",           "0px" },
+        { "border-right-width",         "0px" },
+        { "border-bottom-width",        "0px" },
+        { "border-left-width",          "0px" },
+        { "top",                        "auto" },
+        { "right",                      "auto" },
+        { "bottom",                     "auto" },
+        { "left",                       "auto" },
+        { "width",                      "auto" },
+        { "height",                     "auto" },
+        { "box-sizing",                 "content-box" },
+        { "display",                    "inline" },
+        { "position",                   "static" },
+        { "opacity",                    "1" },
+        { "transform",                  "none" },
+        { "filter",                     "none" },
+        { "background-image",           "none" },
+        { "box-shadow",                 "none" },
+        { "text-decoration-line",       "none" },
+        { "text-transform",             "none" },
+        { "float",                      "none" },
+        { "clear",                      "none" },
+        { "visibility",                 "visible" },
+        { "white-space",                "normal" },
+        { "hyphens",                    "manual" },
+        { "overflow",                   "visible" },
+        { "overflow-x",                 "visible" },
+        { "overflow-y",                 "visible" },
+        { "cursor",                     "auto" },
+        { "z-index",                    "auto" },
+        { "pointer-events",             "auto" },
+        { "flex-direction",             "row" },
+        { "font-weight",                "400" },
+        { "font-stretch",               "normal" },
+        { "font-kerning",               "auto" },
+        { "font-variant-ligatures",     "normal" },
+        { "font-feature-settings",      "normal" },
+        { "font-variation-settings",    "normal" },
+        { "letter-spacing",             "normal" },
+        { "word-spacing",               "normal" },
+        { "text-align",                 "start" },
+        { "list-style-type",            "disc" },
+        { "vertical-align",             "baseline" },
+        { "table-layout",               "auto" },
+        { "border-collapse",            "separate" },
+        { "background-color",           "rgba(0, 0, 0, 0)" },
+        { "border-top-style",           "none" },
+        { "border-right-style",         "none" },
+        { "border-bottom-style",        "none" },
+        { "border-left-style",          "none" },
+        { "accent-color",               "auto" },
+        { "border-spacing",             "0px 0px" },
+        { "caption-side",               "top" },
+        { "caret-color",                "auto" },
+        { "clip-rule",                  "nonzero" },
+        { "dominant-baseline",          "auto" },
+        { "fill",                       "rgb(0, 0, 0)" },
+        { "fill-opacity",               "1" },
+        { "fill-rule",                  "nonzero" },
+        { "font-style",                 "normal" },
+        { "image-rendering",            "auto" },
+        { "list-style-image",           "none" },
+        { "list-style-position",        "outside" },
+        { "orphans",                    "2" },
+        { "overflow-wrap",              "normal" },
+        { "paint-order",                "normal" },
+        { "quotes",                     "auto" },
+        { "scrollbar-color",            "auto" },
+        { "shape-rendering",            "auto" },
+        { "stroke",                     "none" },
+        { "stroke-dasharray",           "none" },
+        { "stroke-dashoffset",          "0px" },
+        { "stroke-linecap",             "butt" },
+        { "stroke-linejoin",            "miter" },
+        { "stroke-miterlimit",          "4" },
+        { "stroke-opacity",             "1" },
+        { "stroke-width",               "1px" },
+        { "tab-size",                   "8" },
+        { "text-anchor",                "start" },
+        { "text-indent",                "0px" },
+        { "text-shadow",                "none" },
+        { "text-wrap-mode",             "wrap" },
+        { "widows",                     "2" },
+        { "word-break",                 "normal" },
+        { "writing-mode",               "horizontal-tb" },
+        { "align-content",              "normal" },
+        { "align-items",                "normal" },
+        { "align-self",                 "auto" },
+        { "animation-play-state",       "running" },
+        { "appearance",                 "none" },
+        { "aspect-ratio",               "auto" },
+        { "background-clip",            "border-box" },
+        { "background-origin",          "padding-box" },
+        { "background-position-x",      "0%" },
+        { "background-position-y",      "0%" },
+        { "background-repeat",          "repeat" },
+        { "background-size",            "auto" },
+        { "border-bottom-left-radius",  "0px" },
+        { "border-bottom-right-radius", "0px" },
+        { "border-top-left-radius",     "0px" },
+        { "border-top-right-radius",    "0px" },
+        { "border-end-end-radius",      "0px" },
+        { "border-end-start-radius",    "0px" },
+        { "border-start-end-radius",    "0px" },
+        { "border-start-start-radius",  "0px" },
+        { "clip",                       "auto" },
+        { "clip-path",                  "none" },
+        { "column-count",               "auto" },
+        { "column-gap",                 "normal" },
+        { "column-span",                "none" },
+        { "column-width",               "auto" },
+        { "container-name",             "none" },
+        { "container-type",             "normal" },
+        { "content",                    "normal" },
+        { "content-visibility",         "visible" },
+        { "counter-increment",          "none" },
+        { "counter-reset",              "none" },
+        { "cx",                         "0px" },
+        { "cy",                         "0px" },
+        { "x",                          "0px" },
+        { "y",                          "0px" },
+        { "r",                          "0px" },
+        { "rx",                         "auto" },
+        { "ry",                         "auto" },
+        { "flex-basis",                 "auto" },
+        { "flex-grow",                  "0" },
+        { "flex-shrink",                "1" },
+        { "flex-wrap",                  "nowrap" },
+        { "grid-auto-columns",          "auto" },
+        { "grid-auto-flow",             "row" },
+        { "grid-auto-rows",             "auto" },
+        { "grid-column-end",            "auto" },
+        { "grid-column-start",          "auto" },
+        { "grid-row-end",               "auto" },
+        { "grid-row-start",             "auto" },
+        { "grid-template-areas",        "none" },
+        { "grid-template-columns",      "none" },
+        { "grid-template-rows",         "none" },
+        { "justify-content",            "normal" },
+        { "justify-items",              "normal" },
+        { "justify-self",               "auto" },
+        { "mask-image",                 "none" },
+        { "max-block-size",             "none" },
+        { "max-height",                 "none" },
+        { "max-inline-size",            "none" },
+        { "max-width",                  "none" },
+        { "min-block-size",             "auto" },
+        { "min-height",                 "auto" },
+        { "min-inline-size",            "auto" },
+        { "min-width",                  "auto" },
+        { "mix-blend-mode",             "normal" },
+        { "object-fit",                 "fill" },
+        { "object-position",            "50% 50%" },
+        { "order",                      "0" },
+        { "outline-offset",             "0px" },
+        { "outline-style",              "none" },
+        { "outline-width",              "0px" },
+        { "perspective",                "none" },
+        { "perspective-origin",         "50% 50%" },
+        { "row-gap",                    "normal" },
+        { "scrollbar-width",            "auto" },
+        { "stop-color",                 "rgb(0, 0, 0)" },
+        { "stop-opacity",               "1" },
+        { "text-decoration-style",      "solid" },
+        { "text-overflow",              "clip" },
+        { "transform-origin",           "50% 50%" },
+        { "transform-style",            "flat" },
+        { "unicode-bidi",               "normal" },
+        { "user-select",                "auto" },
+        { "vector-effect",              "none" },
+        { "line-height",                "normal" },
+        { "direction",                  "ltr" },
+        { "text-orientation",           "mixed" },
+        { "animation-delay",            "0s" },
+        { "animation-duration",         "0s" },
+        { "transition-delay",           "0s" },
+        { "transition-duration",        "0s" },
+        { "backface-visibility",        "visible" },
+        { "column-rule-style",          "none" },
+        { "column-rule-width",          "0px" },
+        { "line-clamp",                 "none" },
+        { "text-decoration",            "none" },
+        { "font-variant",               "normal" },
+        { "border-radius",              "0px" },
+        { "gap",                        "normal" },
+        { "color",                      "rgb(26, 26, 26)" },
+        { "font-family",                "serif" },
+        { "font-size",                  "16px" },
+        { "text-wrap-style",            "auto" },
+        { "text-decoration-thickness",  "auto" },
+        { "text-underline-offset",      "auto" },
+        { "text-underline-position",    "auto" },
+        { "font-optical-sizing",        "auto" },
+        { "isolation",                  "auto" },
+        { "resize",                     "none" },
+        { "empty-cells",                "show" },
+        { "border-image-source",        "none" },
+        { "will-change",                "auto" },
+        { "touch-action",               "auto" },
+        { "scroll-behavior",            "auto" },
+    };
     if (!name) return NULL;
-    if (strcmp(name, "padding-top") == 0 ||
-        strcmp(name, "padding-right") == 0 ||
-        strcmp(name, "padding-bottom") == 0 ||
-        strcmp(name, "padding-left") == 0 ||
-        strcmp(name, "margin-top") == 0 ||
-        strcmp(name, "margin-right") == 0 ||
-        strcmp(name, "margin-bottom") == 0 ||
-        strcmp(name, "margin-left") == 0 ||
-        strcmp(name, "border-top-width") == 0 ||
-        strcmp(name, "border-right-width") == 0 ||
-        strcmp(name, "border-bottom-width") == 0 ||
-        strcmp(name, "border-left-width") == 0)
-        return "0px";
-    if (strcmp(name, "top") == 0 ||
-        strcmp(name, "right") == 0 ||
-        strcmp(name, "bottom") == 0 ||
-        strcmp(name, "left") == 0)
-        return "auto";
-    if (strcmp(name, "width") == 0 || strcmp(name, "height") == 0)
-        return "auto";
-    if (strcmp(name, "box-sizing") == 0) return "content-box";
-    if (strcmp(name, "display") == 0) return "inline";
-    if (strcmp(name, "position") == 0) return "static";
-    if (strcmp(name, "opacity") == 0) return "1";
-    if (strcmp(name, "transform") == 0 ||
-        strcmp(name, "filter") == 0 ||
-        strcmp(name, "background-image") == 0 ||
-        strcmp(name, "box-shadow") == 0 ||
-        strcmp(name, "text-decoration-line") == 0 ||
-        strcmp(name, "text-transform") == 0 ||
-        strcmp(name, "float") == 0 ||
-        strcmp(name, "clear") == 0)
-        return "none";
-    if (strcmp(name, "visibility") == 0) return "visible";
-    if (strcmp(name, "white-space") == 0) return "normal";
-    if (strcmp(name, "hyphens") == 0) return "manual";
-    if (strcmp(name, "overflow") == 0 ||
-        strcmp(name, "overflow-x") == 0 ||
-        strcmp(name, "overflow-y") == 0)
-        return "visible";
-    if (strcmp(name, "cursor") == 0 ||
-        strcmp(name, "z-index") == 0 ||
-        strcmp(name, "pointer-events") == 0)
-        return "auto";
-    if (strcmp(name, "flex-direction") == 0) return "row";
-    if (strcmp(name, "font-weight") == 0) return "400";
-    if (strcmp(name, "font-stretch") == 0) return "normal";
-    if (strcmp(name, "font-kerning") == 0) return "auto";
-    if (strcmp(name, "font-variant-ligatures") == 0) return "normal";
-    if (strcmp(name, "font-feature-settings") == 0) return "normal";
-    if (strcmp(name, "font-variation-settings") == 0) return "normal";
-    if (strcmp(name, "letter-spacing") == 0 ||
-        strcmp(name, "word-spacing") == 0)
-        return "normal";
-    if (strcmp(name, "text-align") == 0) return "start";
-    if (strcmp(name, "list-style-type") == 0) return "disc";
-    if (strcmp(name, "vertical-align") == 0) return "baseline";
-    if (strcmp(name, "table-layout") == 0) return "auto";
-    if (strcmp(name, "border-collapse") == 0) return "separate";
-    if (strcmp(name, "background-color") == 0) return "rgba(0, 0, 0, 0)";
-    if (strcmp(name, "border-top-style") == 0 ||
-        strcmp(name, "border-right-style") == 0 ||
-        strcmp(name, "border-bottom-style") == 0 ||
-        strcmp(name, "border-left-style") == 0)
-        return "none";
+    for (gsize i = 0; i < G_N_ELEMENTS(initials); i++)
+        if (strcmp(name, initials[i].name) == 0) return initials[i].value;
     return NULL;
 }
 
@@ -14218,6 +14381,8 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             return ns_css_value_serialize(s->values[pid]);
         const char *initial = ns_computed_initial_value(resolved_name);
         if (s && initial) return g_strdup(initial);
+        if (s && ns_computed_prop_defaults_to_color(resolved_name))
+            return ns_computed_lookup(ctx, n, "color");
     }
 
     if (style && *style) {
@@ -14245,8 +14410,17 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             if (result) return result;
         }
     }
+    if (pid >= 0 && js && js->style_table && ns_css_prop_inherited(pid)) {
+        for (const ns_node *a = n->parent; a; a = a->parent) {
+            const ns_style *as = g_hash_table_lookup(js->style_table, a);
+            if (as && as->values[pid])
+                return ns_css_value_serialize(as->values[pid]);
+        }
+    }
     const char *initial = ns_computed_initial_value(resolved_name);
     if (initial) return g_strdup(initial);
+    if (pid >= 0 && ns_computed_prop_defaults_to_color(resolved_name))
+        return ns_computed_lookup(ctx, n, "color");
     return NULL;
 }
 
