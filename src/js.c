@@ -23671,6 +23671,71 @@ ns_io_parse_root_margin(const char *str,
     return TRUE;
 }
 
+static gboolean
+ns_io_overflow_clips(const ns_box *box)
+{
+    if (!box || !box->style) return FALSE;
+    if (box->kind != NS_BOX_BLOCK && box->kind != NS_BOX_TABLE_CAPTION &&
+        box->kind != NS_BOX_TABLE_CELL)
+        return FALSE;
+    const char *overflow = ns_style_keyword(box->style, NS_CSS_OVERFLOW);
+    const char *overflow_x = ns_style_keyword(box->style, NS_CSS_OVERFLOW_X);
+    const char *overflow_y = ns_style_keyword(box->style, NS_CSS_OVERFLOW_Y);
+    if (!overflow_x) overflow_x = overflow;
+    if (!overflow_y) overflow_y = overflow;
+    static const char *const clipped[] = { "hidden", "clip", "auto", "scroll" };
+    for (guint i = 0; i < G_N_ELEMENTS(clipped); i++)
+        if (g_strcmp0(overflow_x, clipped[i]) == 0 ||
+            g_strcmp0(overflow_y, clipped[i]) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static void
+ns_io_visual_border_box(const ns_box *box,
+                        double *x, double *y, double *w, double *h)
+{
+    ns_box_border_box(box, x, y, w, h);
+    for (const ns_box *parent = box->parent; parent; parent = parent->parent) {
+        *x -= parent->scroll_x;
+        *y -= parent->scroll_y;
+    }
+}
+
+static void
+ns_io_visual_padding_box(const ns_box *box,
+                         double *x, double *y, double *w, double *h)
+{
+    ns_io_visual_border_box(box, x, y, w, h);
+    *x += box->border.left;
+    *y += box->border.top;
+    *w -= box->border.left + box->border.right;
+    *h -= box->border.top + box->border.bottom;
+    if (*w < 0) *w = 0;
+    if (*h < 0) *h = 0;
+}
+
+static gboolean
+ns_io_intersect_rect(double clip_x, double clip_y,
+                     double clip_w, double clip_h,
+                     double *x, double *y, double *w, double *h)
+{
+    double right = *x + *w;
+    double bottom = *y + *h;
+    double clip_right = clip_x + clip_w;
+    double clip_bottom = clip_y + clip_h;
+    double out_x = *x > clip_x ? *x : clip_x;
+    double out_y = *y > clip_y ? *y : clip_y;
+    double out_right = right < clip_right ? right : clip_right;
+    double out_bottom = bottom < clip_bottom ? bottom : clip_bottom;
+    gboolean intersects = out_right >= out_x && out_bottom >= out_y;
+    *x = out_x;
+    *y = out_y;
+    *w = out_right > out_x ? out_right - out_x : 0;
+    *h = out_bottom > out_y ? out_bottom - out_y : 0;
+    return intersects;
+}
+
 static void
 ns_io_root_rect(JSContext *ctx, ns_io_observer *o,
                 const struct ns_box *layout_root,
@@ -23682,7 +23747,10 @@ ns_io_root_rect(JSContext *ctx, ns_io_observer *o,
         if (rn && rn->kind == NS_NODE_ELEMENT && layout_root) {
             const struct ns_box *rb = ns_box_find_by_dom(layout_root, rn);
             if (rb) {
-                ns_box_border_box(rb, out_x, out_y, out_w, out_h);
+                if (ns_io_overflow_clips(rb))
+                    ns_io_visual_padding_box(rb, out_x, out_y, out_w, out_h);
+                else
+                    ns_io_visual_border_box(rb, out_x, out_y, out_w, out_h);
                 return;
             }
         }
@@ -23713,11 +23781,12 @@ ns_io_compute_entry(JSContext *ctx, ns_io_observer *o,
                     double *tx, double *ty, double *tw, double *th,
                     double *rx, double *ry, double *rw, double *rh,
                     double *ix, double *iy, double *iw, double *ih,
-                    double *ratio)
+                    double *ratio, gboolean *out_intersecting)
 {
     *tx = *ty = *tw = *th = 0;
     *ix = *iy = *iw = *ih = 0;
     *ratio = 0;
+    *out_intersecting = FALSE;
     ns_io_root_rect(ctx, o, layout_root, rx, ry, rw, rh);
     double margin_top = o->margin_top.percentage
         ? o->margin_top.value * *rw / 100.0 : o->margin_top.value;
@@ -23737,20 +23806,31 @@ ns_io_compute_entry(JSContext *ctx, ns_io_observer *o,
     if (!target || !layout_root) return FALSE;
     const struct ns_box *tb = ns_box_find_by_dom(layout_root, target);
     if (!tb) return FALSE;
-    ns_box_border_box(tb, tx, ty, tw, th);
-    double t_right = *tx + *tw;
-    double t_bot   = *ty + *th;
-    double ileft  = *tx > r_left ? *tx : r_left;
-    double itop   = *ty > r_top  ? *ty : r_top;
-    double iright = t_right < r_right ? t_right : r_right;
-    double ibot   = t_bot   < r_bot   ? t_bot   : r_bot;
-    if (iright <= ileft || ibot <= itop) {
-        *ix = *iy = 0; *iw = *ih = 0;
-        return TRUE;
+    ns_io_visual_border_box(tb, tx, ty, tw, th);
+    *ix = *tx;
+    *iy = *ty;
+    *iw = *tw;
+    *ih = *th;
+    gboolean intersects = ns_io_intersect_rect(r_left, r_top,
+        r_right - r_left, r_bot - r_top, ix, iy, iw, ih);
+    const ns_node *root_node = ns_unwrap_element(o->root_wrapper);
+    gboolean found_root = root_node == NULL || root_node->kind == NS_NODE_DOCUMENT;
+    for (const ns_box *parent = tb->parent; parent; parent = parent->parent) {
+        if (parent->dom == root_node) {
+            found_root = TRUE;
+            break;
+        }
+        if (ns_io_overflow_clips(parent)) {
+            double clip_x, clip_y, clip_w, clip_h;
+            ns_io_visual_padding_box(parent, &clip_x, &clip_y, &clip_w, &clip_h);
+            if (!ns_io_intersect_rect(clip_x, clip_y, clip_w, clip_h,
+                                      ix, iy, iw, ih))
+                intersects = FALSE;
+        }
     }
-    *ix = ileft; *iy = itop;
-    *iw = iright - ileft;
-    *ih = ibot - itop;
+    if (!found_root) intersects = FALSE;
+    if (!intersects) *iw = *ih = 0;
+    *out_intersecting = intersects;
     double target_area = (*tw) * (*th);
     if (target_area > 0)
         *ratio = ((*iw) * (*ih)) / target_area;
@@ -23826,18 +23906,22 @@ ns_io_evaluate_one(JSContext *ctx, ns_io_observer *o,
     const struct ns_box *root = js ? js->layout_root : NULL;
     const ns_node *target = ns_unwrap_element(t->wrapper);
     double tx, ty, tw, th, rx, ry, rw, rh, ix, iy, iw, ih, ratio;
+    gboolean intersecting;
     gboolean has_box = ns_io_compute_entry(ctx, o, root, target,
                                            &tx, &ty, &tw, &th,
                                            &rx, &ry, &rw, &rh,
-                                           &ix, &iy, &iw, &ih, &ratio);
-    gboolean intersecting = has_box &&
-        tx <= rx + rw && tx + tw >= rx &&
-        ty <= ry + rh && ty + th >= ry;
+                                           &ix, &iy, &iw, &ih, &ratio,
+                                           &intersecting);
+    intersecting = has_box && intersecting;
     if (tw <= 0 || th <= 0) ratio = intersecting ? 1.0 : 0.0;
-    if (!has_box && t->has_fired) {
-        *out_entry = JS_UNDEFINED;
-        return FALSE;
-    }
+    double viewport_x = ns_window_scroll_prop(ctx, "scrollX");
+    double viewport_y = ns_window_scroll_prop(ctx, "scrollY");
+    tx -= viewport_x;
+    ty -= viewport_y;
+    rx -= viewport_x;
+    ry -= viewport_y;
+    ix -= viewport_x;
+    iy -= viewport_y;
     *out_entry = ns_io_make_entry(ctx, t->wrapper,
                                   tx, ty, tw, th,
                                   rx, ry, rw, rh,
@@ -33955,6 +34039,7 @@ ns_element_set_scrollTop(JSContext *ctx, JSValueConst this_val, JSValueConst val
             ns_js_dispatch_event(js, el, "scroll", NULL);
             ns_js_queue_scrollend(js, el);
         }
+        ns_observer_schedule_tick(js);
     }
     return JS_UNDEFINED;
 }
@@ -33986,6 +34071,7 @@ ns_element_set_scrollLeft(JSContext *ctx, JSValueConst this_val, JSValueConst va
             ns_js_dispatch_event(js, el, "scroll", NULL);
             ns_js_queue_scrollend(js, el);
         }
+        ns_observer_schedule_tick(js);
     }
     return JS_UNDEFINED;
 }
