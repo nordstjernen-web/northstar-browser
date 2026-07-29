@@ -25,7 +25,9 @@ Significant changes in each release:
   word-spacing, tabs, ellipsis, multi-column, inline atomics,
   decorations, small-caps and font features renders byte-identically,
   and the cache's own verification mode reports no difference between
-  cached and freshly shaped runs anywhere in it.
+  cached and freshly shaped runs anywhere in it, nor over 220 real
+  web-platform-test pages. The `css` and `dom` test subset -- 1761 tests,
+  35929 subtests -- reports no subtest that passed before and fails now.
 * The DOM insertion methods run the insertion steps. `append`,
   `prepend`, `before`, `after`, `replaceWith` and `replaceChildren`
   moved nodes into the tree without the work `appendChild`,
