@@ -1432,7 +1432,18 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
         file_domain = g_strdup(host);
         tail = "FALSE";
     }
-    const char *path = (path_attr && *path_attr) ? path_attr : "/";
+    g_autofree char *default_path = NULL;
+    const char *path;
+    if (path_attr && path_attr[0] == '/') {
+        path = path_attr;
+    } else {
+        const char *request_path = parts->pathname;
+        const char *last_slash = request_path ? strrchr(request_path, '/') : NULL;
+        default_path = !last_slash || last_slash == request_path
+            ? g_strdup("/")
+            : g_strndup(request_path, (gsize)(last_slash - request_path));
+        path = default_path;
+    }
 
     g_autofree char *site = ns_url_site_from(url);
     if (!site || !*site) {
