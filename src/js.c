@@ -324,6 +324,7 @@ static JSValue ns_call_on_handler(ns_js *js, JSValue handler,
                                   JSValueConst this_obj, const char *type,
                                   JSValue event, gboolean window_like,
                                   gboolean *special_cancel);
+static JSContext *ns_js_node_realm_context(ns_js *js, const ns_node *node);
 static void    ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
                                              const char *type,
                                              JSValueConst ev);
@@ -21443,6 +21444,7 @@ ns_worker_js_new(ns_worker_host *host)
         g_free(js);
         return NULL;
     }
+    js->main_realm_ctx = js->ctx;
     JS_SetContextOpaque(js->ctx, js);
     JS_SetRuntimeOpaque(js->rt, js);
     JS_SetModuleLoaderFunc2(js->rt, ns_js_module_normalize,
@@ -24955,6 +24957,15 @@ ns_fire_property_on_handler(ns_js *js, const ns_node *target, const char *type,
     }
     JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, target->js_wrapper);
     JSValue handler = JS_GetPropertyStr(js->ctx, wrapper, prop_name);
+    char source_key[56];
+    g_snprintf(source_key, sizeof source_key, "\xffsrc:%s", prop_name);
+    JSValue source = JS_GetPropertyStr(js->ctx, wrapper, source_key);
+    gboolean from_content_attribute = JS_IsString(source);
+    JS_FreeValue(js->ctx, source);
+    if (from_content_attribute) {
+        JS_FreeValue(js->ctx, handler);
+        return FALSE;
+    }
     gboolean fired = FALSE;
     if (JS_IsFunction(js->ctx, handler)) {
         gboolean special = FALSE;
@@ -25449,6 +25460,9 @@ static gboolean
 ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
                            JSValue event, gboolean *default_prevented)
 {
+    JSContext *saved_ctx = js->ctx;
+    JSContext *target_ctx = ns_js_node_realm_context(js, target);
+    js->ctx = target_ctx ? target_ctx : js->main_realm_ctx;
     gboolean fired = FALSE;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
@@ -25638,6 +25652,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         ns_storage_schedule_flush(js);
     }
     ns_js_budget_pop(js, &bg);
+    js->ctx = saved_ctx;
     return fired;
 }
 
@@ -43871,6 +43886,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     if (!js->rt) { g_free(js); return NULL; }
     js->ctx = JS_NewContext(js->rt);
     if (!js->ctx) { JS_FreeRuntime(js->rt); g_free(js); return NULL; }
+    js->main_realm_ctx = js->ctx;
     JS_SetContextOpaque(js->ctx, js);
     JS_SetRuntimeOpaque(js->rt, js);
     JS_SetModuleLoaderFunc2(js->rt, ns_js_module_normalize,
