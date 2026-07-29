@@ -125,6 +125,7 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 |-----------|------|
 | [lexbor](https://github.com/lexbor/lexbor) v3.0.0 | HTML5 → DOM parser, CSS, and the WHATWG URL module |
 | [quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.15.1 | JavaScript engine — no JIT |
+| [ns-pango](https://github.com/nordstjernen-web/ns-pango) | Text itemization, shaping and line breaking — a Pango fork with a cross-layout shaping cache |
 
 **Vendored in-tree** (built from the main tree, no submodules):
 
@@ -136,13 +137,16 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 | [minimp3](https://github.com/lieff/minimp3) (CC0) | In-process MP3 audio decode |
 
 **Required system libraries:** GTK 4 (≥ 4.14; ≥ 4.22.1 on Windows),
-GLib/Pango/Cairo, libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet,
-libpsl, SQLite and zlib. Linux builds also require libseccomp. SDL2 is
+GLib/Cairo, HarfBuzz, FriBidi, fontconfig, FreeType, libcurl (≥ 8.5),
+OpenSSL (libcrypto), uchardet, libpsl, SQLite and zlib. The engine lays
+text out through ns-pango rather than the system Pango; GTK still links
+the system Pango for its own widgets, and the two coexist because every
+symbol in the fork is renamed. Linux builds also require libseccomp. SDL2 is
 required when in-process audio is enabled.
 
 **Optional** (auto-detected): libavif (AVIF images), opusfile /
-vorbisfile (in-process Ogg audio), Enchant (spell-checking), fontconfig,
-pangoft2 and FreeType.
+vorbisfile (in-process Ogg audio), Enchant (spell-checking) and libthai
+(Thai line breaking).
 
 ## License
 

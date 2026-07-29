@@ -1,0 +1,9 @@
+[wrap-git]
+url = https://github.com/nordstjernen-web/ns-pango.git
+revision = 7ccde2847ef2e36ecf0cdbb3672a5daf834842b2
+depth = 1
+
+[provide]
+ns-pango = libpango_dep
+ns-pangocairo = libpangocairo_dep
+ns-pangoft2 = libpangoft2_dep

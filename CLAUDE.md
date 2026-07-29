@@ -141,6 +141,39 @@ the tree carries no patched engine. The shims degrade gracefully
 (e.g. realm lookups resolve to the current realm), which suits this
 single-realm, no-JIT edition.
 
+### Text layout: ns-pango
+
+Text is itemized, shaped and broken into lines by
+[ns-pango](https://github.com/nordstjernen-web/ns-pango), a fork of Pango
+consumed as an **upstream-style meson subproject** pinned to a commit
+(`subprojects/ns-pango.wrap`). The engine includes `<ns-pango/…>`, never
+`<pango/…>`.
+
+The fork exists for one reason: Pango keeps no cache that outlives a
+`PangoLayout`, so the same bytes were handed to HarfBuzz once to measure
+a run and again to paint it, and a table cell was shaped for
+`min-content`, for `max-content` and once more to lay out. ns-pango adds
+a process-wide cache of finished glyph strings and a per-context metrics
+cache, and drops the backends and tooling a browser never links.
+
+Two rules matter when touching it:
+
+- **Every symbol is renamed** (`ns_pango_*`, `NsPango*`, `NS_PANGO_*`,
+  `NS_TYPE_PANGO_*`), because GTK loads the system Pango into the same
+  process and GObject aborts if two libraries register the same type
+  name. `ns-rename.py` in that repo performs the rewrite and is
+  idempotent — re-run it after merging upstream, don't hand-edit.
+- **A run is cached only when its shaping cannot depend on the text
+  around it.** HarfBuzz gets the paragraph as context, so the cache
+  requires whitespace or a paragraph edge at each end of the item.
+  `NS_PANGO_SHAPE_CACHE=verify` shapes both ways and warns on any
+  difference; run it over the affected pages after changing anything in
+  the cache key. `NS_PANGO_SHAPE_CACHE=0` disables the cache, and
+  `--debug=net` reports hits, misses and skips.
+
+The GTK shell still uses the system Pango for its own widgets (the
+`PANGO_ELLIPSIZE_*` constants on GtkLabels); don't rename those.
+
 ### HTML engine: Lexbor
 
 The single HTML→DOM backend is

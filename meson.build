@@ -127,8 +127,19 @@ glib       = dependency('glib-2.0')
 gobject    = dependency('gobject-2.0')
 gio        = dependency('gio-2.0')
 cairo      = dependency('cairo')
-pango      = dependency('pango')
-pangocairo = dependency('pangocairo')
+ns_pango_sp = subproject('ns-pango',
+  default_options: [
+    'default_library=static',
+    'fontconfig=enabled',
+    'freetype=enabled',
+    'introspection=disabled',
+    'sysprof=disabled',
+    'libthai=auto',
+    'warning_level=0',
+    'werror=false',
+  ])
+pango      = ns_pango_sp.get_variable('libpango_dep')
+pangocairo = ns_pango_sp.get_variable('libpangocairo_dep')
 
 have_gtk = false
 if gtk_feature.allowed()
@@ -165,8 +176,8 @@ have_fontconfig = libfontconfig.found()
 if have_fontconfig
   add_project_arguments('-DNS_HAVE_FONTCONFIG=1', language: 'c')
 endif
-libpangoft2 = dependency('pangoft2', required: false)
-have_pangoft2 = libpangoft2.found()
+libpangoft2 = ns_pango_sp.get_variable('libpangoft2_dep')
+have_pangoft2 = true
 if have_pangoft2
   add_project_arguments('-DNS_HAVE_PANGOFT2=1', language: 'c')
 endif

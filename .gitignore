@@ -49,10 +49,12 @@ build.ninja
 compile_commands.json
 
 # Meson auto-downloaded subprojects (wrap files only are committed).
-# lexbor and quickjs-ng are fetched at setup from their upstream releases.
+# lexbor, quickjs-ng and ns-pango are fetched at setup from their upstream
+# releases.
 /subprojects/packagecache/
 /subprojects/lexbor/
 /subprojects/quickjs-ng/
+/subprojects/ns-pango/
 
 # CMake (in case)
 CMakeCache.txt

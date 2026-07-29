@@ -9,7 +9,7 @@
 
 #include <glib.h>
 #include <cairo.h>
-#include <pango/pango.h>
+#include <ns-pango/pango.h>
 #include <quickjs.h>
 
 #include "js.h"
@@ -474,7 +474,7 @@ JSValue
 ns_ctx_scale(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 JSValue
 ns_ctx_rotate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
-PangoFontDescription *
+NsPangoFontDescription *
 ns_canvas_font_desc(const char *css_font);
 gboolean
 ns_ctx_direction_is_rtl(JSContext *ctx, JSValueConst this_val);

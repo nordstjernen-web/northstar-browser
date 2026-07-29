@@ -4,6 +4,28 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* Text is laid out through ns-pango, a fork of Pango carried as a meson
+  subproject, instead of the system Pango. Pango keeps no cache that
+  outlives a `PangoLayout`, so the same bytes were shaped by HarfBuzz
+  once to measure a run and again to paint it, and a table cell was
+  shaped for `min-content`, for `max-content` and once more to lay out.
+  The fork adds a process-wide cache of finished glyph strings keyed on
+  everything HarfBuzz reads -- font, bidi level, gravity, script,
+  language, analysis and show flags, text transform, OpenType features
+  and the item bytes -- and caches `pango_context_get_metrics` per font
+  description, which resolving `line-height: normal` asks for on every
+  inline run. Every symbol in the fork is renamed, because GTK loads
+  the system Pango into the same process and GObject aborts when two
+  libraries register the same type name. Layout time on a page that
+  renders as well as lays out falls 25% on a text-heavy page and 38% on
+  a table-heavy one; laying out alone, where nothing is shaped twice
+  except for intrinsic sizing, the table page falls 29% and text is
+  unchanged. Shaping results are unchanged: a corpus covering RTL and
+  bidi, CJK, the white-space modes, intrinsic sizing, letter- and
+  word-spacing, tabs, ellipsis, multi-column, inline atomics,
+  decorations, small-caps and font features renders byte-identically,
+  and the cache's own verification mode reports no difference between
+  cached and freshly shaped runs anywhere in it.
 * The DOM insertion methods run the insertion steps. `append`,
   `prepend`, `before`, `after`, `replaceWith` and `replaceChildren`
   moved nodes into the tree without the work `appendChild`,
