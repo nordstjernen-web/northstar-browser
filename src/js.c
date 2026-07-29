@@ -40188,8 +40188,7 @@ ns_document_get_lastModified(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_document_get_all(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
-    JSValue all = ns_document_collect_by_tag(ctx, "*");
+    JSValue all = ns_make_live(ctx, this_val, NS_LIVE_DOC_TAG, "*");
     JS_SetIsHTMLDDA(ctx, all);
     return all;
 }
