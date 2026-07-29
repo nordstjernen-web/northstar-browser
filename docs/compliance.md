@@ -77,15 +77,15 @@ harness reported OK.
 | `css/css-backgrounds` | 474 / 1055 | 44.9% |
 | `css/css-transforms` | 310 / 705 | 44.0% |
 | `html/semantics/document-metadata` | 68 / 171 | 39.8% |
-| `html/semantics/scripting-1` | see note | — |
+| `html/semantics/scripting-1` | 1304 / 1980 | 65.9% |
 | `css/css-flexbox` | 780 / 3905 | 20.0% |
 
-`html/semantics/scripting-1` has no stable figure to quote: roughly a
-quarter of its 474 files load modules or iframes over the network and
-time out under load, so its denominator swings by tens of subtests
-between runs (1944 and 1962 on two runs of the same binary). Judge it
-per file instead — its largest, `script-type-and-language-js.html`, went
-from 91 to 456 of 456 subtests on this branch.
+Read `html/semantics/scripting-1` with its denominator in view: roughly
+a quarter of its 474 files load modules or iframes over the network and
+time out under load, so the total swings by tens of subtests between
+runs of the same binary (1944, 1962 and 1980 across three runs). A
+change smaller than about thirty subtests there is noise; the one
+recorded below is an order of magnitude larger.
 
 `html/dom` is the largest single area in WPT and the one most ordinary
 pages depend on. `css/css-flexbox` is the weakest and the most
@@ -95,11 +95,15 @@ described below rather than scattered bugs.
 
 ### Effect of the fixes on this branch
 
-Same runner, same WPT checkout, the commit before this work versus
-`7b38d66`:
+Same runner, same WPT checkout, the commit before this work versus this
+branch. The CSS rows were taken at `7b38d66`, before the two `<script>`
+fixes landed; the `scripting-1` row at `d747520`, before the NUL
+follow-up that adds a further 57 subtests on one of its files. Both
+"after" figures are therefore slightly conservative.
 
 | Area | Before | After |
 | --- | --- | --- |
+| `html/semantics/scripting-1` | 981 | 1304 |
 | `css/css-cascade` | 639 | 951 |
 | `css/css-backgrounds` | 421 | 474 |
 | `css/css-transforms` | 265 | 310 |
@@ -212,7 +216,9 @@ Changes on this branch, each verified against the tests named:
   `text/` + its value, and the comparison runs over the attribute's real
   byte length so an embedded NUL no longer truncates
   `type="text/javascript\0"` into a match.
-  `script-type-and-language-js.html`: 91 → 456 of 456 subtests.
+  `script-type-and-language-js.html` goes from 91 to 456 of 456
+  subtests, and `html/semantics/scripting-1` as a whole from 981 to
+  1304.
 
 ## Keeping this current
 
