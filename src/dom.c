@@ -1316,6 +1316,12 @@ ns_node_is_element_named(const ns_node *n, const char *tag)
            strcmp(n->name, tag) == 0;
 }
 
+static gboolean
+ns_node_is_embedded_document(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_DOCUMENT && n->parent != NULL;
+}
+
 const ns_node *
 ns_node_root(const ns_node *n)
 {
@@ -1331,6 +1337,7 @@ ns_node_find_first_element_depth(const ns_node *root, const char *tag, int depth
     if (ns_node_is_element_named(root, tag))
         return (ns_node *)root;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_embedded_document(c)) continue;
         ns_node *m = ns_node_find_first_element_depth(c, tag, depth + 1);
         if (m) return m;
     }
@@ -1360,6 +1367,7 @@ ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
     }
     if (ns_node_is_element_named(root, "template")) return NULL;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_embedded_document(c)) continue;
         ns_node *m = ns_node_find_by_id_depth(c, id, depth + 1);
         if (m) return m;
     }
@@ -1405,6 +1413,7 @@ static void
 ns_doc_id_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n != doc && ns_node_is_embedded_document(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(n, "id");
         if (eid && *eid) ns_doc_id_index_register(doc, eid, n);
@@ -1433,6 +1442,7 @@ static void
 ns_doc_id_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n != doc && ns_node_is_embedded_document(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(n, "id");
         if (eid && *eid) ns_doc_id_index_unregister(doc, eid, n);
@@ -1614,6 +1624,7 @@ static void
 ns_doc_class_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n != doc && ns_node_is_embedded_document(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *cls = ns_element_get_attr(n, "class");
         if (cls && *cls) ns_doc_class_index_register(doc, cls, n);
@@ -1627,6 +1638,7 @@ static void
 ns_doc_class_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n != doc && ns_node_is_embedded_document(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *cls = ns_element_get_attr(n, "class");
         if (cls && *cls) ns_doc_class_index_unregister(doc, cls, n);
@@ -1713,6 +1725,7 @@ static void
 ns_doc_tag_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n != doc && ns_node_is_embedded_document(n)) return;
     if (n->kind == NS_NODE_ELEMENT && n->name)
         ns_doc_tag_index_add_single(doc->tag_index, n->name, n);
     if (ns_node_is_element_named(n, "template")) return;
@@ -1724,6 +1737,7 @@ static void
 ns_doc_tag_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n != doc && ns_node_is_embedded_document(n)) return;
     if (n->kind == NS_NODE_ELEMENT && n->name)
         ns_doc_tag_index_remove_single(doc->tag_index, n->name, n);
     if (ns_node_is_element_named(n, "template")) return;
