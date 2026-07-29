@@ -23640,6 +23640,8 @@ ns_resize_observer_register(ns_js *js, JSContext *ctx, JSValueConst observer,
     if (!js) return;
     if (!js->resize_observers) js->resize_observers = g_ptr_array_new();
     JSValue targets = JS_GetPropertyStr(ctx, observer, "__targets");
+    JSValue widths = JS_GetPropertyStr(ctx, observer, "__lastWidths");
+    JSValue heights = JS_GetPropertyStr(ctx, observer, "__lastHeights");
     if (!JS_IsArray(targets)) {
         JS_FreeValue(ctx, targets);
         targets = JS_NewArray(ctx);
@@ -23647,20 +23649,38 @@ ns_resize_observer_register(ns_js *js, JSContext *ctx, JSValueConst observer,
         JSValue dup = JS_DupValue(ctx, observer);
         g_ptr_array_add(js->resize_observers, JS_VALUE_GET_PTR(dup));
     }
+    if (!JS_IsArray(widths)) {
+        JS_FreeValue(ctx, widths);
+        widths = JS_NewArray(ctx);
+        JS_SetPropertyStr(ctx, observer, "__lastWidths",
+                          JS_DupValue(ctx, widths));
+    }
+    if (!JS_IsArray(heights)) {
+        JS_FreeValue(ctx, heights);
+        heights = JS_NewArray(ctx);
+        JS_SetPropertyStr(ctx, observer, "__lastHeights",
+                          JS_DupValue(ctx, heights));
+    }
     uint32_t len = 0;
     JSValue lenv = JS_GetPropertyStr(ctx, targets, "length");
     JS_ToUint32(ctx, &len, lenv);
     JS_FreeValue(ctx, lenv);
     gboolean present = FALSE;
+    const ns_node *wanted = ns_unwrap_element(target);
     for (uint32_t i = 0; i < len; i++) {
         JSValue t = JS_GetPropertyUint32(ctx, targets, i);
-        if (JS_VALUE_GET_PTR(t) == JS_VALUE_GET_PTR(target)) present = TRUE;
+        if (ns_unwrap_element(t) == wanted) present = TRUE;
         JS_FreeValue(ctx, t);
         if (present) break;
     }
-    if (!present)
+    if (!present) {
         JS_SetPropertyUint32(ctx, targets, len, JS_DupValue(ctx, target));
+        JS_SetPropertyUint32(ctx, widths, len, JS_UNDEFINED);
+        JS_SetPropertyUint32(ctx, heights, len, JS_UNDEFINED);
+    }
     JS_FreeValue(ctx, targets);
+    JS_FreeValue(ctx, widths);
+    JS_FreeValue(ctx, heights);
 }
 
 static JSValue
@@ -23693,8 +23713,15 @@ ns_resize_observers_tick(ns_js *js)
                                     g_ptr_array_index(js->resize_observers, oi));
         JSValue cb = JS_GetPropertyStr(ctx, observer, "__cb");
         JSValue targets = JS_GetPropertyStr(ctx, observer, "__targets");
-        if (!JS_IsFunction(ctx, cb) || !JS_IsArray(targets)) {
-            JS_FreeValue(ctx, cb); JS_FreeValue(ctx, targets); continue;
+        JSValue widths = JS_GetPropertyStr(ctx, observer, "__lastWidths");
+        JSValue heights = JS_GetPropertyStr(ctx, observer, "__lastHeights");
+        if (!JS_IsFunction(ctx, cb) || !JS_IsArray(targets) ||
+            !JS_IsArray(widths) || !JS_IsArray(heights)) {
+            JS_FreeValue(ctx, cb);
+            JS_FreeValue(ctx, targets);
+            JS_FreeValue(ctx, widths);
+            JS_FreeValue(ctx, heights);
+            continue;
         }
         uint32_t len = 0;
         JSValue lenv = JS_GetPropertyStr(ctx, targets, "length");
@@ -23707,14 +23734,15 @@ ns_resize_observers_tick(ns_js *js)
             double w = 0, h = 0;
             JSValue entry = ns_resize_observer_build_entry(ctx, target, &w, &h);
             double last_w = -1, last_h = -1;
-            JSValue lw = JS_GetPropertyStr(ctx, target, "__ndRoW");
-            JSValue lh = JS_GetPropertyStr(ctx, target, "__ndRoH");
-            JS_ToFloat64(ctx, &last_w, lw);
-            JS_ToFloat64(ctx, &last_h, lh);
+            JSValue lw = JS_GetPropertyUint32(ctx, widths, i);
+            JSValue lh = JS_GetPropertyUint32(ctx, heights, i);
+            gboolean has_last = JS_IsNumber(lw) && JS_IsNumber(lh) &&
+                JS_ToFloat64(ctx, &last_w, lw) == 0 &&
+                JS_ToFloat64(ctx, &last_h, lh) == 0;
             JS_FreeValue(ctx, lw); JS_FreeValue(ctx, lh);
-            if (w != last_w || h != last_h) {
-                JS_SetPropertyStr(ctx, target, "__ndRoW", JS_NewFloat64(ctx, w));
-                JS_SetPropertyStr(ctx, target, "__ndRoH", JS_NewFloat64(ctx, h));
+            if (!has_last || w != last_w || h != last_h) {
+                JS_SetPropertyUint32(ctx, widths, i, JS_NewFloat64(ctx, w));
+                JS_SetPropertyUint32(ctx, heights, i, JS_NewFloat64(ctx, h));
                 if (JS_IsUndefined(entries)) entries = JS_NewArray(ctx);
                 JS_SetPropertyUint32(ctx, entries, n_entries++, entry);
             } else {
@@ -23731,6 +23759,8 @@ ns_resize_observers_tick(ns_js *js)
         if (!JS_IsUndefined(entries)) JS_FreeValue(ctx, entries);
         JS_FreeValue(ctx, cb);
         JS_FreeValue(ctx, targets);
+        JS_FreeValue(ctx, widths);
+        JS_FreeValue(ctx, heights);
     }
     js->observer_ticking = FALSE;
 }
@@ -23763,22 +23793,42 @@ ns_resize_observer_unobserve(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1) return JS_UNDEFINED;
     JSValue targets = JS_GetPropertyStr(ctx, this_val, "__targets");
+    JSValue widths = JS_GetPropertyStr(ctx, this_val, "__lastWidths");
+    JSValue heights = JS_GetPropertyStr(ctx, this_val, "__lastHeights");
     if (JS_IsArray(targets)) {
         uint32_t len = 0;
         JSValue lenv = JS_GetPropertyStr(ctx, targets, "length");
         JS_ToUint32(ctx, &len, lenv);
         JS_FreeValue(ctx, lenv);
         JSValue kept = JS_NewArray(ctx);
+        JSValue kept_widths = JS_NewArray(ctx);
+        JSValue kept_heights = JS_NewArray(ctx);
         uint32_t k = 0;
+        const ns_node *wanted = ns_unwrap_element(argv[0]);
         for (uint32_t i = 0; i < len; i++) {
             JSValue t = JS_GetPropertyUint32(ctx, targets, i);
-            if (JS_VALUE_GET_PTR(t) != JS_VALUE_GET_PTR(argv[0]))
+            JSValue w = JS_IsArray(widths)
+                ? JS_GetPropertyUint32(ctx, widths, i) : JS_UNDEFINED;
+            JSValue h = JS_IsArray(heights)
+                ? JS_GetPropertyUint32(ctx, heights, i) : JS_UNDEFINED;
+            if (ns_unwrap_element(t) != wanted) {
                 JS_SetPropertyUint32(ctx, kept, k++, JS_DupValue(ctx, t));
+                JS_SetPropertyUint32(ctx, kept_widths, k - 1,
+                                     JS_DupValue(ctx, w));
+                JS_SetPropertyUint32(ctx, kept_heights, k - 1,
+                                     JS_DupValue(ctx, h));
+            }
+            JS_FreeValue(ctx, w);
+            JS_FreeValue(ctx, h);
             JS_FreeValue(ctx, t);
         }
         JS_SetPropertyStr(ctx, this_val, "__targets", kept);
+        JS_SetPropertyStr(ctx, this_val, "__lastWidths", kept_widths);
+        JS_SetPropertyStr(ctx, this_val, "__lastHeights", kept_heights);
     }
     JS_FreeValue(ctx, targets);
+    JS_FreeValue(ctx, widths);
+    JS_FreeValue(ctx, heights);
     return JS_UNDEFINED;
 }
 
@@ -23788,6 +23838,8 @@ ns_resize_observer_disconnect(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     JS_SetPropertyStr(ctx, this_val, "__targets", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "__lastWidths", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "__lastHeights", JS_UNDEFINED);
     ns_js *js = js_from_ctx(ctx);
     if (js && js->resize_observers) {
         void *ptr = JS_VALUE_GET_PTR(this_val);
@@ -44526,9 +44578,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
                           "observe", ns_resize_observer_observe, 2);
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
-                          "unobserve", ns_event_noop, 1);
+                          "unobserve", ns_resize_observer_unobserve, 1);
     ns_bind_ctor_proto_fn(ctx, global, "ResizeObserver",
-                          "disconnect", ns_event_noop, 0);
+                          "disconnect", ns_resize_observer_disconnect, 0);
     ns_bind_ctor_proto_fn(ctx, global, "PerformanceObserver",
                           "observe", ns_perf_observer_observe, 1);
     ns_bind_ctor_proto_fn(ctx, global, "PerformanceObserver",
