@@ -50581,20 +50581,67 @@ typedef struct ns_parser_tail {
 } ns_parser_tail;
 
 static gboolean
+ns_script_type_string(const ns_node *n, const char **out, size_t *out_len)
+{
+    const char *s = ns_element_get_attr(n, "type");
+    if (!s) {
+        const char *lang = ns_element_get_attr(n, "language");
+        if (!lang || !*lang) return FALSE;
+        *out = lang;
+        *out_len = strlen(lang);
+        return TRUE;
+    }
+    const char *e = s + strlen(s);
+    while (s < e && g_ascii_isspace(*s)) s++;
+    while (e > s && g_ascii_isspace(e[-1])) e--;
+    *out = s;
+    *out_len = (size_t)(e - s);
+    return TRUE;
+}
+
+static gboolean
+ns_js_mime_essence_match(const char *s, size_t len)
+{
+    static const char *const essences[] = {
+        "application/ecmascript",   "application/javascript",
+        "application/x-ecmascript", "application/x-javascript",
+        "text/ecmascript",          "text/javascript",
+        "text/javascript1.0",       "text/javascript1.1",
+        "text/javascript1.2",       "text/javascript1.3",
+        "text/javascript1.4",       "text/javascript1.5",
+        "text/jscript",             "text/livescript",
+        "text/x-ecmascript",        "text/x-javascript",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(essences); i++)
+        if (len == strlen(essences[i]) &&
+            g_ascii_strncasecmp(s, essences[i], len) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
 ns_script_type_is_module(const ns_node *n)
 {
-    const char *type = ns_element_get_attr(n, "type");
-    return type && g_ascii_strcasecmp(type, "module") == 0;
+    const char *s;
+    size_t len;
+    if (!ns_element_get_attr(n, "type")) return FALSE;
+    if (!ns_script_type_string(n, &s, &len)) return FALSE;
+    return len == 6 && g_ascii_strncasecmp(s, "module", 6) == 0;
 }
 
 static gboolean
 ns_script_type_supported(const ns_node *n)
 {
-    const char *type = ns_element_get_attr(n, "type");
-    return !type || !*type ||
-           g_ascii_strcasecmp(type, "text/javascript") == 0 ||
-           g_ascii_strcasecmp(type, "application/javascript") == 0 ||
-           g_ascii_strcasecmp(type, "module") == 0;
+    const char *s;
+    size_t len;
+    if (!ns_script_type_string(n, &s, &len)) return TRUE;
+    if (len == 0) return TRUE;
+    if (ns_element_get_attr(n, "type")) {
+        if (len == 6 && g_ascii_strncasecmp(s, "module", 6) == 0) return TRUE;
+        return ns_js_mime_essence_match(s, len);
+    }
+    g_autofree char *joined = g_strconcat("text/", s, NULL);
+    return ns_js_mime_essence_match(joined, strlen(joined));
 }
 
 static gboolean
@@ -50604,18 +50651,7 @@ content_type_is_javascript(const char *ct)
     while (*ct == ' ' || *ct == '\t') ct++;
     const char *end = ct;
     while (*end && *end != ';' && *end != ' ' && *end != '\t') end++;
-    size_t len = (size_t)(end - ct);
-    static const char *const ok[] = {
-        "text/javascript", "application/javascript",
-        "application/ecmascript", "text/ecmascript",
-        "application/x-javascript", "text/x-javascript",
-        "application/x-ecmascript", "text/x-ecmascript",
-        "text/jscript", "text/livescript",
-    };
-    for (size_t i = 0; i < G_N_ELEMENTS(ok); i++)
-        if (len == strlen(ok[i]) && g_ascii_strncasecmp(ct, ok[i], len) == 0)
-            return TRUE;
-    return FALSE;
+    return ns_js_mime_essence_match(ct, (size_t)(end - ct));
 }
 
 static gboolean
