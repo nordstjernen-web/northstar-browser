@@ -7106,6 +7106,19 @@ static JSValue
 ns_pre_insert_validity(JSContext *ctx, ns_node *parent, ns_node *node,
                        ns_node *child, gboolean child_is_null);
 
+static void
+ns_js_activate_inserted(ns_js *js, const ns_node *parent, GPtrArray *inserted)
+{
+    if (!js || !inserted || !parent) return;
+    if (ns_node_in_template_content(parent)) return;
+    for (guint i = 0; i < inserted->len; i++) {
+        ns_node *n = g_ptr_array_index(inserted, i);
+        if (!n->parent) continue;
+        ns_ce_upgrade_subtree_all(js, n);
+        ns_js_run_inserted_scripts(js, n);
+    }
+}
+
 static JSValue
 ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
@@ -7192,6 +7205,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         }
         _j->mutated = TRUE;
     }
+    ns_js_activate_inserted(_j, self, added);
     g_ptr_array_free(added, FALSE);
     g_ptr_array_free(removed, FALSE);
     return JS_UNDEFINED;
@@ -27877,8 +27891,9 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
-    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
+    ns_js_activate_inserted(_j, self->parent, seq);
+    g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
 }
 
@@ -27923,8 +27938,9 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, node, NULL,
                                       node->prev_sibling, node->next_sibling);
     }
-    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
+    ns_js_activate_inserted(_j, parent, seq);
+    g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
 }
 
@@ -27979,7 +27995,6 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, node, NULL,
                                       node->prev_sibling, node->next_sibling);
     }
-    g_ptr_array_free(seq, TRUE);
 
     if (!self_in_args) {
         ns_node *saved_prev = self->prev_sibling;
@@ -27992,6 +28007,8 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
         }
     }
     if (_j) _j->mutated = TRUE;
+    ns_js_activate_inserted(_j, parent, seq);
+    g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
 }
 
@@ -28218,8 +28235,9 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, added, NULL,
                                       added->prev_sibling, added->next_sibling);
     }
-    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
+    ns_js_activate_inserted(_j, parent, seq);
+    g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
 }
 
@@ -28273,8 +28291,9 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
-    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
+    ns_js_activate_inserted(_j, parent, seq);
+    g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
 }
 
