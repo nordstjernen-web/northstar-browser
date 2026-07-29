@@ -23119,18 +23119,38 @@ ns_window_observer_ctor(JSContext *ctx, JSValueConst this_val,
 
 static JSValue
 ns_resize_observer_build_entry(JSContext *ctx, JSValueConst target,
+                               const char *observed_box,
                                double *out_w, double *out_h)
 {
     double content_w = 0, content_h = 0, border_w = 0, border_h = 0;
+    double content_x = 0, content_y = 0;
+    double border_x = 0, border_y = 0;
     const struct ns_box *box = ns_box_for_this(ctx, target);
     if (box) {
-        double bx, by;
         content_w = box->content_width;
         content_h = box->content_height;
-        ns_box_border_box(box, &bx, &by, &border_w, &border_h);
+        content_x = box->padding.left;
+        content_y = box->padding.top;
+        ns_box_border_box(box, &border_x, &border_y, &border_w, &border_h);
     }
-    if (out_w) *out_w = content_w;
-    if (out_h) *out_h = content_h;
+    ns_css_media_device device;
+    ns_css_get_media_device(&device);
+    double dppx = device.resolution_dppx > 0 ? device.resolution_dppx : 1.0;
+    double device_x = (border_x + (box ? box->border.left : 0) + content_x) * dppx;
+    double device_y = (border_y + (box ? box->border.top : 0) + content_y) * dppx;
+    double device_w = round(device_x + content_w * dppx) - round(device_x);
+    double device_h = round(device_y + content_h * dppx) - round(device_y);
+    double observed_w = content_w;
+    double observed_h = content_h;
+    if (g_strcmp0(observed_box, "border-box") == 0) {
+        observed_w = border_w;
+        observed_h = border_h;
+    } else if (g_strcmp0(observed_box, "device-pixel-content-box") == 0) {
+        observed_w = device_w;
+        observed_h = device_h;
+    }
+    if (out_w) *out_w = observed_w;
+    if (out_h) *out_h = observed_h;
 
     JSValue content_size = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, content_size, "inlineSize", JS_NewFloat64(ctx, content_w));
@@ -23144,13 +23164,20 @@ ns_resize_observer_build_entry(JSContext *ctx, JSValueConst target,
     JSValue border_size_arr = JS_NewArray(ctx);
     JS_SetPropertyUint32(ctx, border_size_arr, 0, border_size);
 
+    JSValue device_size = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, device_size, "inlineSize", JS_NewFloat64(ctx, device_w));
+    JS_SetPropertyStr(ctx, device_size, "blockSize",  JS_NewFloat64(ctx, device_h));
+    JSValue device_size_arr = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, device_size_arr, 0, device_size);
+
     JSValue entry = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, entry, "target", JS_DupValue(ctx, target));
     JS_SetPropertyStr(ctx, entry, "contentRect",
-                      ns_make_dom_rect(ctx, 0, 0, content_w, content_h));
+                      ns_make_dom_rect(ctx, content_x, content_y,
+                                       content_w, content_h));
     JS_SetPropertyStr(ctx, entry, "borderBoxSize",  border_size_arr);
-    JS_SetPropertyStr(ctx, entry, "contentBoxSize", JS_DupValue(ctx, content_size_arr));
-    JS_SetPropertyStr(ctx, entry, "devicePixelContentBoxSize", content_size_arr);
+    JS_SetPropertyStr(ctx, entry, "contentBoxSize", content_size_arr);
+    JS_SetPropertyStr(ctx, entry, "devicePixelContentBoxSize", device_size_arr);
     return entry;
 }
 
@@ -23637,13 +23664,14 @@ ns_intersection_observer_ctor(JSContext *ctx, JSValueConst this_val,
 
 static void
 ns_resize_observer_register(ns_js *js, JSContext *ctx, JSValueConst observer,
-                            JSValueConst target)
+                            JSValueConst target, const char *box_name)
 {
     if (!js) return;
     if (!js->resize_observers) js->resize_observers = g_ptr_array_new();
     JSValue targets = JS_GetPropertyStr(ctx, observer, "__targets");
     JSValue widths = JS_GetPropertyStr(ctx, observer, "__lastWidths");
     JSValue heights = JS_GetPropertyStr(ctx, observer, "__lastHeights");
+    JSValue boxes = JS_GetPropertyStr(ctx, observer, "__boxes");
     if (!JS_IsArray(targets)) {
         JS_FreeValue(ctx, targets);
         targets = JS_NewArray(ctx);
@@ -23663,43 +23691,81 @@ ns_resize_observer_register(ns_js *js, JSContext *ctx, JSValueConst observer,
         JS_SetPropertyStr(ctx, observer, "__lastHeights",
                           JS_DupValue(ctx, heights));
     }
+    if (!JS_IsArray(boxes)) {
+        JS_FreeValue(ctx, boxes);
+        boxes = JS_NewArray(ctx);
+        JS_SetPropertyStr(ctx, observer, "__boxes", JS_DupValue(ctx, boxes));
+    }
     uint32_t len = 0;
     JSValue lenv = JS_GetPropertyStr(ctx, targets, "length");
     JS_ToUint32(ctx, &len, lenv);
     JS_FreeValue(ctx, lenv);
-    gboolean present = FALSE;
+    uint32_t index = len;
     const ns_node *wanted = ns_unwrap_element(target);
     for (uint32_t i = 0; i < len; i++) {
         JSValue t = JS_GetPropertyUint32(ctx, targets, i);
-        if (ns_unwrap_element(t) == wanted) present = TRUE;
+        if (ns_unwrap_element(t) == wanted) index = i;
         JS_FreeValue(ctx, t);
-        if (present) break;
+        if (index != len) break;
     }
-    if (!present) {
+    if (index == len) {
         JS_SetPropertyUint32(ctx, targets, len, JS_DupValue(ctx, target));
         JS_SetPropertyUint32(ctx, widths, len, JS_UNDEFINED);
         JS_SetPropertyUint32(ctx, heights, len, JS_UNDEFINED);
+        JS_SetPropertyUint32(ctx, boxes, len, JS_NewString(ctx, box_name));
+    } else {
+        JS_SetPropertyUint32(ctx, boxes, index, JS_NewString(ctx, box_name));
+        JS_SetPropertyUint32(ctx, widths, index, JS_UNDEFINED);
+        JS_SetPropertyUint32(ctx, heights, index, JS_UNDEFINED);
     }
     JS_FreeValue(ctx, targets);
     JS_FreeValue(ctx, widths);
     JS_FreeValue(ctx, heights);
+    JS_FreeValue(ctx, boxes);
 }
 
 static JSValue
 ns_resize_observer_observe(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
-    if (argc < 1) return JS_UNDEFINED;
+    if (argc < 1 || !ns_unwrap_element(argv[0]))
+        return JS_ThrowTypeError(ctx, "ResizeObserver target must be an Element");
     JSValue cb = JS_GetPropertyStr(ctx, this_val, "__cb");
-    if (!JS_IsFunction(ctx, cb)) { JS_FreeValue(ctx, cb); return JS_UNDEFINED; }
+    if (!JS_IsFunction(ctx, cb)) {
+        JS_FreeValue(ctx, cb);
+        return JS_ThrowTypeError(ctx, "incompatible ResizeObserver receiver");
+    }
 
     JS_FreeValue(ctx, cb);
+    const char *box_name = "content-box";
+    const char *converted = NULL;
+    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
+        JSValue box = JS_GetPropertyStr(ctx, argv[1], "box");
+        if (JS_IsException(box)) return box;
+        if (!JS_IsUndefined(box)) {
+            converted = JS_ToCString(ctx, box);
+            if (!converted) {
+                JS_FreeValue(ctx, box);
+                return JS_EXCEPTION;
+            }
+            if (g_strcmp0(converted, "content-box") != 0 &&
+                g_strcmp0(converted, "border-box") != 0 &&
+                g_strcmp0(converted, "device-pixel-content-box") != 0) {
+                JS_FreeCString(ctx, converted);
+                JS_FreeValue(ctx, box);
+                return JS_ThrowTypeError(ctx, "invalid ResizeObserver box option");
+            }
+            box_name = converted;
+        }
+        JS_FreeValue(ctx, box);
+    }
 
     ns_js *_j = js_from_ctx(ctx);
     if (_j) {
-        ns_resize_observer_register(_j, ctx, this_val, argv[0]);
+        ns_resize_observer_register(_j, ctx, this_val, argv[0], box_name);
         ns_observer_schedule_tick(_j);
     }
+    if (converted) JS_FreeCString(ctx, converted);
     return JS_UNDEFINED;
 }
 
@@ -23717,12 +23783,14 @@ ns_resize_observers_tick(ns_js *js)
         JSValue targets = JS_GetPropertyStr(ctx, observer, "__targets");
         JSValue widths = JS_GetPropertyStr(ctx, observer, "__lastWidths");
         JSValue heights = JS_GetPropertyStr(ctx, observer, "__lastHeights");
+        JSValue boxes = JS_GetPropertyStr(ctx, observer, "__boxes");
         if (!JS_IsFunction(ctx, cb) || !JS_IsArray(targets) ||
-            !JS_IsArray(widths) || !JS_IsArray(heights)) {
+            !JS_IsArray(widths) || !JS_IsArray(heights) || !JS_IsArray(boxes)) {
             JS_FreeValue(ctx, cb);
             JS_FreeValue(ctx, targets);
             JS_FreeValue(ctx, widths);
             JS_FreeValue(ctx, heights);
+            JS_FreeValue(ctx, boxes);
             continue;
         }
         uint32_t len = 0;
@@ -23733,8 +23801,13 @@ ns_resize_observers_tick(ns_js *js)
         uint32_t n_entries = 0;
         for (uint32_t i = 0; i < len; i++) {
             JSValue target = JS_GetPropertyUint32(ctx, targets, i);
+            JSValue box = JS_GetPropertyUint32(ctx, boxes, i);
+            const char *box_name = JS_ToCString(ctx, box);
             double w = 0, h = 0;
-            JSValue entry = ns_resize_observer_build_entry(ctx, target, &w, &h);
+            JSValue entry = ns_resize_observer_build_entry(ctx, target,
+                box_name ? box_name : "content-box", &w, &h);
+            if (box_name) JS_FreeCString(ctx, box_name);
+            JS_FreeValue(ctx, box);
             double last_w = -1, last_h = -1;
             JSValue lw = JS_GetPropertyUint32(ctx, widths, i);
             JSValue lh = JS_GetPropertyUint32(ctx, heights, i);
@@ -23763,6 +23836,7 @@ ns_resize_observers_tick(ns_js *js)
         JS_FreeValue(ctx, targets);
         JS_FreeValue(ctx, widths);
         JS_FreeValue(ctx, heights);
+        JS_FreeValue(ctx, boxes);
     }
     js->observer_ticking = FALSE;
 }
@@ -23793,10 +23867,12 @@ static JSValue
 ns_resize_observer_unobserve(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    if (argc < 1) return JS_UNDEFINED;
+    if (argc < 1 || !ns_unwrap_element(argv[0]))
+        return JS_ThrowTypeError(ctx, "ResizeObserver target must be an Element");
     JSValue targets = JS_GetPropertyStr(ctx, this_val, "__targets");
     JSValue widths = JS_GetPropertyStr(ctx, this_val, "__lastWidths");
     JSValue heights = JS_GetPropertyStr(ctx, this_val, "__lastHeights");
+    JSValue boxes = JS_GetPropertyStr(ctx, this_val, "__boxes");
     if (JS_IsArray(targets)) {
         uint32_t len = 0;
         JSValue lenv = JS_GetPropertyStr(ctx, targets, "length");
@@ -23805,6 +23881,7 @@ ns_resize_observer_unobserve(JSContext *ctx, JSValueConst this_val,
         JSValue kept = JS_NewArray(ctx);
         JSValue kept_widths = JS_NewArray(ctx);
         JSValue kept_heights = JS_NewArray(ctx);
+        JSValue kept_boxes = JS_NewArray(ctx);
         uint32_t k = 0;
         const ns_node *wanted = ns_unwrap_element(argv[0]);
         for (uint32_t i = 0; i < len; i++) {
@@ -23813,24 +23890,31 @@ ns_resize_observer_unobserve(JSContext *ctx, JSValueConst this_val,
                 ? JS_GetPropertyUint32(ctx, widths, i) : JS_UNDEFINED;
             JSValue h = JS_IsArray(heights)
                 ? JS_GetPropertyUint32(ctx, heights, i) : JS_UNDEFINED;
+            JSValue box = JS_IsArray(boxes)
+                ? JS_GetPropertyUint32(ctx, boxes, i) : JS_UNDEFINED;
             if (ns_unwrap_element(t) != wanted) {
                 JS_SetPropertyUint32(ctx, kept, k++, JS_DupValue(ctx, t));
                 JS_SetPropertyUint32(ctx, kept_widths, k - 1,
                                      JS_DupValue(ctx, w));
                 JS_SetPropertyUint32(ctx, kept_heights, k - 1,
                                      JS_DupValue(ctx, h));
+                JS_SetPropertyUint32(ctx, kept_boxes, k - 1,
+                                     JS_DupValue(ctx, box));
             }
             JS_FreeValue(ctx, w);
             JS_FreeValue(ctx, h);
+            JS_FreeValue(ctx, box);
             JS_FreeValue(ctx, t);
         }
         JS_SetPropertyStr(ctx, this_val, "__targets", kept);
         JS_SetPropertyStr(ctx, this_val, "__lastWidths", kept_widths);
         JS_SetPropertyStr(ctx, this_val, "__lastHeights", kept_heights);
+        JS_SetPropertyStr(ctx, this_val, "__boxes", kept_boxes);
     }
     JS_FreeValue(ctx, targets);
     JS_FreeValue(ctx, widths);
     JS_FreeValue(ctx, heights);
+    JS_FreeValue(ctx, boxes);
     return JS_UNDEFINED;
 }
 
@@ -23842,6 +23926,7 @@ ns_resize_observer_disconnect(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, this_val, "__targets", JS_UNDEFINED);
     JS_SetPropertyStr(ctx, this_val, "__lastWidths", JS_UNDEFINED);
     JS_SetPropertyStr(ctx, this_val, "__lastHeights", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "__boxes", JS_UNDEFINED);
     ns_js *js = js_from_ctx(ctx);
     if (js && js->resize_observers) {
         void *ptr = JS_VALUE_GET_PTR(this_val);
@@ -23855,6 +23940,9 @@ static JSValue
 ns_resize_observer_ctor(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (argc < 1 || !JS_IsFunction(ctx, argv[0]))
+        return JS_ThrowTypeError(ctx,
+            "ResizeObserver callback must be callable");
     JSValue obj;
     JSValue proto = JS_GetPropertyStr(ctx, this_val, "prototype");
     if (JS_IsObject(proto)) {
@@ -23873,8 +23961,7 @@ ns_resize_observer_ctor(JSContext *ctx, JSValueConst this_val,
         ns_bind_fn(ctx, obj, "disconnect", ns_resize_observer_disconnect, 0);
     }
     JS_FreeValue(ctx, proto);
-    if (argc >= 1 && JS_IsFunction(ctx, argv[0]))
-        JS_SetPropertyStr(ctx, obj, "__cb", JS_DupValue(ctx, argv[0]));
+    JS_SetPropertyStr(ctx, obj, "__cb", JS_DupValue(ctx, argv[0]));
     ns_bind_fn_if_not_callable(ctx, obj, "observe",
                                ns_resize_observer_observe, 2);
     ns_bind_fn_if_not_callable(ctx, obj, "unobserve",
