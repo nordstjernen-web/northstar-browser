@@ -48,5 +48,6 @@ void ns_winview_focus(NsWinView *view);
 void ns_winview_find_open(NsWinView *view);
 void ns_winview_toggle_devtools(NsWinView *view);
 void ns_winview_layout(NsWinView *view, int x, int y, int width, int height);
+void ns_winview_refresh_font(NsWinView *view, UINT dpi);
 
 #endif
