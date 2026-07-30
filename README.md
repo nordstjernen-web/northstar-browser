@@ -23,7 +23,7 @@ filter in both GUI and headless/tooling modes · no JIT.
 See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 
 **Minimalism:** one window, one page, one process. The engine is a
-compact body of C — about 141,000 lines of original C (excluding
+compact body of C — about 152,000 lines of original C (excluding
 the vendored WAMR, Wuffs and audio decoders) — small enough for one
 person to read and audit end-to-end.
 
@@ -43,8 +43,8 @@ libavif when available, and SVG in the engine).
 
 ## Browser features
 
-- **HTML/CSS** via lexbor — modern cascade, flex, grid,
-  transforms, gradients, `@keyframes`.
+- **HTML** parsed to a DOM by lexbor; **CSS** by the engine's own
+  cascade — flex, grid, transforms, gradients, `@keyframes`.
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL).
@@ -125,7 +125,7 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 
 | Component | Role |
 |-----------|------|
-| [lexbor](https://github.com/lexbor/lexbor) v3.0.0 | HTML5 → DOM parser, CSS, and the WHATWG URL module |
+| [lexbor](https://github.com/lexbor/lexbor) v3.0.0 | HTML5 → DOM parser and the WHATWG URL module |
 | [quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.15.1 | JavaScript engine — no JIT |
 | [ns-pango](https://github.com/nordstjernen-web/ns-pango) | Text itemization, shaping and line breaking — a Pango fork with a cross-layout shaping cache |
 
