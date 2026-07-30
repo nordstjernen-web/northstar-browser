@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* Grid items can be placed on named lines. A line named in the track
+  list was parsed as a track, rejected, and dropped, so `grid-column:
+  main` resolved to nothing and the item was auto placed. Names are now
+  recorded and resolved, an area called `foo` also defines `foo-start`
+  and `foo-end`, an end line repeating the start's name means the next
+  line with that name, and an item with a column but no row keeps its
+  column. chess.com's play page draws its board again.
 * `OfflineAudioContext` renders audio instead of silence. The whole Web
   Audio surface was shape without substance: every `create*` method
   returned the same generic node, `connect()` returned its argument
