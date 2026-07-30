@@ -13759,6 +13759,53 @@ ns_computed_box_shorthand(JSContext *ctx, const ns_node *n,
     return out;
 }
 
+static void
+ns_radius_corner_axes(const char *value, char **horizontal, char **vertical)
+{
+    char **parts = g_strsplit(value && *value ? value : "0px", " ", 2);
+    *horizontal = g_strdup(parts[0] ? parts[0] : "0px");
+    *vertical = g_strdup(parts[0] && parts[1] ? parts[1] : *horizontal);
+    g_strfreev(parts);
+}
+
+static char *
+ns_radius_axis_list(char *const corner[4])
+{
+    if (strcmp(corner[0], corner[1]) == 0 &&
+        strcmp(corner[1], corner[2]) == 0 &&
+        strcmp(corner[2], corner[3]) == 0)
+        return g_strdup(corner[0]);
+    if (strcmp(corner[0], corner[2]) == 0 && strcmp(corner[1], corner[3]) == 0)
+        return g_strdup_printf("%s %s", corner[0], corner[1]);
+    if (strcmp(corner[1], corner[3]) == 0)
+        return g_strdup_printf("%s %s %s", corner[0], corner[1], corner[2]);
+    return g_strdup_printf("%s %s %s %s", corner[0], corner[1], corner[2],
+                           corner[3]);
+}
+
+static char *
+ns_computed_radius_shorthand(JSContext *ctx, const ns_node *n)
+{
+    static const char *const corners[4] = {
+        "border-top-left-radius", "border-top-right-radius",
+        "border-bottom-right-radius", "border-bottom-left-radius",
+    };
+    char *h[4], *v[4];
+    for (int i = 0; i < 4; i++) {
+        char *value = ns_computed_lookup(ctx, n, corners[i]);
+        ns_radius_corner_axes(value, &h[i], &v[i]);
+        g_free(value);
+    }
+    char *hl = ns_radius_axis_list(h);
+    char *vl = ns_radius_axis_list(v);
+    char *out = strcmp(hl, vl) == 0 ? g_strdup(hl)
+                                    : g_strdup_printf("%s / %s", hl, vl);
+    for (int i = 0; i < 4; i++) { g_free(h[i]); g_free(v[i]); }
+    g_free(hl);
+    g_free(vl);
+    return out;
+}
+
 static char *
 ns_computed_box_edge_px(const ns_box *b, const char *name)
 {
@@ -13804,7 +13851,7 @@ ns_computed_transform_matrix(const ns_style *s, const ns_box *b)
     ns_mat4 m;
     ns_css_transform_to_mat4(&eff, bw, bh, &m);
     GString *out = g_string_new(NULL);
-    if (ns_mat4_is_affine2d(&m)) {
+    if (!ns_css_transform_has_3d_function(&eff) && ns_mat4_is_affine2d(&m)) {
         g_string_append_printf(out, "matrix(%g, %g, %g, %g, %g, %g)",
                                m.m[0], m.m[4], m.m[1], m.m[5], m.m[3], m.m[7]);
     } else {
@@ -14228,6 +14275,8 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (strcmp(name, "inset") == 0)
         return ns_computed_box_shorthand(ctx, n, "top", "right",
                                          "bottom", "left");
+    if (strcmp(name, "border-radius") == 0)
+        return ns_computed_radius_shorthand(ctx, n);
     if (strcmp(name, "object-position") == 0 ||
         strcmp(name, "background-position") == 0) {
         gboolean is_bg = name[0] == 'b';

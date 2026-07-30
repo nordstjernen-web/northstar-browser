@@ -4434,12 +4434,16 @@ parse_calc_inner(const char *text)
         } else if (fn == 8 && n >= 1) {
             double sum = 0;
             gboolean ok = TRUE;
+            gboolean numeric = TRUE;
             for (int i = 0; i < n && ok; i++) {
                 double x = 0;
                 ok = calc_arg_key(parts[i], &x);
+                if (!calc_arg_is_number(parts[i])) numeric = FALSE;
                 sum += x * x;
             }
-            if (ok) out = calc_num_value(sqrt(sum));
+            if (ok)
+                out = numeric ? calc_num_value(sqrt(sum))
+                              : calc_px_value(sqrt(sum));
         } else if (fn == 9 && n == 2) {
             double x = 0, y = 0;
             if (calc_arg_key(parts[0], &x) && calc_arg_key(parts[1], &y))
@@ -5687,6 +5691,7 @@ parse_transform(const char *text)
                 if (nt >= 1) parse_transform_len(targs[0], &op->b, &op->b_is_percent);
             } else if (strcmp(fn_lc, "translatez") == 0) {
                 if (nt >= 1) parse_transform_len(targs[0], &op->c, &dummy_pct);
+                op->is_3d = TRUE;
             } else {
                 if (nt >= 1) parse_transform_len(targs[0], &op->a, &op->a_is_percent);
                 if (nt >= 2) parse_transform_len(targs[1], &op->b, &op->b_is_percent);
@@ -5705,6 +5710,7 @@ parse_transform(const char *text)
             op->b = strcmp(fn_lc, "rotatey") == 0 ? 1 : 0;
             op->c = 0;
             op->d = 0;
+            op->is_3d = TRUE;
             accept = nt == 1 && parse_angle_any(targs[0], &op->d);
         } else if (strcmp(fn_lc, "rotate3d") == 0 && nt == 4) {
             op->kind = NS_CSS_TFN_ROTATE3D;
@@ -5712,11 +5718,13 @@ parse_transform(const char *text)
             op->b = g_ascii_strtod(targs[1], NULL);
             op->c = g_ascii_strtod(targs[2], NULL);
             op->d = 0;
+            op->is_3d = TRUE;
             accept = parse_angle_any(targs[3], &op->d);
         } else if (strcmp(fn_lc, "perspective") == 0 && nt >= 1) {
             op->kind = NS_CSS_TFN_PERSPECTIVE;
             op->a = 0;
             parse_transform_len(targs[0], &op->a, &dummy_pct);
+            op->is_3d = TRUE;
             accept = TRUE;
         } else if (strcmp(fn_lc, "scale") == 0 ||
                    strcmp(fn_lc, "scalex") == 0 ||
@@ -5730,7 +5738,9 @@ parse_transform(const char *text)
             op->c = 1;
             if (strcmp(fn_lc, "scalex") == 0) { op->a = sa; op->b = 1; }
             else if (strcmp(fn_lc, "scaley") == 0) { op->a = 1; op->b = sa; }
-            else if (strcmp(fn_lc, "scalez") == 0) { op->a = 1; op->b = 1; op->c = sa; }
+            else if (strcmp(fn_lc, "scalez") == 0) {
+                op->a = 1; op->b = 1; op->c = sa; op->is_3d = TRUE;
+            }
             else { op->a = sa; op->b = sb; }
             accept = TRUE;
         } else if (strcmp(fn_lc, "skew") == 0 ||
@@ -5757,6 +5767,7 @@ parse_transform(const char *text)
             op->kind = NS_CSS_TFN_MATRIX3D;
             for (int k = 0; k < 16; k++)
                 op->m3d[k] = g_ascii_strtod(targs[k], NULL);
+            op->is_3d = TRUE;
             accept = TRUE;
         } else if ((strcmp(fn_lc, "translate3d") == 0 && nt >= 2)) {
             op->kind = NS_CSS_TFN_TRANSLATE;
@@ -5765,6 +5776,7 @@ parse_transform(const char *text)
             parse_transform_len(targs[0], &op->a, &op->a_is_percent);
             parse_transform_len(targs[1], &op->b, &op->b_is_percent);
             if (nt >= 3) parse_transform_len(targs[2], &op->c, &dummy_pct);
+            op->is_3d = TRUE;
             accept = TRUE;
         } else if (strcmp(fn_lc, "scale3d") == 0 && nt >= 2) {
             op->kind = NS_CSS_TFN_SCALE;
@@ -5772,6 +5784,7 @@ parse_transform(const char *text)
             parse_scale_number(targs[0], &op->a);
             parse_scale_number(targs[1], &op->b);
             if (nt >= 3) parse_scale_number(targs[2], &op->c);
+            op->is_3d = TRUE;
             accept = TRUE;
         }
         if (accept) tf.n_ops++;
@@ -6069,6 +6082,15 @@ ns_css_individual_transform_serialize(const ns_css_value *v, int prop)
         return NULL;
     }
     return g_string_free(s, FALSE);
+}
+
+gboolean
+ns_css_transform_has_3d_function(const ns_css_transform *tf)
+{
+    if (!tf) return FALSE;
+    for (int i = 0; i < tf->n_ops; i++)
+        if (tf->ops[i].is_3d) return TRUE;
+    return FALSE;
 }
 
 gboolean
@@ -7202,7 +7224,10 @@ parse_integer_property(ns_css_prop prop, const char *t)
     if (cv) {
         if (cv->kind == NS_CSS_V_LENGTH &&
             cv->u.length.unit == NS_CSS_UNIT_NUMBER) {
-            cv->u.length.v = round(cv->u.length.v);
+            double n = cv->u.length.v;
+            if (isnan(n)) n = 0;
+            cv->u.length.v = CLAMP(round(n), (double)G_MININT32,
+                                   (double)G_MAXINT32);
             return cv;
         }
         ns_css_value_free(cv);
@@ -16837,7 +16862,10 @@ ns_css_value_serialize(const ns_css_value *v)
         }
     case NS_CSS_V_LENGTH: {
         const char *unit = ns_css_unit_suffix(v->u.length.unit);
-        return g_strdup_printf("%g%s", v->u.length.v, unit);
+        double n = v->u.length.v;
+        if (isfinite(n) && n == floor(n) && fabs(n) < 1e15)
+            return g_strdup_printf("%.0f%s", n, unit);
+        return g_strdup_printf("%g%s", n, unit);
     }
     case NS_CSS_V_SIZE: {
         GString *s = g_string_new(NULL);
@@ -16982,15 +17010,24 @@ ns_css_value_serialize(const ns_css_value *v)
             if (i) g_string_append_c(s, ' ');
             switch (op->kind) {
             case NS_CSS_TFN_TRANSLATE:
-                g_string_append_printf(s, "translate(%g%s, %g%s)",
-                    op->a, op->a_is_percent ? "%" : "px",
-                    op->b, op->b_is_percent ? "%" : "px");
+                if (op->is_3d)
+                    g_string_append_printf(s, "translate3d(%g%s, %g%s, %gpx)",
+                        op->a, op->a_is_percent ? "%" : "px",
+                        op->b, op->b_is_percent ? "%" : "px", op->c);
+                else
+                    g_string_append_printf(s, "translate(%g%s, %g%s)",
+                        op->a, op->a_is_percent ? "%" : "px",
+                        op->b, op->b_is_percent ? "%" : "px");
                 break;
             case NS_CSS_TFN_ROTATE:
                 g_string_append_printf(s, "rotate(%gdeg)", op->a);
                 break;
             case NS_CSS_TFN_SCALE:
-                g_string_append_printf(s, "scale(%g, %g)", op->a, op->b);
+                if (op->is_3d)
+                    g_string_append_printf(s, "scale3d(%g, %g, %g)",
+                                           op->a, op->b, op->c);
+                else
+                    g_string_append_printf(s, "scale(%g, %g)", op->a, op->b);
                 break;
             case NS_CSS_TFN_SKEW:
                 g_string_append_printf(s, "skew(%gdeg, %gdeg)", op->a, op->b);
