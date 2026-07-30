@@ -181,6 +181,14 @@ install_status_css(void)
         "  border-top: 1px solid alpha(currentColor, 0.15);"
         "  font-size: smaller;"
         "}"
+        "headerbar, headerbar > windowhandle {"
+        "  min-height: 34px;"
+        "}"
+        "headerbar button.titlebutton {"
+        "  min-height: 26px;"
+        "  min-width: 26px;"
+        "  padding: 0;"
+        "}"
         ".ns-toolbar button, .ns-toolbar entry {"
         "  min-height: 26px;"
         "}"
@@ -1442,6 +1450,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
                                 G_CALLBACK(on_reload_clicked), pw);
     GtkWidget *home = toolbar_button("northstar-home", ns_i18n("Home"),
                                      G_CALLBACK(on_home_clicked), pw);
+    gtk_widget_set_margin_end(home, 24);
 
     pw->spinner = gtk_spinner_new();
     gtk_widget_set_tooltip_text(pw->spinner, ns_i18n("Loading"));

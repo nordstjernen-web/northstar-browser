@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 ver=$(sed -n "s/^[[:space:]]*version:[[:space:]]*'\([^']*\)'.*/\1/p" meson.build | head -n1)
 [ -n "$ver" ] || { echo "could not read version from meson.build" >&2; exit 1; }
 ver=${ver%%-*}
-codename='Open source edition'
+codename='A fine open source web browser.'
 
 FRAMES=${NS_SPLASH_FRAMES:-36}
 DELAY=${NS_SPLASH_DELAY:-11}
@@ -60,9 +60,10 @@ for y in range(H):
 sys.stdout.write(" ".join(out))
 PY
 
-convert -size ${W}x${H} xc:black -draw "$(cat "$w/sky.mvg")" "$w/sky0.png"
+convert -size ${W}x${H} xc:black -draw "@$w/sky.mvg" "$w/sky0.png"
 convert -size ${W}x${H} xc:none -fill '#b6d9f4' \
-    -draw "ellipse $((W/2)),${HORIZON} $((W)),$((62*S)) 0,360" -blur 0x$((46*S)) "$w/skyglow.png"
+    -draw "ellipse $((W/2)),${HORIZON} $((W)),$((62*S)) 0,360" -blur 0x$((46*S)) \
+    -background black -alpha remove -alpha off "$w/skyglow.png"
 convert "$w/sky0.png" "$w/skyglow.png" -compose screen -composite "$w/sky.png"
 
 PLANET_CY=$(python3 -c "print(int($HORIZON + $H*2.05))")
@@ -237,10 +238,10 @@ PY
 
 convert -size ${W}x${H} xc:none -fill none -stroke '#f2fbff' -strokewidth $((5*S)) \
     -draw "ellipse $((W/2)),${PLANET_CY} ${PLANET_RX},${PLANET_RY} 0,360" \
-    -blur 0x$((3*S)) "$w/limb.png"
+    -blur 0x$((3*S)) -background black -alpha remove -alpha off "$w/limb.png"
 convert -size ${W}x${H} xc:none -fill none -stroke '#9ed3f4' -strokewidth $((16*S)) \
     -draw "ellipse $((W/2)),${PLANET_CY} ${PLANET_RX},${PLANET_RY} 0,360" \
-    -blur 0x$((26*S)) "$w/limbglow.png"
+    -blur 0x$((26*S)) -background black -alpha remove -alpha off "$w/limbglow.png"
 
 python3 "$w/earth.py" "$w" "$w/ground.png" "$W" "$H" "$HORIZON" \
     "$PLANET_CY" "$PLANET_RX" "$PLANET_RY" "$(python3 -c "print(int($W*0.800))")"
@@ -255,7 +256,8 @@ convert -size ${W}x${H} xc:none -fill '#ffc65a' \
     -draw "ellipse ${SX},${SY} $((44*S)),$((44*S)) 0,360" -blur 0x$((34*S)) "$w/halo.png"
 convert -size ${W}x${H} xc:none -fill '#fff3d2' \
     -draw "ellipse ${SX},${SY} $((18*S)),$((18*S)) 0,360" -blur 0x$((12*S)) "$w/halo2.png"
-convert "$w/halo.png" "$w/halo2.png" -compose over -composite "$w/sunhalo.png"
+convert "$w/halo.png" "$w/halo2.png" -compose over -composite \
+    -background black -alpha remove -alpha off "$w/sunhalo.png"
 
 P() { echo $(( $1 * S )); }
 convert -background none -font "$fb" -pointsize $(P 52) -kerning $((1*S)) -fill '#ffffff' label:'Northstar ' "$w/t1.png"
@@ -328,8 +330,19 @@ def ell(col, cx, cy, rx, ry, dst=None):
     (out if dst is None else dst).append(
         "fill %s stroke none ellipse %.1f,%.1f %.1f,%.1f 0,360" % (col, cx, cy, rx, ry))
 
-def poly(col, pts):
-    out.append("fill %s stroke none polygon %s" % (col, " ".join("%.1f,%.1f" % p for p in pts)))
+def poly(col, pts, dst=None):
+    (out if dst is None else dst).append(
+        "fill %s stroke none polygon %s" % (col, " ".join("%.1f,%.1f" % p for p in pts)))
+
+def rell(col, cx, cy, rx, ry, ang, dst=None):
+    a = math.radians(ang)
+    ca, sa = math.cos(a), math.sin(a)
+    pts = []
+    for k in range(28):
+        th = TAU*k/28
+        x, y = rx*math.cos(th), ry*math.sin(th)
+        pts.append((cx + x*ca - y*sa, cy + x*sa + y*ca))
+    poly(col, pts, dst)
 
 def hx(c):
     return "#%02x%02x%02x" % tuple(int(max(0, min(255, v))) for v in c)
@@ -386,6 +399,53 @@ for fx, fy, sc, phase, seed in CLOUDS:
     for px, py, pr in puffs:
         ell(hx(lit), px + sunward*pr*0.14, py - pr*0.22, pr*0.76, pr*0.76, clouds)
 
+PIG = (0.428, 0.372, 0.066, 1.30)
+
+def flying_pig():
+    fx, fy, sc, phase = PIG
+    R = H*sc
+    cx = W*fx + math.sin(TAU*T + phase)*W*0.0090
+    cy = H*fy + math.sin(TAU*2*T + phase*1.7)*H*0.0100
+    flap = math.sin(TAU*3*T)
+    skin, shade, lit = "#ffb3d1", "#ef8ab4", "#ffdaea"
+    snout, hoof = "#f37ba9", "#e2749f"
+    wing, wingshade = "#fff4f9", "#ffcfe4"
+
+    rell(wingshade, cx - R*0.34, cy - R*0.46 + flap*R*0.10,
+         R*0.58, R*0.19, -16 - flap*20, clouds)
+    for k, (ox, oy, rr) in enumerate([(-1.06, -0.16, 0.15), (-1.22, -0.30, 0.12),
+                                      (-1.16, -0.48, 0.09)]):
+        ell(shade if k else skin, cx + R*ox, cy + R*oy, R*rr, R*rr, clouds)
+    for ox in (-0.52, 0.36):
+        ell(hoof, cx + R*ox, cy + R*0.66, R*0.15, R*0.21, clouds)
+
+    ell(shade, cx, cy + R*0.06, R*1.03, R*0.74, clouds)
+    ell(skin, cx, cy, R, R*0.70, clouds)
+    ell(lit, cx - R*0.16, cy - R*0.28, R*0.62, R*0.28, clouds)
+    for ox in (-0.24, 0.62):
+        ell(hoof, cx + R*ox, cy + R*0.62, R*0.16, R*0.22, clouds)
+
+    hx_, hy = cx + R*0.88, cy - R*0.14
+    poly(shade, [(hx_ - R*0.30, hy - R*0.42), (hx_ - R*0.02, hy - R*0.30),
+                 (hx_ - R*0.34, hy - R*0.08)], clouds)
+    poly(shade, [(hx_ + R*0.16, hy - R*0.46), (hx_ + R*0.42, hy - R*0.20),
+                 (hx_ + R*0.06, hy - R*0.22)], clouds)
+    ell(skin, hx_, hy, R*0.56, R*0.52, clouds)
+    ell(lit, hx_ - R*0.04, hy - R*0.22, R*0.34, R*0.18, clouds)
+    ell("#ff9ec4", hx_ + R*0.04, hy + R*0.26, R*0.17, R*0.12, clouds)
+    ell(snout, hx_ + R*0.48, hy + R*0.10, R*0.26, R*0.21, clouds)
+    for ox in (-0.07, 0.07):
+        ell("#c85f8b", hx_ + R*(0.48 + ox), hy + R*0.10, R*0.05, R*0.07, clouds)
+    ell("#3d2331", hx_ + R*0.14, hy - R*0.14, R*0.11, R*0.13, clouds)
+    ell("#ffffff", hx_ + R*0.17, hy - R*0.18, R*0.04, R*0.05, clouds)
+
+    rell(wing, cx - R*0.06, cy - R*0.58 - flap*R*0.08,
+         R*0.70, R*0.24, -26 - flap*24, clouds)
+    rell("#ffffff", cx - R*0.16, cy - R*0.62 - flap*R*0.08,
+         R*0.34, R*0.10, -26 - flap*24, clouds)
+
+flying_pig()
+
 pulse = 0.80 + 0.20*math.sin(TAU*T)
 
 def ray(ang, ln, hw, col, a0, segs=6):
@@ -440,13 +500,13 @@ render_frame() {
     out="$w/frame_${n}.png"
     halo=$(python3 -c "import math;print('%.3f'%(0.80+0.20*math.sin(2*math.pi*$t)))")
     python3 "$w/anim.py" "$W" "$H" "$S" "$t" "$w" "$i"
-    convert -size ${W}x${H} xc:black -draw "$(cat "$w/glow_${n}.mvg")" "$w/glow_${n}.png"
-    convert "$w/bg.png" -draw "$(cat "$w/clouds_${n}.mvg")" \
-        \( "$w/sunhalo.png" -channel A -evaluate multiply "$halo" +channel \) \
+    convert -size ${W}x${H} xc:black -draw "@$w/glow_${n}.mvg" "$w/glow_${n}.png"
+    convert "$w/bg.png" -draw "@$w/clouds_${n}.mvg" \
+        \( "$w/sunhalo.png" -evaluate multiply "$halo" \) \
         -compose screen -composite \
         "$w/glow_${n}.png" -compose screen -composite \
         "$w/textlayer.png" -compose over -composite \
-        -draw "$(cat "$w/frame.mvg")" \
+        -draw "@$w/frame.mvg" \
         -filter Lanczos -resize 940x320 \
         -ordered-dither o8x8,"$LEVELS" -strip "$out"
     rm -f "$w/glow_${n}.png"
@@ -468,7 +528,12 @@ echo "palette: $(identify -format '%w' "$w/pal.gif") colours"
 convert -delay "$DELAY" -loop 0 \
     $(for f in "${frames[@]}"; do printf ' ( %q -dither None -remap %q ) ' "$f" "$w/pal.gif"; done) \
     "$w/splash_pre.gif"
-gifsicle -O3 --lossy="$LOSSY" --colors 256 "$w/splash_pre.gif" -o "$w/splash.gif"
+if command -v gifsicle >/dev/null 2>&1; then
+    gifsicle -O3 --lossy="$LOSSY" --colors 256 "$w/splash_pre.gif" -o "$w/splash.gif"
+else
+    echo "gifsicle not found — falling back to ImageMagick optimisation" >&2
+    convert "$w/splash_pre.gif" -layers optimize "$w/splash.gif"
+fi
 sz=$(stat -c%s "$w/splash.gif")
 echo "assembled splash.gif ${FRAMES}f $(identify -format '%wx%h' "$w/splash.gif[0]") ($sz bytes)"
 

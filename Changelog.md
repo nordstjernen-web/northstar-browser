@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* The `about:start` splash is redrawn for the release: it reads
+  "A fine open source web browser." beneath the version, and a small pink
+  pig flies among the clouds, drifting and flapping on the same loop the
+  clouds and the sun's rays already ride. `scripts/gen-splash.sh` renders
+  it, and now runs where ImageMagick 7 is the only ImageMagick: the glow
+  layers are flattened onto black before they are screened, so the blend
+  no longer depends on how a given version treats a transparent source,
+  the long MVG primitives are read from files rather than the command
+  line, and `gifsicle` is optional.
+* The window's title bar is shorter, which gives the page the height back.
 * Dynamic `:has()` selectors now update after class, attribute and child-list
   mutations. The incremental restyle index used the selector's final subject
   as the mutation key, so `div:has(+ .test) #subject` indexed `#subject`

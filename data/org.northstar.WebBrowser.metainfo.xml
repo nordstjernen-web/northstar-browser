@@ -59,6 +59,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.6" date="2026-07-30">
+      <description>
+        <p>CSS and text layout release.</p>
+        <ul>
+          <li>Dynamic :has() selectors update after class, attribute and child-list mutations.</li>
+          <li>Percentage and elliptical border-radius resolve against the border box, so circular avatars are round.</li>
+          <li>Relative colour syntax, the color() function and one shared parser for all six colour functions.</li>
+          <li>Text is itemized, shaped and broken by ns-pango, which caches finished glyph strings across layouts.</li>
+          <li>The DOM insertion methods run the insertion steps, and getComputedStyle resolves every property it enumerates.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.5" date="2026-07-28">
       <description>
         <p>Media and graphics release.</p>
