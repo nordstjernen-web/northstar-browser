@@ -23,7 +23,8 @@ Significant changes in each release:
   then lost all of its subresources. Requests now ask for HTTP/2 and are
   upgraded to HTTP/3 by the alt-svc cache, the way an origin advertises
   it; `NS_FORCE_HTTP3=1` still asks for HTTP/3 outright. Acid3 loads in
-  2.2 seconds instead of 15.5 and scores 65 instead of 12.
+  2.2 seconds instead of 15.5, and three seconds in it has run 65 of its
+  tests rather than 12.
 * `min-content` and `max-content` grid tracks size to their content.
   Both parsed to the same kind as `auto`, so such a column stretched into
   the free space instead of shrinking to what it holds. Two defects sat
