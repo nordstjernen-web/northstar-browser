@@ -12203,6 +12203,37 @@ css_trim_dup_range(const char *start, const char *end)
     return g_strndup(start, (gsize)(end - start));
 }
 
+static char *
+css_value_closed_at_eof(const char *value)
+{
+    GString *out = g_string_new(value ? value : "");
+    GString *closers = g_string_new(NULL);
+    char quote = 0;
+    for (const char *p = out->str; *p; p++) {
+        if (*p == '\\' && p[1]) { p++; continue; }
+        if (quote) {
+            if (*p == quote) quote = 0;
+            continue;
+        }
+        switch (*p) {
+        case '"': case '\'': quote = *p; break;
+        case '(': g_string_append_c(closers, ')'); break;
+        case '[': g_string_append_c(closers, ']'); break;
+        case '{': g_string_append_c(closers, '}'); break;
+        case ')': case ']': case '}':
+            if (closers->len > 0 && closers->str[closers->len - 1] == *p)
+                g_string_truncate(closers, closers->len - 1);
+            break;
+        default: break;
+        }
+    }
+    if (quote) g_string_append_c(out, quote);
+    for (gsize i = closers->len; i > 0; i--)
+        g_string_append_c(out, closers->str[i - 1]);
+    g_string_free(closers, TRUE);
+    return g_string_free(out, FALSE);
+}
+
 static void
 css_stylesheet_ensure_layers(ns_css_stylesheet *sh)
 {
@@ -15935,6 +15966,9 @@ inline_decl_list_parse(const char *style)
         gboolean important = FALSE;
         css_strip_important(value, &important);
         g_strstrip(value);
+        char *closed = css_value_closed_at_eof(value);
+        g_free(value);
+        value = closed;
         if (!*name || !*value || !ns_css_named_property_supported(name) ||
             !ns_css_named_declaration_valid(name, value)) {
             g_free(name);
@@ -16321,9 +16355,11 @@ inline_quad_expanded(const char *prop, const char *value)
 }
 
 char *
-ns_inline_style_set(const char *style, const char *prop, const char *value)
+ns_inline_style_set(const char *style, const char *prop, const char *raw_value)
 {
     if (!prop) return g_strdup(style ? style : "");
+    char *value = raw_value && *raw_value
+        ? css_value_closed_at_eof(raw_value) : NULL;
     GString *out = g_string_new(NULL);
     gboolean found = FALSE;
     gboolean set_all = g_ascii_strcasecmp(prop, "all") == 0;
@@ -16420,6 +16456,7 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
         }
     }
     g_free(quad_expanded);
+    g_free(value);
     if (out->len > 0) g_string_append_c(out, ';');
     return g_string_free(out, FALSE);
 }
