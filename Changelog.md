@@ -33,6 +33,13 @@ Significant changes in each release:
   no longer depends on how a given version treats a transparent source,
   the long MVG primitives are read from files rather than the command
   line, and `gifsicle` is optional.
+* Table cells centre their content vertically again. A cell with no
+  `vertical-align` of its own fell back to the initial `baseline`, so in a
+  row taller than the cell's own line the text sat at the top. Every
+  browser's user-agent sheet gives cells `middle`, which is what pages
+  written as tables expect: on Hacker News the title beside the logo sat
+  two pixels high. Cells now default to `middle`, and an author rule or a
+  `valign` attribute still overrides it.
 * An image is drawn inside its own borders, padding and margin. The
   painter placed the bitmap at the box's margin-box origin and gave it the
   content size, so anything between that origin and the content box was
