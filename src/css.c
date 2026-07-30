@@ -8812,6 +8812,22 @@ split_ws_limit(const char *s, char *out[], int max)
 }
 
 static int
+css_ws_token_count(const char *s)
+{
+    int n = 0;
+    const char *p = s;
+    const char *end = s + strlen(s);
+    while (p < end) {
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end) break;
+        char term = 0;
+        p = css_scan_until(p, end, " \t\n\r\f", &term);
+        n++;
+    }
+    return n;
+}
+
+static int
 split_ws(const char *s, char *out[4])
 {
     return split_ws_limit(s, out, 4);
@@ -10352,6 +10368,7 @@ parse_declaration_block(const char **pp, const char *end,
             };
             char *parts[4] = {0};
             int n = 0;
+            gboolean overlong = FALSE;
             const char *scan = vtext;
             const char *gv_end = vtext + strlen(vtext);
             while (n < 4) {
@@ -10359,8 +10376,11 @@ parse_declaration_block(const char **pp, const char *end,
                 parts[n++] = css_trim_dup_range(scan, slash ? slash : gv_end);
                 if (!slash) break;
                 scan = slash + 1;
+                if (n == 4)
+                    overlong = css_find_top_level_char(scan, gv_end, '/') ||
+                               *css_skip_ws_comments(scan, gv_end);
             }
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; overlong ? FALSE : i < 4; i++) {
                 const char *text = i < n && *parts[i] ? parts[i] : NULL;
                 if (!text) {
                     const char *from = i == 1 ? parts[0]
@@ -11090,7 +11110,7 @@ parse_declaration_block(const char **pp, const char *end,
             strcmp(pname, "border-color") == 0 ||
             strcmp(pname, "border-style") == 0) {
             char *tokens[4] = {0};
-            int n = split_ws(vtext, tokens);
+            int n = css_ws_token_count(vtext) > 4 ? 0 : split_ws(vtext, tokens);
             if (n > 0) {
                 if (strcmp(pname, "margin") == 0)
                     emit_quad(decls_out,
