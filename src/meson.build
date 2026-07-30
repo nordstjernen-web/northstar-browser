@@ -236,6 +236,10 @@ if have_gtk
   subdir('gtk')
 endif
 
-if not have_gtk
-  message('GTK 4 shell disabled — building the engine without GTK.')
+if have_win32
+  subdir('win32')
+endif
+
+if not have_gtk and not have_win32
+  message('Desktop shells disabled — building the engine without a GUI.')
 endif

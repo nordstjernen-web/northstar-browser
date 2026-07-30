@@ -1,8 +1,8 @@
 # Northstar — Claude operating guide
 
 Northstar is a web browser written from scratch in **C**, using **GTK 4**
-for the UI and **libcurl** for networking. Targets **Linux** (primary),
-**macOS** and **Windows**.
+on Linux/macOS and native **Win32** on Windows, with **libcurl** for
+networking. Targets **Linux** (primary), **macOS** and **Windows**.
 
 See `README.md` for the product vision. Northstar is the GPL /
 open-source edition of the [Nordstjernen
@@ -52,7 +52,8 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `musl.yml`
   (WASAPI/CoreAudio/ALSA), mixing and resampling itself. The renderer
   emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands that
   ride the render-response `X-Audio` side-channel to the shell, which
-  queues them to the in-process mixer (`src/gtk/procview.c`).
+  queues them to the in-process mixer (`src/gtk/procview.c`,
+  `src/win32/winview.c`).
 - Images decode in-tree: PNG (including animated APNG), GIF, BMP
   and JPEG through
   [Wuffs](https://github.com/google/wuffs), which also covers still WebP
@@ -106,7 +107,7 @@ This repo is driven by Claude in long uninterrupted sessions.
   driven from Linux (GTK 4 / libcurl / meson / clang and an X session at
   `DISPLAY=:0`), macOS with Homebrew, or Windows 11 via MSYS2 MINGW64.
   All use the same meson/ninja invocation; the Windows binary is
-  `./builddir/src/gtk/northstar.exe`. Every commit must pass
+  `./builddir/src/win32/northstar.exe`. Every commit must pass
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
   — that's the per-change correctness gate, not CI.

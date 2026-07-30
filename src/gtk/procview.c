@@ -1733,11 +1733,11 @@ on_result(gpointer data)
             v->js_redirects++;
             do_load(v, res->nav, FALSE, FALSE, FALSE);
         }
-        if (res->ok && res->camera && *res->camera)
+        if (current && res->ok && res->camera && *res->camera)
             pv_perm_bar_show(v, REQ_CAMERA, res->camera);
-        if (res->ok && res->download && *res->download)
+        if (current && res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
-        if (res->ok && res->audio && *res->audio)
+        if (current && res->ok && res->audio && *res->audio)
             pv_media_pump(v, res->audio);
         v->render_inflight = FALSE;
         if (v->render_pending) {

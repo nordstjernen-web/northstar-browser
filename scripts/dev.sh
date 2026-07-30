@@ -4,7 +4,11 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${NS_BIN:-$ROOT/builddir/src/gtk/northstar}
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) DEFAULT_BIN=$ROOT/builddir/src/win32/northstar.exe ;;
+    *) DEFAULT_BIN=$ROOT/builddir/src/gtk/northstar ;;
+esac
+BIN=${NS_BIN:-$DEFAULT_BIN}
 export NS_ALLOW_ROOT=${NS_ALLOW_ROOT:-1}
 BASE=${NS_BASE:-$ROOT/data/baseline}
 
