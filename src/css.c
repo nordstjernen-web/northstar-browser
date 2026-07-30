@@ -648,6 +648,7 @@ static gboolean parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b,
                             guint8 *a);
 static gboolean parse_color_depth(const char *s, guint8 *r, guint8 *g,
                                   guint8 *b, guint8 *a, int depth);
+static double css_angle_value_degrees(double v, char **endp);
 
 static char *
 ascii_lower(const char *s, gsize len)
@@ -1278,48 +1279,137 @@ named_color(const char *name, guint8 *r, guint8 *g, guint8 *b)
     return FALSE;
 }
 
+typedef struct {
+    double   v;
+    gboolean percent;
+    gboolean angle;
+    gboolean none;
+} ns_color_arg;
+
+typedef struct {
+    ns_color_arg args[4];
+    int          count;
+    gboolean     legacy;
+} ns_color_args;
+
+static const char *
+color_skip_ws(const char *p)
+{
+    while (is_ws(*p)) p++;
+    return p;
+}
+
+static gboolean
+color_read_arg(const char **pp, ns_color_arg *out)
+{
+    const char *p = *pp;
+    memset(out, 0, sizeof *out);
+    if (g_ascii_strncasecmp(p, "none", 4) == 0 && !is_ident(p[4])) {
+        out->none = TRUE;
+        *pp = p + 4;
+        return TRUE;
+    }
+    char *end = NULL;
+    double v = g_ascii_strtod(p, &end);
+    if (!end || end == p) return FALSE;
+    if (*end == '%') {
+        out->percent = TRUE;
+        end++;
+    } else if (g_ascii_isalpha(*end)) {
+        char *unit_end = end;
+        double deg = css_angle_value_degrees(v, &unit_end);
+        if (unit_end == end) return FALSE;
+        out->angle = TRUE;
+        v = deg;
+        end = unit_end;
+    }
+    if (is_ident(*end)) return FALSE;
+    out->v = v;
+    *pp = end;
+    return TRUE;
+}
+
+static gboolean
+color_args_parse(const char *args, ns_color_args *out)
+{
+    const char *p = color_skip_ws(args);
+    int slash_at = -1;
+    out->count = 0;
+    out->legacy = FALSE;
+    while (*p && *p != ')') {
+        if (out->count > 0) {
+            const char *before_ws = p;
+            p = color_skip_ws(p);
+            gboolean spaced = p != before_ws;
+            if (*p == ',') {
+                if (out->count > 1 && !out->legacy) return FALSE;
+                out->legacy = TRUE;
+                p = color_skip_ws(p + 1);
+            } else if (*p == '/') {
+                if (out->legacy || slash_at >= 0) return FALSE;
+                slash_at = out->count;
+                p = color_skip_ws(p + 1);
+            } else if (!spaced || out->legacy) {
+                return FALSE;
+            }
+        }
+        if (out->count >= (int)G_N_ELEMENTS(out->args)) return FALSE;
+        if (!*p || *p == ')') return FALSE;
+        if (!color_read_arg(&p, &out->args[out->count])) return FALSE;
+        out->count++;
+    }
+    p = color_skip_ws(p);
+    if (*p == ')') p = color_skip_ws(p + 1);
+    if (*p) return FALSE;
+    if (slash_at >= 0 && slash_at != out->count - 1) return FALSE;
+    if (out->count == 4 && !out->legacy && slash_at < 0) return FALSE;
+    return out->count >= 3;
+}
+
+static const char *
+color_func_args(const char *s, const char *name)
+{
+    gsize n = strlen(name);
+    if (g_ascii_strncasecmp(s, name, n) != 0 || s[n] != '(') return NULL;
+    return s + n + 1;
+}
+
+static double
+color_arg_scaled(const ns_color_arg *a, double percent_full)
+{
+    if (a->none) return 0.0;
+    return a->percent ? a->v * percent_full / 100.0 : a->v;
+}
+
+static guint8
+color_channel_byte(double unit_value)
+{
+    if (!isfinite(unit_value)) unit_value = unit_value > 0 ? 1.0 : 0.0;
+    return (guint8)CLAMP((int)(unit_value * 255.0 + 0.5), 0, 255);
+}
+
+static guint8
+color_args_alpha(const ns_color_args *a)
+{
+    if (a->count < 4) return 255;
+    return color_channel_byte(color_arg_scaled(&a->args[3], 1.0));
+}
+
 static gboolean
 parse_rgb_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
 {
-    gboolean is_rgba = g_ascii_strncasecmp(s, "rgba(", 5) == 0;
-    gboolean is_rgb  = !is_rgba && g_ascii_strncasecmp(s, "rgb(", 4) == 0;
-    if (!is_rgb && !is_rgba) return FALSE;
-    const char *p = strchr(s, '(');
-    if (!p) return FALSE;
-    p++;
-    double values[4] = { 0, 0, 0, 1 };
-    gboolean is_percent[4] = { FALSE, FALSE, FALSE, FALSE };
-    int count = 0;
-    while (*p && *p != ')' && count < 4) {
-        while (*p == ' ' || *p == ',' || *p == '/') p++;
-        if (!*p || *p == ')') break;
-        if (g_ascii_strncasecmp(p, "none", 4) == 0 &&
-            !is_ident(p[4])) {
-            values[count] = count == 3 ? 1.0 : 0.0;
-            count++;
-            p += 4;
-            continue;
-        }
-        char *end = NULL;
-        double v = g_ascii_strtod(p, &end);
-        if (!end || end == p) return FALSE;
-        if (*end == '%') { is_percent[count] = TRUE; end++; }
-        values[count++] = v;
-        p = end;
-    }
-    if (count < 3) return FALSE;
-    double rgb_scaled[3];
+    const char *args = color_func_args(s, "rgba");
+    if (!args) args = color_func_args(s, "rgb");
+    if (!args) return FALSE;
+    ns_color_args parsed;
+    if (!color_args_parse(args, &parsed)) return FALSE;
     for (int i = 0; i < 3; i++)
-        rgb_scaled[i] = is_percent[i] ? values[i] * 255.0 / 100.0 : values[i];
-    *r = (guint8)CLAMP((int)(rgb_scaled[0] + 0.5), 0, 255);
-    *g = (guint8)CLAMP((int)(rgb_scaled[1] + 0.5), 0, 255);
-    *b = (guint8)CLAMP((int)(rgb_scaled[2] + 0.5), 0, 255);
-    if (count == 4) {
-        double alpha = is_percent[3] ? values[3] / 100.0 : values[3];
-        *a = (guint8)CLAMP((int)(alpha * 255 + 0.5), 0, 255);
-    } else {
-        *a = 255;
-    }
+        if (parsed.args[i].angle) return FALSE;
+    if (parsed.count == 4 && parsed.args[3].angle) return FALSE;
+    *r = color_channel_byte(color_arg_scaled(&parsed.args[0], 255.0) / 255.0);
+    *g = color_channel_byte(color_arg_scaled(&parsed.args[1], 255.0) / 255.0);
+    *b = color_channel_byte(color_arg_scaled(&parsed.args[2], 255.0) / 255.0);
+    *a = color_args_alpha(&parsed);
     return TRUE;
 }
 
@@ -1357,52 +1447,34 @@ css_angle_value_degrees(double v, char **endp)
 }
 
 static gboolean
+color_hue_valid(const ns_color_arg *a)
+{
+    return !a->percent;
+}
+
+static double
+color_hue_turns(const ns_color_arg *a)
+{
+    double h = a->none ? 0.0 : a->v / 360.0;
+    return isfinite(h) ? h - floor(h) : 0.0;
+}
+
+static gboolean
 parse_hsl_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
 {
-    gboolean is_hsla = g_ascii_strncasecmp(s, "hsla(", 5) == 0;
-    gboolean is_hsl  = !is_hsla && g_ascii_strncasecmp(s, "hsl(", 4) == 0;
-    if (!is_hsl && !is_hsla) return FALSE;
-    const char *p = strchr(s, '(');
-    if (!p) return FALSE;
-    p++;
-    double values[4] = { 0, 0, 0, 1 };
-    gboolean alpha_pct = FALSE;
-    int count = 0;
-    while (*p && *p != ')' && count < 4) {
-        while (*p == ' ' || *p == ',' || *p == '/') p++;
-        if (!*p || *p == ')') break;
-        if (g_ascii_strncasecmp(p, "none", 4) == 0 &&
-            !is_ident(p[4])) {
-            values[count] = count == 3 ? 1.0 : 0.0;
-            count++;
-            p += 4;
-            continue;
-        }
-        char *end = NULL;
-        double v = g_ascii_strtod(p, &end);
-        if (!end || end == p) return FALSE;
-        if (count == 0) {
-            v = css_angle_value_degrees(v, &end);
-            if (is_ident(*end)) return FALSE;
-        } else if (count == 1 || count == 2) {
-            if (*end != '%') return FALSE;   /* saturation/lightness need % */
-            end++;
-        } else if (*end == '%') {
-            alpha_pct = TRUE;
-            end++;
-        }
-        values[count++] = v;
-        p = end;
-    }
-    if (count < 3) return FALSE;
-    double h = values[0] / 360.0;
-    h = isfinite(h) ? h - floor(h) : 0.0;
-    double sat = values[1] / 100.0;
-    if (sat < 0) sat = 0;
-    if (sat > 1) sat = 1;
-    double lig = values[2] / 100.0;
-    if (lig < 0) lig = 0;
-    if (lig > 1) lig = 1;
+    const char *args = color_func_args(s, "hsla");
+    if (!args) args = color_func_args(s, "hsl");
+    if (!args) return FALSE;
+    ns_color_args parsed;
+    if (!color_args_parse(args, &parsed)) return FALSE;
+    if (parsed.args[1].angle || parsed.args[2].angle) return FALSE;
+    if (!color_hue_valid(&parsed.args[0])) return FALSE;
+    if (parsed.legacy && (!parsed.args[1].percent || !parsed.args[2].percent))
+        return FALSE;
+    if (parsed.count == 4 && parsed.args[3].angle) return FALSE;
+    double h = color_hue_turns(&parsed.args[0]);
+    double sat = CLAMP(color_arg_scaled(&parsed.args[1], 100.0) / 100.0, 0.0, 1.0);
+    double lig = CLAMP(color_arg_scaled(&parsed.args[2], 100.0) / 100.0, 0.0, 1.0);
     double rr, gg, bb;
     if (sat == 0) {
         rr = gg = bb = lig;
@@ -1413,61 +1485,26 @@ parse_hsl_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
         gg = hsl_hue_to_rgb(pp, q, h);
         bb = hsl_hue_to_rgb(pp, q, h - 1.0/3.0);
     }
-    *r = (guint8)CLAMP((int)(rr * 255 + 0.5), 0, 255);
-    *g = (guint8)CLAMP((int)(gg * 255 + 0.5), 0, 255);
-    *b = (guint8)CLAMP((int)(bb * 255 + 0.5), 0, 255);
-    if (count >= 4) {
-        double alpha = values[3];
-        if (alpha_pct) alpha /= 100.0;
-        *a = (guint8)CLAMP((int)(alpha * 255 + 0.5), 0, 255);
-    } else {
-        *a = 255;
-    }
+    *r = color_channel_byte(rr);
+    *g = color_channel_byte(gg);
+    *b = color_channel_byte(bb);
+    *a = color_args_alpha(&parsed);
     return TRUE;
 }
 
 static gboolean
 parse_hwb_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
 {
-    if (g_ascii_strncasecmp(s, "hwb(", 4) != 0) return FALSE;
-    const char *p = strchr(s, '(');
-    if (!p) return FALSE;
-    p++;
-    double values[4] = { 0, 0, 0, 1 };
-    gboolean is_percent[4] = { FALSE, FALSE, FALSE, FALSE };
-    int count = 0;
-    while (*p && *p != ')' && count < 4) {
-        while (*p == ' ' || *p == ',' || *p == '/') p++;
-        if (!*p || *p == ')') break;
-        if (g_ascii_strncasecmp(p, "none", 4) == 0 &&
-            !is_ident(p[4])) {
-            values[count] = count == 3 ? 1.0 : 0.0;
-            count++;
-            p += 4;
-            continue;
-        }
-        char *end = NULL;
-        double v = g_ascii_strtod(p, &end);
-        if (!end || end == p) return FALSE;
-        if (count == 0) {
-            v = css_angle_value_degrees(v, &end);
-            if (is_ident(*end)) return FALSE;
-        } else if (*end == '%') {
-            is_percent[count] = TRUE;
-            end++;
-        } else if (is_ident(*end)) {
-            return FALSE;
-        }
-        values[count++] = v;
-        p = end;
-    }
-    if (count < 3) return FALSE;
-    double h = values[0] / 360.0;
-    h = isfinite(h) ? h - floor(h) : 0.0;
-    double w = (is_percent[1] ? values[1] : values[1]) / 100.0;
-    double bl = (is_percent[2] ? values[2] : values[2]) / 100.0;
-    w = CLAMP(w, 0.0, 1.0);
-    bl = CLAMP(bl, 0.0, 1.0);
+    const char *args = color_func_args(s, "hwb");
+    if (!args) return FALSE;
+    ns_color_args parsed;
+    if (!color_args_parse(args, &parsed) || parsed.legacy) return FALSE;
+    if (parsed.args[1].angle || parsed.args[2].angle) return FALSE;
+    if (!color_hue_valid(&parsed.args[0])) return FALSE;
+    if (parsed.count == 4 && parsed.args[3].angle) return FALSE;
+    double h = color_hue_turns(&parsed.args[0]);
+    double w = CLAMP(color_arg_scaled(&parsed.args[1], 100.0) / 100.0, 0.0, 1.0);
+    double bl = CLAMP(color_arg_scaled(&parsed.args[2], 100.0) / 100.0, 0.0, 1.0);
     double rr = hsl_hue_to_rgb(0, 1, h + 1.0/3.0);
     double gg = hsl_hue_to_rgb(0, 1, h);
     double bb = hsl_hue_to_rgb(0, 1, h - 1.0/3.0);
@@ -1480,15 +1517,10 @@ parse_hwb_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
         gg = gg * scale + w;
         bb = bb * scale + w;
     }
-    *r = (guint8)CLAMP((int)(rr * 255 + 0.5), 0, 255);
-    *g = (guint8)CLAMP((int)(gg * 255 + 0.5), 0, 255);
-    *b = (guint8)CLAMP((int)(bb * 255 + 0.5), 0, 255);
-    if (count >= 4) {
-        double alpha = is_percent[3] ? values[3] / 100.0 : values[3];
-        *a = (guint8)CLAMP((int)(alpha * 255 + 0.5), 0, 255);
-    } else {
-        *a = 255;
-    }
+    *r = color_channel_byte(rr);
+    *g = color_channel_byte(gg);
+    *b = color_channel_byte(bb);
+    *a = color_args_alpha(&parsed);
     return TRUE;
 }
 
@@ -1574,135 +1606,62 @@ lab_to_srgb(double l, double a, double b, guint8 *r, guint8 *g, guint8 *bl)
 }
 
 static gboolean
+parse_polar_lab_args(const ns_color_args *parsed, gboolean is_polar,
+                     double lightness_full, double axis_full,
+                     double chroma_full, double *l, double *aa, double *bb)
+{
+    if (parsed->legacy) return FALSE;
+    if (parsed->args[0].angle || parsed->args[1].angle) return FALSE;
+    if (parsed->count == 4 && parsed->args[3].angle) return FALSE;
+    if (!is_polar && parsed->args[2].angle) return FALSE;
+    *l = CLAMP(color_arg_scaled(&parsed->args[0], lightness_full),
+               0.0, lightness_full);
+    if (is_polar) {
+        if (!color_hue_valid(&parsed->args[2])) return FALSE;
+        double chroma = color_arg_scaled(&parsed->args[1], chroma_full);
+        if (chroma < 0) chroma = 0;
+        double rad = color_hue_turns(&parsed->args[2]) * 2.0 * G_PI;
+        *aa = chroma * cos(rad);
+        *bb = chroma * sin(rad);
+    } else {
+        *aa = color_arg_scaled(&parsed->args[1], axis_full);
+        *bb = color_arg_scaled(&parsed->args[2], axis_full);
+    }
+    return TRUE;
+}
+
+static gboolean
 parse_lab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
 {
-    gboolean is_lch = g_ascii_strncasecmp(s, "lch(", 4) == 0;
-    gboolean is_lab = !is_lch && g_ascii_strncasecmp(s, "lab(", 4) == 0;
-    if (!is_lch && !is_lab) return FALSE;
-    if (strchr(s, ',')) return FALSE;
-    const char *p = strchr(s, '(');
-    if (!p) return FALSE;
-    p++;
-    double values[4] = { 0, 0, 0, 1 };
-    int count = 0;
-    while (*p && *p != ')' && count < 4) {
-        while (*p == ' ' || *p == '/') p++;
-        if (!*p || *p == ')') break;
-        if (g_ascii_strncasecmp(p, "none", 4) == 0 &&
-            !is_ident(p[4])) {
-            values[count] = count == 3 ? 1.0 : 0.0;
-            count++;
-            p += 4;
-            continue;
-        }
-        char *end = NULL;
-        double v = g_ascii_strtod(p, &end);
-        if (!end || end == p) return FALSE;
-        if (count == 0) {
-            if (*end == '%') end++;
-        } else if (count == 1) {
-            if (*end == '%') {
-                v *= 1.25;
-                end++;
-            }
-            if (is_lch && v < 0) v = 0;
-        } else if (count == 2) {
-            if (is_lch) {
-                v = css_angle_value_degrees(v, &end);
-                if (is_ident(*end)) return FALSE;
-            } else if (*end == '%') {
-                v *= 1.25;
-                end++;
-            }
-        } else if (count == 3) {
-            if (*end == '%') {
-                v /= 100.0;
-                end++;
-            }
-        }
-        values[count++] = v;
-        p = end;
-    }
-    if (count < 3) return FALSE;
-    double l = CLAMP(values[0], 0.0, 100.0);
-    double aa = values[1];
-    double bb = values[2];
-    if (is_lch) {
-        double rad = values[2] * G_PI / 180.0;
-        aa = values[1] * cos(rad);
-        bb = values[1] * sin(rad);
-    }
+    const char *args = color_func_args(s, "lch");
+    gboolean is_lch = args != NULL;
+    if (!args) args = color_func_args(s, "lab");
+    if (!args) return FALSE;
+    ns_color_args parsed;
+    if (!color_args_parse(args, &parsed)) return FALSE;
+    double l, aa, bb;
+    if (!parse_polar_lab_args(&parsed, is_lch, 100.0, 125.0, 150.0,
+                              &l, &aa, &bb))
+        return FALSE;
     lab_to_srgb(l, aa, bb, r, g, b);
-    double av = count >= 4 ? values[3] : 1.0;
-    *alpha = (guint8)CLAMP((int)(CLAMP(av, 0.0, 1.0) * 255 + 0.5), 0, 255);
+    *alpha = color_args_alpha(&parsed);
     return TRUE;
 }
 
 static gboolean
 parse_oklab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
 {
-    gboolean is_lch = g_ascii_strncasecmp(s, "oklch(", 6) == 0;
-    gboolean is_lab = !is_lch && g_ascii_strncasecmp(s, "oklab(", 6) == 0;
-    if (!is_lch && !is_lab) return FALSE;
-    if (strchr(s, ',')) return FALSE;
-    const char *p = strchr(s, '(');
-    if (!p) return FALSE;
-    p++;
-    double values[4] = { 0, 0, 0, 1 };
-    int count = 0;
-    while (*p && *p != ')' && count < 4) {
-        while (*p == ' ' || *p == '/') p++;
-        if (!*p || *p == ')') break;
-        if (g_ascii_strncasecmp(p, "none", 4) == 0 &&
-            !is_ident(p[4])) {
-            values[count] = count == 3 ? 1.0 : 0.0;
-            count++;
-            p += 4;
-            continue;
-        }
-        char *end = NULL;
-        double v = g_ascii_strtod(p, &end);
-        if (!end || end == p) return FALSE;
-        if (count == 0) {
-            if (*end == '%') {
-                v /= 100.0;
-                end++;
-            }
-        } else if (count == 1) {
-            if (*end == '%') {
-                v *= 0.004;
-                end++;
-            }
-            if (is_lch && v < 0) v = 0;
-        } else if (count == 2) {
-            if (is_lch) {
-                v = css_angle_value_degrees(v, &end);
-                if (is_ident(*end)) return FALSE;
-            } else if (*end == '%') {
-                v *= 0.004;
-                end++;
-            }
-        } else if (count == 3) {
-            if (*end == '%') {
-                v /= 100.0;
-                end++;
-            }
-        }
-        values[count++] = v;
-        p = end;
-    }
-    if (count < 3) return FALSE;
-    double l = CLAMP(values[0], 0.0, 1.0);
-    double aa = values[1];
-    double bb = values[2];
-    if (is_lch) {
-        double rad = values[2] * G_PI / 180.0;
-        aa = values[1] * cos(rad);
-        bb = values[1] * sin(rad);
-    }
+    const char *args = color_func_args(s, "oklch");
+    gboolean is_lch = args != NULL;
+    if (!args) args = color_func_args(s, "oklab");
+    if (!args) return FALSE;
+    ns_color_args parsed;
+    if (!color_args_parse(args, &parsed)) return FALSE;
+    double l, aa, bb;
+    if (!parse_polar_lab_args(&parsed, is_lch, 1.0, 0.4, 0.4, &l, &aa, &bb))
+        return FALSE;
     oklab_to_srgb(l, aa, bb, r, g, b);
-    double av = count >= 4 ? values[3] : 1.0;
-    *alpha = (guint8)CLAMP((int)(CLAMP(av, 0.0, 1.0) * 255 + 0.5), 0, 255);
+    *alpha = color_args_alpha(&parsed);
     return TRUE;
 }
 
@@ -1749,14 +1708,66 @@ mat3_apply(const double m[9], const double v[3], double out[3])
 }
 
 static void
+mat3_invert(const double m[9], double out[9])
+{
+    double det = m[0] * (m[4] * m[8] - m[5] * m[7])
+               - m[1] * (m[3] * m[8] - m[5] * m[6])
+               + m[2] * (m[3] * m[7] - m[4] * m[6]);
+    if (det == 0.0) det = 1.0;
+    out[0] = (m[4] * m[8] - m[5] * m[7]) / det;
+    out[1] = (m[2] * m[7] - m[1] * m[8]) / det;
+    out[2] = (m[1] * m[5] - m[2] * m[4]) / det;
+    out[3] = (m[5] * m[6] - m[3] * m[8]) / det;
+    out[4] = (m[0] * m[8] - m[2] * m[6]) / det;
+    out[5] = (m[2] * m[3] - m[0] * m[5]) / det;
+    out[6] = (m[3] * m[7] - m[4] * m[6]) / det;
+    out[7] = (m[1] * m[6] - m[0] * m[7]) / det;
+    out[8] = (m[0] * m[4] - m[1] * m[3]) / det;
+}
+
+static void
+mat3_apply_inverse(const double m[9], const double v[3], double out[3])
+{
+    double inv[9];
+    mat3_invert(m, inv);
+    mat3_apply(inv, v, out);
+}
+
+static const double ns_xyz_to_srgb[9] = {
+     3.2404542, -1.5371385, -0.4985314,
+    -0.9692660,  1.8760108,  0.0415560,
+     0.0556434, -0.2040259,  1.0572252,
+};
+static const double ns_p3_to_xyz[9] = {
+    0.4865709486, 0.2656676932, 0.1982172852,
+    0.2289745641, 0.6917385218, 0.0792869141,
+    0.0000000000, 0.0451133819, 1.0439443689,
+};
+static const double ns_a98_to_xyz[9] = {
+    0.5766690429, 0.1855582379, 0.1882286462,
+    0.2973449753, 0.6273635663, 0.0752914585,
+    0.0270313614, 0.0706888525, 0.9913375368,
+};
+static const double ns_prophoto_to_xyz_d50[9] = {
+    0.7977604896, 0.1351757162, 0.0313534242,
+    0.2880711198, 0.7118432022, 0.0000856779,
+    0.0000000000, 0.0000000000, 0.8251046025,
+};
+static const double ns_rec2020_to_xyz[9] = {
+    0.6369580483, 0.1446169036, 0.1688809752,
+    0.2627002120, 0.6779980715, 0.0593017165,
+    0.0000000000, 0.0280726930, 1.0609850577,
+};
+static const double ns_d50_to_d65[9] = {
+     0.9555766, -0.0230393, 0.0631636,
+    -0.0282895,  1.0099416, 0.0210077,
+     0.0122982, -0.0204830, 1.3299098,
+};
+
+static void
 xyz_d65_to_linear_srgb(const double xyz[3], double out[3])
 {
-    static const double m[9] = {
-         3.2404542, -1.5371385, -0.4985314,
-        -0.9692660,  1.8760108,  0.0415560,
-         0.0556434, -0.2040259,  1.0572252,
-    };
-    mat3_apply(m, xyz, out);
+    mat3_apply(ns_xyz_to_srgb, xyz, out);
 }
 
 static double
@@ -1789,31 +1800,6 @@ static void
 predefined_to_linear_srgb(ns_predefined_space space, const double in[3],
                           double out[3])
 {
-    static const double p3_to_xyz[9] = {
-        0.4865709486, 0.2656676932, 0.1982172852,
-        0.2289745641, 0.6917385218, 0.0792869141,
-        0.0000000000, 0.0451133819, 1.0439443689,
-    };
-    static const double a98_to_xyz[9] = {
-        0.5766690429, 0.1855582379, 0.1882286462,
-        0.2973449753, 0.6273635663, 0.0752914585,
-        0.0270313614, 0.0706888525, 0.9913375368,
-    };
-    static const double prophoto_to_xyz_d50[9] = {
-        0.7977604896, 0.1351757162, 0.0313534242,
-        0.2880711198, 0.7118432022, 0.0000856779,
-        0.0000000000, 0.0000000000, 0.8251046025,
-    };
-    static const double rec2020_to_xyz[9] = {
-        0.6369580483, 0.1446169036, 0.1688809752,
-        0.2627002120, 0.6779980715, 0.0593017165,
-        0.0000000000, 0.0280726930, 1.0609850577,
-    };
-    static const double d50_to_d65[9] = {
-         0.9555766, -0.0230393, 0.0631636,
-        -0.0282895,  1.0099416, 0.0210077,
-         0.0122982, -0.0204830, 1.3299098,
-    };
     double linear[3], xyz[3], adapted[3];
     switch (space) {
     case NS_PREDEF_SRGB:
@@ -1824,27 +1810,27 @@ predefined_to_linear_srgb(ns_predefined_space space, const double in[3],
         return;
     case NS_PREDEF_DISPLAY_P3:
         for (int i = 0; i < 3; i++) linear[i] = srgb_decode_gamma(in[i]);
-        mat3_apply(p3_to_xyz, linear, xyz);
+        mat3_apply(ns_p3_to_xyz, linear, xyz);
         break;
     case NS_PREDEF_A98_RGB:
         for (int i = 0; i < 3; i++) linear[i] = a98_decode(in[i]);
-        mat3_apply(a98_to_xyz, linear, xyz);
+        mat3_apply(ns_a98_to_xyz, linear, xyz);
         break;
     case NS_PREDEF_PROPHOTO_RGB:
         for (int i = 0; i < 3; i++) linear[i] = prophoto_decode(in[i]);
-        mat3_apply(prophoto_to_xyz_d50, linear, adapted);
-        mat3_apply(d50_to_d65, adapted, xyz);
+        mat3_apply(ns_prophoto_to_xyz_d50, linear, adapted);
+        mat3_apply(ns_d50_to_d65, adapted, xyz);
         break;
     case NS_PREDEF_REC2020:
         for (int i = 0; i < 3; i++) linear[i] = rec2020_decode(in[i]);
-        mat3_apply(rec2020_to_xyz, linear, xyz);
+        mat3_apply(ns_rec2020_to_xyz, linear, xyz);
         break;
     case NS_PREDEF_XYZ_D65:
         for (int i = 0; i < 3; i++) xyz[i] = in[i];
         break;
     case NS_PREDEF_XYZ_D50:
         for (int i = 0; i < 3; i++) adapted[i] = in[i];
-        mat3_apply(d50_to_d65, adapted, xyz);
+        mat3_apply(ns_d50_to_d65, adapted, xyz);
         break;
     default:
         return;
@@ -1852,44 +1838,300 @@ predefined_to_linear_srgb(ns_predefined_space space, const double in[3],
     xyz_d65_to_linear_srgb(xyz, out);
 }
 
+static void
+xyz_linear_srgb_to_d65(const double lin[3], double out[3])
+{
+    mat3_apply_inverse(ns_xyz_to_srgb, lin, out);
+}
+
+static double
+a98_encode(double c)
+{
+    double v = pow(fabs(c), 256.0 / 563.0);
+    return c < 0 ? -v : v;
+}
+
+static double
+prophoto_encode(double c)
+{
+    double a = fabs(c);
+    double v = a < 1.0 / 512.0 ? a * 16.0 : pow(a, 1.0 / 1.8);
+    return c < 0 ? -v : v;
+}
+
+static double
+rec2020_encode(double c)
+{
+    static const double alpha = 1.09929682680944;
+    static const double beta  = 0.018053968510807;
+    double a = fabs(c);
+    double v = a < beta ? a * 4.5 : alpha * pow(a, 0.45) - (alpha - 1.0);
+    return c < 0 ? -v : v;
+}
+
+static void
+linear_srgb_to_predefined(ns_predefined_space space, const double lin[3],
+                          double out[3])
+{
+    double xyz[3], rgb[3];
+    xyz_linear_srgb_to_d65(lin, xyz);
+    switch (space) {
+    case NS_PREDEF_SRGB:
+        for (int i = 0; i < 3; i++) out[i] = srgb_encode_linear(lin[i]);
+        return;
+    case NS_PREDEF_SRGB_LINEAR:
+        for (int i = 0; i < 3; i++) out[i] = lin[i];
+        return;
+    case NS_PREDEF_DISPLAY_P3:
+        mat3_apply_inverse(ns_p3_to_xyz, xyz, rgb);
+        for (int i = 0; i < 3; i++) out[i] = srgb_encode_linear(rgb[i]);
+        return;
+    case NS_PREDEF_A98_RGB:
+        mat3_apply_inverse(ns_a98_to_xyz, xyz, rgb);
+        for (int i = 0; i < 3; i++) out[i] = a98_encode(rgb[i]);
+        return;
+    case NS_PREDEF_PROPHOTO_RGB: {
+        double d50[3];
+        mat3_apply_inverse(ns_d50_to_d65, xyz, d50);
+        mat3_apply_inverse(ns_prophoto_to_xyz_d50, d50, rgb);
+        for (int i = 0; i < 3; i++) out[i] = prophoto_encode(rgb[i]);
+        return;
+    }
+    case NS_PREDEF_REC2020:
+        mat3_apply_inverse(ns_rec2020_to_xyz, xyz, rgb);
+        for (int i = 0; i < 3; i++) out[i] = rec2020_encode(rgb[i]);
+        return;
+    case NS_PREDEF_XYZ_D65:
+        for (int i = 0; i < 3; i++) out[i] = xyz[i];
+        return;
+    case NS_PREDEF_XYZ_D50:
+        mat3_apply_inverse(ns_d50_to_d65, xyz, out);
+        return;
+    }
+}
+
+static double
+lab_f(double t)
+{
+    if (t > 0.008856451679) return cbrt(t);
+    return (903.2962963 * t + 16.0) / 116.0;
+}
+
+static void
+srgb_to_lab(guint8 r, guint8 g, guint8 b, double *ol, double *oa, double *ob)
+{
+    double lin[3] = { srgb_decode_gamma(r / 255.0),
+                      srgb_decode_gamma(g / 255.0),
+                      srgb_decode_gamma(b / 255.0) };
+    double xyz[3], d50[3];
+    xyz_linear_srgb_to_d65(lin, xyz);
+    mat3_apply_inverse(ns_d50_to_d65, xyz, d50);
+    double fx = lab_f(d50[0] / 0.96422);
+    double fy = lab_f(d50[1]);
+    double fz = lab_f(d50[2] / 0.82521);
+    *ol = 116.0 * fy - 16.0;
+    *oa = 500.0 * (fx - fy);
+    *ob = 200.0 * (fy - fz);
+}
+
+static void
+srgb_to_hsl(guint8 r, guint8 g, guint8 b, double *oh, double *os, double *ol)
+{
+    double rr = r / 255.0, gg = g / 255.0, bb = b / 255.0;
+    double max = MAX(rr, MAX(gg, bb)), min = MIN(rr, MIN(gg, bb));
+    double d = max - min;
+    double h = 0.0;
+    if (d > 0) {
+        if (max == rr)      h = fmod((gg - bb) / d, 6.0);
+        else if (max == gg) h = (bb - rr) / d + 2.0;
+        else                h = (rr - gg) / d + 4.0;
+        h *= 60.0;
+        if (h < 0) h += 360.0;
+    }
+    double l = (max + min) / 2.0;
+    double s = (l <= 0.0 || l >= 1.0) ? 0.0 : d / (1.0 - fabs(2.0 * l - 1.0));
+    *oh = h;
+    *os = s * 100.0;
+    *ol = l * 100.0;
+}
+
+static void
+srgb_to_hwb(guint8 r, guint8 g, guint8 b, double *oh, double *ow, double *obl)
+{
+    double s, l;
+    srgb_to_hsl(r, g, b, oh, &s, &l);
+    double rr = r / 255.0, gg = g / 255.0, bb = b / 255.0;
+    *ow = MIN(rr, MIN(gg, bb)) * 100.0;
+    *obl = (1.0 - MAX(rr, MAX(gg, bb))) * 100.0;
+}
+
+static void
+lab_to_polar(double a, double b, double *chroma, double *hue)
+{
+    *chroma = hypot(a, b);
+    double h = atan2(b, a) * 180.0 / G_PI;
+    *hue = h < 0 ? h + 360.0 : h;
+}
+
+static gboolean
+relative_channel_values(const char *fn, gsize fn_len,
+                        ns_predefined_space space, const guint8 rgba[4],
+                        const char *names[4], double ch[4])
+{
+    static const char *const rgb_names[]   = { "r", "g", "b", "alpha" };
+    static const char *const hsl_names[]   = { "h", "s", "l", "alpha" };
+    static const char *const hwb_names[]   = { "h", "w", "b", "alpha" };
+    static const char *const lab_names[]   = { "l", "a", "b", "alpha" };
+    static const char *const lch_names[]   = { "l", "c", "h", "alpha" };
+    static const char *const xyz_names[]   = { "x", "y", "z", "alpha" };
+    const char *const *pick = NULL;
+    ch[3] = rgba[3] / 255.0;
+
+    if (fn_len == 3 && g_ascii_strncasecmp(fn, "rgb", 3) == 0) {
+        pick = rgb_names;
+        for (int i = 0; i < 3; i++) ch[i] = rgba[i];
+    } else if (fn_len == 4 && g_ascii_strncasecmp(fn, "rgba", 4) == 0) {
+        pick = rgb_names;
+        for (int i = 0; i < 3; i++) ch[i] = rgba[i];
+    } else if ((fn_len == 3 && g_ascii_strncasecmp(fn, "hsl", 3) == 0) ||
+               (fn_len == 4 && g_ascii_strncasecmp(fn, "hsla", 4) == 0)) {
+        pick = hsl_names;
+        srgb_to_hsl(rgba[0], rgba[1], rgba[2], &ch[0], &ch[1], &ch[2]);
+    } else if (fn_len == 3 && g_ascii_strncasecmp(fn, "hwb", 3) == 0) {
+        pick = hwb_names;
+        srgb_to_hwb(rgba[0], rgba[1], rgba[2], &ch[0], &ch[1], &ch[2]);
+    } else if (fn_len == 3 && g_ascii_strncasecmp(fn, "lab", 3) == 0) {
+        pick = lab_names;
+        srgb_to_lab(rgba[0], rgba[1], rgba[2], &ch[0], &ch[1], &ch[2]);
+    } else if (fn_len == 3 && g_ascii_strncasecmp(fn, "lch", 3) == 0) {
+        pick = lch_names;
+        double a, b;
+        srgb_to_lab(rgba[0], rgba[1], rgba[2], &ch[0], &a, &b);
+        lab_to_polar(a, b, &ch[1], &ch[2]);
+    } else if (fn_len == 5 && g_ascii_strncasecmp(fn, "oklab", 5) == 0) {
+        pick = lab_names;
+        srgb_to_oklab(rgba[0], rgba[1], rgba[2], &ch[0], &ch[1], &ch[2]);
+    } else if (fn_len == 5 && g_ascii_strncasecmp(fn, "oklch", 5) == 0) {
+        pick = lch_names;
+        double a, b;
+        srgb_to_oklab(rgba[0], rgba[1], rgba[2], &ch[0], &a, &b);
+        lab_to_polar(a, b, &ch[1], &ch[2]);
+    } else if (fn_len == 5 && g_ascii_strncasecmp(fn, "color", 5) == 0) {
+        pick = space == NS_PREDEF_XYZ_D65 || space == NS_PREDEF_XYZ_D50
+               ? xyz_names : rgb_names;
+        double lin[3] = { srgb_decode_gamma(rgba[0] / 255.0),
+                          srgb_decode_gamma(rgba[1] / 255.0),
+                          srgb_decode_gamma(rgba[2] / 255.0) };
+        linear_srgb_to_predefined(space, lin, ch);
+    }
+    if (!pick) return FALSE;
+    for (int i = 0; i < 4; i++) names[i] = pick[i];
+    return TRUE;
+}
+
+static const char *
+color_relative_origin_end(const char *p, const char *s_end)
+{
+    while (p < s_end && !is_ws(*p) && *p != ')' && *p != '(') p++;
+    if (p < s_end && *p == '(') {
+        const char *close = match_close_paren(p + 1, s_end);
+        return close ? close + 1 : NULL;
+    }
+    return p;
+}
+
+static char *
+color_relative_expand(const char *s, int depth)
+{
+    const char *open = strchr(s, '(');
+    if (!open || open == s) return NULL;
+    const char *fn = s;
+    gsize fn_len = (gsize)(open - s);
+    const char *s_end = s + strlen(s);
+    const char *p = open + 1;
+    ns_predefined_space space = NS_PREDEF_SRGB;
+    const char *space_text = NULL;
+    gsize space_len = 0;
+    if (fn_len == 5 && g_ascii_strncasecmp(fn, "color", 5) == 0) {
+        p = color_skip_ws(p);
+        space_text = p;
+        while (*p && (g_ascii_isalnum(*p) || *p == '-')) p++;
+        space_len = (gsize)(p - space_text);
+        if (!predefined_space_by_name(space_text, space_len, &space))
+            return NULL;
+    }
+    p = color_skip_ws(p);
+    if (g_ascii_strncasecmp(p, "from", 4) != 0 || !is_ws(p[4])) return NULL;
+    p = color_skip_ws(p + 4);
+
+    const char *origin_end = color_relative_origin_end(p, s_end);
+    if (!origin_end || origin_end == p) return NULL;
+    char *origin = g_strndup(p, (gsize)(origin_end - p));
+    guint8 rgba[4] = { 0, 0, 0, 255 };
+    gboolean parsed = parse_color_depth(origin, &rgba[0], &rgba[1], &rgba[2],
+                                        &rgba[3], depth + 1);
+    g_free(origin);
+    if (!parsed) return NULL;
+
+    const char *names[4] = { NULL, NULL, NULL, NULL };
+    double ch[4];
+    if (!relative_channel_values(fn, fn_len, space, rgba, names, ch))
+        return NULL;
+
+    const char *args_end = match_close_paren(open + 1, s_end);
+    if (!args_end) args_end = s_end;
+    GString *out = g_string_new_len(fn, fn_len);
+    g_string_append_c(out, '(');
+    if (space_text) {
+        g_string_append_len(out, space_text, space_len);
+        g_string_append_c(out, ' ');
+    }
+    const char *q = origin_end;
+    while (q < args_end) {
+        if (g_ascii_isalpha(*q) || *q == '_' || (unsigned char)*q >= 128) {
+            const char *id = q;
+            while (q < args_end && is_ident(*q)) q++;
+            gsize n = (gsize)(q - id);
+            int idx = -1;
+            for (int i = 0; i < 4; i++)
+                if (strlen(names[i]) == n &&
+                    g_ascii_strncasecmp(id, names[i], n) == 0)
+                    idx = i;
+            if (idx < 0) {
+                g_string_append_len(out, id, n);
+            } else {
+                char buf[G_ASCII_DTOSTR_BUF_SIZE];
+                g_ascii_formatd(buf, sizeof buf, "%.6f", ch[idx]);
+                g_string_append(out, buf);
+            }
+        } else {
+            g_string_append_c(out, *q++);
+        }
+    }
+    g_string_append_c(out, ')');
+    return g_string_free(out, FALSE);
+}
+
 static gboolean
 parse_color_function(const char *s, guint8 *r, guint8 *g, guint8 *b,
                      guint8 *alpha)
 {
-    if (g_ascii_strncasecmp(s, "color(", 6) != 0) return FALSE;
-    if (strchr(s, ',')) return FALSE;
-    const char *p = s + 6;
-    while (is_ws(*p)) p++;
+    const char *p = color_func_args(s, "color");
+    if (!p) return FALSE;
+    p = color_skip_ws(p);
     const char *name = p;
     while (*p && (g_ascii_isalnum(*p) || *p == '-')) p++;
     ns_predefined_space space;
     if (!predefined_space_by_name(name, (gsize)(p - name), &space)) return FALSE;
+    if (!is_ws(*p)) return FALSE;
 
+    ns_color_args parsed;
+    if (!color_args_parse(p, &parsed) || parsed.legacy) return FALSE;
     double values[4] = { 0, 0, 0, 1 };
-    int count = 0;
-    while (*p && *p != ')' && count < 4) {
-        while (is_ws(*p) || *p == '/') p++;
-        if (!*p || *p == ')') break;
-        if (g_ascii_strncasecmp(p, "none", 4) == 0 && !is_ident(p[4])) {
-            values[count] = count == 3 ? 1.0 : 0.0;
-            count++;
-            p += 4;
-            continue;
-        }
-        char *end = NULL;
-        double v = g_ascii_strtod(p, &end);
-        if (!end || end == p) return FALSE;
-        if (*end == '%') {
-            v /= 100.0;
-            end++;
-        } else if (is_ident(*end)) {
-            return FALSE;
-        }
-        values[count++] = v;
-        p = end;
+    for (int i = 0; i < parsed.count; i++) {
+        if (parsed.args[i].angle) return FALSE;
+        values[i] = color_arg_scaled(&parsed.args[i], 1.0);
     }
-    while (is_ws(*p)) p++;
-    if (*p != ')' || count < 3) return FALSE;
 
     double linear[3];
     predefined_to_linear_srgb(space, values, linear);
@@ -2151,6 +2393,14 @@ parse_color_depth(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
     *a = 255;
     if (!s || !*s) return FALSE;
     if (depth > 32) return FALSE;
+    if (strchr(s, '(')) {
+        char *plain = color_relative_expand(s, depth);
+        if (plain) {
+            gboolean ok = parse_color_depth(plain, r, g, b, a, depth + 1);
+            g_free(plain);
+            return ok;
+        }
+    }
     if (strstr(s, "calc(")) {
         char *flat = color_resolve_calcs(s);
         if (flat) {
