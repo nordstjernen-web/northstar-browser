@@ -7232,6 +7232,15 @@ prop_is_bg_layered(ns_css_prop prop)
            prop == NS_CSS_BACKGROUND_POSITION_Y;
 }
 
+static gboolean
+prop_is_corner_radius(ns_css_prop prop)
+{
+    return prop == NS_CSS_BORDER_TOP_LEFT_RADIUS ||
+           prop == NS_CSS_BORDER_TOP_RIGHT_RADIUS ||
+           prop == NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS ||
+           prop == NS_CSS_BORDER_BOTTOM_LEFT_RADIUS;
+}
+
 static ns_css_value *
 parse_keyword_choice(const char *text, const char *choices)
 {
@@ -7419,6 +7428,33 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_value_layer_list(prop, t);
         g_free(t);
         return v;
+    }
+
+    if (prop_is_corner_radius(prop)) {
+        char *pair[2] = {0};
+        int nt = split_ws_limit(t, pair, G_N_ELEMENTS(pair));
+        if (nt == 2) {
+            double num[2];
+            ns_css_unit unit[2];
+            if (parse_length(pair[0], &num[0], &unit[0]) &&
+                parse_length(pair[1], &num[1], &unit[1]) &&
+                num[0] >= 0 && num[1] >= 0 &&
+                unit[0] != NS_CSS_UNIT_NUMBER && unit[1] != NS_CSS_UNIT_NUMBER) {
+                legacy_em_normalize(&num[0], &unit[0]);
+                legacy_em_normalize(&num[1], &unit[1]);
+                v = g_new0(ns_css_value, 1);
+                v->kind = NS_CSS_V_SIZE;
+                v->u.size.w = num[0];
+                v->u.size.h = num[1];
+                v->u.size.w_unit = unit[0];
+                v->u.size.h_unit = unit[1];
+            }
+        }
+        for (int i = 0; i < nt; i++) g_free(pair[i]);
+        if (nt == 2) {
+            g_free(t);
+            return v;
+        }
     }
 
     switch (prop) {
@@ -8658,6 +8694,8 @@ ns_css_named_declaration_valid(const char *name, const char *text)
     if (!ns_css_named_property_supported(name)) return FALSE;
     if (name[0] == '-' && name[1] == '-')
         return css_declaration_value_syntax_valid(text);
+    if (g_ascii_strcasecmp(name, "border-radius") == 0)
+        return ns_css_supports_declaration(name, text);
     if (g_ascii_strcasecmp(name, "all") != 0) {
         int prop = prop_id(name);
         return prop >= 0 ? ns_css_declaration_valid(prop, text)
@@ -10827,35 +10865,53 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         if (strcmp(pname, "border-radius") == 0) {
-            char *vtext_main = vtext;
-            char *slash = strchr(vtext_main, '/');
+            char *slash = strchr(vtext, '/');
             if (slash) *slash = '\0';
             char *tokens[4] = {0};
-            int n = split_ws(vtext_main, tokens);
-            if (n > 0) {
-                const char *tl = tokens[0];
-                const char *tr = n >= 2 ? tokens[1] : tl;
-                const char *br = n >= 3 ? tokens[2] : tl;
-                const char *bl = n >= 4 ? tokens[3] : tr;
-                const struct { ns_css_prop p; const char *v; } map[] = {
-                    { NS_CSS_BORDER_TOP_LEFT_RADIUS,     tl },
-                    { NS_CSS_BORDER_TOP_RIGHT_RADIUS,    tr },
-                    { NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS, br },
-                    { NS_CSS_BORDER_BOTTOM_LEFT_RADIUS,  bl },
+            char *vtokens[4] = {0};
+            int n = split_ws(vtext, tokens);
+            int vn = slash ? split_ws(slash + 1, vtokens) : 0;
+            if (n > 0 && (!slash || vn > 0)) {
+                const char *corner[4] = {
+                    tokens[0],
+                    n >= 2 ? tokens[1] : tokens[0],
+                    n >= 3 ? tokens[2] : tokens[0],
+                    n >= 4 ? tokens[3] : (n >= 2 ? tokens[1] : tokens[0]),
+                };
+                const char *vcorner[4] = {0};
+                if (vn > 0) {
+                    vcorner[0] = vtokens[0];
+                    vcorner[1] = vn >= 2 ? vtokens[1] : vtokens[0];
+                    vcorner[2] = vn >= 3 ? vtokens[2] : vtokens[0];
+                    vcorner[3] = vn >= 4 ? vtokens[3]
+                                         : (vn >= 2 ? vtokens[1] : vtokens[0]);
+                }
+                static const ns_css_prop corner_props[4] = {
+                    NS_CSS_BORDER_TOP_LEFT_RADIUS,
+                    NS_CSS_BORDER_TOP_RIGHT_RADIUS,
+                    NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS,
+                    NS_CSS_BORDER_BOTTOM_LEFT_RADIUS,
                 };
                 for (int i = 0; i < 4; i++) {
-                    ns_css_value *vv = parse_value_for(map[i].p, map[i].v);
+                    char *text = vcorner[i]
+                        ? g_strdup_printf("%s %s", corner[i], vcorner[i])
+                        : g_strdup(corner[i]);
+                    ns_css_value *vv = parse_value_for(corner_props[i], text);
+                    g_free(text);
                     if (!vv) continue;
-                    ns_css_decl d = { .prop = map[i].p, .value = vv, .important = important };
+                    ns_css_decl d = { .prop = corner_props[i], .value = vv,
+                                      .important = important };
                     g_array_append_val(decls_out, d);
                 }
-                ns_css_value *legacy = parse_value_for(NS_CSS_BORDER_RADIUS, tl);
+                ns_css_value *legacy =
+                    parse_value_for(NS_CSS_BORDER_RADIUS, tokens[0]);
                 if (legacy) {
                     ns_css_decl d = { .prop = NS_CSS_BORDER_RADIUS, .value = legacy, .important = important };
                     g_array_append_val(decls_out, d);
                 }
             }
             for (int i = 0; i < n; i++) g_free(tokens[i]);
+            for (int i = 0; i < vn; i++) g_free(vtokens[i]);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
