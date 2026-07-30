@@ -9099,7 +9099,7 @@ grid_named_line(const char *name, gsize len, int after)
                 return ln->line;
         }
     }
-    if (gl->areas && len > 6) {
+    if (gl->areas && len > 4) {
         gsize base = 0;
         gboolean want_end = FALSE;
         if (len > 6 && strncmp(name + len - 6, "-start", 6) == 0)
