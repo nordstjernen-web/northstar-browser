@@ -6861,6 +6861,40 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
             }
         }
     }
+    if (box->style && style_is_grid_container(box->style)) {
+        const ns_css_value *cv =
+            box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
+        if (cv && cv->kind == NS_CSS_V_TRACKS && cv->u.tracks.n > 0 &&
+            !cv->u.tracks.subgrid) {
+            const ns_css_tracks *tk = &cv->u.tracks;
+            double sum = 0;
+            gboolean all_definite = TRUE;
+            for (int i = 0; i < tk->n; i++) {
+                if (tk->tracks[i].kind == NS_CSS_TRACK_PX) {
+                    sum += tk->tracks[i].v;
+                } else if (tk->tracks[i].has_min &&
+                           tk->tracks[i].min_kind == NS_CSS_TRACK_PX) {
+                    sum += tk->tracks[i].min_v;
+                } else {
+                    all_definite = FALSE;
+                    break;
+                }
+            }
+            if (all_definite && sum > 0) {
+                const ns_css_value *gv =
+                    box->style->values[NS_CSS_COLUMN_GAP];
+                if (!gv || !(gv->kind == NS_CSS_V_LENGTH ||
+                             gv->kind == NS_CSS_V_CALC))
+                    gv = box->style->values[NS_CSS_GAP];
+                if (gv && (gv->kind == NS_CSS_V_LENGTH ||
+                           gv->kind == NS_CSS_V_CALC) && tk->n > 1) {
+                    double gap = length_resolve(gv, 0, 0);
+                    if (gap > 0) sum += gap * (tk->n - 1);
+                }
+                return sum;
+            }
+        }
+    }
     const ns_style *child_style = box->style ? box->style : parent_style;
     double max_child = 0;
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {

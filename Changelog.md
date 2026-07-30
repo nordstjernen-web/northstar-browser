@@ -16,6 +16,10 @@ Significant changes in each release:
   track is also never scaled down to make the tracks fit, since its items
   cannot render narrower than it: the grid overflows instead, where before
   the following columns slid underneath content that kept its own width.
+  A grid container's own min-content is the sum of its columns rather than
+  its widest child, which is what a grid nested in a grid needs: on
+  chess.com the board's inner grid measured its widest column instead of
+  all four, so the board hung out of its container and over the panel.
 * Grid items can be placed on named lines. A line named in the track
   list was parsed as a track, rejected, and dropped, so `grid-column:
   main` resolved to nothing and the item was auto placed. Names are now
