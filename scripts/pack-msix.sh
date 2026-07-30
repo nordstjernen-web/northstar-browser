@@ -19,6 +19,12 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+
+if ! command -v rsvg-convert >/dev/null 2>&1; then
+    echo "pack-msix: rsvg-convert not found (pacman -S mingw-w64-x86_64-librsvg)" >&2
+    exit 1
+fi
+
 BUILDDIR=${BUILDDIR:-$ROOT/builddir-msix} \
 NS_MESON_SETUP_ARGS="${NS_MSIX_MESON_SETUP_ARGS:-}" \
     "$SCRIPT_DIR/pack-windows.sh"
@@ -41,11 +47,6 @@ STAGE=$ROOT/dist/northstar-msix
 MSIX=$ROOT/dist/northstar-${VERSION}-win64.msix
 TEMPLATE=$ROOT/data/msix/AppxManifest.xml.in
 SVG=$ROOT/data/icons/hicolor/scalable/apps/northstar.svg
-
-if ! command -v rsvg-convert >/dev/null 2>&1; then
-    echo "pack-msix: rsvg-convert not found (pacman -S mingw-w64-x86_64-librsvg)" >&2
-    exit 1
-fi
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/Assets"
