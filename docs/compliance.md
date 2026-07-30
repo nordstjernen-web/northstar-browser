@@ -173,13 +173,6 @@ result is right; where it takes part in arithmetic with an angle, as in
 means carrying a unit type through `calc()`, not a change to these four
 functions.
 
-### `:has()` invalidation is incomplete
-
-`:has()` matches correctly on a static document. What is missing is
-invalidation: when a DOM mutation changes whether an ancestor's
-`:has()` matches, the ancestor's style is not always recomputed. This is
-most of the failures under `css/selectors/invalidation/`.
-
 ### Experimental CSS Values features
 
 `if()`, `random()`, `calc-mix()` and `attr()` with a type argument are
@@ -198,6 +191,15 @@ not settle on. The subtests that do run mostly pass.
 
 Changes on this branch, each verified against the tests named:
 
+- **Dynamic `:has()` invalidation.** The incremental restyle index used
+  the final subject of a selector containing `:has()` as its mutation
+  key. For `div:has(+ .test) #subject`, that indexed `#subject` instead
+  of the `div` whose match actually changes. It now indexes the compound
+  that owns `:has()` and invalidates its descendant and following-sibling
+  dependent region. The 78 files under `css/selectors/invalidation/`
+  gain 311 passing subtests with no regression; the four largest affected
+  files pass all 1,029 subtests. Typical mutation flushes in the largest
+  file recompute 8–10 styles while reusing the rest of the tree.
 - **One colour-argument scanner, and relative colour syntax.** The six
   colour functions each carried their own argument loop and each
   accepted whatever its loop happened not to reject — `rgb(1 2 3 4 5)`,

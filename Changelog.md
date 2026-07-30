@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* Dynamic `:has()` selectors now update after class, attribute and child-list
+  mutations. The incremental restyle index used the selector's final subject
+  as the mutation key, so `div:has(+ .test) #subject` indexed `#subject`
+  instead of the `div` whose match changes. It now indexes the compound that
+  owns `:has()` and invalidates its descendant and following-sibling dependent
+  region. The selector-invalidation WPT subset gains 311 passing subtests with
+  no regression, while typical mutations in its largest file still recompute
+  only 8–10 styles rather than the whole document.
 * `border-radius: 50%` -- the way a page makes a circular avatar --
   painted a 50-pixel corner. The painter read the radius out of the
   computed value and ignored its unit, so every percentage radius became
