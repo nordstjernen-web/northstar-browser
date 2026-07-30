@@ -33,6 +33,15 @@ Significant changes in each release:
   no longer depends on how a given version treats a transparent source,
   the long MVG primitives are read from files rather than the command
   line, and `gifsicle` is optional.
+* An image is drawn inside its own borders, padding and margin. The
+  painter placed the bitmap at the box's margin-box origin and gave it the
+  content size, so anything between that origin and the content box was
+  painted over: a bordered image covered its own top and left borders, and
+  a margin shifted the picture instead of the box. On Hacker News the logo
+  is an 18-pixel image with `border:1px white solid`, and its top and left
+  edges were missing. Replaced content now starts where the content box
+  starts, the way inline SVG and MathML already did, and the placeholder,
+  alt text and drop shadow follow it.
 * The toolbar reads like a browser toolbar again: back and forward are
   green, reload is blue, and a red stop button sits between reload and
   home, appearing only while a page is loading. Stop is real -- it marks
