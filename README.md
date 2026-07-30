@@ -1,5 +1,7 @@
 # Northstar web browser (GPL edition)
 
+![Northstar showing its about:start page](docs/screenshot.png)
+
 Northstar is a minimalist web browser written from scratch in C. Its
 engine targets practical HTML5, modern CSS and JavaScript compatibility
 without embedding Gecko, WebKit, Blink or another browser engine. Linux
@@ -9,8 +11,6 @@ This repository is the open-source GPL edition of the
 [Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
 Northstar is licensed under the GNU General Public License, version 3 or
 later.
-
-![Northstar showing its about:start page](docs/screenshot.png)
 
 ![Best viewed in Northstar](docs/best-viewed-in-northstar.gif)
 
