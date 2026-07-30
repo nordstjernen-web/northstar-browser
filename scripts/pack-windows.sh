@@ -35,6 +35,13 @@ MINGW_PREFIX=$(resolve_mingw_prefix) || {
     exit 1
 }
 
+declare -A mingw_dlls
+for dll in "$MINGW_PREFIX"/bin/*.dll; do
+    [ -f "$dll" ] || continue
+    dll_name=${dll##*/}
+    mingw_dlls[${dll_name,,}]=${dll}
+done
+
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" --buildtype=release "${EXTRA_MESON_SETUP_ARGS[@]}"
 elif [ ${#EXTRA_MESON_SETUP_ARGS[@]} -gt 0 ]; then
@@ -56,15 +63,12 @@ mkdir -p "$APP"
 cp "$LAUNCHER_SRC" "$OUT/northstar.exe"
 cp "$BIN_SRC" "$APP/$BROWSER_EXE"
 validate_launcher_imports() {
-    local dep src alt
+    local dep key src
     while IFS= read -r dep; do
         [ -n "$dep" ] || continue
-        src=$MINGW_PREFIX/bin/$dep
-        if [ ! -f "$src" ]; then
-            alt=$(find "$MINGW_PREFIX/bin" -maxdepth 1 -iname "$dep" -print -quit 2>/dev/null || true)
-            [ -n "$alt" ] && src=$alt
-        fi
-        if [ -f "$src" ]; then
+        key=${dep,,}
+        src=${mingw_dlls[$key]:-}
+        if [ -n "$src" ]; then
             printf 'pack-windows: root launcher imports %s; keep it system-only before using the app/ layout\n' \
                 "$dep" >&2
             exit 1
@@ -104,22 +108,17 @@ queue=("$APP/$BROWSER_EXE")
 for loader in "$APP"/lib/gdk-pixbuf-2.0/*/loaders/*.dll; do
     [ -f "$loader" ] && queue+=("$loader")
 done
-while [ ${#queue[@]} -gt 0 ]; do
-    cur=${queue[0]}
-    queue=("${queue[@]:1}")
+queue_head=0
+while [ "$queue_head" -lt "${#queue[@]}" ]; do
+    cur=${queue[$queue_head]}
+    queue_head=$((queue_head + 1))
     deps=$(objdump -p "$cur" 2>/dev/null | awk '/DLL Name:/ {print $3}') || true
     for dep in $deps; do
-        key=$(printf '%s' "$dep" | tr '[:upper:]' '[:lower:]')
+        key=${dep,,}
         if [ -n "${seen[$key]:-}" ]; then continue; fi
         seen[$key]=1
-        src=$MINGW_PREFIX/bin/$dep
-        if [ ! -f "$src" ]; then
-            # case-insensitive fallback for DLLs whose import name capitalisation
-            # differs from the on-disk file name
-            alt=$(find "$MINGW_PREFIX/bin" -maxdepth 1 -iname "$dep" -print -quit 2>/dev/null || true)
-            [ -n "$alt" ] && src=$alt
-        fi
-        if [ -f "$src" ]; then
+        src=${mingw_dlls[$key]:-}
+        if [ -n "$src" ]; then
             cp "$src" "$APP/"
             queue+=("$APP/$(basename "$src")")
         fi

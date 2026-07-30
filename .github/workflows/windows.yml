@@ -48,7 +48,6 @@ jobs:
           update: false
           cache: true
           install: >-
-            base-devel
             git
             mingw-w64-x86_64-clang
             mingw-w64-x86_64-lld
@@ -71,14 +70,15 @@ jobs:
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-libavif
             mingw-w64-x86_64-SDL2
-            make
             zip
 
       - name: Restore ccache
         id: ccache-restore
         uses: actions/cache/restore@v5
         with:
-          path: ${{ runner.temp }}\ccache
+          path: |
+            ${{ runner.temp }}\ccache
+            ${{ runner.temp }}\thinlto-cache
           key: ccache-windows-${{ matrix.windows }}-${{ github.sha }}
           restore-keys: |
             ccache-windows-${{ matrix.windows }}-
@@ -107,8 +107,13 @@ jobs:
         run: |
           set -o pipefail
           export CC="ccache clang"
+          export CXX="ccache clang++"
           export CC_LD=lld
-          meson setup builddir --werror -Db_lto=true
+          export CXX_LD=lld
+          meson setup builddir --werror -Db_lto=true -Db_lto_mode=thin
+          THINLTO_CACHE_DIR=$(cygpath -m "$RUNNER_TEMP/thinlto-cache")
+          mkdir -p "$THINLTO_CACHE_DIR"
+          meson configure builddir -Dc_link_args="-Wl,--thinlto-cache-dir=$THINLTO_CACHE_DIR -Wl,--thinlto-cache-policy=cache_size_bytes=300m"
           meson compile -C builddir 2>&1 | tee build.log
 
       - name: ccache stats
@@ -120,7 +125,9 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@v5
         with:
-          path: ${{ runner.temp }}\ccache
+          path: |
+            ${{ runner.temp }}\ccache
+            ${{ runner.temp }}\thinlto-cache
           key: ccache-windows-${{ matrix.windows }}-${{ github.sha }}
 
       - name: Smoke test (binary present)
@@ -209,6 +216,7 @@ jobs:
         if: steps.pack.outcome == 'success'
         env:
           BUILDDIR: ${{ github.workspace }}/builddir
+          NS_MSIX_REUSE_BUNDLE: '1'
         run: |
           set -o pipefail
           ./scripts/pack-msix.sh 2>&1 | tee pack-msix.log

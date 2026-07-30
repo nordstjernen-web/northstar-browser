@@ -19,15 +19,21 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+BUNDLE=${BUNDLE:-$ROOT/dist/northstar-win64}
 
 if ! command -v rsvg-convert >/dev/null 2>&1; then
     echo "pack-msix: rsvg-convert not found (pacman -S mingw-w64-x86_64-librsvg)" >&2
     exit 1
 fi
 
-BUILDDIR=${BUILDDIR:-$ROOT/builddir-msix} \
-NS_MESON_SETUP_ARGS="${NS_MSIX_MESON_SETUP_ARGS:-}" \
-    "$SCRIPT_DIR/pack-windows.sh"
+if [ "${NS_MSIX_REUSE_BUNDLE:-0}" != 1 ]; then
+    BUILDDIR=${BUILDDIR:-$ROOT/builddir-msix} \
+    NS_MESON_SETUP_ARGS="${NS_MSIX_MESON_SETUP_ARGS:-}" \
+        "$SCRIPT_DIR/pack-windows.sh"
+elif [ ! -x "$BUNDLE/northstar.exe" ] || [ ! -x "$BUNDLE/app/northstar-ui.exe" ]; then
+    echo "pack-msix: NS_MSIX_REUSE_BUNDLE=1 but no complete Windows bundle exists." >&2
+    exit 1
+fi
 
 VERSION=$(grep -E "^[[:space:]]*version:" "$ROOT/meson.build" \
           | head -1 | sed -E "s/.*'([^']+)'.*/\\1/")
@@ -42,7 +48,6 @@ DISPLAY_NAME=${NS_MSIX_DISPLAY_NAME:-Northstar Web Browser}
 PHONE_PRODUCT_ID=${NS_MSIX_PHONE_PRODUCT_ID:-2c47a178-dfb0-4383-9dc0-aa7195bc8354}
 PHONE_PUBLISHER_ID=${NS_MSIX_PHONE_PUBLISHER_ID:-eb62046e-1fa9-48a1-b651-cbf7237e9a03}
 
-BUNDLE=$ROOT/dist/northstar-win64
 STAGE=$ROOT/dist/northstar-msix
 MSIX=$ROOT/dist/northstar-${VERSION}-win64.msix
 TEMPLATE=$ROOT/data/msix/AppxManifest.xml.in
