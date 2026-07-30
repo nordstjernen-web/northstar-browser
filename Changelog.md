@@ -33,10 +33,18 @@ Significant changes in each release:
   no longer depends on how a given version treats a transparent source,
   the long MVG primitives are read from files rather than the command
   line, and `gifsicle` is optional.
+* The toolbar reads like a browser toolbar again: back and forward are
+  green, reload is blue, and a red stop button sits between reload and
+  home, appearing only while a page is loading. Stop is real -- it marks
+  the in-flight frame stale so the page stops changing, ends the loading
+  state and drops the busy cursor -- though it does not abort the network
+  request behind it.
 * The window's title bar is shorter, which gives the page the height back.
   The home button is set off from the address bar rather than sitting flush
   against it, and the security shield beside the address is drawn smaller so
   it reads as an indicator rather than another toolbar button.
+* `about:northstar` lists the user agent, resolved the way a request
+  resolves it, so it shows what is actually sent rather than a constant.
 * Dynamic `:has()` selectors now update after class, attribute and child-list
   mutations. The incremental restyle index used the selector's final subject
   as the mutation key, so `div:has(+ .test) #subject` indexed `#subject`

@@ -104,6 +104,7 @@ typedef struct {
     GtkWidget      *back;
     GtkWidget      *forward;
     GtkWidget      *reload;
+    GtkWidget      *stop;
     GtkWidget      *spinner;
     GtkWidget      *status;
     char           *status_base;
@@ -266,6 +267,8 @@ set_loading_ui(ProcWindow *pw, gboolean loading)
 {
     gtk_widget_set_visible(pw->spinner, loading);
     gtk_spinner_set_spinning(GTK_SPINNER(pw->spinner), loading);
+    if (pw->stop)
+        gtk_widget_set_visible(pw->stop, loading);
 }
 
 static char *
@@ -759,6 +762,15 @@ on_reload_clicked(GtkButton *b, gpointer ud)
     NsProcView *v = current_view(ud);
     if (v)
         ns_proc_view_reload(v);
+}
+
+static void
+on_stop_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    NsProcView *v = current_view(ud);
+    if (v)
+        ns_proc_view_stop(v);
 }
 
 static void
@@ -1456,11 +1468,15 @@ proc_window_new(GtkApplication *app, const char *home_url,
                                  G_CALLBACK(on_forward_clicked), pw);
     pw->reload = toolbar_button("northstar-reload", ns_i18n("Reload"),
                                 G_CALLBACK(on_reload_clicked), pw);
+    pw->stop = toolbar_button("northstar-stop", ns_i18n("Stop"),
+                              G_CALLBACK(on_stop_clicked), pw);
+    gtk_widget_set_visible(pw->stop, FALSE);
     GtkWidget *home = toolbar_button("northstar-home", ns_i18n("Home"),
                                      G_CALLBACK(on_home_clicked), pw);
     gtk_widget_set_margin_end(home, 24);
     toolbar_button_icon_size(pw->back, 20);
     toolbar_button_icon_size(pw->forward, 20);
+    toolbar_button_icon_size(pw->stop, 20);
     toolbar_button_icon_size(home, 20);
 
     pw->spinner = gtk_spinner_new();
@@ -1524,6 +1540,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_box_append(GTK_BOX(toolbar), pw->back);
     gtk_box_append(GTK_BOX(toolbar), pw->forward);
     gtk_box_append(GTK_BOX(toolbar), pw->reload);
+    gtk_box_append(GTK_BOX(toolbar), pw->stop);
     gtk_box_append(GTK_BOX(toolbar), home);
     gtk_box_append(GTK_BOX(toolbar), pw->spinner);
     gtk_box_append(GTK_BOX(toolbar), pw->security_icon);
