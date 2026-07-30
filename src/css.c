@@ -3471,11 +3471,14 @@ parse_font_size_token(const char *text, double *out_v, ns_css_unit *out_unit,
         ok = TRUE;
     } else {
         ok = parse_length(s, out_v, out_unit) &&
-             *out_unit != NS_CSS_UNIT_NUMBER;
+             *out_unit != NS_CSS_UNIT_NUMBER && *out_v >= 0;
     }
     if (ok && slash && slash[1] && out_lh && out_lh_unit &&
         parse_length(slash + 1, out_lh, out_lh_unit)) {
-        if (out_has_lh) *out_has_lh = TRUE;
+        if (*out_lh < 0)
+            ok = FALSE;
+        else if (out_has_lh)
+            *out_has_lh = TRUE;
     }
     g_free(s);
     return ok;
@@ -10651,7 +10654,7 @@ parse_declaration_block(const char **pp, const char *end,
                     break;
                 }
             }
-            int prefix_end = size_idx >= 0 ? size_idx : n;
+            int prefix_end = size_idx >= 0 ? size_idx : 0;
             for (int i = 0; i < prefix_end; i++) {
                 const char *t = tokens[i];
                 ns_css_prop prop = NS_CSS_PROP_COUNT;
@@ -10694,18 +10697,21 @@ parse_declaration_block(const char **pp, const char *end,
                 int family_start = size_idx + 1;
                 char *slash = strchr(size_tok, '/');
                 if (!has_lh && slash && !slash[1] && size_idx + 1 < n) {
-                    if (parse_length(tokens[size_idx + 1], &lh, &lu)) {
+                    if (parse_length(tokens[size_idx + 1], &lh, &lu) &&
+                        lh >= 0) {
                         has_lh = TRUE;
                         family_start = size_idx + 2;
                     }
                 } else if (!has_lh && size_idx + 1 < n &&
                            tokens[size_idx + 1][0] == '/') {
                     const char *lh_text = tokens[size_idx + 1] + 1;
-                    if (*lh_text && parse_length(lh_text, &lh, &lu)) {
+                    if (*lh_text && parse_length(lh_text, &lh, &lu) &&
+                        lh >= 0) {
                         has_lh = TRUE;
                         family_start = size_idx + 2;
                     } else if (!*lh_text && size_idx + 2 < n &&
-                               parse_length(tokens[size_idx + 2], &lh, &lu)) {
+                               parse_length(tokens[size_idx + 2], &lh, &lu) &&
+                               lh >= 0) {
                         has_lh = TRUE;
                         family_start = size_idx + 3;
                     }
@@ -14167,6 +14173,88 @@ index_subject_kind(const css_index_counts *counts,
     return kind;
 }
 
+static gboolean
+index_add_subject(ns_css_rule_index *idx, const css_index_counts *counts,
+                  const ns_css_simple *subj, guint ri, guint si)
+{
+    guint class_i = 0, attr_i = 0;
+
+    if (!subj || subj->never_match) return FALSE;
+
+    switch (index_subject_kind(counts, subj, &class_i, &attr_i)) {
+    case CSS_INDEX_ID:
+        index_add(idx->by_id, subj->id, ri, si);
+        return TRUE;
+    case CSS_INDEX_CLASS: {
+        const char *cls = g_ptr_array_index(subj->classes, class_i);
+        if (cls && *cls) {
+            index_add(idx->by_class, cls, ri, si);
+            return TRUE;
+        }
+        return FALSE;
+    }
+    case CSS_INDEX_TAG:
+        index_add_lowercase(idx->by_tag, subj->type, ri, si);
+        return TRUE;
+    case CSS_INDEX_ATTR: {
+        const ns_css_attr_pred *a0 =
+            &g_array_index(subj->attrs, ns_css_attr_pred, attr_i);
+        if (a0 && a0->name && *a0->name) {
+            index_add_lowercase(idx->by_attr, a0->name, ri, si);
+            return TRUE;
+        }
+        return FALSE;
+    }
+    case CSS_INDEX_NONE:
+        break;
+    }
+    return FALSE;
+}
+
+/* A subject that is only :is()/:where() carries no name of its own, so it
+ * lands in the universal bucket and is then tested against every element.
+ * An element can only match it by matching one of the arms, so when every arm
+ * ends in something indexable the rule can be filed under each arm's key
+ * instead. Any arm without a key -- a bare pseudo-class, `*` -- makes the
+ * group unindexable, and the caller falls back to universal.
+ */
+static gboolean
+index_add_matches_any(ns_css_rule_index *idx, const css_index_counts *counts,
+                      const ns_css_simple *subj, guint ri, guint si)
+{
+    const GPtrArray *best = NULL;
+
+    if (!subj || !subj->matches_any || subj->matches_any->len == 0)
+        return FALSE;
+
+    for (guint gi = 0; gi < subj->matches_any->len; gi++) {
+        const GPtrArray *group = g_ptr_array_index(subj->matches_any, gi);
+        if (!group || group->len == 0) return FALSE;
+        if (!best || group->len < best->len) best = group;
+    }
+
+    for (guint ai = 0; ai < best->len; ai++) {
+        const ns_css_selector *arm = g_ptr_array_index(best, ai);
+        if (!arm || arm->compounds->len == 0) return FALSE;
+        const ns_css_simple *arm_subj =
+            g_ptr_array_index(arm->compounds, arm->compounds->len - 1);
+        if (!arm_subj || arm_subj->never_match) return FALSE;
+        guint ci = 0, ai2 = 0;
+        if (index_subject_kind(counts, arm_subj, &ci, &ai2) == CSS_INDEX_NONE)
+            return FALSE;
+    }
+
+    for (guint ai = 0; ai < best->len; ai++) {
+        const ns_css_selector *arm = g_ptr_array_index(best, ai);
+        const ns_css_simple *arm_subj =
+            g_ptr_array_index(arm->compounds, arm->compounds->len - 1);
+        if (!index_add_subject(idx, counts, arm_subj, ri, si))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
 static ns_css_rule_index *
 ns_css_rule_index_build(const ns_css_stylesheet *sheet)
 {
@@ -14208,34 +14296,10 @@ ns_css_rule_index_build(const ns_css_stylesheet *sheet)
                 g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
             if (!subj || subj->never_match) continue;
             had_matchable_selector = TRUE;
-            guint class_i = 0, attr_i = 0;
-            switch (index_subject_kind(&counts, subj, &class_i, &attr_i)) {
-            case CSS_INDEX_ID:
-                index_add(idx->by_id, subj->id, ri, si);
+            if (index_add_subject(idx, &counts, subj, ri, si))
                 continue;
-            case CSS_INDEX_CLASS: {
-                const char *cls = g_ptr_array_index(subj->classes, class_i);
-                if (cls && *cls) {
-                    index_add(idx->by_class, cls, ri, si);
-                    continue;
-                }
-                break;
-            }
-            case CSS_INDEX_TAG:
-                index_add_lowercase(idx->by_tag, subj->type, ri, si);
+            if (index_add_matches_any(idx, &counts, subj, ri, si))
                 continue;
-            case CSS_INDEX_ATTR: {
-                const ns_css_attr_pred *a0 =
-                    &g_array_index(subj->attrs, ns_css_attr_pred, attr_i);
-                if (a0 && a0->name && *a0->name) {
-                    index_add_lowercase(idx->by_attr, a0->name, ri, si);
-                    continue;
-                }
-                break;
-            }
-            case CSS_INDEX_NONE:
-                break;
-            }
             index_add_candidate_array(idx->universal, ri, si);
         }
         if (!had_matchable_selector) continue;
@@ -17349,16 +17413,17 @@ typedef struct {
     const ns_css_selector *selector;
     const ns_node         *element;
     ns_css_pseudo_element  pseudo;
+    int                    scope_order;
+    gboolean               matched;
 } selector_cache_key;
 
-typedef struct {
-    int      scope_order;
-    gboolean matched;
-} selector_cache_value;
-
-#define NS_SELECTOR_CACHE_MAX 262144
+#define NS_SELECTOR_CACHE_MAX   262144
+#define NS_SELECTOR_CACHE_BLOCK 8192
 
 static __thread GHashTable *g_selector_cache;
+static __thread GPtrArray  *g_selector_cache_blocks;
+static __thread guint       g_selector_cache_used;
+
 
 static guint
 selector_cache_hash(gconstpointer data)
@@ -17382,19 +17447,34 @@ selector_cache_equal(gconstpointer a, gconstpointer b)
            left->pseudo == right->pseudo;
 }
 
+/* A full cascade never probes the same (rule, selector, element, pseudo)
+ * twice, so every insert in the first pass is a miss that exists only to
+ * serve the container-query pass that follows. Entries come from a bump
+ * arena rather than two allocations each: on a page like github.com that is
+ * about 1.5 million allocations saved per relayout.
+ */
+static void
+selector_cache_reset_arena(void)
+{
+    g_clear_pointer(&g_selector_cache_blocks, g_ptr_array_unref);
+    g_selector_cache_used = NS_SELECTOR_CACHE_BLOCK;
+}
+
 void
 ns_css_selector_cache_begin(void)
 {
     g_clear_pointer(&g_selector_cache, g_hash_table_destroy);
-    g_selector_cache = g_hash_table_new_full(selector_cache_hash,
-                                              selector_cache_equal,
-                                              g_free, g_free);
+    selector_cache_reset_arena();
+    g_selector_cache_blocks = g_ptr_array_new_with_free_func(g_free);
+    g_selector_cache = g_hash_table_new(selector_cache_hash,
+                                        selector_cache_equal);
 }
 
 void
 ns_css_selector_cache_end(void)
 {
     g_clear_pointer(&g_selector_cache, g_hash_table_destroy);
+    selector_cache_reset_arena();
 }
 
 static gboolean
@@ -17405,14 +17485,12 @@ selector_cache_lookup(const ns_css_rule *rule,
                       gboolean *matched, int *scope_order)
 {
     if (!g_selector_cache) return FALSE;
-    selector_cache_key probe = { rule, selector, element, pseudo };
-    gpointer cached;
-    if (!g_hash_table_lookup_extended(g_selector_cache, &probe, NULL,
-                                      &cached))
-        return FALSE;
-    selector_cache_value *value = cached;
-    *matched = value->matched;
-    *scope_order = value->scope_order;
+    selector_cache_key probe = { rule, selector, element, pseudo, 0, FALSE };
+    const selector_cache_key *entry = g_hash_table_lookup(g_selector_cache,
+                                                          &probe);
+    if (!entry) return FALSE;
+    *matched = entry->matched;
+    *scope_order = entry->scope_order;
     return TRUE;
 }
 
@@ -17426,11 +17504,18 @@ selector_cache_insert(const ns_css_rule *rule,
     if (!g_selector_cache ||
         g_hash_table_size(g_selector_cache) >= NS_SELECTOR_CACHE_MAX)
         return;
-    selector_cache_key *key = g_new(selector_cache_key, 1);
-    *key = (selector_cache_key){ rule, selector, element, pseudo };
-    selector_cache_value *value = g_new(selector_cache_value, 1);
-    *value = (selector_cache_value){ scope_order, matched };
-    g_hash_table_insert(g_selector_cache, key, value);
+    if (g_selector_cache_used >= NS_SELECTOR_CACHE_BLOCK) {
+        g_ptr_array_add(g_selector_cache_blocks,
+                        g_new(selector_cache_key, NS_SELECTOR_CACHE_BLOCK));
+        g_selector_cache_used = 0;
+    }
+    selector_cache_key *block =
+        g_ptr_array_index(g_selector_cache_blocks,
+                          g_selector_cache_blocks->len - 1);
+    selector_cache_key *entry = &block[g_selector_cache_used++];
+    *entry = (selector_cache_key){ rule, selector, element, pseudo,
+                                   scope_order, matched };
+    g_hash_table_add(g_selector_cache, entry);
 }
 
 static GArray *
@@ -18347,6 +18432,7 @@ static void
 resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
 {
     double my_font_px = resolve_font_size_px(out, parent_style);
+    if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
     if (root_px <= 0) root_px = my_font_px;
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
@@ -18376,6 +18462,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                                             : normal_line_height_px(root_px)) +
                      fsv->u.calc.pct * parent_px / 100.0;
     }
+    if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH) {
         ns_css_value *fs = ns_css_value_cow(out, NS_CSS_FONT_SIZE);

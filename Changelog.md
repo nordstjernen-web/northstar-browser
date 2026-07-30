@@ -69,6 +69,32 @@ Significant changes in each release:
   `matrix()` whenever the resulting matrix happened to be flat, and the
   specified value of `translate3d()` and `scale3d()` dropped its Z
   component entirely.
+* The CSS cascade indexes `:is()` and `:where()` subjects, and stops
+  allocating per selector test. Profiling ten real sites put the cost of a
+  page load in the cascade rather than in layout: on github.com a relayout
+  spent 1.5-2.2 seconds matching selectors against 1635 elements, twice per
+  relayout because container queries cascade a second time, against roughly
+  0.5 s for layout itself. Counting candidates showed why -- 83% of the
+  rules tested against each element came from the index's catch-all bucket,
+  and the biggest group in it was rules whose subject is only `:is(...)` or
+  `:where(...)`, which carry no name of their own to file under. An element
+  can only match such a rule by matching one of the arms, so when every arm
+  ends in an id, class or tag the rule is now filed under each arm's key
+  instead of the catch-all; an arm without one (a bare pseudo-class, `*`)
+  still falls back. On github.com that removes 25% of all candidate tests
+  and 24% of the selector matches. Separately, the selector cache -- which
+  exists so the container-query pass can reuse the first pass's results --
+  allocated a key and a value for every test, about a million allocations
+  per pass, none of which the first pass can ever hit, since a cascade never
+  probes the same rule, selector and element twice. Entries now come from a
+  bump arena with the result stored inline. On a page built to exercise
+  this, 3200 elements against 3200 rules of which a third are `:is()` or
+  `:where()` unions, the initial cascade falls from 4083 ms to 1760 ms and
+  total relayout time by 26%; pages whose CSS does not use those selectors
+  are unaffected. Rendering is unchanged -- 32 layout and text dumps are
+  byte-identical to the previous build -- and the `css` and `dom`
+  web-platform-test subset gains 826 subtest passes, from tests that
+  previously ran out of time, with no subtest regressing.
 * Text is laid out through ns-pango, a fork of Pango carried as a meson
   subproject, instead of the system Pango. Pango keeps no cache that
   outlives a `PangoLayout`, so the same bytes were shaped by HarfBuzz
