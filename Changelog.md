@@ -89,9 +89,10 @@ Significant changes in each release:
   probes the same rule, selector and element twice. Entries now come from a
   bump arena with the result stored inline. On a page built to exercise
   this, 3200 elements against 3200 rules of which a third are `:is()` or
-  `:where()` unions, the initial cascade falls from 4083 ms to 1760 ms and
-  total relayout time by 26%; pages whose CSS does not use those selectors
-  are unaffected. Rendering is unchanged -- 32 layout and text dumps are
+  `:where()` unions, the initial cascade falls 52% (1561 ms to 753 ms,
+  median of nine) and the whole headless run 16%. Pages whose CSS does not
+  use those selectors are unchanged: a text-heavy page's cascade moves from
+  2.4 ms to 2.2 ms and its run time distributions overlap. Rendering is unchanged -- 32 layout and text dumps are
   byte-identical to the previous build -- and the `css` and `dom`
   web-platform-test subset gains 826 subtest passes, from tests that
   previously ran out of time, with no subtest regressing.
