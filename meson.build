@@ -119,15 +119,9 @@ message('northstar build profile: ' +
         (ns_is_release ? ns_release_profile
                        : 'development (debug symbols + frame pointer + hardened)'))
 
-# Desktop shells are independent features. GTK stays automatic on Unix and
-# native Win32 stays automatic on Windows.
+# The GTK shell is a feature: disabling it yields an engine-only build that
+# needs no GTK 4 at all.
 gtk_feature = get_option('gtk')
-
-win32_feature = get_option('win32')
-if win32_feature.enabled() and host_machine.system() != 'windows'
-  error('The native Win32 shell can only be built for Windows.')
-endif
-have_win32 = host_machine.system() == 'windows' and win32_feature.allowed()
 
 glib       = dependency('glib-2.0')
 gobject    = dependency('gobject-2.0')
@@ -148,10 +142,9 @@ pango      = ns_pango_sp.get_variable('libpango_dep')
 pangocairo = ns_pango_sp.get_variable('libpangocairo_dep')
 
 have_gtk = false
-if gtk_feature.enabled() or (gtk_feature.auto() and host_machine.system() != 'windows')
+if gtk_feature.allowed()
   gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
-  gtk4 = dependency('gtk4', version: gtk4_min,
-                    required: gtk_feature.enabled())
+  gtk4 = dependency('gtk4', version: gtk4_min, required: gtk_feature)
   if gtk4.found()
     have_gtk = true
     gtk4_dep = gtk4
@@ -386,6 +379,5 @@ install_data(
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')
-summary({'Native Win32 shell': have_win32}, section: 'Shells')
 
 subdir('src')

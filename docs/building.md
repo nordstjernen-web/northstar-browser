@@ -59,9 +59,7 @@ shown below.
 
 Install MSYS2 MINGW64, then install the packages listed by
 `.github/workflows/windows.yml`. Run Meson from the MINGW64 shell so its
-compiler and `pkg-config` resolve the MinGW libraries. GTK is not required by
-the default native Win32 shell. See [win32-shell.md](win32-shell.md) for its
-architecture, parity contract, and packaging details.
+compiler and `pkg-config` resolve the MinGW libraries.
 
 ## Build
 
@@ -69,12 +67,6 @@ architecture, parity contract, and packaging details.
 meson setup builddir
 meson compile -C builddir
 ./builddir/src/gtk/northstar
-```
-
-On Windows, the same commands produce and run the native shell at:
-
-```sh
-./builddir/src/win32/northstar.exe
 ```
 
 `meson setup` fetches the pinned upstream subprojects **lexbor** (HTML/CSS/
@@ -96,8 +88,7 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `gtk` | `auto` | Build the GTK 4 shell automatically on Unix. On Windows, opt in to produce `northstar-gtk.exe` alongside the native shell. |
-| `win32` | `auto` | Build the native Win32 shell automatically on Windows. |
+| `gtk` | `auto` | Build the GTK 4 desktop shell. Disable for an engine-only build. |
 | `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL2). |
 | `build_date` | *(configure date)* | Build-date stamp shown in the About dialog. |
@@ -121,7 +112,6 @@ fixtures are exercised and how behaviour can be scripted:
 
 Useful flags: `--dump=png:PATH` / `--dump=layout:-` / `--dump=text:-`,
 `--eval=EXPR`, `--viewport=W`, `--viewport-height=H`, `--settle-ms=N`.
-On Windows, substitute `./builddir/src/win32/northstar.exe` in the examples.
 
 Running as `root` is refused for safety; set `NS_ALLOW_ROOT=1` only in a
 throwaway container. `NS_NO_SANDBOX=1` / `NS_NO_SECCOMP=1` disable the

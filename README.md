@@ -74,8 +74,8 @@ libavif when available, and SVG in the engine).
 - **Single window / single process** — the browser shows one page in one
   window, and the page engine runs in the shell process (no per-tab
   renderer processes).
-- **UI** — native Win32 on Windows and GTK 4 on Linux/macOS, with bookmarks,
-  find-in-page, save-to-PDF, JS console, settings, and headless mode.
+- **UI** — bookmarks, find-in-page, save-to-PDF, JS console, settings,
+  headless mode.
 
 ## Build and run
 
@@ -109,9 +109,7 @@ single page can also be rendered directly:
 ```
 
 Meson feature options include `-Davif=disabled`, `-Daudio=disabled`,
-`-Dwasm=disabled`, `-Dgtk=disabled` and `-Dwin32=disabled` for smaller or
-engine-only builds. On Windows the default executable is
-`builddir/src/win32/northstar.exe`; see [docs/win32-shell.md](docs/win32-shell.md).
+`-Dwasm=disabled` and `-Dgtk=disabled` for smaller or engine-only builds.
 
 WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree. lexbor and
 quickjs-ng are fetched by `meson setup` as pinned upstream subprojects
@@ -140,11 +138,10 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 | [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | In-process MPEG-1 video and MP2 audio decode |
 | [minimp3](https://github.com/lieff/minimp3) (CC0) | In-process MP3 audio decode |
 
-**Required system libraries:** GTK 4 (≥ 4.14 on Linux/macOS; not required by
-the native Windows shell), GLib/Cairo, HarfBuzz, FriBidi, fontconfig, FreeType,
-libcurl (≥ 8.5),
+**Required system libraries:** GTK 4 (≥ 4.14; ≥ 4.22.1 on Windows),
+GLib/Cairo, HarfBuzz, FriBidi, fontconfig, FreeType, libcurl (≥ 8.5),
 OpenSSL (libcrypto), uchardet, libpsl, SQLite and zlib. The engine lays
-text out through ns-pango rather than the system Pango; the GTK shell links
+text out through ns-pango rather than the system Pango; GTK still links
 the system Pango for its own widgets, and the two coexist because every
 symbol in the fork is renamed. Linux builds also require libseccomp. SDL2 is
 required when in-process audio is enabled.

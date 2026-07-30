@@ -1,6 +1,9 @@
-/* appmain.c - Shared graphical and headless application entry point. */
+/* Northstar — application entry point for GUI and headless modes.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
-#include <glib.h>
+#include <gtk/gtk.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,7 +31,6 @@
 #include <ns-pango/ns-pango-cache.h>
 
 #include "bytecode_cache.h"
-#include "appmain.h"
 #include "cache.h"
 #include "config.h"
 #include "debuglog.h"
@@ -40,20 +42,12 @@
 #include "i18n.h"
 #include "net.h"
 #include "proc_limits.h"
+#include "procview.h"
+#include "procwindow.h"
 #include "rproc_inproc.h"
 #include "security.h"
 #include "threaddump.h"
 #include "watchdog.h"
-
-#ifdef NS_HAVE_GTK
-#include "gtk/procwindow.h"
-#define ns_shell_run ns_procapp_run
-#define ns_shell_set_window_size ns_procapp_set_window_size
-#else
-#include "win32/winwindow.h"
-#define ns_shell_run ns_winapp_run
-#define ns_shell_set_window_size ns_winapp_set_window_size
-#endif
 
 static char *g_self_exe;
 
@@ -185,7 +179,7 @@ ns_win32_use_fontconfig_backend(const char *dir)
 }
 
 static void
-ns_win32_anchor_runtime_data(void)
+ns_win32_anchor_gtk_data(void)
 {
     if (!g_self_exe) {
         ns_win32_use_fontconfig_backend(NULL);
@@ -198,19 +192,12 @@ ns_win32_anchor_runtime_data(void)
     }
     ns_win32_use_fontconfig_backend(dir);
     char *share_dir = g_build_filename(dir, "share", NULL);
-#ifdef NS_HAVE_GTK
     if (g_file_test(share_dir, G_FILE_TEST_IS_DIR)) {
         if (!g_getenv("GTK_DATA_PREFIX")) g_setenv("GTK_DATA_PREFIX", dir, TRUE);
         if (!g_getenv("GTK_EXE_PREFIX"))  g_setenv("GTK_EXE_PREFIX",  dir, TRUE);
         if (!g_getenv("XDG_DATA_DIRS"))   g_setenv("XDG_DATA_DIRS", share_dir, TRUE);
     }
-#else
-    if (g_file_test(share_dir, G_FILE_TEST_IS_DIR) &&
-        !g_getenv("XDG_DATA_DIRS"))
-        g_setenv("XDG_DATA_DIRS", share_dir, TRUE);
-#endif
     g_free(share_dir);
-#ifdef NS_HAVE_GTK
     if (!g_getenv("GDK_PIXBUF_MODULE_FILE")) {
         char *loaders = g_build_filename(dir,
             "lib", "gdk-pixbuf-2.0", "2.10.0", "loaders.cache", NULL);
@@ -218,7 +205,6 @@ ns_win32_anchor_runtime_data(void)
             g_setenv("GDK_PIXBUF_MODULE_FILE", loaders, TRUE);
         g_free(loaders);
     }
-#endif
     {
         char *ca = g_build_filename(dir,
             "etc", "ssl", "certs", "ca-bundle.crt", NULL);
@@ -341,10 +327,6 @@ ns_linux_has_gpu_render_node(void)
 static void
 ns_apply_gsk_renderer(const char *pref)
 {
-#ifndef NS_HAVE_GTK
-    (void)pref;
-    return;
-#else
     if (g_getenv("GSK_RENDERER")) return;
     if (!pref || !*pref ||
         g_ascii_strcasecmp(pref, "auto")    == 0 ||
@@ -369,7 +351,6 @@ ns_apply_gsk_renderer(const char *pref)
     }
     g_warning("ignoring unknown gsk_renderer '%s' "
               "(expected one of: auto, gl, ngl, vulkan, cairo)", pref);
-#endif
 }
 
 static gboolean
@@ -483,7 +464,7 @@ ns_run_proc_gui(int argc, char **argv, const char *url,
         g_free(abs_path);
         if (file_url) start = file_url;
     }
-    int status = ns_shell_run(start, session_path, recover, private_mode);
+    int status = ns_procapp_run(start, session_path, recover, private_mode);
     g_free(file_url);
     g_free(g_self_exe);
     g_self_exe = NULL;
@@ -532,7 +513,7 @@ main(int argc, char **argv)
     g_log_set_writer_func(ns_log_writer, NULL, NULL);
 #ifdef G_OS_WIN32
     ns_win32_set_app_id();
-    ns_win32_anchor_runtime_data();
+    ns_win32_anchor_gtk_data();
 #endif
 #ifdef __APPLE__
     ns_macos_anchor_gtk_data();
@@ -569,7 +550,7 @@ main(int argc, char **argv)
                 const char *hs = end + 1;
                 gint64 h = g_ascii_strtoll(hs, &end, 10);
                 if (end != hs && *end == '\0' && h > 0 && h < 100000)
-                    ns_shell_set_window_size((int)w, (int)h);
+                    ns_procapp_set_window_size((int)w, (int)h);
             }
         } else if (g_strcmp0(argv[i], "--print-config") == 0) {
             char *dump = ns_config_dump();
@@ -578,6 +559,7 @@ main(int argc, char **argv)
             ns_config_shutdown();
             return 0;
         } else if (g_strcmp0(argv[i], "--headless") == 0) {
+            /* headless dispatch is driven by proc_mode below */
         } else if (g_str_has_prefix(argv[i], "--dump=")) {
             const char *v = argv[i] + 7;
             dump_set = TRUE;

@@ -1,8 +1,8 @@
 # Northstar documentation
 
 Developer documentation for the **Northstar** web browser (open-source GPL
-edition) — a minimalist browser written from scratch in C with native Win32
-and GTK 4 shells plus libcurl, carrying no upstream browser engine.
+edition) — a minimalist browser written from scratch in C with GTK 4 and
+libcurl, carrying no upstream browser engine.
 
 ## Contents
 
@@ -11,8 +11,6 @@ and GTK 4 shells plus libcurl, carrying no upstream browser engine.
   owns which job.
 - **[building.md](building.md)** — dependencies per distro, the meson/ninja
   build, meson options, headless mode, and the render-test fixtures.
-- **[win32-shell.md](win32-shell.md)** — the native Windows shell, its GTK
-  feature-parity contract, architecture, build, packaging, and verification.
 - **[preloading.md](preloading.md)** — the speculative preload scan, the
   request key that identifies a fetch, and the four layers that keep a
   subresource from being fetched twice.

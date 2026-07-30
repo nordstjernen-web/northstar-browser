@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a redistributable Northstar Windows bundle: a root launcher plus the
-# mingw64 DLLs and runtime data under app/ so it runs outside MSYS2.
+# mingw64 DLLs and GTK runtime data under app/ so it runs outside MSYS2.
 #
 # Builds (or reuses) a separate --buildtype=release tree in $BUILDDIR so the
 # shipped binary has NDEBUG defined — third-party assertions in vendored deps
@@ -11,7 +11,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUILDDIR=${BUILDDIR:-$ROOT/builddir-release}
 OUT=${OUT:-$ROOT/dist/northstar-win64}
 APP=$OUT/app
-BIN_SRC=$BUILDDIR/src/win32/northstar.exe
+BIN_SRC=$BUILDDIR/src/gtk/northstar.exe
 LAUNCHER_SRC=$BUILDDIR/src/northstar-launcher.exe
 BROWSER_EXE=northstar-ui.exe
 EXTRA_MESON_SETUP_ARGS=()
@@ -24,7 +24,7 @@ resolve_mingw_prefix() {
                 /mingw64; do
         [ -n "$cand" ] || continue
         [ -d "$cand/bin" ] || continue
-        [ -f "$cand/bin/libglib-2.0-0.dll" ] || continue
+        [ -f "$cand/bin/libgtk-4-1.dll" ] || continue
         echo "$cand"; return
     done
     return 1
@@ -74,16 +74,36 @@ validate_launcher_imports() {
 
 validate_launcher_imports
 
+# GLib settings schemas (compiled). Apps that GSettings-look-up a key crash without these.
+mkdir -p "$APP/share/glib-2.0/schemas"
+if [ -f "$MINGW_PREFIX/share/glib-2.0/schemas/gschemas.compiled" ]; then
+    cp "$MINGW_PREFIX/share/glib-2.0/schemas/gschemas.compiled" "$APP/share/glib-2.0/schemas/"
+fi
+
 if [ -d "$MINGW_PREFIX/etc/fonts" ]; then
     mkdir -p "$APP/etc"
     cp -r "$MINGW_PREFIX/etc/fonts" "$APP/etc/"
 fi
 
-# Transitively resolve DLL dependencies starting from the executable.
-# objdump reports import names; we look them up in the
+# GDK-PixBuf loader cache + loader DLLs (image decode for <img>). Copied
+# *before* the DLL chase so the loaders' transitive deps (notably
+# librsvg-2-2.dll, pulled in only by pixbufloader_svg.dll) get bundled too.
+# The browser renders SVG itself; these loaders only serve GTK's icon theme.
+# GdkPixbuf loads these dynamically via loaders.cache, so their import edges
+# don't appear in northstar.exe's static-import graph.
+if [ -d "$MINGW_PREFIX/lib/gdk-pixbuf-2.0" ]; then
+    mkdir -p "$APP/lib"
+    cp -r "$MINGW_PREFIX/lib/gdk-pixbuf-2.0" "$APP/lib/"
+fi
+
+# Transitively resolve DLL dependencies starting from the exe and every
+# pixbuf loader DLL. objdump reports import names; we look them up in the
 # mingw bin dir and skip anything that resolves to a Windows system DLL.
 declare -A seen
 queue=("$APP/$BROWSER_EXE")
+for loader in "$APP"/lib/gdk-pixbuf-2.0/*/loaders/*.dll; do
+    [ -f "$loader" ] && queue+=("$loader")
+done
 while [ ${#queue[@]} -gt 0 ]; do
     cur=${queue[0]}
     queue=("${queue[@]:1}")
@@ -139,16 +159,34 @@ validate_ngtcp2_ossl() {
 
 validate_ngtcp2_ossl
 
+# Adwaita + hicolor icons for default GTK widget glyphs (back/forward arrows, etc.).
+mkdir -p "$APP/share/icons"
+for theme in Adwaita hicolor; do
+    if [ -d "$MINGW_PREFIX/share/icons/$theme" ]; then
+        cp -r "$MINGW_PREFIX/share/icons/$theme" "$APP/share/icons/"
+    fi
+done
+
+# Northstar's own application + toolbar icons (drop into the hicolor theme
+# so gtk_image_new_from_icon_name("northstar-back") and friends resolve at
+# runtime, and about: pages can read the svg/gif as a data URI). The dev tree
+# finds these via the ../../data/icons search path; the bundle only has
+# share/icons, so every northstar-*.svg the toolbar references must be
+# copied there or the header-bar buttons render blank. Refresh the hicolor
+# cache so the bundled icons show up without a filesystem scan.
+mkdir -p "$APP/share/icons/hicolor/scalable/apps"
+cp "$ROOT"/data/icons/hicolor/scalable/apps/northstar*.svg \
+   "$ROOT/data/icons/hicolor/scalable/apps/northstar.gif" \
+   "$APP/share/icons/hicolor/scalable/apps/"
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache --force --ignore-theme-index \
+        "$APP/share/icons/hicolor" >/dev/null 2>&1 || true
+fi
+
 # Per-application data: license text. The browser reads it relative to
 # the exe at runtime (see src/net.c::about_read_first).
 mkdir -p "$APP/share/northstar"
 cp "$ROOT/LICENSE" "$APP/share/northstar/"
-cp "$ROOT/THIRD-PARTY-LICENSES.md" "$APP/share/northstar/"
-cp -r "$ROOT/data/i18n" "$APP/share/northstar/"
-
-mkdir -p "$APP/share/icons/hicolor/scalable/apps"
-cp "$ROOT/data/icons/hicolor/scalable/apps/northstar.gif" \
-   "$APP/share/icons/hicolor/scalable/apps/"
 
 # Northstar's own GPL text plus the third-party copyright + license notices
 # required by the libraries we ship, both at the root of the bundle.

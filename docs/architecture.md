@@ -17,8 +17,8 @@ per-origin renderer process; every page shares one address space.
  watchdog supervisor  (watchdog.c)
     │  spawns + restarts on crash/hang
     ▼
- browser process  (platform shell + engine, single-process)
-    │   ├─ Win32 or GTK 4 UI: one page view, omnibox, menus
+ browser process  (src/gtk/ shell + engine, single-process)
+    │   ├─ GTK 4 UI: one page view, omnibox, menus  (src/gtk/*.c)
     │   ├─ engine: fetch → parse → style → layout → paint
     │   ├─ QuickJS runtime for the current top-level page
     │   └─ asynchronous audio worker           (src/audio/audio.c)
@@ -32,9 +32,8 @@ per-origin renderer process; every page shares one address space.
   becomes a tiny supervisor that runs the real shell as a child and
   restarts it on crash or hang. It initialises no network, sandbox, or
   UI. Headless/tooling modes are never supervised.
-- **Browser process** — the native Win32 shell (`src/win32/`) on Windows or
-  GTK 4 shell (`src/gtk/`) on Linux/macOS hosts the engine directly.
-  `ns_rproc_single_process_enable()` (`rproc_inproc.c`) wires
+- **Browser process** — the GTK 4 shell (`src/gtk/`) hosts the engine
+  directly. `ns_rproc_single_process_enable()` (`rproc_inproc.c`) wires
   the in-process render path so no renderer subprocess is spawned.
 - **Audio mixer** (`src/audio/audio.c`) — downloads and decodes `<audio>`
   on an in-process worker thread, then outputs through SDL2. Per-view audio
@@ -60,7 +59,7 @@ and headless drivers share the same path).
 | 5. Style | `css.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `anim.c` runs transitions and `@keyframes`; `font.c` loads `@font-face` web fonts. |
 | 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. `mathml.c` lays out presentation MathML. Anonymous table boxes are generated around any run of table-internal siblings. |
 | 7. Paint | `paint.c`, `image.c` | Builds and rasterises the Cairo display list. `image.c` decodes images on demand. |
-| 8. Present | `src/win32/winview.c`, `src/gtk/procview.c`, `headless.c` | Win32 blits through GDI, GTK draws into its page widget, and headless dumps to PNG or a text/layout tree. |
+| 8. Present | `src/gtk/procview.c`, `headless.c` | GUI blits the surface into the GTK widget; headless dumps it to PNG or a text/layout tree. |
 
 Most computed values stay as parsed `ns_css_value`s, but `display` is
 resolved once per element into an `ns_display` — the CSS Display Level 3

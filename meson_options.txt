@@ -1,9 +1,7 @@
 option('build_date', type: 'string', value: '',
        description: 'Build date stamp shown in the About dialog (defaults to the configure-time date).')
 option('gtk', type: 'feature', value: 'auto',
-       description: 'Build the GTK 4 desktop shell (auto on Unix; opt in on Windows alongside the native Win32 shell).')
-option('win32', type: 'feature', value: 'auto',
-       description: 'Build the native Win32 desktop shell (auto on Windows only).')
+       description: 'Build the GTK 4 desktop shell (on by default when GTK 4 is present). Disable for an engine-only build that needs no GTK 4 toolkit at all.')
 option('wasm', type: 'feature', value: 'auto',
        description: 'Build the WebAssembly JS API over the vendored WAMR interpreter (on by default; disable on platforms WAMR does not support, e.g. NetBSD).')
 option('avif', type: 'feature', value: 'auto',

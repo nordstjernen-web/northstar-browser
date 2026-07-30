@@ -54,26 +54,23 @@ jobs:
             mingw-w64-x86_64-lld
             mingw-w64-x86_64-llvm-tools
             mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-glib2
             mingw-w64-x86_64-meson
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-ccache
             mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gtk4
             mingw-w64-x86_64-harfbuzz
             mingw-w64-x86_64-fribidi
             mingw-w64-x86_64-cairo
             mingw-w64-x86_64-fontconfig
             mingw-w64-x86_64-freetype
             mingw-w64-x86_64-curl
-            mingw-w64-x86_64-openssl
-            mingw-w64-x86_64-zlib
             mingw-w64-x86_64-ca-certificates
             mingw-w64-x86_64-uchardet
             mingw-w64-x86_64-libpsl
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-libavif
             mingw-w64-x86_64-SDL2
-            mingw-w64-x86_64-librsvg
             make
             zip
 
@@ -101,7 +98,7 @@ jobs:
           ccache --version | head -1
           meson --version
           ninja --version
-          pkg-config --modversion glib-2.0
+          pkg-config --modversion gtk4
           pkg-config --modversion libcurl
 
       - name: Build (LTO via LLD)
@@ -127,20 +124,20 @@ jobs:
           key: ccache-windows-${{ matrix.windows }}-${{ github.sha }}
 
       - name: Smoke test (binary present)
-        if: hashFiles('builddir/src/win32/northstar.exe') != ''
+        if: hashFiles('builddir/src/gtk/northstar.exe') != ''
         run: |
-          test -f builddir/src/win32/northstar.exe
-          file builddir/src/win32/northstar.exe
+          test -f builddir/src/gtk/northstar.exe
+          file builddir/src/gtk/northstar.exe
 
       - name: Headless smoke (--print-config + about:start)
-        if: hashFiles('builddir/src/win32/northstar.exe') != ''
+        if: hashFiles('builddir/src/gtk/northstar.exe') != ''
         env:
           NS_ALLOW_ROOT: '1'
         run: |
           set -o pipefail
-          ./builddir/src/win32/northstar.exe --print-config > config.txt
+          ./builddir/src/gtk/northstar.exe --print-config > config.txt
           head -5 config.txt
-          ./builddir/src/win32/northstar.exe --headless --dump=text about:start > about.txt
+          ./builddir/src/gtk/northstar.exe --headless --dump=text about:start > about.txt
           head -3 about.txt
           grep -q Northstar about.txt
 
@@ -155,17 +152,17 @@ jobs:
           retention-days: 14
 
       - name: Upload northstar binary
-        if: hashFiles('builddir/src/win32/northstar.exe') != ''
+        if: hashFiles('builddir/src/gtk/northstar.exe') != ''
         uses: actions/upload-artifact@v7
         with:
           name: northstar-windows-${{ matrix.windows }}
-          path: builddir/src/win32/northstar.exe
+          path: builddir/src/gtk/northstar.exe
           if-no-files-found: error
           retention-days: 14
 
       - name: Build redistributable bundle (pack-windows.sh)
         id: pack
-        if: github.event_name != 'pull_request' && hashFiles('builddir/src/win32/northstar.exe') != ''
+        if: github.event_name != 'pull_request' && hashFiles('builddir/src/gtk/northstar.exe') != ''
         env:
           BUILDDIR: ${{ github.workspace }}/builddir
           NS_ALLOW_ROOT: '1'

@@ -1,8 +1,8 @@
 # Northstar — Codex operating guide
 
 Northstar is a web browser written from scratch in **C**, using **GTK 4**
-on Linux/macOS and native **Win32** on Windows, with **libcurl** for
-networking. Targets **Linux** (primary), **macOS** and **Windows**.
+for the UI and **libcurl** for networking. Targets **Linux** (primary),
+**macOS** and **Windows**.
 
 See `README.md` for the product vision. Northstar is the GPL /
 open-source edition of the [Nordstjernen
@@ -93,7 +93,7 @@ This repo is driven by Codex in long uninterrupted sessions.
   driven from Linux (GTK 4 / libcurl / meson / clang and an X session at
   `DISPLAY=:0`), macOS with Homebrew, or Windows 11 via MSYS2 MINGW64.
   All use the same meson/ninja invocation; the Windows binary is
-  `./builddir/src/win32/northstar.exe`. Every commit must pass
+  `./builddir/src/gtk/northstar.exe`. Every commit must pass
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
   — that's the per-change correctness gate, not CI.

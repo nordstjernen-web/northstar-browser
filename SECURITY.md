@@ -44,8 +44,8 @@ trusted.
 ## Defenses
 
 This minimalist edition runs **single-process**: the HTML/CSS/JS/layout
-engine parses and renders untrusted content in the platform shell process
-itself (`ns_rproc_single_process_enable`, `src/appmain.c`). There is
+engine parses and renders untrusted content in the GTK shell process
+itself (`ns_rproc_single_process_enable`, `src/gtk/appmain.c`). There is
 no separate `northstar-renderer` executable and no per-tab renderer
 process — every page shares one OS process and one address space. The
 audio decoders and SDL2 mixer also run in that browser process on an
@@ -97,7 +97,7 @@ installed from `src/security.c` before any HTML or audio is parsed:
 | Headless / `--dump` / `--eval` / WPT tooling | ✅ | ✅ | ✅ |
 
 The interactive GUI runs single-process (the engine is in the shell), and
-its startup path (`proc_mode` in `src/appmain.c`) applies both Landlock
+its startup path (`proc_mode` in `src/gtk/appmain.c`) applies both Landlock
 and `ns_security_seccomp_init()`. No renderer or media executable needs
 `fork`/`execve`, so the browser process can use the same no-`execve`
 syscall allow-list as headless/tooling mode.
@@ -128,8 +128,7 @@ syscall allow-list as headless/tooling mode.
   process (`src/audio/audio.c`), not via an external player. When a page
   plays an `<audio>` element the engine emits
   `open`/`play`/`pause`/`seek`/`stop`/`volume` commands that ride the
-  render-response `X-Audio` side-channel to the shell (`src/gtk/procview.c`,
-  `src/win32/winview.c`),
+  render-response `X-Audio` side-channel to the shell (`src/gtk/procview.c`),
   which queues them to a per-view audio context. A dedicated worker thread
   fetches and decodes media without blocking GTK; URLs are never handed to
   a shell or arbitrary binary. The mixer decodes MP3 (vendored minimp3),
@@ -159,7 +158,7 @@ engine and audio code still shares the browser process. Set
 ### Windows process mitigations
 
 Windows has no direct Landlock or seccomp-bpf equivalent that a
-user-space browser process can apply to itself. Instead the browser
+user-space GTK process can apply to itself. Instead the browser
 hardens itself at startup via `SetProcessMitigationPolicy`, called
 from `ns_security_win32_mitigations_init` in `src/security.c`
 **before** any DLL we don't statically link is touched. Six

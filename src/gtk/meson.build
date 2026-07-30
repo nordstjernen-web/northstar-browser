@@ -26,10 +26,8 @@ northstar_icon_resources = gnome.compile_resources(
   c_name: 'northstar_icons',
 )
 
-northstar_gtk_executable_name = have_win32 ? 'northstar-gtk' : 'northstar'
-
 executable(
-  northstar_gtk_executable_name,
+  'northstar',
   northstar_engine_sources + northstar_app_sources +
     northstar_gtk_sources + northstar_audio_sources +
     northstar_gtk_platform_sources +

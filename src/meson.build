@@ -106,7 +106,7 @@ if host_machine.system() == 'windows'
   windows = import('windows')
   northstar_win_resources = windows.compile_resources(
     'northstar.rc',
-    depend_files: files('../data/icons/northstar.ico', 'northstar.manifest'),
+    depend_files: files('../data/icons/northstar.ico'),
   )
 endif
 
@@ -236,10 +236,6 @@ if have_gtk
   subdir('gtk')
 endif
 
-if have_win32
-  subdir('win32')
-endif
-
-if not have_gtk and not have_win32
-  message('Desktop shells disabled — building the engine without a GUI.')
+if not have_gtk
+  message('GTK 4 shell disabled — building the engine without GTK.')
 endif
