@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* `min-content` and `max-content` grid tracks size to their content.
+  Both parsed to the same kind as `auto`, so such a column stretched into
+  the free space instead of shrinking to what it holds. Two defects sat
+  behind that: a box with a definite width contributed nothing to
+  min-content, because the measurement only ever looked at its children;
+  and an intrinsic track was measured against the space left after every
+  `minmax()` had taken its maximum, which scaled it to zero. On
+  chess.com's play page the board column now has a width and the side
+  panel sits beside the board rather than on top of it.
 * Grid items can be placed on named lines. A line named in the track
   list was parsed as a track, rejected, and dropped, so `grid-column:
   main` resolved to nothing and the item was auto placed. Names are now
