@@ -34,6 +34,9 @@ Significant changes in each release:
   the long MVG primitives are read from files rather than the command
   line, and `gifsicle` is optional.
 * The window's title bar is shorter, which gives the page the height back.
+  The home button is set off from the address bar rather than sitting flush
+  against it, and the security shield beside the address is drawn smaller so
+  it reads as an indicator rather than another toolbar button.
 * Dynamic `:has()` selectors now update after class, attribute and child-list
   mutations. The incremental restyle index used the selector's final subject
   as the mutation key, so `div:has(+ .test) #subject` indexed `#subject`

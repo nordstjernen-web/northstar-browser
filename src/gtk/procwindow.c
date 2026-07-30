@@ -210,6 +210,14 @@ set_accessible_label(GtkWidget *w, const char *label)
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, label, -1);
 }
 
+static void
+toolbar_button_icon_size(GtkWidget *button, int pixels)
+{
+    GtkWidget *child = gtk_button_get_child(GTK_BUTTON(button));
+    if (GTK_IS_IMAGE(child))
+        gtk_image_set_pixel_size(GTK_IMAGE(child), pixels);
+}
+
 static GtkWidget *
 toolbar_button(const char *icon, const char *tooltip, GCallback cb,
                gpointer data)
@@ -1451,6 +1459,9 @@ proc_window_new(GtkApplication *app, const char *home_url,
     GtkWidget *home = toolbar_button("northstar-home", ns_i18n("Home"),
                                      G_CALLBACK(on_home_clicked), pw);
     gtk_widget_set_margin_end(home, 24);
+    toolbar_button_icon_size(pw->back, 20);
+    toolbar_button_icon_size(pw->forward, 20);
+    toolbar_button_icon_size(home, 20);
 
     pw->spinner = gtk_spinner_new();
     gtk_widget_set_tooltip_text(pw->spinner, ns_i18n("Loading"));
@@ -1458,7 +1469,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_widget_set_visible(pw->spinner, FALSE);
 
     pw->security_icon = gtk_image_new();
-    gtk_image_set_pixel_size(GTK_IMAGE(pw->security_icon), 16);
+    gtk_image_set_pixel_size(GTK_IMAGE(pw->security_icon), 12);
     gtk_widget_set_valign(pw->security_icon, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(pw->security_icon, "ns-sec-icon");
     gtk_widget_set_visible(pw->security_icon, FALSE);
@@ -1502,7 +1513,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
     g_object_unref(appmenu);
 
     GtkWidget *logo = gtk_image_new_from_icon_name("northstar");
-    gtk_image_set_pixel_size(GTK_IMAGE(logo), 24);
+    gtk_image_set_pixel_size(GTK_IMAGE(logo), 28);
     GtkWidget *logo_button = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(logo_button), logo);
     gtk_button_set_has_frame(GTK_BUTTON(logo_button), FALSE);
