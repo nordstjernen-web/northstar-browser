@@ -127,13 +127,24 @@ At 20% this is the lowest score in the table and, unlike `css/css-color`,
 it is about layout rather than serialization — so it is the gap most
 likely to make a real page render wrong. Simple cases are correct: a
 row of `flex: 1 1 auto` / `flex: 2 1 0` / fixed-width items resolves to
-the same geometry a browser produces, and `flex-direction: column` with
-`align-items` and `justify-content` places items correctly. The
+the same geometry a browser produces, `flex-direction: column` with
+`align-items` and `justify-content` places items correctly, and
+`align-items: baseline` now aligns baselines rather than tops. The
 failures are concentrated in the harder parts of the algorithm —
-`min-width: auto` on flex items, percentage resolution against an
-indefinite container, wrapping with `align-content`, nested flex
-containers, and the intrinsic-size contribution of a flex container to
-its parent. This deserves attention before any further colour work.
+percentage resolution against an indefinite container, wrapping with
+`align-content`, nested flex containers, and the intrinsic-size
+contribution of a flex container to its parent. This deserves attention
+before any further colour work.
+
+### `getComputedStyle` does not force a style flush
+
+Reading a computed value returns whatever the last completed style pass
+produced. Everything a rule depends on that is only known after layout —
+container queries, most obviously — therefore reads stale until a render
+has run, even though the same rule paints correctly. A page that sets a
+class and reads a computed value in the same task sees the old value.
+Making the read flush style, as the CSSOM requires, is a change to how
+the render pipeline is driven rather than to the CSSOM bindings.
 
 ### Computed values keep no colour space
 
@@ -146,14 +157,15 @@ the conversions to sRGB are exact — but every serialization subtest in
 `css/css-color` fails. Fixing this means carrying a space-tagged colour
 through the style system and the paint path, not a parser change.
 
-### Relative colour syntax is not implemented
+### Inverse trigonometry does not produce an angle
 
-`rgb(from <color> r g b)` and the `from` form of the other colour
-functions parse as invalid, which is roughly 2300 subtests in
-`css/css-color`. Unlike the item above this needs no architectural
-change — the origin colour resolves to a plain colour — but it does need
-channel-keyword substitution in each colour function plus `calc()`
-integration.
+`asin()`, `acos()`, `atan()` and `atan2()` return a plain number in
+radians rather than an `<angle>`. Where the result is used directly as
+an angle — `rotate(atan(1))` — the angle parser converts it and the
+result is right; where it takes part in arithmetic with an angle, as in
+`calc(atan(1) / 45deg)`, the calculation is rejected. Fixing it properly
+means carrying a unit type through `calc()`, not a change to these four
+functions.
 
 ### `:has()` invalidation is incomplete
 
@@ -180,6 +192,47 @@ not settle on. The subtests that do run mostly pass.
 
 Changes on this branch, each verified against the tests named:
 
+- **One colour-argument scanner, and relative colour syntax.** The six
+  colour functions each carried their own argument loop and each
+  accepted whatever its loop happened not to reject — `rgb(1 2 3 4 5)`,
+  `rgb(0,0,0,0,0)`, `rgb(10, 20 30)`, `rgb(10 20 30, 0.5)` and
+  `hsl(120 50% 50% extra)` all parsed, and a colour split over two lines
+  in a stylesheet parsed as nothing at all, because the loops skipped
+  only spaces. One scanner now enforces the legacy comma form and the
+  modern whitespace-with-slash form as alternatives and rejects trailing
+  text. `lch()` scaled a percentage chroma by 1.25, `lab()`'s factor,
+  instead of 1.5. Relative colour syntax — `rgb(from <color> r g b)` and
+  the `from` form of the other seven functions, with `calc()` over a
+  channel keyword — is implemented by converting the origin colour into
+  the destination space and substituting the channel keywords before the
+  value is parsed again.
+- **Unclosed functions no longer empty a style block.** CSS
+  tokenization closes an open function at end of input, so
+  `el.style.color = "rgb(1,2,3"` should set the colour. Northstar
+  spliced the raw text into the style attribute, where the unclosed
+  paren swallowed every declaration after it and the whole block was
+  then thrown away as invalid.
+- **`border-radius`.** Percentage radii were used as pixel counts —
+  `border-radius: 50%` painted a 50-pixel corner — and a `calc()` radius
+  was dropped. The elliptical forms did not work: the two-value corner
+  longhand was rejected, `10px / 20px` kept only the horizontal radii,
+  and through the CSSOM the declaration was rejected whole because the
+  shorthand was validated against the single-length grammar of the
+  legacy property.
+- **Shorthands that share a name with a longhand.** `el.style.overflow =
+  "hidden auto"` and `el.style.gap = "10px 20px"` silently dropped the
+  declaration while the same value worked in a stylesheet. Validation
+  now falls back to the declaration-block parse, which covers every
+  shorthand of that shape. `grid-area` gained its four longhands and
+  single-value `overflow` its two.
+- **`align-items: baseline`.** Flex items aligned on their tops, because
+  nothing in the box tree recorded where a box's first baseline was.
+- **Numeric computed values.** `hypot()` returned a plain number, so
+  `hypot(3px, 4px)` was rejected by every property wanting a length;
+  `z-index: calc(infinity)` computed to `inf`; numbers past six
+  significant digits serialized in exponent form; and a transform built
+  from 3D functions serialized as a 2D `matrix()` whenever the resulting
+  matrix happened to be flat.
 - **Insertion steps for `ChildNode`/`ParentNode`.** `append`,
   `prepend`, `before`, `after`, `replaceWith` and `replaceChildren` did
   not run the insertion steps, so a `<script>` inserted through any of
