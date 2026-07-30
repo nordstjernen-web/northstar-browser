@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* An SVG with a `viewBox` but no width or height is sized the way CSS
+  says: its ratio fitted inside the 300x150 default object size. The
+  decoder used to rasterise it into a square, so the artwork was
+  letterboxed and then stretched into the page's box -- Wikipedia's
+  wordmark came out as a smear, and chess.com's sidebar logo under-scaled
+  under `background-size: contain` and vanished entirely under `cover`.
 * Workers get the APIs the polyfills already implement. A worker ran only
   the first part of the polyfill bundle, so IndexedDB, the streams, Blob
   and caches were missing inside one while the window had them all --
