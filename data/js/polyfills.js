@@ -280,9 +280,9 @@
         }
         return out;
     });
-    if (global.__ndWorkerHeadersOnly) {
-        delete global.__ndWorkerHeadersOnly;
-        return;
+    var ndWorkerScope = !!global.__ndWorkerHeadersOnly;
+    if (ndWorkerScope) {
+        try { delete global.__ndWorkerHeadersOnly; } catch (e) {}
     }
 
     function utf8Encode(s) {
@@ -2851,6 +2851,8 @@
         defineCtor('IDBVersionChangeEvent', IDBVersionChangeEvent);
         defineCtor('indexedDB', new IDBFactory());
     })();
+
+    if (ndWorkerScope) return;
 
     if (typeof Symbol !== 'undefined') {
         if (typeof Symbol.dispose === 'undefined') {

@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* Workers get the APIs the polyfills already implement. A worker ran only
+  the first part of the polyfill bundle, so IndexedDB, the streams, Blob
+  and caches were missing inside one while the window had them all --
+  thirteen globals differed between the two scopes. chess.com's opening
+  book worker failed on `indexedDB is not defined` and took the play
+  page's initialisation with it; that page now loads without a script
+  error. `AbortController` and `AbortSignal` are installed in workers
+  too, so a worker can cancel a fetch.
 * A page on an origin that does not speak QUIC no longer stalls for the
   whole connect timeout. Whenever libcurl was built with HTTP/3, every
   request asked for it, so the first hop to an origin that silently drops
