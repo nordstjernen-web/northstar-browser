@@ -21,6 +21,7 @@
 
 #define NS_WINVIEW_CLASS L"NorthstarWinView"
 #define NS_DEVTOOLS_CLASS L"NorthstarDeveloperTools"
+#define NS_TOUNICODE_KEEP_STATE 0x4
 #define NS_WM_RESULT (WM_APP + 41)
 #define NS_TIMER_ANIM 1
 #define NS_TIMER_CONSOLE 2
@@ -315,6 +316,26 @@ ns_set_window_text_utf8(HWND hwnd, const char *text)
     g_free(wide);
 }
 
+static HFONT
+ns_create_ui_font(UINT dpi)
+{
+    NONCLIENTMETRICSW metrics = { .cbSize = sizeof metrics };
+    if (SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof metrics,
+                                   &metrics, 0, dpi ? dpi : 96)) {
+        HFONT font = CreateFontIndirectW(&metrics.lfMessageFont);
+        if (font)
+            return font;
+    }
+    return (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+}
+
+static void
+ns_destroy_ui_font(HFONT font)
+{
+    if (font && font != (HFONT)GetStockObject(DEFAULT_GUI_FONT))
+        DeleteObject(font);
+}
+
 static void
 ns_set_control_font(NsWinView *view, HWND control)
 {
@@ -347,6 +368,16 @@ ns_request_free(NsRequest *request)
     g_free(request);
 }
 
+static char *
+ns_take_cstr(char *owned)
+{
+    if (!owned)
+        return NULL;
+    char *copy = g_strdup(owned);
+    free(owned);
+    return copy;
+}
+
 static void
 ns_result_free(NsResult *result)
 {
@@ -360,8 +391,8 @@ ns_result_free(NsResult *result)
     g_free(result->download);
     g_free(result->audio);
     g_free(result->pixels);
-    free(result->text);
-    free(result->cursor);
+    g_free(result->text);
+    g_free(result->cursor);
     g_free(result);
 }
 
@@ -556,10 +587,10 @@ ns_worker_main(gpointer data)
                     result->height = frame.height;
                     result->stride = frame.stride;
                 }
-                result->nav = frame.nav;
-                result->camera = frame.camera;
-                result->download = frame.download;
-                result->audio = frame.audio;
+                result->nav = ns_take_cstr(frame.nav);
+                result->camera = ns_take_cstr(frame.camera);
+                result->download = ns_take_cstr(frame.download);
+                result->audio = ns_take_cstr(frame.audio);
                 frame.nav = NULL;
                 frame.camera = NULL;
                 frame.download = NULL;
@@ -579,16 +610,16 @@ ns_worker_main(gpointer data)
                                               request->y,
                                               &result->prevented);
                 if (!result->prevented)
-                    result->text = ns_rproc_http_link_at(
-                        view->proc, request->x, request->y);
+                    result->text = ns_take_cstr(ns_rproc_http_link_at(
+                        view->proc, request->x, request->y));
             }
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_CLICK) {
             NsResult *result = g_new0(NsResult, 1);
             result->type = NS_RES_CLICK;
             result->seq = request->seq;
-            result->text = view->proc ? ns_rproc_http_click(
-                view->proc, request->x, request->y, request->mods) : NULL;
+            result->text = view->proc ? ns_take_cstr(ns_rproc_http_click(
+                view->proc, request->x, request->y, request->mods)) : NULL;
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_VIEWPORT) {
             NsResult *result = g_new0(NsResult, 1);
@@ -611,31 +642,36 @@ ns_worker_main(gpointer data)
             result->kind = request->kind;
             result->fallback_x = request->dx;
             result->fallback_y = request->dy;
-            result->text = view->proc ? ns_rproc_http_key_full(
+            result->text = view->proc ? ns_take_cstr(ns_rproc_http_key_full(
                 view->proc, request->kind, request->key, request->code,
-                request->keycode, request->mods, &result->prevented) : NULL;
+                request->keycode, request->mods, &result->prevented)) : NULL;
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_SELECT) {
             NsResult *result = g_new0(NsResult, 1);
             result->type = request->kind == 4 ? NS_RES_COPY : NS_RES_SELECT;
             result->seq = request->seq;
-            result->text = view->proc ? ns_rproc_http_select(
-                view->proc, request->kind, request->x, request->y) : NULL;
+            result->text = view->proc ? ns_take_cstr(ns_rproc_http_select(
+                view->proc, request->kind, request->x, request->y)) : NULL;
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_HOVER) {
             NsResult *result = g_new0(NsResult, 1);
             result->type = NS_RES_HOVER;
             result->seq = request->seq;
-            if (view->proc)
+            if (view->proc) {
+                char *href = NULL;
+                char *cursor = NULL;
                 result->ok = ns_rproc_http_hover_full(
-                    view->proc, request->x, request->y, &result->text,
-                    &result->cursor) == 1;
+                    view->proc, request->x, request->y, &href,
+                    &cursor) == 1;
+                result->text = ns_take_cstr(href);
+                result->cursor = ns_take_cstr(cursor);
+            }
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_RELEASE) {
             NsResult *result = g_new0(NsResult, 1);
             result->type = NS_RES_RELEASE;
-            result->text = view->proc ? ns_rproc_http_release_full(
-                view->proc, &result->ok) : NULL;
+            result->text = view->proc ? ns_take_cstr(
+                ns_rproc_http_release_full(view->proc, &result->ok)) : NULL;
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_FIND) {
             NsResult *result = g_new0(NsResult, 1);
@@ -667,23 +703,23 @@ ns_worker_main(gpointer data)
         } else if (request->type == NS_REQ_CONSOLE) {
             NsResult *result = g_new0(NsResult, 1);
             result->type = NS_RES_CONSOLE;
-            result->text = view->proc ?
-                ns_rproc_http_console_poll(view->proc) : NULL;
+            result->text = view->proc ? ns_take_cstr(
+                ns_rproc_http_console_poll(view->proc)) : NULL;
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_EVAL) {
             NsResult *result = g_new0(NsResult, 1);
             result->type = NS_RES_EVAL;
             result->dump_tab = request->dump_tab;
             result->inspect = request->inspect;
-            result->text = view->proc ?
-                ns_rproc_http_eval(view->proc, request->query) : NULL;
+            result->text = view->proc ? ns_take_cstr(
+                ns_rproc_http_eval(view->proc, request->query)) : NULL;
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_DUMP) {
             NsResult *result = g_new0(NsResult, 1);
             result->type = NS_RES_DUMP;
             result->dump_tab = request->dump_tab;
-            result->text = view->proc ?
-                ns_rproc_http_dump(view->proc, request->query) : NULL;
+            result->text = view->proc ? ns_take_cstr(
+                ns_rproc_http_dump(view->proc, request->query)) : NULL;
             ns_post_result(view, result);
         } else if (request->type == NS_REQ_DROP_FILES) {
             NsResult *result = g_new0(NsResult, 1);
@@ -1140,7 +1176,7 @@ ns_virtual_key_name(UINT key, char *buffer, gsize size)
     WCHAR wide[4] = {0};
     if (GetKeyboardState(state)) {
         int count = ToUnicodeEx(key, MapVirtualKeyW(key, MAPVK_VK_TO_VSC),
-                                state, wide, 4, 0,
+                                state, wide, 4, NS_TOUNICODE_KEEP_STATE,
                                 GetKeyboardLayout(0));
         if (count == 1) {
             char *utf8 = g_utf16_to_utf8((gunichar2 *)wide, 1, NULL, NULL,
@@ -2420,7 +2456,7 @@ ns_winview_new(HWND parent, HINSTANCE instance)
 {
     NsWinView *view = g_new0(NsWinView, 1);
     view->instance = instance;
-    view->ui_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    view->ui_font = ns_create_ui_font(GetDpiForWindow(parent));
     view->queue = g_async_queue_new();
     g_mutex_init(&view->proc_lock);
     view->history = g_ptr_array_new_with_free_func(g_free);
@@ -2497,6 +2533,29 @@ ns_winview_hwnd(NsWinView *view)
 }
 
 void
+ns_winview_refresh_font(NsWinView *view, UINT dpi)
+{
+    if (!view)
+        return;
+    HFONT font = ns_create_ui_font(dpi);
+    HFONT previous = view->ui_font;
+    view->ui_font = font;
+    HWND controls[] = {
+        view->find_edit, view->find_label, view->find_prev, view->find_next,
+        view->find_close, view->perm_label, view->perm_allow, view->perm_deny,
+        view->dev_tab, view->dev_output, view->dev_input, view->dev_inspect,
+        view->dev_refresh, view->dev_clear
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(controls); i++)
+        if (controls[i])
+            SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
+    ns_layout_bars(view);
+    if (view->devtools)
+        ns_dev_layout(view);
+    ns_destroy_ui_font(previous);
+}
+
+void
 ns_winview_destroy(NsWinView *view)
 {
     if (!view)
@@ -2538,6 +2597,7 @@ ns_winview_destroy(NsWinView *view)
     g_free(view->deferred_url);
     for (int i = 0; i < NS_DEV_COUNT; i++)
         g_free(view->dev_text[i]);
+    ns_destroy_ui_font(view->ui_font);
     g_mutex_clear(&view->proc_lock);
     g_free(view);
 }

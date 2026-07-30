@@ -4,6 +4,79 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* Dynamic `:has()` selectors now update after class, attribute and child-list
+  mutations. The incremental restyle index used the selector's final subject
+  as the mutation key, so `div:has(+ .test) #subject` indexed `#subject`
+  instead of the `div` whose match changes. It now indexes the compound that
+  owns `:has()` and invalidates its descendant and following-sibling dependent
+  region. The selector-invalidation WPT subset gains 311 passing subtests with
+  no regression, while typical mutations in its largest file still recompute
+  only 8–10 styles rather than the whole document.
+* `border-radius: 50%` -- the way a page makes a circular avatar --
+  painted a 50-pixel corner. The painter read the radius out of the
+  computed value and ignored its unit, so every percentage radius became
+  a pixel count and a `calc()` radius was dropped altogether. Radii now
+  resolve against the border box, the horizontal one against its width
+  and the vertical against its height. The elliptical forms work as
+  well: `border-top-left-radius: 10px 20px` used to be rejected and
+  `border-radius: 10px / 20px` kept only the horizontal radii, while
+  through the CSSOM the whole declaration was thrown away. A corner now
+  carries both radii and the painter draws elliptical corners, with
+  overlapping radii scaled down together in the proportion the spec
+  prescribes.
+* Relative colour syntax is implemented -- `rgb(from <color> r g b)` and
+  the `from` form of `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`,
+  `oklch()` and `color()`, including `calc()` over a channel keyword, as
+  in `hsl(from red calc(h + 120) s l)`. sRGB to Lab, HSL and HWB
+  conversions and the inverse of each predefined-space transform are
+  added; the inverses are derived from the matrices already used in the
+  forward direction, so a `color(display-p3 from ...)` round trip cannot
+  drift.
+* The six colour functions each had their own argument loop, and each
+  accepted whatever its loop happened not to reject: `rgb(1 2 3 4 5)`,
+  `rgb(0,0,0,0,0)`, `rgb(10, 20 30)`, `rgb(10 20 30, 0.5)` and
+  `hsl(120 50% 50% extra)` all parsed, and a colour split over two lines
+  in a stylesheet failed to parse at all because the loops skipped only
+  spaces. One scanner now serves all six: it enforces the legacy comma
+  form and the modern whitespace-with-slash form as alternatives rather
+  than a free mixture, and rejects anything after the arguments. Two
+  value bugs fell out of the merge -- `lch()` scaled a percentage chroma
+  by the factor `lab()` uses for its axes, so `lch(50% 20% 40)` gave
+  C=25 where CSS Color 4 specifies 30, and `hwb()` had a ternary whose
+  branches were identical.
+* CSS tokenization closes an open function at end of input, so
+  `el.style.color = "rgb(1,2,3"` sets the colour and leaves the rest of
+  the inline style alone. Northstar spliced the raw text into the style
+  attribute instead, where the unclosed paren swallowed every
+  declaration after it: setting one property through the IDL attribute
+  or through `setProperty` discarded the whole block, and `cssText`
+  stored text that degraded further on each read and rewrite.
+* `align-items: baseline` and `align-self: baseline` fell through to
+  flex-start, so a label beside a larger heading sat with its top flush
+  instead of its text on one line. An inline box now keeps the baseline
+  of its first line and a flex item takes the first baseline found among
+  its in-flow children, synthesizing one at the bottom margin edge when
+  there is no line box in it.
+* `el.style.overflow = "hidden auto"` and `el.style.gap = "10px 20px"`
+  silently dropped the declaration while the same value in a stylesheet
+  worked, because both names carry a property id of their own and the
+  CSSOM validated them against that single-value grammar instead of the
+  expansion the stylesheet parser performs. `grid-area` never set
+  `grid-row-start` and its three siblings, and `overflow` with a single
+  value left `overflow-x` and `overflow-y` reading `visible` on an
+  element that was in fact clipping. The four-value shorthands --
+  `margin`, `padding`, `border-width`, `border-color`, `border-style` --
+  ignored a fifth value rather than rejecting the declaration.
+* `hypot()` always returned a plain number, so `hypot(3px, 4px)` was
+  rejected by every property that wants a length. An integer property
+  given an overflowing calculation kept the raw double, so
+  `z-index: calc(infinity)` computed to `inf` and `calc(NaN)` to `nan`;
+  both now clamp as CSS Values requires. Numbers large enough to reach
+  exponent notation serialized through `%g` as `1.23457e+06px`, wrong
+  and lossy. A transform built from 3D functions serialized as a 2D
+  `matrix()` whenever the resulting matrix happened to be flat, and the
+  specified value of `translate3d()` and `scale3d()` dropped its Z
+  component entirely.
 * The CSS cascade indexes `:is()` and `:where()` subjects, and stops
   allocating per selector test. Profiling ten real sites put the cost of a
   page load in the cascade rather than in layout: on github.com a relayout

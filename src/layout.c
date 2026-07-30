@@ -4945,16 +4945,16 @@ apply_inline_spacing(NsPangoAttrList *list, const ns_style *style, const char *t
         ns_pango_attr_list_insert(list, ls);
     }
     if (ws_px != 0) {
-        int per_space = (int)((ls_px + ws_px) * NS_PANGO_SCALE);
-        for (const char *p = text; *p; p++) {
-            if (*p == ' ') {
-                gsize idx = (gsize)(p - text);
-                NsPangoAttribute *a = ns_pango_attr_letter_spacing_new(per_space);
-                a->start_index = (guint)idx;
-                a->end_index = (guint)(idx + 1);
-                ns_pango_attr_list_insert(list, a);
-            }
-        }
+        /* ns-pango applies this at the word separators CSS Text names, on the
+         * separator's own advance. Emulating it with a letter-spacing attribute
+         * per space, as this used to, split the paragraph into an item per word
+         * and only ever found ASCII space, never U+00A0.
+         */
+        NsPangoAttribute *ws = ns_pango_attr_word_spacing_new(
+            (int)(ws_px * NS_PANGO_SCALE));
+        ws->start_index = 0;
+        ws->end_index = G_MAXUINT;
+        ns_pango_attr_list_insert(list, ws);
     }
 }
 
@@ -5435,6 +5435,51 @@ ns_vertical_measure(ns_box *box, const ns_style *ps,
     g_object_unref(layout);
 }
 
+static gboolean
+box_first_baseline(const ns_box *b, double *out)
+{
+    if (!b) return FALSE;
+    if (b->kind == NS_BOX_INLINE) {
+        if (b->first_baseline <= 0) return FALSE;
+        *out = b->margin.top + b->border.top + b->padding.top +
+               b->first_baseline;
+        return TRUE;
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        if (style_is_absolute_or_fixed(c->style)) continue;
+        double child_baseline;
+        if (box_first_baseline(c, &child_baseline)) {
+            *out = (c->y - b->y) + child_baseline;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static const char *
+flex_item_align(const ns_box *c, const char *container_align)
+{
+    if (c && c->style) {
+        const char *as = ns_style_keyword(c->style, NS_CSS_ALIGN_SELF);
+        if (as && strcmp(as, "auto") != 0) return as;
+    }
+    return container_align;
+}
+
+static gboolean
+flex_align_is_baseline(const char *align)
+{
+    return align && (strcmp(align, "baseline") == 0 ||
+                     strcmp(align, "first baseline") == 0);
+}
+
+static double
+flex_item_baseline(const ns_box *c, double fallback)
+{
+    double baseline;
+    return box_first_baseline(c, &baseline) ? baseline : fallback;
+}
+
 static void
 inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 {
@@ -5442,6 +5487,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     if (!box->text || !*box->text) {
         box->content_width  = 0;
         box->content_height = 0;
+        box->first_baseline = 0;
         return;
     }
 
@@ -5455,6 +5501,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         ns_vertical_measure(box, parent_style, &thickness, &length);
         box->content_width  = thickness;
         box->content_height = length;
+        box->first_baseline = 0;
         box->inline_layout_cache_valid = FALSE;
         return;
     }
@@ -5573,6 +5620,10 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         box->content_height = measured > expected ? measured : expected;
     double ta_h = inline_textarea_total_height(box);
     if (ta_h > box->content_height) box->content_height = ta_h;
+    box->first_baseline =
+        (double)ns_pango_layout_get_baseline(layout) / NS_PANGO_SCALE;
+    if (line_heights[0] > measured)
+        box->first_baseline += (line_heights[0] - measured) / 2.0;
     if (cacheable) {
         box->inline_layout_cache_style = parent_style;
         box->inline_layout_cache_width = content_width;
@@ -8208,14 +8259,24 @@ layout_flex_row(ns_box *box, double cw,
         if (cross_size < min_cross) cross_size = min_cross;
     }
 
+    double cross_baseline = 0;
+    double cross_below_baseline = 0;
+    for (guint k = 0; k < items->len; k++) {
+        ns_box *c = items->pdata[k];
+        if (!flex_align_is_baseline(flex_item_align(c, align))) continue;
+        double item_h_full = g_array_index(measured_h, double, k);
+        double b = flex_item_baseline(c, item_h_full);
+        if (b > cross_baseline) cross_baseline = b;
+        if (item_h_full - b > cross_below_baseline)
+            cross_below_baseline = item_h_full - b;
+    }
+    if (cross_baseline + cross_below_baseline > cross_size)
+        cross_size = cross_baseline + cross_below_baseline;
+
     for (guint k = 0; k < items->len; k++) {
         guint i = k;
         ns_box *c = items->pdata[i];
-        const char *eff_align = align;
-        if (c->style) {
-            const char *as = ns_style_keyword(c->style, NS_CSS_ALIGN_SELF);
-            if (as && strcmp(as, "auto") != 0) eff_align = as;
-        }
+        const char *eff_align = flex_item_align(c, align);
         double item_h_full = g_array_index(measured_h, double, i);
         gboolean mt_auto = c->style &&
             keyword_is(c->style->values[NS_CSS_MARGIN_TOP], "auto");
@@ -8231,6 +8292,8 @@ layout_flex_row(ns_box *box, double cw,
             cy = inner_y + (cross_size - item_h_full) / 2.0;
         } else if (strcmp(eff_align, "flex-end") == 0 || strcmp(eff_align, "end") == 0) {
             cy = inner_y + cross_size - item_h_full;
+        } else if (flex_align_is_baseline(eff_align)) {
+            cy = inner_y + cross_baseline - flex_item_baseline(c, item_h_full);
         }
         double a = g_array_index(assigned_main, double, i);
         double outer_main = a + c->margin.left + c->margin.right +
@@ -8402,15 +8465,28 @@ layout_flex_row_wrap(ns_box *box, double cw,
             if (item_h > line_max_h) line_max_h = item_h;
         }
 
+        double line_baseline = 0;
+        double line_below_baseline = 0;
+        for (guint k = 0; k < line_count; k++) {
+            ns_box *c = items->pdata[line_start + k];
+            if (!flex_align_is_baseline(flex_item_align(c, align))) continue;
+            double item_h_full = c->content_height +
+                                 c->padding.top + c->padding.bottom +
+                                 c->border.top + c->border.bottom +
+                                 c->margin.top + c->margin.bottom;
+            double b = flex_item_baseline(c, item_h_full);
+            if (b > line_baseline) line_baseline = b;
+            if (item_h_full - b > line_below_baseline)
+                line_below_baseline = item_h_full - b;
+        }
+        if (line_baseline + line_below_baseline > line_max_h)
+            line_max_h = line_baseline + line_below_baseline;
+
         double cursor_x = inner_x + leading;
         for (guint k = 0; k < line_count; k++) {
             guint idx = line_start + k;
             ns_box *c = items->pdata[idx];
-            const char *eff_align = align;
-            if (c->style) {
-                const char *as = ns_style_keyword(c->style, NS_CSS_ALIGN_SELF);
-                if (as && strcmp(as, "auto") != 0) eff_align = as;
-            }
+            const char *eff_align = flex_item_align(c, align);
             double item_h_full = c->content_height +
                                  c->padding.top + c->padding.bottom +
                                  c->border.top + c->border.bottom +
@@ -8420,6 +8496,9 @@ layout_flex_row_wrap(ns_box *box, double cw,
                 cy = line_y + (line_max_h - item_h_full) / 2.0;
             else if (strcmp(eff_align, "flex-end") == 0 || strcmp(eff_align, "end") == 0)
                 cy = line_y + line_max_h - item_h_full;
+            else if (flex_align_is_baseline(eff_align))
+                cy = line_y + line_baseline -
+                     flex_item_baseline(c, item_h_full);
             c->x = cursor_x;
             c->y = cy;
             c->flex_main_size = g_array_index(main_arr, double, idx);

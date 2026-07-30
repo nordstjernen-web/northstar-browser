@@ -367,6 +367,7 @@ typedef struct ns_css_transform_op {
     double m3d[16];
     gboolean a_is_percent, b_is_percent;
     gboolean e_is_percent, f_is_percent;
+    gboolean is_3d;
 } ns_css_transform_op;
 
 #define NS_CSS_TRANSFORM_OPS_MAX 8
@@ -377,6 +378,7 @@ typedef struct ns_css_transform {
 } ns_css_transform;
 
 gboolean ns_css_transform_is_3d(const ns_css_transform *tf);
+gboolean ns_css_transform_has_3d_function(const ns_css_transform *tf);
 
 typedef enum ns_css_track_kind {
     NS_CSS_TRACK_PX,
