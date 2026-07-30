@@ -64,6 +64,7 @@ void ns_paint_sync_inline_atomic_offsets(ns_box *root);
 void ns_paint_register_font_oracle(void);
 
 void ns_paint_apply_inline_font(NsPangoLayout *layout, const ns_style *style);
+int ns_paint_pango_font_size(double size_px);
 NsPangoWeight ns_paint_pango_weight(int weight);
 NsPangoStretch ns_paint_pango_stretch(int rank);
 void ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *style);
