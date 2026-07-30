@@ -2161,16 +2161,14 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
         ns_pango_attr_list_insert(attrs, ls);
     }
     if (ws_px != 0) {
-        int per_space = (int)((ls_px + ws_px) * NS_PANGO_SCALE);
-        for (const char *p = b->text; *p; p++) {
-            if (*p == ' ') {
-                gsize idx = (gsize)(p - b->text);
-                NsPangoAttribute *a = ns_pango_attr_letter_spacing_new(per_space);
-                a->start_index = (guint)idx;
-                a->end_index = (guint)(idx + 1);
-                ns_pango_attr_list_insert(attrs, a);
-            }
-        }
+        /* See apply_inline_spacing() in layout.c: ns-pango puts this on the
+         * separator's advance, so no attribute per space and no item per word.
+         */
+        NsPangoAttribute *ws = ns_pango_attr_word_spacing_new(
+            (int)(ws_px * NS_PANGO_SCALE));
+        ws->start_index = 0;
+        ws->end_index = G_MAXUINT;
+        ns_pango_attr_list_insert(attrs, ws);
     }
     if (b->attrs) {
         for (gint ii = (gint)b->attrs->len - 1; ii >= 0; ii--) {

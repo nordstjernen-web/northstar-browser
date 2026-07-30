@@ -4945,16 +4945,16 @@ apply_inline_spacing(NsPangoAttrList *list, const ns_style *style, const char *t
         ns_pango_attr_list_insert(list, ls);
     }
     if (ws_px != 0) {
-        int per_space = (int)((ls_px + ws_px) * NS_PANGO_SCALE);
-        for (const char *p = text; *p; p++) {
-            if (*p == ' ') {
-                gsize idx = (gsize)(p - text);
-                NsPangoAttribute *a = ns_pango_attr_letter_spacing_new(per_space);
-                a->start_index = (guint)idx;
-                a->end_index = (guint)(idx + 1);
-                ns_pango_attr_list_insert(list, a);
-            }
-        }
+        /* ns-pango applies this at the word separators CSS Text names, on the
+         * separator's own advance. Emulating it with a letter-spacing attribute
+         * per space, as this used to, split the paragraph into an item per word
+         * and only ever found ASCII space, never U+00A0.
+         */
+        NsPangoAttribute *ws = ns_pango_attr_word_spacing_new(
+            (int)(ws_px * NS_PANGO_SCALE));
+        ws->start_index = 0;
+        ws->end_index = G_MAXUINT;
+        ns_pango_attr_list_insert(list, ws);
     }
 }
 
