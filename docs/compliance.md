@@ -62,6 +62,12 @@ Measured at `7b38d66` against a WPT checkout of 2026-07-29, 8 s per-test
 timeout. "Files" counts test files where every subtest passed and the
 harness reported OK.
 
+The table predates the colour, `border-radius`, flex-baseline and CSSOM
+fixes listed under "Recent fixes" below, which have not been re-measured
+against it — each was verified against the behaviour it names rather
+than against a WPT run. Re-run the areas before quoting these numbers as
+current.
+
 | Area | Subtests | Pass rate |
 | --- | --- | --- |
 | `html/dom` | 60099 / 60879 | 98.7% |
