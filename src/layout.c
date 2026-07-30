@@ -8989,24 +8989,30 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
     double auto_base[NS_CSS_TRACKS_MAX] = {0};
     double auto_lim[NS_CSS_TRACKS_MAX]  = {0};
     if (content_min) {
-        double base_sum = 0;
+        double base_sum = 0, auto_sum = 0, content_sum = 0;
         for (int i = 0; i < tr->n; i++) {
             if (!track_is_intrinsic(tr->tracks[i].kind)) continue;
             auto_base[i] = content_min[i] > 0 ? content_min[i] : 0;
             double lim = content_max ? content_max[i] : auto_base[i];
             auto_lim[i] = lim > auto_base[i] ? lim : auto_base[i];
             base_sum += auto_base[i];
+            if (tr->tracks[i].kind == NS_CSS_TRACK_AUTO)
+                auto_sum += auto_base[i];
+            else
+                content_sum += auto_base[i];
         }
         double free_for_auto = available_main - (total_fixed - total_shrink);
         if (free_for_auto < 0) free_for_auto = 0;
-        if (base_sum > free_for_auto && base_sum > 0) {
-            double scale = free_for_auto / base_sum;
+        double room = free_for_auto - content_sum;
+        if (room < 0) room = 0;
+        if (auto_sum > room && auto_sum > 0) {
+            double scale = room / auto_sum;
             for (int i = 0; i < tr->n; i++) {
-                if (!track_is_intrinsic(tr->tracks[i].kind)) continue;
+                if (tr->tracks[i].kind != NS_CSS_TRACK_AUTO) continue;
                 auto_base[i] *= scale;
                 if (auto_lim[i] < auto_base[i]) auto_lim[i] = auto_base[i];
             }
-            base_sum = free_for_auto;
+            base_sum = content_sum + room;
         }
         total_fixed += base_sum;
     }

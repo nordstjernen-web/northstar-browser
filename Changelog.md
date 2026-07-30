@@ -12,7 +12,10 @@ Significant changes in each release:
   and an intrinsic track was measured against the space left after every
   `minmax()` had taken its maximum, which scaled it to zero. On
   chess.com's play page the board column now has a width and the side
-  panel sits beside the board rather than on top of it.
+  panel sits beside the board rather than on top of it. A `min-content`
+  track is also never scaled down to make the tracks fit, since its items
+  cannot render narrower than it: the grid overflows instead, where before
+  the following columns slid underneath content that kept its own width.
 * Grid items can be placed on named lines. A line named in the track
   list was parsed as a track, rejected, and dropped, so `grid-column:
   main` resolved to nothing and the item was auto placed. Names are now
