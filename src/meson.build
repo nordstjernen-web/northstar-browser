@@ -106,7 +106,7 @@ if host_machine.system() == 'windows'
   windows = import('windows')
   northstar_win_resources = windows.compile_resources(
     'northstar.rc',
-    depend_files: files('../data/icons/northstar.ico'),
+    depend_files: files('../data/icons/northstar.ico', 'northstar.manifest'),
   )
 endif
 

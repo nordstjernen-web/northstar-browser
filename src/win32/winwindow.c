@@ -210,6 +210,26 @@ ns_set_text(HWND control, const char *text)
     g_free(wide);
 }
 
+static HFONT
+ns_create_ui_font(UINT dpi)
+{
+    NONCLIENTMETRICSW metrics = { .cbSize = sizeof metrics };
+    if (SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof metrics,
+                                   &metrics, 0, dpi ? dpi : 96)) {
+        HFONT font = CreateFontIndirectW(&metrics.lfMessageFont);
+        if (font)
+            return font;
+    }
+    return (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+}
+
+static void
+ns_destroy_ui_font(HFONT font)
+{
+    if (font && font != (HFONT)GetStockObject(DEFAULT_GUI_FONT))
+        DeleteObject(font);
+}
+
 static void
 ns_set_font(NsWinWindow *window, HWND control)
 {
@@ -1176,10 +1196,32 @@ ns_create_button(NsWinWindow *window, int id, const wchar_t *label)
     return button;
 }
 
+static void
+ns_refresh_fonts(NsWinWindow *window, UINT dpi)
+{
+    if (!window)
+        return;
+    HFONT font = ns_create_ui_font(dpi);
+    HFONT previous = window->font;
+    window->font = font;
+    HWND controls[] = {
+        window->back, window->forward, window->reload, window->home,
+        window->spinner, window->security, window->address, window->go,
+        window->bookmarks_button, window->menu_button, window->logo,
+        window->status
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(controls); i++)
+        if (controls[i])
+            SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
+    ns_winview_refresh_font(window->view, dpi);
+    ns_layout_main(window);
+    ns_destroy_ui_font(previous);
+}
+
 static gboolean
 ns_create_main_controls(NsWinWindow *window)
 {
-    window->font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    window->font = ns_create_ui_font(GetDpiForWindow(window->window));
     window->tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
         WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -1293,6 +1335,8 @@ ns_window_cleanup(NsWinWindow *window)
         ns_bookmarks_free(window->bookmarks);
         window->bookmarks = NULL;
     }
+    ns_destroy_ui_font(window->font);
+    window->font = NULL;
 }
 
 static gboolean
@@ -1758,6 +1802,7 @@ ns_main_window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
         return 0;
     case WM_DPICHANGED:
         ns_apply_dpi_change(hwnd, lparam);
+        ns_refresh_fonts(window, HIWORD(wparam));
         ns_configure_media();
         return 0;
     case WM_GETMINMAXINFO: {
