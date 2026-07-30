@@ -4,6 +4,26 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* `OfflineAudioContext` renders audio instead of silence. The whole Web
+  Audio surface was shape without substance: every `create*` method
+  returned the same generic node, `connect()` returned its argument
+  without recording an edge, `start()` and `stop()` did nothing, and
+  `startRendering()` resolved a buffer of zeros. `AudioBuffer` could not
+  hold samples at all -- `getChannelData` minted a fresh zeroed array on
+  every call, so writing to it discarded the write. Nodes now carry their
+  kind, `connect()` records the graph, sources honour their scheduled
+  start and stop, buffers keep one array per channel, and the graph is
+  rendered by `src/webaudio.c`: oscillators (sine, square, sawtooth,
+  triangle, with detune), gain, a dynamics compressor with soft knee and
+  attack/release, the RBJ biquad types, delay, wave shaping, constant
+  sources and buffer playback with rate and looping. The canonical
+  oscillator-into-compressor pipeline that used to sum to exactly zero
+  now returns real samples. Rendering is mono, summed into every channel
+  of the destination buffer, and `AudioParam` automation curves are still
+  ignored -- a parameter reads as its current value for the whole render.
+  The context, its nodes and its buffers also brand themselves, so
+  `Object.prototype.toString` reports `OfflineAudioContext`,
+  `OscillatorNode` and the rest rather than `Object`.
 * The `about:start` splash is redrawn for the release: it reads
   "A fine open source web browser." beneath the version, and a small pink
   pig flies among the clouds, drifting and flapping on the same loop the

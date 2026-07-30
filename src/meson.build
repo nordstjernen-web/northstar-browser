@@ -83,6 +83,7 @@ northstar_engine_sources = files(
   'spellcheck.c',
   'texture.c',
   'wasm.c',
+  'webaudio.c',
   'webcrypto.c',
   'ws.c',
   'html_lexbor.c',
