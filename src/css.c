@@ -7258,6 +7258,17 @@ prop_is_bg_layered(ns_css_prop prop)
 }
 
 static gboolean
+grid_line_is_custom_ident(const char *text)
+{
+    if (!text || !*text) return FALSE;
+    if (g_ascii_strcasecmp(text, "auto") == 0) return FALSE;
+    if (g_ascii_strncasecmp(text, "span", 4) == 0 &&
+        (text[4] == '\0' || is_ws(text[4])))
+        return FALSE;
+    return is_ident_start(text[0]);
+}
+
+static gboolean
 prop_is_corner_radius(ns_css_prop prop)
 {
     return prop == NS_CSS_BORDER_TOP_LEFT_RADIUS ||
@@ -8719,12 +8730,10 @@ ns_css_named_declaration_valid(const char *name, const char *text)
     if (!ns_css_named_property_supported(name)) return FALSE;
     if (name[0] == '-' && name[1] == '-')
         return css_declaration_value_syntax_valid(text);
-    if (g_ascii_strcasecmp(name, "border-radius") == 0)
-        return ns_css_supports_declaration(name, text);
     if (g_ascii_strcasecmp(name, "all") != 0) {
         int prop = prop_id(name);
-        return prop >= 0 ? ns_css_declaration_valid(prop, text)
-                         : ns_css_supports_declaration(name, text);
+        if (prop >= 0 && ns_css_declaration_valid(prop, text)) return TRUE;
+        return ns_css_supports_declaration(name, text);
     }
     if (strstr(text, "var(")) return TRUE;
     ns_css_value *wide = parse_css_wide_keyword(text);
@@ -9707,9 +9716,10 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "overflow") == 0) {
             char *tokens[3] = {0};
             int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
-            if (n == 2) {
+            if (n == 1 || n == 2) {
                 ns_css_value *vx = parse_value_for(NS_CSS_OVERFLOW_X, tokens[0]);
-                ns_css_value *vy = parse_value_for(NS_CSS_OVERFLOW_Y, tokens[1]);
+                ns_css_value *vy = parse_value_for(NS_CSS_OVERFLOW_Y,
+                                                   tokens[n == 2 ? 1 : 0]);
                 if (vx) {
                     ns_css_decl d = { .prop = NS_CSS_OVERFLOW_X, .value = vx, .important = important };
                     g_array_append_val(decls_out, d);
@@ -9718,13 +9728,15 @@ parse_declaration_block(const char **pp, const char *end,
                     ns_css_decl d = { .prop = NS_CSS_OVERFLOW_Y, .value = vy, .important = important };
                     g_array_append_val(decls_out, d);
                 }
-                for (int i = 0; i < n; i++) g_free(tokens[i]);
+            }
+            gboolean expanded = n == 2;
+            for (int i = 0; i < n; i++) g_free(tokens[i]);
+            if (expanded) {
                 g_free(pname);
                 g_free(vtext);
                 if (p < end && *p == ';') p++;
                 continue;
             }
-            for (int i = 0; i < n; i++) g_free(tokens[i]);
         }
 
         static const struct { const char *name; ns_css_prop prop; } prop_aliases[] = {
@@ -10331,6 +10343,39 @@ parse_declaration_block(const char **pp, const char *end,
             g_free(vtext);
             if (p < end && *p == ';') p++;
             continue;
+        }
+
+        if (strcmp(pname, "grid-area") == 0) {
+            static const ns_css_prop area_props[4] = {
+                NS_CSS_GRID_ROW_START, NS_CSS_GRID_COLUMN_START,
+                NS_CSS_GRID_ROW_END, NS_CSS_GRID_COLUMN_END,
+            };
+            char *parts[4] = {0};
+            int n = 0;
+            const char *scan = vtext;
+            const char *gv_end = vtext + strlen(vtext);
+            while (n < 4) {
+                const char *slash = css_find_top_level_char(scan, gv_end, '/');
+                parts[n++] = css_trim_dup_range(scan, slash ? slash : gv_end);
+                if (!slash) break;
+                scan = slash + 1;
+            }
+            for (int i = 0; i < 4; i++) {
+                const char *text = i < n && *parts[i] ? parts[i] : NULL;
+                if (!text) {
+                    const char *from = i == 1 ? parts[0]
+                                     : i >= 2 && i - 2 < n ? parts[i - 2]
+                                     : NULL;
+                    if (from && grid_line_is_custom_ident(from)) text = from;
+                }
+                if (!text) continue;
+                ns_css_value *v = parse_value_for(area_props[i], text);
+                if (!v) continue;
+                ns_css_decl d = { .prop = area_props[i], .value = v,
+                                  .important = important };
+                g_array_append_val(decls_out, d);
+            }
+            for (int i = 0; i < n; i++) g_free(parts[i]);
         }
 
         if (strcmp(pname, "grid-column") == 0 ||
