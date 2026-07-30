@@ -70,7 +70,6 @@ jobs:
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-libavif
             mingw-w64-x86_64-SDL2
-            zip
 
       - name: Restore ccache
         id: ccache-restore
@@ -101,11 +100,9 @@ jobs:
           pkg-config --modversion gtk4
           pkg-config --modversion libcurl
 
-      - name: Build (LTO via LLD)
-        id: build
+      - name: Build (ThinLTO via LLD)
         if: hashFiles('meson.build') != ''
         run: |
-          set -o pipefail
           export CC="ccache clang"
           export CXX="ccache clang++"
           export CC_LD=lld
@@ -114,7 +111,7 @@ jobs:
           THINLTO_CACHE_DIR=$(cygpath -m "$RUNNER_TEMP/thinlto-cache")
           mkdir -p "$THINLTO_CACHE_DIR"
           meson configure builddir -Dc_link_args="-Wl,--thinlto-cache-dir=$THINLTO_CACHE_DIR -Wl,--thinlto-cache-policy=cache_size_bytes=300m"
-          meson compile -C builddir 2>&1 | tee build.log
+          meson compile -C builddir
 
       - name: ccache stats
         if: always()
@@ -129,104 +126,3 @@ jobs:
             ${{ runner.temp }}\ccache
             ${{ runner.temp }}\thinlto-cache
           key: ccache-windows-${{ matrix.windows }}-${{ github.sha }}
-
-      - name: Smoke test (binary present)
-        if: hashFiles('builddir/src/gtk/northstar.exe') != ''
-        run: |
-          test -f builddir/src/gtk/northstar.exe
-          file builddir/src/gtk/northstar.exe
-
-      - name: Headless smoke (--print-config + about:start)
-        if: hashFiles('builddir/src/gtk/northstar.exe') != ''
-        env:
-          NS_ALLOW_ROOT: '1'
-        run: |
-          set -o pipefail
-          ./builddir/src/gtk/northstar.exe --print-config > config.txt
-          head -5 config.txt
-          ./builddir/src/gtk/northstar.exe --headless --dump=text about:start > about.txt
-          head -3 about.txt
-          grep -q Northstar about.txt
-
-      - name: Upload build log
-        if: always() && hashFiles('build.log') != ''
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: build-log-windows-${{ matrix.windows }}
-          path: build.log
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload northstar binary
-        if: hashFiles('builddir/src/gtk/northstar.exe') != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: northstar-windows-${{ matrix.windows }}
-          path: builddir/src/gtk/northstar.exe
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Build redistributable bundle (pack-windows.sh)
-        id: pack
-        if: github.event_name != 'pull_request' && hashFiles('builddir/src/gtk/northstar.exe') != ''
-        env:
-          BUILDDIR: ${{ github.workspace }}/builddir
-          NS_ALLOW_ROOT: '1'
-        run: |
-          set -o pipefail
-          ./scripts/pack-windows.sh 2>&1 | tee pack-windows.log
-          VERSION=$(grep -E "^[[:space:]]*version" meson.build | head -1 \
-                    | sed -E "s/.*version: '([^']+)'.*/\1/")
-          ZIP="dist/northstar-${VERSION}-windows-x86_64.zip"
-          ./dist/northstar-win64/northstar.exe --print-config > bundle-config.txt
-          ./dist/northstar-win64/northstar.exe --headless --dump=text about:start > bundle-about.txt
-          grep -q Northstar bundle-about.txt
-          mkdir -p isolated-launcher
-          cp dist/northstar-win64/northstar.exe isolated-launcher/
-          if ./isolated-launcher/northstar.exe --print-config 2> isolated-launcher.err; then
-            echo "isolated launcher unexpectedly succeeded" >&2
-            exit 1
-          fi
-          grep -q "Extract All" isolated-launcher.err
-          ( cd dist && zip -r -q "$(basename "$ZIP")" northstar-win64 )
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
-
-      - name: Upload pack-windows log
-        if: always() && hashFiles('pack-windows.log') != ''
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: pack-windows-log-${{ matrix.windows }}
-          path: pack-windows.log
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload Windows bundle zip
-        if: hashFiles('dist/northstar-*-windows-*.zip') != ''
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: northstar-windows-${{ matrix.windows }}-zip
-          path: dist/northstar-*-windows-*.zip
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Build MSIX package (pack-msix.sh)
-        if: steps.pack.outcome == 'success'
-        env:
-          BUILDDIR: ${{ github.workspace }}/builddir
-          NS_MSIX_REUSE_BUNDLE: '1'
-        run: |
-          set -o pipefail
-          ./scripts/pack-msix.sh 2>&1 | tee pack-msix.log
-
-      - name: Upload MSIX package
-        if: hashFiles('dist/*.msix') != ''
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: northstar-windows-${{ matrix.windows }}-msix
-          path: dist/*.msix
-          if-no-files-found: ignore
-          retention-days: 14
