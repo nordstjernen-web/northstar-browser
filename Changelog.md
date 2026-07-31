@@ -4,6 +4,43 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* `prefers-color-scheme` reports what the desktop is actually wearing. The
+  answer came from `gtk-application-prefer-dark-theme`, a GTK 3 property a
+  GTK 4 dark theme does not set, so every dark desktop was told "light":
+  a site's dark stylesheet never applied, and the browser's own pages sat
+  white inside a dark window. The scheme is now judged from the luminance
+  of the foreground colour the theme resolves, which holds for any theme
+  rather than the ones that happen to set the old property, and it is
+  re-evaluated when the theme changes under a running window. The internal
+  pages -- start, about, settings, history and the error page -- gain the
+  dark half they never had.
+* An error page appears whenever a navigation has nothing to render. Only
+  https:// failures got one, so a missing `file://` path came back 404 with
+  an empty body and rendered as a blank white page. The page is now built
+  for any scheme that ends in a transport error or a 4xx/5xx with no body
+  of its own, and the classifier no longer blames the network for
+  everything it fails to recognise: an unmatched message falls through to
+  the status code, and a file URL is described as a file rather than as an
+  unreachable server.
+* The status line behaves like one. It held a permanent row beneath the
+  page and read "Done" for the life of every visit; hovering a link wrote
+  the URL there and leaving the link wrote nothing, so the last link the
+  pointer touched stayed on screen indefinitely. It now clears when the
+  pointer leaves a link and when a load finishes, and floats over the
+  bottom-left corner of the page only while it has something to say.
+* The toolbar reports the page zoom. Zooming said "Zoom 121%" for a moment
+  and then left no trace, so a window could sit at any magnification with
+  nothing admitting it -- and the steps were successive tenths, which is
+  where 121% came from. A reading appears beside the address bar while the
+  page is scaled, resets the zoom when clicked, and the steps follow the
+  usual ladder: 90, 100, 110, 125, 150.
+* The bookmark button says whether the page is bookmarked, with a star that
+  fills once it is on the list; the popover's action becomes "Remove this
+  bookmark" rather than silently doing nothing a second time. Escape closes
+  the find bar, which its own tooltip already promised. The title bar no
+  longer reads "Northstar 1.0.6 — Northstar 1.0.6" on a page with no title.
+  The bookmarks popover sizes to its contents instead of reserving 280
+  blank pixels, and the downloads window says when it is empty.
 * Text shaping is cached a word at a time, not a run at a time, and a
   paragraph's items are cached too. The line breaker cuts a run wherever a
   line ends and shapes the piece again, so a paragraph measured
