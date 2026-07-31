@@ -8151,8 +8151,11 @@ layout_flex_row(ns_box *box, double cw,
     const ns_css_value *mnh_box = box->style ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
     const ns_css_value *mxh_box = box->style ? box->style->values[NS_CSS_MAX_HEIGHT] : NULL;
     double explicit_cross = 0;
-    if (hv_box && (hv_box->kind == NS_CSS_V_LENGTH || hv_box->kind == NS_CSS_V_CALC))
+    gboolean definite_cross = FALSE;
+    if (hv_box && (hv_box->kind == NS_CSS_V_LENGTH || hv_box->kind == NS_CSS_V_CALC)) {
         explicit_cross = resolve_used_height(box, hv_box, parent_content_width, 0);
+        definite_cross = explicit_cross > 0;
+    }
     double min_cross = resolve_used_height(box, mnh_box, parent_content_width, -1);
     double max_cross_limit = resolve_used_height(box, mxh_box,
                                                  parent_content_width, -1);
@@ -8183,6 +8186,8 @@ layout_flex_row(ns_box *box, double cw,
         explicit_cross = box->content_height;
     if (explicit_cross <= 0 && box->definite_height > 0)
         explicit_cross = box->definite_height;
+    if (!definite_cross && explicit_cross > 0 && box->definite_height > 0)
+        definite_cross = TRUE;
 
     GPtrArray *items = g_ptr_array_new();
     for (ns_box *c = box->first_child; c; c = c->next_sibling)
@@ -8426,7 +8431,9 @@ layout_flex_row(ns_box *box, double cw,
     gboolean main_reversed = reverse != rtl;
     double cursor_x = main_reversed ? inner_x + cw - leading : inner_x + leading;
     const char *align = keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
-    double cross_size = max_cross > explicit_cross ? max_cross : explicit_cross;
+    double cross_size = definite_cross || max_cross < explicit_cross
+                      ? explicit_cross : max_cross;
+    if (min_cross > cross_size) cross_size = min_cross;
     if (max_cross_limit >= 0 && cross_size > max_cross_limit) {
         cross_size = max_cross_limit;
         if (cross_size < min_cross) cross_size = min_cross;
@@ -8443,7 +8450,7 @@ layout_flex_row(ns_box *box, double cw,
         if (item_h_full - b > cross_below_baseline)
             cross_below_baseline = item_h_full - b;
     }
-    if (cross_baseline + cross_below_baseline > cross_size)
+    if (!definite_cross && cross_baseline + cross_below_baseline > cross_size)
         cross_size = cross_baseline + cross_below_baseline;
 
     for (guint k = 0; k < items->len; k++) {
