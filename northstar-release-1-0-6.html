@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northstar Browser 1.0.6 released!</title>
+<meta name="description" content="Northstar Browser 1.0.6 released - a rebuilt CSS grid, an indexed cascade, faster text layout through ns-pango, Web Audio that actually renders, and relative colour syntax. The GPL-licensed single-window, single-process edition of the Nordstjernen engine, written from scratch in C. No telemetry, no JIT.">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/northstar-browser">
+      <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
+    </a>
+    <div class="brand">
+      <a href="."><img class="logo" src="assets/nordstjernen.svg" alt="*"></a>
+      <span class="title"><a href=".">nordstjernen.org</a></span>
+    </div>
+    <div class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</div>
+  </div>
+
+  <nav class="nav" aria-label="Primary">
+    <a href="index.html#about">About</a>
+    <a href="index.html#news">News</a>
+    <a href="northstar-browser/">Northstar</a>
+    <a href="screenshots.html">Screenshots</a>
+    <a href="https://github.com/nordstjernen-web/northstar-browser">GitHub</a>
+    <input type="checkbox" id="nav-more" class="nav-more-toggle">
+    <label class="nav-more-btn" for="nav-more">More <span aria-hidden="true">&#9662;</span></label>
+    <div class="nav-sec">
+      <a href="index.html#specs">Specifications</a>
+      <a href="download.html">Download</a>
+      <a href="https://github.com/nordstjernen-web/northstar-browser/releases">Releases</a>
+      <a href="https://discord.gg/4W959nW5vF">Discord</a>
+    </div>
+  </nav>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>Northstar Browser 1.0.6 released!</h1>
+        <p>Today, 31 July 2026, we are pleased to announce the release of <b>Northstar 1.0.6</b>. Northstar is the free-software edition of the <a href="index.html">Nordstjernen</a> project: a single-window, single-page, single-process desktop browser built from the same clean-room C engine, licensed under the <b>GNU General Public License, version 3 or later</b>. It runs on Linux, macOS and Windows.</p>
+
+        <p>This release is mostly about running real sites. The layout, CSS and DOM gaps that kept pages like lichess, chess.com, bbc.com and Hacker News from rendering correctly are closed, and the text and cascade paths were rebuilt around caches that make a page load substantially faster.</p>
+
+        <p>Northstar Browser version 1.0.6 is available now! <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.6">Read the full release notes here</a>, or <a href="#download">jump straight to the downloads</a>.</p>
+
+        <p>It ships alongside <a href="release-1-0-22.html">Nordstjernen 1.0.22</a>, the source-available flagship built from the same engine.</p>
+
+        <p>&laquo; <a href="northstar-browser/">About the Northstar Browser</a> &middot; <a href="index.html">Back to nordstjernen.org</a></p>
+
+        <div class="shot">
+          <a href="screenshots/northstar-screenshot.png"><img src="screenshots/northstar-screenshot.png" width="1011" height="758" alt="Northstar 1.0.6's about:start start page — the redrawn open-source-edition splash above a search box"></a>
+          <div class="cap">Northstar 1.0.6&rsquo;s <code>about:start</code> page &mdash; the splash redrawn for the release. <a href="screenshots.html">more screenshots &raquo;</a></div>
+        </div>
+
+        <h2>highlights</h2>
+        <ul class="news">
+          <li><b>Faster text.</b> Text is laid out through <a href="https://github.com/nordstjernen-web/ns-pango">ns-pango</a>, a Pango fork carried as a subproject, which adds the process-wide shaping cache Pango has no place for. Layout time falls 25% on a text-heavy page and 38% on a table-heavy one. Shaping results are unchanged, and verified byte-identical across a corpus covering RTL, bidi, CJK, small-caps and font features.</li>
+          <li><b>An indexed cascade.</b> The CSS cascade indexes <code>:is()</code> and <code>:where()</code> subjects and stops allocating per selector test. On a page built to exercise this the initial cascade falls 52% and the whole headless run 16%; the css and dom test subset gains 826 subtest passes from tests that previously ran out of time.</li>
+          <li><b>Grid, largely rebuilt.</b> Named lines, <code>min-content</code> and <code>max-content</code> tracks, tracks in any length unit, correct intrinsic widths for a grid container, and area-placed items that honour <code>align-items</code>.</li>
+          <li><b>Web Audio actually renders.</b> <code>OfflineAudioContext</code> used to resolve a buffer of zeros; oscillators, gain, compressor, biquad, delay, wave shaping and buffer playback are now implemented in the engine.</li>
+          <li><b>Colour.</b> Relative colour syntax, the <code>color()</code> function across nine colour spaces, and one shared scanner for all six colour functions &mdash; which rejects the malformed forms that used to parse and accepts a colour split across lines.</li>
+        </ul>
+
+        <h2>layout and CSS</h2>
+        <ul class="news">
+          <li>A single flex line is as tall as the container says, rather than growing to the tallest item, and <code>align-items: baseline</code> and <code>align-self: baseline</code> work instead of falling through to <code>flex-start</code>.</li>
+          <li>An <code>inline-block</code>, <code>inline-flex</code> or <code>inline-grid</code> sits on the text baseline by the baseline of its own last line box, as CSS 2.1 requires.</li>
+          <li>Flex and grid items measure intrinsic sizes in the font they will actually be drawn in, so web-font text no longer wraps mid-phrase. An absolutely positioned box with <code>width: auto</code> gets a real shrink-to-fit width, measured by shaping the text rather than guessed at 0.65em per character.</li>
+          <li><code>border-radius: 50%</code> paints a circle. Percentage radii were treated as pixels and <code>calc()</code> radii dropped; elliptical corners now work.</li>
+          <li>CSS tokenization closes an open function at end of input, so setting an unterminated value no longer swallows the rest of an inline style.</li>
+          <li>Table cells default to <code>vertical-align: middle</code>, an image is drawn inside its own borders, padding and margin, and a percentage inside <code>min()</code>, <code>max()</code> and <code>clamp()</code> resolves against the box rather than the viewport.</li>
+          <li>An SVG with a <code>viewBox</code> but no width or height is fitted to the 300&times;150 default object size instead of being rasterised square and stretched.</li>
+          <li>Dynamic <code>:has()</code> selectors update after class, attribute and child-list mutations; the selector-invalidation test subset gains 311 subtests.</li>
+          <li><code>hypot()</code> returns a length, overflowing integer calculations clamp, large numbers no longer serialize in exponent notation, and 3D transforms keep their Z component.</li>
+        </ul>
+
+        <h2>DOM, CSSOM and JavaScript</h2>
+        <ul class="news">
+          <li><code>getComputedStyle</code> resolves every property it enumerates. It listed 218 properties and returned the empty string for 126 of them.</li>
+          <li><code>document.styleSheets</code> includes linked sheets with their <code>href</code> and rules &mdash; one test page went from 13 reachable rules to 1895.</li>
+          <li>The DOM insertion methods run the insertion steps, so a script inserted through <code>append</code>, <code>before</code>, <code>replaceWith</code> and friends executes, and a custom element gets its <code>connectedCallback</code>.</li>
+          <li><code>AbortSignal</code> is a real interface object, so <code>signal instanceof AbortSignal</code> answers instead of throwing; <code>MessagePort</code> gains the same in the window. Event-listener objects follow the Web IDL callback-interface algorithm.</li>
+          <li>Checkbox and radio activation follows HTML's pre-activation and canceled-activation steps; three focused tests move from 52/80 to 80/80. <code>CSSStyleSheet.insertRule()</code> and <code>deleteRule()</code> enforce their arguments, and <code>addRule()</code>/<code>removeRule()</code> work &mdash; that interface test moves from 8/17 to 17/17.</li>
+          <li>Shorthands through the CSSOM &mdash; <code>overflow</code>, <code>gap</code>, <code>grid-area</code> and the four-value shorthands &mdash; no longer silently drop the declaration, computed position values are normalized, and <code>transform-origin</code> and <code>perspective-origin</code> serialize as lengths.</li>
+          <li>A dialog opened from script renders and a modal one is centred; a finished keyframe animation keeps the value <code>animation-fill-mode</code> says it should; a mouse or pointer event carries the window it was dispatched in; and a positioned box answers the pointer in the layer it paints in, so a fixed high-<code>z-index</code> overlay is clickable.</li>
+          <li>Instantiating a module through the WebAssembly JS API runs the start section and nothing else, which is what Emscripten modules expect. Workers get the APIs the polyfills already implement &mdash; thirteen globals differed between a worker and the window &mdash; and share the storage partition of the page that started them, so IndexedDB works there.</li>
+        </ul>
+
+        <h2>networking and performance</h2>
+        <ul class="news">
+          <li>A page on an origin that does not speak QUIC no longer stalls for the whole connect timeout. Requests ask for HTTP/2 and are upgraded to HTTP/3 through the alt-svc cache. Acid3 loads in 2.2 seconds instead of 15.5; <code>NS_FORCE_HTTP3=1</code> still asks for HTTP/3 outright.</li>
+          <li>Text shaping is cached a word at a time rather than a run at a time, and a paragraph's items are cached too. Over a 200&nbsp;KB page, shape-cache misses fall from 5265 to 155, HarfBuzz drops from 28.6% of the process to 1.5%, and layout goes from 159&nbsp;ms to 112&nbsp;ms.</li>
+          <li>Line, word and sentence breaks are cached: the whole headless page load runs 5.75% fewer instructions, the text engine alone 20% fewer. The text caches are sharded sixteen ways, taking four-thread throughput from about 79,000 to about 98,000 layouts/s.</li>
+          <li>An IndexedDB write no longer walks the origin's whole storage directory on every put, and the font metrics behind the <code>ex</code>, <code>ch</code>, <code>cap</code> and <code>ic</code> units are measured once per font rather than once per length.</li>
+        </ul>
+
+        <h2>user interface</h2>
+        <ul class="news">
+          <li><code>prefers-color-scheme</code> reports what the desktop is actually wearing, and the internal pages gain the dark half they never had.</li>
+          <li>An error page appears whenever a navigation has nothing to render, not only for <code>https://</code> failures.</li>
+          <li>The status line clears when the pointer leaves a link and when a load finishes, and floats over the page only while it has something to say.</li>
+          <li>The toolbar reports the page zoom, with steps at 90, 100, 110, 125 and 150. Back and forward are green, reload is blue, and a red stop button appears while a page is loading.</li>
+          <li>The bookmark button shows whether the page is bookmarked, Escape closes the find bar and restores the URL of the page on screen, and the title bar no longer doubles the product name.</li>
+          <li>The toolbar menu covers New Window, Zoom In, Zoom Out, Reset Zoom, Full Screen, History and the two save entries, each naming its shortcut.</li>
+          <li>The title bar is shorter, giving the page the height back; a single-line text field shows as many characters as its box has room for; a <code>#fragment</code> stays anchored while the page finishes loading; a popover menu takes the height its items need; and <code>about:northstar</code> lists the user agent as a request actually resolves it.</li>
+        </ul>
+
+        <h2>documentation and known limitations</h2>
+        <p>A new <a href="https://github.com/nordstjernen-web/northstar-browser/blob/main/docs/compliance.md">docs/compliance.md</a> records where the engine stands against the HTML and CSS specifications, how to reproduce the web-platform-tests scores, and the known structural gaps.</p>
+        <ul class="news">
+          <li>Web Audio renders mono, and <code>AudioParam</code> automation curves are ignored &mdash; a parameter reads as its current value for the whole render.</li>
+          <li>The stop button ends the loading state and marks the frame stale, but does not abort the network request behind it.</li>
+          <li><code>&lt;video&gt;</code> plays MPEG-1 only. There is no MPEG-4 or H.264 decoder, and no Media Source Extensions, so streaming video sites do not play.</li>
+        </ul>
+
+        <h2>about Northstar</h2>
+        <p><b>Free software.</b> Northstar is licensed under the GNU GPL, version 3 or later &mdash; use it, read it, change it, share it.</p>
+        <p><b>One process, one page.</b> All rendering happens in a single compact process &mdash; about 149,000 lines of original C, excluding the vendored WAMR, Wuffs and audio decoders &mdash; prioritizing auditability. On Linux it runs behind a Landlock filesystem sandbox (plus <code>PR_SET_NO_NEW_PRIVS</code>) with a default-deny seccomp syscall filter. No JIT.</p>
+        <p><b>Standards-first.</b> The same engine lineage as Nordstjernen: lexbor v3.0.0 for HTML/CSS, quickjs-ng v0.15.1 for JavaScript, ns-pango for text, WAMR for WebAssembly, Wuffs for image decoding. Modern CSS (flex, grid, transforms, gradients, keyframes), Shadow DOM, custom elements, the Navigation API, service workers and WebExtensions with local persistence. Behaviour is measured against the spec text, section by section.</p>
+        <p><b>What it leaves out.</b> Compared with Nordstjernen: no multi-window browsing, no per-tab renderer processes, no WebGL or WebGPU, no embedded PDF viewer. Audio playback (MP3, MP2, Ogg Opus/Vorbis) is included, and video is MPEG-1 only &mdash; an ISO standard whose patents have expired, so it costs no dependency and no licence, but also not a format the modern web serves.</p>
+        <p>It sends no telemetry and no update pings, and includes no AI-style web APIs.</p>
+        <p>Read the <a href="northstar-browser/">full Northstar documentation</a>, or see the <a href="index.html#specs">comparison of Nordstjernen and Northstar</a> on the home page.</p>
+
+        <a id="news"></a>
+        <h2>news</h2>
+        <p><span class="date">31&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.6</b> released &mdash; a rebuilt grid, an indexed CSS cascade, faster text through ns-pango, Web Audio that renders, and relative colour syntax.
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.6">Release notes &raquo;</a></p>
+
+        <p><span class="date">31&nbsp;JUL&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.22</b> released &mdash; real-site layout fixes, faster text and regular expressions, and a much more capable Android app.
+        <a href="release-1-0-22.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.22">Release notes &raquo;</a></p>
+
+        <p><span class="date">28&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.5</b> released &mdash; in-engine SVG, WebP/APNG, MPEG-1 video playback, and much better HTML, CSS and JavaScript compatibility.
+        <a href="northstar-release-1-0-5.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.5">Release notes &raquo;</a></p>
+
+        <p><span class="date">23&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.4</b> released &mdash; a maintenance release.
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.4">Release notes &raquo;</a></p>
+
+        <p><span class="date">22&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.3</b> released &mdash; Media Queries Level 4, CSSOM used values, and use-after-free fixes.
+        <a href="northstar-release-1-0-3.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.3">Release notes &raquo;</a></p>
+
+        <p><span class="date">18&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.1</b> released &mdash; the first public release of the GPL edition.
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.1">Release notes &raquo;</a></p>
+
+        <a id="download"></a>
+        <h2>download</h2>
+        <p>Latest tagged release: Northstar <b>1.0.6</b> &mdash; released 31 July 2026.
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.6">full release notes &raquo;</a></p>
+
+        <table class="spec dl">
+          <tr>
+            <th>Windows</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.6/northstar-1.0.6-windows-x86_64.zip">northstar-1.0.6-windows-x86_64.zip</a> &mdash; self-contained, 57&nbsp;MB compressed</td>
+          </tr>
+          <tr>
+            <th>Fedora (source RPM)</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.6/northstar-1.0.6-1.fc44.src.rpm">northstar-1.0.6-1.fc44.src.rpm</a></td>
+          </tr>
+          <tr>
+            <th>Source</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/archive/refs/tags/1.0.6.tar.gz">1.0.6.tar.gz</a> &middot;
+                <a href="https://github.com/nordstjernen-web/northstar-browser/archive/refs/tags/1.0.6.zip">1.0.6.zip</a></td>
+          </tr>
+          <tr>
+            <th>All releases</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases">github.com/nordstjernen-web/northstar-browser/releases</a></td>
+          </tr>
+        </table>
+
+        <p>The Windows build needs no installer and no MSYS2 &mdash; extract it anywhere and run
+        <code>northstar.exe</code>. Windows marks anything downloaded from the internet as
+        blocked, so before extracting, right-click the <code>.zip</code>, choose Properties,
+        tick <b>Unblock</b> at the bottom of the General tab and press OK. Doing it on the
+        archive first saves repeating it on <code>northstar.exe</code>, since the mark is
+        copied to every file extracted from a blocked archive.</p>
+
+        <p>On Linux and macOS, build from source with meson &mdash; see the
+        <a href="https://github.com/nordstjernen-web/northstar-browser">README</a> or the
+        <a href="northstar-browser/#build">build instructions</a>.</p>
+
+  </div>
+
+  <div class="footer">
+    <div class="counter"><img src="counter.php" alt="visitor count"></div>
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0-or-later</a> &middot;
+    <a href="https://discord.gg/4W959nW5vF">Discord</a> &middot;
+    <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
+  </div>
+
+</div>
+
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('a').forEach(function (link) {
+    link.addEventListener('mouseenter', function () {
+      window.status = link.getAttribute('href') || '';
+    });
+    link.addEventListener('mouseleave', function () {
+      window.status = 'nordstjernen.org';
+    });
+  });
+  window.status = 'nordstjernen.org';
+});
+</script>
+
+</body>
+</html>
