@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/nordstjernen-web/ns-pango.git
-revision = f5adeef58d18f8f69485c3f00af68011fc04c68c
+revision = 5bc359d9e5edddaafd7f5e287e2b6c83b02b2b81
 depth = 1
 
 [provide]

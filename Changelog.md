@@ -4,6 +4,22 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* Text shaping is cached a word at a time, not a run at a time, and a
+  paragraph's items are cached too. The line breaker cuts a run wherever a
+  line ends and shapes the piece again, so a paragraph measured
+  unconstrained and then laid out at a real width shared no cache entry
+  with itself -- the hit rate sat at half. Words do not move when the width
+  does, which is why Firefox and Chrome both cache text a word at a time,
+  and now so does this. A miss still shapes the whole run in one HarfBuzz
+  call and only then divides the result, so no glyph is shaped in smaller
+  company than before. Over a 200 KB page, shape-cache misses fall from
+  5265 to 155 and stay there at every window width, HarfBuzz drops from
+  28.6% of the process to 1.5%, and the layout phase goes from 159 ms to
+  112 ms. Itemising -- bidi, script, emoji and width runs, and the font
+  lookup behind each character -- is cached on the same principle, keyed on
+  the context's serial so that a web font arriving invalidates it. Nothing
+  moves on screen: five test pages, one of them mixing Latin, Arabic,
+  Hebrew, Devanagari, Thai, CJK and emoji, render byte-identically.
 * An IndexedDB write no longer walks the origin's whole storage directory.
   Every `put` recomputed the origin's quota by opening each `.sqlite` file
   beside the current one, asking it for `page_count` and closing it again --
