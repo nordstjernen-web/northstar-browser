@@ -4,6 +4,31 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* A single-line text field shows as many characters as its box has room
+  for. The visible window came from the `size` attribute alone, so CSS that
+  widened the control -- `flex-grow`, `width: 100%` -- stretched only the
+  painted frame: the start page's search box scrolled its text away after
+  twenty-four characters with room for sixty. A control narrower than its
+  `size` attribute clips inside its border now instead of painting past it.
+* A `#fragment` stays anchored while the page finishes loading. The scroll
+  offset was computed once, from whatever layout existed at navigation
+  time, so images above the target had not been decoded yet and the view
+  landed hundreds of pixels short of the heading it was asked for. The
+  target is re-located whenever layout moves it, until the document goes
+  quiet or the reader scrolls away.
+* A popover menu takes the height its items need. GTK builds a section's
+  separator after the popover has negotiated its size, so the surface came
+  out one separator short and the scrolled window inside it swallowed the
+  difference -- the last item of the context menu was always clipped.
+* The toolbar menu covers what a reader reaches for: New Window, Zoom In,
+  Zoom Out, Reset Zoom, Full Screen, History and the two save entries join
+  it, grouped into window, view, page and tools sections, each naming its
+  keyboard shortcut. Reload, a toolbar button one pixel away, leaves.
+* Escape in the address bar restores the URL of the page on screen. It used
+  to return focus to the page but leave whatever had been typed in the bar,
+  where it named a page the window was not showing. With the page already
+  focused, Escape stops the load. The connection indicator moves inside the
+  entry, where the padlock belongs.
 * Text layout no longer recomputes a paragraph's line, word and sentence
   breaks every time it lays that paragraph out. ns-pango gains a cache of
   what `default_break` -- UAX #14 plus UAX #29 -- produces for a run of
