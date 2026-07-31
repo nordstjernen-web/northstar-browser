@@ -15,7 +15,10 @@ later.
 ![Best viewed in Northstar](docs/best-viewed-in-northstar.gif)
 
 **Web standards:** Behaviour is measured against the specification text,
-section by section, not against another browser.
+section by section, not against another browser. The engine runs
+web-platform-tests through headless mode; see
+[docs/compliance.md](docs/compliance.md) for the current per-area scores
+and the known structural gaps.
 
 **Security:** on Linux the browser runs behind a Landlock filesystem
 sandbox (plus `PR_SET_NO_NEW_PRIVS`), with a default-deny seccomp syscall
@@ -23,9 +26,9 @@ filter in both GUI and headless/tooling modes · no JIT.
 See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 
 **Minimalism:** one window, one page, one process. The engine is a
-compact body of C — about 152,000 lines of original C (excluding
-the vendored WAMR, Wuffs and audio decoders) — small enough for one
-person to read and audit end-to-end.
+compact body of C — about 149,000 lines of original C (excluding the
+vendored WAMR, Wuffs and audio decoders, and the generated image-data
+tables) — small enough for one person to read and audit end-to-end.
 
 ## What this edition is
 
@@ -36,8 +39,7 @@ It deliberately omits tabs, per-tab renderer processes, WebGL, WebGPU,
 an embedded PDF viewer and AI-style web APIs. It does not send telemetry
 or update pings.
 
-Audio still plays in-process (MP3, MP2, Ogg Opus/Vorbis), including audio
-streams assembled through Media Source Extensions. Images decode
+Audio still plays in-process (MP3, MP2, Ogg Opus/Vorbis). Images decode
 in-tree (PNG/APNG, GIF, BMP, JPEG and WebP via Wuffs, AVIF through
 libavif when available, and SVG in the engine).
 
@@ -49,6 +51,11 @@ libavif when available, and SVG in the engine).
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL).
 - **Custom elements** — autonomous and customized built-in elements.
+- **Workers** — dedicated workers with structured-clone messaging,
+  message channels and broadcast channels.
+- **Storage** — IndexedDB over SQLite, `localStorage`/`sessionStorage`
+  and the cache API, each partitioned by origin.
+- **Live connections** — WebSockets and server-sent events.
 - **Navigation API** — `window.navigation` for single-page routing.
 - **Service workers** — origin-scoped registration, persistence and
   controlled-page fetch interception.
@@ -61,8 +68,8 @@ libavif when available, and SVG in the engine).
   is checked against a local SHA-256 blocklist. The check runs entirely
   on-device.
 - **Media** — images (PNG/APNG, GIF, BMP, JPEG, WebP, optional AVIF,
-  SVG); audio (`<audio>`)
-  decodes and plays in the browser process, including audio MSE streams.
+  SVG); audio (`<audio>`) decodes and plays in the browser process,
+  alongside a Web Audio graph.
   `<video>` plays MPEG-1 (`video/mpeg`), decoded in-tree by the same
   pl_mpeg that already handles MP2 audio. MPEG-1 is an ISO standard whose
   patents have expired, so it costs no dependency and no licence; it is
