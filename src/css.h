@@ -590,6 +590,10 @@ typedef struct ns_css_value {
             double rem;
             double lh;
             double rlh;
+            guint8 fn;
+            guint8 n_args;
+            guint8 arg_none;
+            struct { double px, pct; } args[4];
         } calc;
         ns_css_shadow_list shadow;
         ns_css_gradient  gradient;
@@ -608,6 +612,8 @@ const ns_css_value *ns_css_value_layer(const ns_css_value *head, int index);
 int                 ns_css_value_layer_count(const ns_css_value *head);
 
 double   ns_css_length_or(const ns_css_value *v, double fallback);
+gboolean ns_css_calc_is_math_fn(const ns_css_value *v);
+double   ns_css_calc_math_fn_px(const ns_css_value *v, double basis);
 double   ns_css_dimension_px(const ns_css_value *v, double font_size,
                              double basis);
 gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);

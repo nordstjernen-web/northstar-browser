@@ -23,6 +23,8 @@ static double
 length_resolve(const ns_css_value *v, double basis, double fallback)
 {
     if (!v) return fallback;
+    if (ns_css_calc_is_math_fn(v))
+        return ns_css_calc_math_fn_px(v, basis);
     if (v->kind == NS_CSS_V_CALC)
         return v->u.calc.pct / 100.0 * basis + v->u.calc.px;
     if (v->kind != NS_CSS_V_LENGTH) return fallback;
@@ -94,6 +96,9 @@ height_is_percent(const ns_css_value *v)
         return TRUE;
     if (v->kind == NS_CSS_V_CALC && v->u.calc.pct != 0.0)
         return TRUE;
+    if (ns_css_calc_is_math_fn(v))
+        for (int i = 0; i < v->u.calc.n_args; i++)
+            if (v->u.calc.args[i].pct != 0.0) return TRUE;
     return FALSE;
 }
 
@@ -123,6 +128,8 @@ resolve_used_height(const ns_box *box, const ns_css_value *hv,
             vh = containing_block_definite_height(box);
             if (vh < 0) return fallback;
         }
+        if (ns_css_calc_is_math_fn(hv))
+            return ns_css_calc_math_fn_px(hv, vh);
         if (hv->kind == NS_CSS_V_CALC)
             return hv->u.calc.pct / 100.0 * vh + hv->u.calc.px;
         return hv->u.length.v * vh / 100.0;
@@ -176,7 +183,9 @@ containing_block_definite_height(const ns_box *box)
         double base = box_is_doc_root(p) ? ns_css_viewport_h()
                                          : containing_block_definite_height(p);
         if (base < 0) return -1;
-        double ch = h->kind == NS_CSS_V_CALC
+        double ch = ns_css_calc_is_math_fn(h)
+            ? ns_css_calc_math_fn_px(h, base)
+            : h->kind == NS_CSS_V_CALC
             ? h->u.calc.pct / 100.0 * base + h->u.calc.px
             : h->u.length.v * base / 100.0;
         return clamp_height_minmax_px(p->style, ch);
@@ -190,6 +199,8 @@ resolve_height_with_basis(const ns_css_value *hv, double width_basis,
                           double height_basis, double fallback)
 {
     if (!hv) return fallback;
+    if (ns_css_calc_is_math_fn(hv) && height_basis >= 0)
+        return ns_css_calc_math_fn_px(hv, height_basis);
     if (hv->kind == NS_CSS_V_CALC) {
         if (hv->u.calc.pct != 0.0 && height_basis >= 0)
             return hv->u.calc.pct / 100.0 * height_basis + hv->u.calc.px;
