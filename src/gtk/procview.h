@@ -77,6 +77,10 @@ void   ns_proc_view_zoom_reset(NsProcView *view);
 void   ns_proc_view_focus(NsProcView *view);
 void   ns_proc_view_find_open(NsProcView *view);
 
+/* Close the find bar if it is showing. TRUE when it was, so a caller
+   handling Escape knows the key was consumed. */
+gboolean ns_proc_view_find_close(NsProcView *view);
+
 
 G_END_DECLS
 

@@ -107,6 +107,7 @@ typedef struct {
     GtkWidget      *spinner;
     GtkWidget      *status;
     char           *status_base;
+    guint           status_timer;
     GtkWidget      *bookmarks_button;
     char           *home_url;
     ns_bookmarks   *bookmarks;
@@ -133,6 +134,8 @@ procwindow_free(gpointer data)
     ProcWindow *pw = data;
     if (pw->session_timer)
         g_source_remove(pw->session_timer);
+    if (pw->status_timer)
+        g_source_remove(pw->status_timer);
     g_free(pw->session_path);
     g_free(pw->home_url);
     g_free(pw->status_base);
@@ -177,8 +180,11 @@ install_status_css(void)
     gtk_css_provider_load_from_string(
         p,
         ".ns-procstatus {"
-        "  padding: 2px 8px;"
+        "  padding: 2px 10px;"
+        "  border-top-right-radius: 6px;"
+        "  background: @theme_base_color;"
         "  border-top: 1px solid alpha(currentColor, 0.15);"
+        "  border-right: 1px solid alpha(currentColor, 0.15);"
         "  font-size: smaller;"
         "}"
         "headerbar, headerbar > windowhandle {"
@@ -362,8 +368,8 @@ update_chrome(ProcWindow *pw)
     const char *title = ns_proc_view_title(v);
     set_address_text(pw, url);
     const char *brand = ns_brand_versioned();
-    char *wt = g_strdup_printf("%s — %s",
-                               title && *title ? title : brand, brand);
+    char *wt = title && *title ? g_strdup_printf("%s — %s", title, brand)
+                               : g_strdup(brand);
     gtk_window_set_title(GTK_WINDOW(pw->window), wt);
     g_free(wt);
     gtk_widget_set_sensitive(pw->back, ns_proc_view_can_back(v));
@@ -527,24 +533,34 @@ downloads_populate_recent(ProcWindow *pw)
 {
     const char *dir = downloads_dir();
     GDir *gd = g_dir_open(dir, 0, NULL);
-    if (!gd) return;
-    GPtrArray *files = g_ptr_array_new_with_free_func(g_free);
-    const char *nm;
-    while ((nm = g_dir_read_name(gd)) && files->len < 200) {
-        if (nm[0] == '.') continue;
-        g_ptr_array_add(files, g_build_filename(dir, nm, NULL));
+    guint shown = 0;
+    if (gd) {
+        GPtrArray *files = g_ptr_array_new_with_free_func(g_free);
+        const char *nm;
+        while ((nm = g_dir_read_name(gd)) && files->len < 200) {
+            if (nm[0] == '.') continue;
+            g_ptr_array_add(files, g_build_filename(dir, nm, NULL));
+        }
+        g_dir_close(gd);
+        g_ptr_array_sort(files, (GCompareFunc)g_strcmp0);
+        for (guint i = 0; i < files->len && shown < 25; i++) {
+            const char *path = g_ptr_array_index(files, i);
+            if (!g_file_test(path, G_FILE_TEST_IS_REGULAR)) continue;
+            char *base = g_path_get_basename(path);
+            GtkWidget *row = download_row_new(base, TRUE, path, NULL);
+            gtk_list_box_append(GTK_LIST_BOX(pw->downloads_list), row);
+            g_free(base);
+            shown++;
+        }
+        g_ptr_array_free(files, TRUE);
     }
-    g_dir_close(gd);
-    g_ptr_array_sort(files, (GCompareFunc)g_strcmp0);
-    for (guint i = 0; i < files->len && i < 25; i++) {
-        const char *path = g_ptr_array_index(files, i);
-        if (!g_file_test(path, G_FILE_TEST_IS_REGULAR)) continue;
-        char *base = g_path_get_basename(path);
-        GtkWidget *row = download_row_new(base, TRUE, path, NULL);
-        gtk_list_box_append(GTK_LIST_BOX(pw->downloads_list), row);
-        g_free(base);
+    if (shown == 0) {
+        GtkWidget *empty = gtk_label_new(ns_i18n("Nothing downloaded yet"));
+        gtk_widget_add_css_class(empty, "dim-label");
+        gtk_widget_set_margin_top(empty, 24);
+        gtk_widget_set_margin_bottom(empty, 24);
+        gtk_list_box_append(GTK_LIST_BOX(pw->downloads_list), empty);
     }
-    g_ptr_array_free(files, TRUE);
 }
 
 static gboolean
@@ -642,6 +658,41 @@ pw_render_status(ProcWindow *pw)
 {
     const char *base = pw->status_base ? pw->status_base : "";
     gtk_label_set_text(GTK_LABEL(pw->status), base);
+    gtk_widget_set_visible(pw->status, *base != '\0');
+}
+
+static void
+pw_set_status_persistent(ProcWindow *pw, const char *text)
+{
+    if (pw->status_timer) {
+        g_source_remove(pw->status_timer);
+        pw->status_timer = 0;
+    }
+    g_free(pw->status_base);
+    pw->status_base = g_strdup(text ? text : "");
+    pw_render_status(pw);
+}
+
+static gboolean
+pw_status_expire(gpointer data)
+{
+    ProcWindow *pw = data;
+    pw->status_timer = 0;
+    g_clear_pointer(&pw->status_base, g_free);
+    pw_render_status(pw);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+pw_set_status(ProcWindow *pw, const char *text)
+{
+    if (pw->status_timer)
+        g_source_remove(pw->status_timer);
+    g_free(pw->status_base);
+    pw->status_base = g_strdup(text ? text : "");
+    pw_render_status(pw);
+    pw->status_timer = *pw->status_base
+        ? g_timeout_add_seconds(5, pw_status_expire, pw) : 0;
 }
 
 static void
@@ -658,13 +709,10 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         break;
     case NS_PROC_EVT_URL:
         set_address_text(pw, text);
-        g_clear_pointer(&pw->status_base, g_free);
-        pw_render_status(pw);
+        pw_set_status_persistent(pw, NULL);
         break;
     case NS_PROC_EVT_STATUS:
-        g_free(pw->status_base);
-        pw->status_base = g_strdup(text ? text : "");
-        pw_render_status(pw);
+        pw_set_status_persistent(pw, text);
         break;
     case NS_PROC_EVT_HISTORY:
         gtk_widget_set_sensitive(pw->back, ns_proc_view_can_back(v));
@@ -873,6 +921,8 @@ act_focus_page(GSimpleAction *a, GVariant *p, gpointer ud)
         (focus == pw->address || gtk_widget_is_ancestor(focus, pw->address));
     if (editing_address)
         set_address_text(pw, v ? ns_proc_view_url(v) : "");
+    else if (ns_proc_view_find_close(v))
+        return;
     else if (v && ns_proc_view_is_loading(v))
         ns_proc_view_stop(v);
     if (v)
@@ -1595,13 +1645,22 @@ proc_window_new(GtkApplication *app, const char *home_url,
     GtkWidget *page = ns_proc_view_widget(pw->view);
     gtk_widget_set_hexpand(page, TRUE);
     gtk_widget_set_vexpand(page, TRUE);
-    gtk_box_append(GTK_BOX(vbox), page);
 
     pw->status = gtk_label_new("");
-    gtk_widget_set_halign(pw->status, GTK_ALIGN_START);
-    gtk_label_set_ellipsize(GTK_LABEL(pw->status), PANGO_ELLIPSIZE_END);
+    gtk_label_set_ellipsize(GTK_LABEL(pw->status), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_label_set_max_width_chars(GTK_LABEL(pw->status), 90);
     gtk_widget_add_css_class(pw->status, "ns-procstatus");
-    gtk_box_append(GTK_BOX(vbox), pw->status);
+    gtk_widget_set_halign(pw->status, GTK_ALIGN_START);
+    gtk_widget_set_valign(pw->status, GTK_ALIGN_END);
+    gtk_widget_set_can_target(pw->status, FALSE);
+    gtk_widget_set_visible(pw->status, FALSE);
+
+    GtkWidget *page_overlay = gtk_overlay_new();
+    gtk_overlay_set_child(GTK_OVERLAY(page_overlay), page);
+    gtk_overlay_add_overlay(GTK_OVERLAY(page_overlay), pw->status);
+    gtk_widget_set_hexpand(page_overlay, TRUE);
+    gtk_widget_set_vexpand(page_overlay, TRUE);
+    gtk_box_append(GTK_BOX(vbox), page_overlay);
 
     gtk_window_set_child(GTK_WINDOW(pw->window), vbox);
     install_shortcuts(pw);
@@ -1718,7 +1777,7 @@ on_add_bookmark(GtkButton *button, gpointer user_data)
     const char *title = ns_proc_view_title(v);
     if (url && *url && !ns_bookmarks_contains(pw->bookmarks, url)) {
         ns_bookmarks_add(pw->bookmarks, url, title);
-        gtk_label_set_text(GTK_LABEL(pw->status), ns_i18n("Bookmark added"));
+        pw_set_status(pw, ns_i18n("Bookmark added"));
     }
 }
 
@@ -1741,12 +1800,17 @@ build_bookmarks_popover(ProcWindow *pw)
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_size_request(scroll, -1, 280);
+    gtk_scrolled_window_set_propagate_natural_height(
+        GTK_SCROLLED_WINDOW(scroll), TRUE);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll),
+                                               320);
     GtkWidget *list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     guint n = pw->bookmarks ? ns_bookmarks_count(pw->bookmarks) : 0;
     if (n == 0) {
         GtkWidget *empty = gtk_label_new(ns_i18n("No bookmarks yet"));
         gtk_widget_add_css_class(empty, "dim-label");
+        gtk_widget_set_margin_top(empty, 12);
+        gtk_widget_set_margin_bottom(empty, 12);
         gtk_box_append(GTK_BOX(list), empty);
     }
     for (guint i = 0; i < n; i++) {
@@ -1869,9 +1933,8 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
     proc_window_load(pw, recovered_url ? recovered_url
                                       : ctx->url ? ctx->url : "about:start");
     if (recovered_url)
-        gtk_label_set_text(GTK_LABEL(pw->status),
-                           ns_i18n("Recovered the previous session after "
-                                   "an unexpected exit"));
+        pw_set_status(pw, ns_i18n("Recovered the previous session after "
+                                  "an unexpected exit"));
     g_free(recovered_url);
 
     if (pw->session_path)

@@ -1706,7 +1706,7 @@ on_result(gpointer data)
             push_history(v, v->current_url);
         post_emit(v, NS_PROC_EVT_URL, v->current_url);
         post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
-        post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Done"));
+        post_emit(v, NS_PROC_EVT_STATUS, "");
         finish_loading(v);
         request_render(v);
     } else if (res->type == RES_FRAME) {
@@ -1835,8 +1835,10 @@ on_result(gpointer data)
                 navigated = TRUE;
                 ns_proc_view_load(v, res->href);
             }
-        } else if (!v->busy_cursor) {
-            pv_set_named_cursor(area, res->cursor);
+        } else {
+            post_emit(v, NS_PROC_EVT_STATUS, "");
+            if (!v->busy_cursor)
+                pv_set_named_cursor(area, res->cursor);
         }
         if (!navigated && v->link_pending) {
             v->link_pending = FALSE;
@@ -1852,8 +1854,10 @@ on_result(gpointer data)
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
             if (!v->busy_cursor)
                 pv_set_named_cursor(v->area, res->cursor ? res->cursor : "pointer");
-        } else if (!v->busy_cursor) {
-            pv_set_named_cursor(v->area, res->cursor);
+        } else {
+            post_emit(v, NS_PROC_EVT_STATUS, "");
+            if (!v->busy_cursor)
+                pv_set_named_cursor(v->area, res->cursor);
         }
         if (res->ok)
             request_render(v);
@@ -2393,6 +2397,16 @@ on_search_next(GtkWidget *w, gpointer data)
 static void
 on_search_prev(GtkWidget *w, gpointer data)
 { (void)w; request_find(data, 2); }
+
+gboolean
+ns_proc_view_find_close(NsProcView *view)
+{
+    if (!view || !view->search_revealer ||
+        !gtk_revealer_get_reveal_child(GTK_REVEALER(view->search_revealer)))
+        return FALSE;
+    search_close(view);
+    return TRUE;
+}
 
 static void
 on_search_stop(GtkSearchEntry *e, gpointer data)
