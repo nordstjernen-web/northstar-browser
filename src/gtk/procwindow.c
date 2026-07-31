@@ -99,7 +99,6 @@ typedef struct {
     GtkApplication *app;
     GtkWidget      *window;
     NsProcView     *view;
-    GtkWidget      *security_icon;
     GtkWidget      *address;
     GtkWidget      *back;
     GtkWidget      *forward;
@@ -194,10 +193,7 @@ install_status_css(void)
         "  min-height: 26px;"
         "}"
         ".ns-toolbar entry { padding-top: 2px; padding-bottom: 2px; }"
-        ".ns-sec-icon { margin-left: 2px; margin-right: 2px; }"
-        ".ns-sec-secure { color: #2e9e44; }"
-        ".ns-sec-invalid { color: #e01b24; }"
-        ".ns-sec-warn { color: #e5a50a; }");
+        ".ns-address image.left { margin-right: 4px; }");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -306,41 +302,35 @@ set_address_text(ProcWindow *pw, const char *url)
 static void
 update_security_indicator(ProcWindow *pw, NsProcView *v)
 {
-    GtkWidget *icon = pw->security_icon;
-    if (!icon)
+    GtkEntry *entry = GTK_ENTRY(pw->address);
+    if (!entry)
         return;
-    gtk_widget_remove_css_class(icon, "ns-sec-secure");
-    gtk_widget_remove_css_class(icon, "ns-sec-invalid");
-    gtk_widget_remove_css_class(icon, "ns-sec-warn");
 
     const char *url = v ? ns_proc_view_url(v) : NULL;
     int sec = v ? ns_proc_view_security(v) : NS_SEC_NONE;
-    const char *icon_name = NULL, *label = NULL, *css = NULL;
+    const char *icon_name = NULL, *label = NULL;
     switch (sec) {
     case NS_SEC_SECURE:
         icon_name = "security-high-symbolic";
         label = ns_i18n("Secure — the certificate is valid");
-        css = "ns-sec-secure";
         break;
     case NS_SEC_INVALID:
         icon_name = "security-low-symbolic";
         label = ns_i18n("Not secure — the certificate is not trusted");
-        css = "ns-sec-invalid";
         break;
     case NS_SEC_PLAIN:
         icon_name = "channel-insecure-symbolic";
         label = ns_i18n("Not secure — the connection is not encrypted");
-        css = "ns-sec-warn";
         break;
     default:
         break;
     }
     if (!icon_name || !url || !*url) {
-        gtk_widget_set_visible(icon, FALSE);
+        gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY, NULL);
         return;
     }
-    gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name);
-    gtk_widget_add_css_class(icon, css);
+    gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY, icon_name);
+    gtk_entry_set_icon_activatable(entry, GTK_ENTRY_ICON_PRIMARY, FALSE);
 
     GString *tip = g_string_new(label);
     char *host = ns_url_host_from(url);
@@ -349,10 +339,9 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
     const char *ip = ns_proc_view_remote_ip(v);
     if (ip && *ip)
         g_string_append_printf(tip, "\n%s %s", ns_i18n("Server:"), ip);
-    gtk_widget_set_tooltip_text(icon, tip->str);
+    gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_PRIMARY, tip->str);
     g_string_free(tip, TRUE);
     g_free(host);
-    gtk_widget_set_visible(icon, TRUE);
 }
 
 static void
@@ -877,7 +866,15 @@ act_focus_page(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a;
     (void)p;
-    NsProcView *v = current_view(ud);
+    ProcWindow *pw = ud;
+    NsProcView *v = current_view(pw);
+    GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(pw->window));
+    gboolean editing_address = focus && pw->address &&
+        (focus == pw->address || gtk_widget_is_ancestor(focus, pw->address));
+    if (editing_address)
+        set_address_text(pw, v ? ns_proc_view_url(v) : "");
+    else if (v && ns_proc_view_is_loading(v))
+        ns_proc_view_stop(v);
     if (v)
         ns_proc_view_focus(v);
 }
@@ -925,6 +922,16 @@ static void act_about(GSimpleAction *action, GVariant *parameter,
                       gpointer user_data);
 static void act_settings(GSimpleAction *action, GVariant *parameter,
                          gpointer user_data);
+static void act_new_window(GSimpleAction *action, GVariant *parameter,
+                           gpointer user_data);
+static void act_history(GSimpleAction *action, GVariant *parameter,
+                        gpointer user_data);
+static void act_save_pdf(GSimpleAction *action, GVariant *parameter,
+                         gpointer user_data);
+static void act_save_image(GSimpleAction *action, GVariant *parameter,
+                           gpointer user_data);
+static void act_fullscreen(GSimpleAction *action, GVariant *parameter,
+                           gpointer user_data);
 static void on_bookmarks_clicked(GtkButton *button, gpointer user_data);
 
 typedef struct {
@@ -1388,6 +1395,15 @@ install_shortcuts(ProcWindow *pw)
     install_action(pw, "downloads", G_CALLBACK(act_downloads),
                    (const char *[]){ "<Ctrl>j", NULL });
     install_action(pw, "about", G_CALLBACK(act_about), NULL);
+    install_action(pw, "new-window", G_CALLBACK(act_new_window),
+                   (const char *[]){ "<Ctrl>n", NULL });
+    install_action(pw, "history", G_CALLBACK(act_history),
+                   (const char *[]){ "<Ctrl>h", NULL });
+    install_action(pw, "save-pdf", G_CALLBACK(act_save_pdf),
+                   (const char *[]){ "<Ctrl>p", NULL });
+    install_action(pw, "save-image", G_CALLBACK(act_save_image), NULL);
+    install_action(pw, "fullscreen", G_CALLBACK(act_fullscreen),
+                   (const char *[]){ "F11", NULL });
     install_action(pw, "settings", G_CALLBACK(act_settings),
                    (const char *[]){ "<Ctrl>comma", NULL });
     install_action(pw, "quit", G_CALLBACK(act_quit),
@@ -1403,21 +1419,23 @@ on_window_key_pressed(GtkEventControllerKey *controller, guint keyval,
     (void)state;
     ProcWindow *pw = user_data;
     GtkWindow *win = GTK_WINDOW(pw->window);
-    if (keyval == GDK_KEY_F11) {
-        if (gtk_window_is_fullscreen(win)) {
-            gtk_window_unfullscreen(win);
-            gtk_window_maximize(win);
-        } else {
-            gtk_window_fullscreen(win);
-        }
-        return TRUE;
-    }
     if (keyval == GDK_KEY_Escape && gtk_window_is_fullscreen(win)) {
         gtk_window_unfullscreen(win);
         gtk_window_maximize(win);
         return TRUE;
     }
     return FALSE;
+}
+
+static void
+menu_append_accel(GMenu *menu, const char *label, const char *action,
+                  const char *accel)
+{
+    GMenuItem *item = g_menu_item_new(label, action);
+    if (accel)
+        g_menu_item_set_attribute(item, "accel", "s", accel);
+    g_menu_append_item(menu, item);
+    g_object_unref(item);
 }
 
 static ProcWindow *
@@ -1484,16 +1502,11 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_widget_set_valign(pw->spinner, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(pw->spinner, FALSE);
 
-    pw->security_icon = gtk_image_new();
-    gtk_image_set_pixel_size(GTK_IMAGE(pw->security_icon), 12);
-    gtk_widget_set_valign(pw->security_icon, GTK_ALIGN_CENTER);
-    gtk_widget_add_css_class(pw->security_icon, "ns-sec-icon");
-    gtk_widget_set_visible(pw->security_icon, FALSE);
-
     pw->address = gtk_entry_new();
     gtk_widget_set_hexpand(pw->address, TRUE);
+    gtk_widget_add_css_class(pw->address, "ns-address");
     gtk_entry_set_placeholder_text(GTK_ENTRY(pw->address),
-                                   ns_i18n("Enter a URL and press Enter"));
+                                   ns_i18n("Search or enter a URL"));
     set_accessible_label(pw->address, ns_i18n("Address and search bar"));
     g_signal_connect(pw->address, "activate",
                      G_CALLBACK(on_address_activate), pw);
@@ -1509,12 +1522,39 @@ proc_window_new(GtkApplication *app, const char *home_url,
                                           G_CALLBACK(on_bookmarks_clicked), pw);
 
     GMenu *appmenu = g_menu_new();
-    g_menu_append(appmenu, ns_i18n("Reload"), "win.reload");
-    g_menu_append(appmenu, ns_i18n("Find in Page"), "win.find");
-    g_menu_append(appmenu, ns_i18n("JavaScript Console"), "win.console");
-    g_menu_append(appmenu, ns_i18n("Downloads"), "win.downloads");
-    g_menu_append(appmenu, ns_i18n("Task Manager"), "win.task-manager");
-    g_menu_append(appmenu, ns_i18n("Settings"), "win.settings");
+    GMenu *sec_window = g_menu_new();
+    menu_append_accel(sec_window, ns_i18n("New Window"), "win.new-window",
+                      NULL);
+    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_window));
+    g_object_unref(sec_window);
+    GMenu *sec_view = g_menu_new();
+    menu_append_accel(sec_view, ns_i18n("Zoom In"), "win.zoom-in",
+                      "<Ctrl>plus");
+    menu_append_accel(sec_view, ns_i18n("Zoom Out"), "win.zoom-out",
+                      "<Ctrl>minus");
+    menu_append_accel(sec_view, ns_i18n("Reset Zoom"), "win.zoom-reset",
+                      "<Ctrl>0");
+    menu_append_accel(sec_view, ns_i18n("Full Screen"), "win.fullscreen", NULL);
+    menu_append_accel(sec_view, ns_i18n("Find in Page"), "win.find", NULL);
+    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_view));
+    g_object_unref(sec_view);
+    GMenu *sec_page = g_menu_new();
+    menu_append_accel(sec_page, ns_i18n("History"), "win.history", NULL);
+    menu_append_accel(sec_page, ns_i18n("Downloads"), "win.downloads", NULL);
+    menu_append_accel(sec_page, ns_i18n("Save Page as PDF…"), "win.save-pdf",
+                      NULL);
+    menu_append_accel(sec_page, ns_i18n("Save Page as Image…"),
+                      "win.save-image", NULL);
+    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_page));
+    g_object_unref(sec_page);
+    GMenu *sec_tools = g_menu_new();
+    menu_append_accel(sec_tools, ns_i18n("JavaScript Console"), "win.console",
+                      "<Ctrl><Shift>j");
+    menu_append_accel(sec_tools, ns_i18n("Task Manager"), "win.task-manager",
+                      NULL);
+    menu_append_accel(sec_tools, ns_i18n("Settings"), "win.settings", NULL);
+    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_tools));
+    g_object_unref(sec_tools);
     GMenu *appmenu_about = g_menu_new();
     g_menu_append(appmenu_about, ns_i18n("About Northstar"), "win.about");
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(appmenu_about));
@@ -1524,6 +1564,8 @@ proc_window_new(GtkApplication *app, const char *home_url,
                                   "open-menu-symbolic");
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
                                    G_MENU_MODEL(appmenu));
+    ns_popover_menu_fit(GTK_WIDGET(gtk_menu_button_get_popover(
+                            GTK_MENU_BUTTON(menu_button))));
     gtk_widget_set_tooltip_text(menu_button, ns_i18n("Menu"));
     set_accessible_label(menu_button, ns_i18n("Menu"));
     g_object_unref(appmenu);
@@ -1543,7 +1585,6 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_box_append(GTK_BOX(toolbar), pw->stop);
     gtk_box_append(GTK_BOX(toolbar), home);
     gtk_box_append(GTK_BOX(toolbar), pw->spinner);
-    gtk_box_append(GTK_BOX(toolbar), pw->security_icon);
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
@@ -1586,6 +1627,55 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     NsProcView *v = current_view(pw);
     if (v)
         ns_proc_view_load(v, "about:settings");
+}
+
+static void
+act_history(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    ProcWindow *pw = user_data;
+    NsProcView *v = current_view(pw);
+    if (v)
+        ns_proc_view_load(v, "about:history");
+}
+
+static void
+act_new_window(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    ProcWindow *pw = user_data;
+    ProcWindow *nw = proc_window_new(pw->app, pw->home_url,
+                                     ns_proc_view_is_private(pw->view));
+    proc_window_load(nw, nw->home_url);
+    gtk_window_present(GTK_WINDOW(nw->window));
+}
+
+static void
+act_save_pdf(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    ns_proc_view_save_pdf(current_view(user_data));
+}
+
+static void
+act_save_image(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    ns_proc_view_save_image(current_view(user_data));
+}
+
+static void
+act_fullscreen(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    ProcWindow *pw = user_data;
+    GtkWindow *win = GTK_WINDOW(pw->window);
+    if (gtk_window_is_fullscreen(win)) {
+        gtk_window_unfullscreen(win);
+        gtk_window_maximize(win);
+    } else {
+        gtk_window_fullscreen(win);
+    }
 }
 
 static void

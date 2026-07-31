@@ -67,6 +67,10 @@ const char *ns_proc_view_remote_ip(NsProcView *view);
 int         ns_proc_view_renderer_pid(NsProcView *view);
 void        ns_proc_view_end_task(NsProcView *view);
 
+/* Ask the user for a destination and write the current page there. */
+void   ns_proc_view_save_pdf(NsProcView *view);
+void   ns_proc_view_save_image(NsProcView *view);
+
 void   ns_proc_view_zoom_in(NsProcView *view);
 void   ns_proc_view_zoom_out(NsProcView *view);
 void   ns_proc_view_zoom_reset(NsProcView *view);

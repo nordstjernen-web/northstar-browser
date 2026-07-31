@@ -2191,6 +2191,14 @@ on_ctx_select_all(GSimpleAction *a, GVariant *p, gpointer ud)
     start_select(v, 3, 0, 0);
 }
 
+void
+ns_proc_view_save_pdf(NsProcView *view)
+{ if (view) view_save(view, TRUE); }
+
+void
+ns_proc_view_save_image(NsProcView *view)
+{ if (view) view_save(view, FALSE); }
+
 static void
 on_ctx_save_pdf(GSimpleAction *a, GVariant *p, gpointer ud)
 { (void)a; (void)p; view_save(ud, TRUE); }
