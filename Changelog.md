@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* Instantiating a module through the `WebAssembly` JS API runs the module's
+  start section and nothing else. WAMR, built for a standalone runtime, also
+  called `_initialize`, `__wasm_call_ctors` and `__post_instantiate` from
+  inside `wasm_runtime_instantiate` -- but on the web those are ordinary
+  exports the JS glue calls itself, after it has pointed its heap views at
+  the instance's memory. Running them first meant an Emscripten module tore
+  down on its own first WASI call: chess.com's analysis engine died in
+  `environ_sizes_get` before `new WebAssembly.Instance` had returned.
 * A finished keyframe animation keeps the value `animation-fill-mode`
   says it should. The engine sampled the last keyframe correctly, then threw
   the sample away: every getter the painter calls required the animation to
