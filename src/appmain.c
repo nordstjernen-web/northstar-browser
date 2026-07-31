@@ -422,16 +422,22 @@ ns_run_headless(ns_headless_opts *hopts)
         ns_net_perf_snapshot(&fetches, &bytes, &sum_ms, &span_ms);
         ns_engine_layout_perf(&relayouts, &layout_ms);
         guint64 shape_hits = 0, shape_misses = 0, shape_skips = 0, shape_entries = 0;
+        guint64 brk_hits = 0, brk_misses = 0, brk_skips = 0, brk_entries = 0;
         ns_pango_cache_get_stats(&shape_hits, &shape_misses, &shape_skips,
                                  &shape_entries);
+        ns_pango_break_cache_stats(&brk_hits, &brk_misses, &brk_skips,
+                                   &brk_entries);
         g_printerr("[net perf] fetches=%" G_GUINT64_FORMAT " bytes=%"
                    G_GUINT64_FORMAT " net_span=%.1fms net_sum=%.1fms | "
                    "relayouts=%" G_GUINT64_FORMAT " layout=%.1fms | "
                    "shape_cache hits=%" G_GUINT64_FORMAT " misses=%"
                    G_GUINT64_FORMAT " skipped=%" G_GUINT64_FORMAT " entries=%"
-                   G_GUINT64_FORMAT "\n",
+                   G_GUINT64_FORMAT " | break_cache hits=%" G_GUINT64_FORMAT
+                   " misses=%" G_GUINT64_FORMAT " skipped=%" G_GUINT64_FORMAT
+                   " entries=%" G_GUINT64_FORMAT "\n",
                    fetches, bytes, span_ms, sum_ms, relayouts, layout_ms,
-                   shape_hits, shape_misses, shape_skips, shape_entries);
+                   shape_hits, shape_misses, shape_skips, shape_entries,
+                   brk_hits, brk_misses, brk_skips, brk_entries);
     }
     g_free(file_url);
     ns_bytecode_cache_shutdown();
