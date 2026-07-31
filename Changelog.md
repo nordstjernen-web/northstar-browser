@@ -30,6 +30,13 @@ Significant changes in each release:
   path nothing. Northstar's own layout still runs on the main loop thread,
   so this is headroom for parallel layout rather than a speedup today.
   `--debug=net` reports the break cache alongside the shape cache.
+* `document.styleSheets` includes the sheets a page links to, with their
+  `href` and their rules. Only inline `<style>` blocks had a populated
+  `CSSStyleSheet`; a `<link rel=stylesheet>` produced one with a null href
+  and an empty `cssRules`, because the sheet was built from the element's
+  own text content and a link has none. nrk.no went from 13 reachable rules
+  to 1895. The engine keeps a reference to the CSS it already fetched for
+  the cascade, so nothing is downloaded or stored twice.
 * `getComputedStyle(el).cssFloat` reports the used float. The accessor read
   the declaration block directly rather than going through whichever
   `getPropertyValue` the object carries, so on a computed style -- which has
