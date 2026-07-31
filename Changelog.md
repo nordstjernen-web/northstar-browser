@@ -2,6 +2,16 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.7:
+======
+* `--version` prints the version and exits. The flag was never
+  recognised, so it fell through to an ordinary startup: the browser
+  armed the watchdog, opened a window and left the caller with exit 255
+  and no version anywhere. It is now answered before the sandbox, the
+  watchdog and GTK are touched, which is also what lets it work from the
+  Windows bundle -- the launcher there attaches to the parent console for
+  it the way it already did for `--headless` and `--print-config`.
+
 1.0.6:
 ======
 * A grid item placed by area name is aligned to its row. Items placed

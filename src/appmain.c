@@ -47,6 +47,7 @@
 #include "rproc_inproc.h"
 #include "security.h"
 #include "threaddump.h"
+#include "version.h"
 #include "watchdog.h"
 
 static char *g_self_exe;
@@ -224,6 +225,7 @@ ns_win32_args_need_console(int argc, char **argv)
         if (!argv[i]) continue;
         if (g_strcmp0(argv[i], "--headless")     == 0 ||
             g_strcmp0(argv[i], "--print-config") == 0 ||
+            g_strcmp0(argv[i], "--version")      == 0 ||
             g_strcmp0(argv[i], "--wpt")          == 0 ||
             g_str_has_prefix(argv[i], "--dump=") ||
             g_str_has_prefix(argv[i], "--url=")  ||
@@ -491,6 +493,12 @@ main(int argc, char **argv)
     if (ns_win32_args_need_console(argc, argv))
         ns_win32_attach_parent_console();
 #endif
+    for (int i = 1; i < argc; i++) {
+        if (g_strcmp0(argv[i], "--version") == 0) {
+            g_print("Northstar %s\n", NS_VERSION);
+            return 0;
+        }
+    }
     if (!ns_security_refuse_root()) return 77;
     init_self_exe(argc > 0 ? argv[0] : NULL);
     ns_i18n_init(g_self_exe);
