@@ -6635,6 +6635,57 @@ replaced_box_intrinsic_width(const ns_box *box)
 }
 
 static double
+grid_natural_width(ns_box *box, const ns_style *child_style)
+{
+    const ns_css_value *fv = box->style->values[NS_CSS_GRID_AUTO_FLOW];
+    if (fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword &&
+        strstr(fv->u.keyword, "column")) return -1;
+    const ns_css_value *cv = box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
+    if (!cv || cv->kind != NS_CSS_V_TRACKS || cv->u.tracks.n <= 0 ||
+        cv->u.tracks.subgrid ||
+        cv->u.tracks.auto_repeat != NS_CSS_AUTO_REPEAT_NONE) return -1;
+    const ns_css_tracks *tk = &cv->u.tracks;
+    int n = tk->n < NS_CSS_TRACKS_MAX ? tk->n : NS_CSS_TRACKS_MAX;
+    double col[NS_CSS_TRACKS_MAX];
+    for (int i = 0; i < n; i++) col[i] = 0;
+    int slot = 0;
+    for (ns_box *c = box->first_child; c; c = c->next_sibling) {
+        if (style_is_absolute_or_fixed(c->style)) continue;
+        double w = measure_natural_width(c, child_style);
+        if (c->style) {
+            ns_edges m = {0}, pd = {0}, bd = {0};
+            edges_from_style(c->style, 0, &m, &pd, &bd);
+            w += m.left + m.right + pd.left + pd.right + bd.left + bd.right;
+        }
+        int t = slot % n;
+        if (w > col[t]) col[t] = w;
+        slot++;
+    }
+    if (slot == 0) return -1;
+    double sum = 0;
+    for (int i = 0; i < n; i++) {
+        double track = col[i];
+        if (tk->tracks[i].kind == NS_CSS_TRACK_PX)
+            track = tk->tracks[i].v;
+        else if (tk->tracks[i].has_min &&
+                 tk->tracks[i].min_kind == NS_CSS_TRACK_PX &&
+                 tk->tracks[i].min_v > track)
+            track = tk->tracks[i].min_v;
+        sum += track;
+    }
+    if (n > 1) {
+        const ns_css_value *gv = box->style->values[NS_CSS_COLUMN_GAP];
+        if (!gv || (gv->kind != NS_CSS_V_LENGTH && gv->kind != NS_CSS_V_CALC))
+            gv = box->style->values[NS_CSS_GAP];
+        if (gv && (gv->kind == NS_CSS_V_LENGTH || gv->kind == NS_CSS_V_CALC)) {
+            double gap = length_resolve(gv, 0, 0);
+            if (gap > 0) sum += gap * (n - 1);
+        }
+    }
+    return sum;
+}
+
+static double
 measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
     if (!box) return 0;
@@ -6730,6 +6781,10 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
     }
     if (style_contains_inline_size(box->style)) return 0;
     const ns_style *child_style = box->style ? box->style : parent_style;
+    if (box->style && style_is_grid_container(box->style)) {
+        double gw = grid_natural_width(box, child_style);
+        if (gw > 0) return gw;
+    }
     gboolean flex_row = style_is_flex_container(box->style) &&
         !keyword_is(box->style ? box->style->values[NS_CSS_FLEX_DIRECTION] : NULL, "column") &&
         !keyword_is(box->style ? box->style->values[NS_CSS_FLEX_DIRECTION] : NULL, "column-reverse");

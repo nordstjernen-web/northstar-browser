@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* A grid container's max-content width is the sum of its columns, not the
+  width of its widest item. Anything that shrink-wraps a grid -- a float, a
+  table cell, an inline-grid, `width: max-content` -- was sized as if the
+  columns were stacked, so the tracks overflowed the box they were given.
+  bbc.com's "LIVE" flag is a floated two-column grid, and the headline
+  beside it started inside the flag rather than after it.
 * Flex and grid items measure their intrinsic sizes in the font they will
   actually be drawn in. The base size of a flex item and the min-content
   floor of a flex or grid item were measured against the item's own style
