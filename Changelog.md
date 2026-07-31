@@ -4,6 +4,39 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* A grid item placed by area name is aligned to its row. Items placed
+  through `grid-template-areas` went down a layout path that never read
+  `align-items` or `align-self`: each was put at the top of its row at its
+  own height and left there, where the default is to stretch. lichess's
+  lobby is one grid row holding the pool, the game list and the start
+  buttons; the buttons' column stayed 179 pixels tall beside a 600-pixel
+  neighbour and the player counts, pinned to the bottom of that column,
+  came to rest on top of the buttons. A stretched item is now given its
+  row height before it lays out rather than grown afterwards, so what is
+  inside it lands in the right place too.
+* A single flex line is as tall as the container says. A row flex
+  container with a definite height has a line exactly that tall, and an
+  item that stretches gets that height whether its content fits or not.
+  The line was sized to the taller of the container and its content
+  instead, so one over-tall item dragged the whole line past the height
+  the author asked for -- lichess's 59-pixel site header held blocks that
+  grew to 86 and hung out of the bar across the page behind it.
+* A percentage inside `min()`, `max()` and `clamp()` is measured against
+  the box rather than the viewport. These functions were folded to a
+  single pixel value while the stylesheet was being parsed, when the only
+  basis available was the viewport width, so the comparison ran against
+  the wrong number and the answer was frozen before the element it
+  belonged to was known: in a 400-pixel column `min(300px, 50%)` came out
+  300 instead of 200. `width: min(100%, 60rem)` now measures what it says.
+* A dialog opened from script renders, and a modal one is centred.
+  `showModal()` and `show()` set the open attribute without telling the
+  style engine, so the element kept the `display: none` it was matched
+  with at parse time -- it reported open, matched `[open]`, and had no box
+  at all. Only a dialog carrying `open` in the markup ever appeared. The
+  user-agent sheet now also carries the modal rule the HTML specification
+  defines, and an out-of-flow box asking for an intrinsic height is no
+  longer stretched between its top and bottom offsets, so a modal lands in
+  the middle of the viewport the way it does in a browser.
 * A mouse or pointer event carries the window it was dispatched in.
   `UIEvent.view` is that window and every event the engine synthesised
   for a click, a drag or a hover reported null, which is a value no
