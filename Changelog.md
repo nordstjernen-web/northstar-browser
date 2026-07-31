@@ -23,12 +23,13 @@ Significant changes in each release:
   threads is worth doing. Every thread gets its own fontmap, because
   fontconfig's is unlocked, and so its own font objects -- which the cache
   keys on -- so all of them missed, all took the one lock exclusively to
-  insert, and all queued behind each other. Four threads with the cache
-  serving used to run no faster than four threads with it switched off.
-  Four-core throughput now scales 2.78x where it scaled 1.36x. Northstar's
-  own layout still runs on the main loop thread, so this is headroom for
-  parallel layout rather than a speedup today. `--debug=net` reports the
-  break cache alongside the shape cache.
+  insert, and all queued behind each other: on four cores one table was
+  worth 1.9x over no cache on one thread and only 1.2x on four. Sharding
+  takes four-thread throughput a quarter higher, from about 79 000 to about
+  98 000 layouts/s over the fork's corpus, and costs the single-threaded
+  path nothing. Northstar's own layout still runs on the main loop thread,
+  so this is headroom for parallel layout rather than a speedup today.
+  `--debug=net` reports the break cache alongside the shape cache.
 * `getComputedStyle(el).cssFloat` reports the used float. The accessor read
   the declaration block directly rather than going through whichever
   `getPropertyValue` the object carries, so on a computed style -- which has
