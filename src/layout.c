@@ -11768,7 +11768,10 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             }
         }
         if (!stretch_w && !has_explicit_width && abox->kind == NS_BOX_BLOCK) {
-            double fit = estimate_natural_width(abox, avail);
+            double fit = measure_natural_width(abox, cs);
+            if (!(fit > 0)) fit = estimate_natural_width(abox, avail);
+            double floor_w = measure_min_width(abox, cs);
+            if (fit < floor_w) fit = floor_w;
             if (fit >= 0 && fit < avail) layout_w = fit;
         }
         layout_box(abox, layout_w, cs);

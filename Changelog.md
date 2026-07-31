@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* An absolutely positioned box with `width: auto` gets the shrink-to-fit
+  width CSS 2.1 asks for -- its max-content size clamped to the available
+  space and floored at min-content -- measured by shaping the text. It used
+  to be guessed from a character count at 0.65em each, so every tooltip,
+  dropdown, badge and popover came out at a width unrelated to its
+  contents: a seven-character label was sized 81px where the text needs 63.
 * Event-listener objects follow the Web IDL callback-interface algorithm.
   `handleEvent` is looked up for every dispatch, non-callable values and
   throwing getters are reported as uncaught listener exceptions, and generic
