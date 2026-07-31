@@ -100,6 +100,7 @@ typedef struct {
     GtkWidget      *window;
     NsProcView     *view;
     GtkWidget      *address;
+    GtkWidget      *zoom_button;
     GtkWidget      *back;
     GtkWidget      *forward;
     GtkWidget      *reload;
@@ -199,7 +200,8 @@ install_status_css(void)
         "  min-height: 26px;"
         "}"
         ".ns-toolbar entry { padding-top: 2px; padding-bottom: 2px; }"
-        ".ns-address image.left { margin-right: 4px; }");
+        ".ns-address image.left { margin-right: 4px; }"
+        ".ns-zoom { font-size: smaller; padding: 0 6px; min-width: 0; }");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -348,6 +350,31 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
     gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_PRIMARY, tip->str);
     g_string_free(tip, TRUE);
     g_free(host);
+}
+
+static void
+update_zoom_indicator(ProcWindow *pw, NsProcView *v)
+{
+    if (!pw->zoom_button)
+        return;
+    int percent = v ? ns_proc_view_zoom_percent(v) : 100;
+    if (percent == 100) {
+        gtk_widget_set_visible(pw->zoom_button, FALSE);
+        return;
+    }
+    char label[16];
+    g_snprintf(label, sizeof label, "%d%%", percent);
+    gtk_button_set_label(GTK_BUTTON(pw->zoom_button), label);
+    gtk_widget_set_visible(pw->zoom_button, TRUE);
+}
+
+static void
+on_zoom_indicator_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    NsProcView *v = current_view(ud);
+    if (v)
+        ns_proc_view_zoom_reset(v);
 }
 
 static void
@@ -720,6 +747,9 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         break;
     case NS_PROC_EVT_LOADING:
         set_loading_ui(pw, text && *text == '1');
+        break;
+    case NS_PROC_EVT_ZOOM:
+        update_zoom_indicator(pw, v);
         break;
     case NS_PROC_EVT_DOWNLOAD:
         if (text && *text) {
@@ -1565,6 +1595,16 @@ proc_window_new(GtkApplication *app, const char *home_url,
                      G_CALLBACK(on_address_focus_enter), pw);
     gtk_widget_add_controller(pw->address, addr_focus);
 
+    pw->zoom_button = gtk_button_new_with_label("100%");
+    gtk_button_set_has_frame(GTK_BUTTON(pw->zoom_button), FALSE);
+    gtk_widget_add_css_class(pw->zoom_button, "ns-zoom");
+    gtk_widget_set_tooltip_text(pw->zoom_button,
+                                ns_i18n("Reset zoom (Ctrl+0)"));
+    set_accessible_label(pw->zoom_button, ns_i18n("Reset zoom"));
+    gtk_widget_set_visible(pw->zoom_button, FALSE);
+    g_signal_connect(pw->zoom_button, "clicked",
+                     G_CALLBACK(on_zoom_indicator_clicked), pw);
+
     GtkWidget *go = toolbar_button("northstar-go", ns_i18n("Go"),
                                    G_CALLBACK(on_go_clicked), pw);
     pw->bookmarks_button = toolbar_button("user-bookmarks-symbolic",
@@ -1636,6 +1676,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_box_append(GTK_BOX(toolbar), home);
     gtk_box_append(GTK_BOX(toolbar), pw->spinner);
     gtk_box_append(GTK_BOX(toolbar), pw->address);
+    gtk_box_append(GTK_BOX(toolbar), pw->zoom_button);
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(toolbar), menu_button);

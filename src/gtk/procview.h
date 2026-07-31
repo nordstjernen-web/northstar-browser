@@ -25,7 +25,8 @@ typedef enum {
     NS_PROC_EVT_STATUS,
     NS_PROC_EVT_HISTORY,
     NS_PROC_EVT_LOADING,
-    NS_PROC_EVT_DOWNLOAD
+    NS_PROC_EVT_DOWNLOAD,
+    NS_PROC_EVT_ZOOM
 } NsProcEvent;
 
 typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
@@ -74,6 +75,9 @@ void   ns_proc_view_save_image(NsProcView *view);
 void   ns_proc_view_zoom_in(NsProcView *view);
 void   ns_proc_view_zoom_out(NsProcView *view);
 void   ns_proc_view_zoom_reset(NsProcView *view);
+
+/* Current page zoom as a percentage; 100 when the page is unscaled. */
+int    ns_proc_view_zoom_percent(NsProcView *view);
 void   ns_proc_view_focus(NsProcView *view);
 void   ns_proc_view_find_open(NsProcView *view);
 

@@ -1593,19 +1593,51 @@ set_zoom(NsProcView *v, double scale)
     if (clamped == cur_scale(v))
         return;
     v->scale = clamped;
-    char status[32];
-    g_snprintf(status, sizeof status, "%s %d%%", ns_i18n("Zoom"),
-               permille / 10);
-    post_emit(v, NS_PROC_EVT_STATUS, status);
+    char percent[16];
+    g_snprintf(percent, sizeof percent, "%d", permille / 10);
+    post_emit(v, NS_PROC_EVT_ZOOM, percent);
     if (v->opened) {
         configure_adjustments(v);
         request_render(v);
     }
 }
 
-void ns_proc_view_zoom_in(NsProcView *v)  { set_zoom(v, cur_scale(v) * NS_PROC_ZOOM_STEP); }
-void ns_proc_view_zoom_out(NsProcView *v) { set_zoom(v, cur_scale(v) / NS_PROC_ZOOM_STEP); }
+static const int k_zoom_ladder_percent[] = {
+    25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300,
+    400, 500
+};
+
+static void
+zoom_step(NsProcView *v, int direction)
+{
+    int now = (int)(cur_scale(v) * 100.0 + 0.5);
+    gsize n = G_N_ELEMENTS(k_zoom_ladder_percent);
+    if (direction > 0) {
+        for (gsize i = 0; i < n; i++)
+            if (k_zoom_ladder_percent[i] > now) {
+                set_zoom(v, k_zoom_ladder_percent[i] / 100.0);
+                return;
+            }
+        set_zoom(v, k_zoom_ladder_percent[n - 1] / 100.0);
+        return;
+    }
+    for (gsize i = n; i-- > 0; )
+        if (k_zoom_ladder_percent[i] < now) {
+            set_zoom(v, k_zoom_ladder_percent[i] / 100.0);
+            return;
+        }
+    set_zoom(v, k_zoom_ladder_percent[0] / 100.0);
+}
+
+void ns_proc_view_zoom_in(NsProcView *v)  { zoom_step(v, 1); }
+void ns_proc_view_zoom_out(NsProcView *v) { zoom_step(v, -1); }
 void ns_proc_view_zoom_reset(NsProcView *v) { set_zoom(v, 1.0); }
+
+int
+ns_proc_view_zoom_percent(NsProcView *v)
+{
+    return v ? (int)(cur_scale(v) * 100.0 + 0.5) : 100;
+}
 
 static void
 pv_perm_resolve(NsProcView *v, gboolean allow)
