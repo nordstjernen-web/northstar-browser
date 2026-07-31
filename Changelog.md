@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* The font metrics behind the `ex`, `ch`, `cap` and `ic` units are measured
+  once per font rather than once per length. Resolving any of them shaped
+  four probe glyphs through a fresh layout, and a stylesheet asks for the
+  same font once per element its rule matches, so a page that sizes fields
+  in `ch` paid for it on every one of them. The answer depends on nothing
+  but the family, size, weight and slant, so it is kept until the font map
+  changes underneath it -- 1.3% fewer instructions over a page whose
+  elements each carry their own font, and nothing moves: the layout dump
+  and the rendered PNG are byte-identical.
 * A single-line text field shows as many characters as its box has room
   for. The visible window came from the `size` attribute alone, so CSS that
   widened the control -- `flex-grow`, `width: 100%` -- stretched only the

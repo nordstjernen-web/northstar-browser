@@ -1584,11 +1584,47 @@ ns_paint_font_available(const char *family)
     return has;
 }
 
-static void
-ns_paint_font_metrics(const char *family, double size_px, int weight,
-                      gboolean italic, ns_css_font_metrics *out)
+typedef struct {
+    char    *family;
+    double   size_px;
+    int      weight;
+    gboolean italic;
+} ns_font_metrics_key;
+
+static guint
+font_metrics_key_hash(gconstpointer v)
 {
-    if (size_px <= 0) return;
+    const ns_font_metrics_key *k = v;
+    return (k->family ? g_str_hash(k->family) : 0) ^
+           g_double_hash(&k->size_px) ^
+           (guint)(k->weight * 31 + (k->italic ? 1 : 0));
+}
+
+static gboolean
+font_metrics_key_equal(gconstpointer a, gconstpointer b)
+{
+    const ns_font_metrics_key *ka = a, *kb = b;
+    return ka->size_px == kb->size_px && ka->weight == kb->weight &&
+           ka->italic == kb->italic && g_strcmp0(ka->family, kb->family) == 0;
+}
+
+static void
+font_metrics_key_free(gpointer v)
+{
+    ns_font_metrics_key *k = v;
+    g_free(k->family);
+    g_free(k);
+}
+
+/* Resolving one ex, ch, cap or ic shapes four probe glyphs, and a stylesheet
+ * asks for the same font over and over -- once per element the rule matches.
+ * The answer depends on nothing but the four arguments, so it is measured
+ * once per font and kept until the font map changes under it.
+ */
+static void
+font_metrics_measure(const char *family, double size_px, int weight,
+                     gboolean italic, ns_css_font_metrics *out)
+{
     NsPangoLayout *l = paint_create_layout();
     if (!l) return;
     NsPangoFontDescription *fd = ns_pango_font_description_new();
@@ -1623,6 +1659,61 @@ ns_paint_font_metrics(const char *family, double size_px, int weight,
 
     ns_pango_font_description_free(fd);
     g_object_unref(l);
+}
+
+static void
+ns_paint_font_metrics(const char *family, double size_px, int weight,
+                      gboolean italic, ns_css_font_metrics *out)
+{
+    static GHashTable *cache;
+    static guint cached_serial;
+
+    if (size_px <= 0) return;
+
+    NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
+    guint serial = fm ? ns_pango_font_map_get_serial(fm) : 0;
+    if (!cache) {
+        cache = g_hash_table_new_full(font_metrics_key_hash,
+                                      font_metrics_key_equal,
+                                      font_metrics_key_free, g_free);
+        cached_serial = serial;
+    } else if (serial != cached_serial) {
+        g_hash_table_remove_all(cache);
+        cached_serial = serial;
+    }
+
+    ns_font_metrics_key probe = {
+        .family = (char *)family, .size_px = size_px,
+        .weight = weight, .italic = italic,
+    };
+    const ns_css_font_metrics *hit = g_hash_table_lookup(cache, &probe);
+    if (hit) {
+        *out = *hit;
+        return;
+    }
+
+    /* A probe glyph a font does not cover measures zero, and the ratios below
+     * are what CSS Values names as the fallback for exactly that case. Filling
+     * them in here rather than leaving the caller's own defaults standing is
+     * what makes the answer a function of the arguments alone, and so worth
+     * keeping.
+     */
+    ns_css_font_metrics m = {
+        .ex_px  = size_px * 0.5,
+        .ch_px  = size_px * 0.5,
+        .cap_px = size_px * 0.7,
+        .ic_px  = size_px,
+    };
+    font_metrics_measure(family, size_px, weight, italic, &m);
+
+    ns_font_metrics_key *key = g_new(ns_font_metrics_key, 1);
+    key->family = g_strdup(family);
+    key->size_px = size_px;
+    key->weight = weight;
+    key->italic = italic;
+    g_hash_table_insert(cache, key, g_memdup2(&m, sizeof m));
+
+    *out = m;
 }
 
 void
