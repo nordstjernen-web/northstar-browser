@@ -1100,10 +1100,13 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
                                       content_type, &err)
             : ns_engine_fetch_blocking(fetch_url, referrer, &err);
     ns_net_set_navigation_fetch(FALSE, FALSE);
-    if (resp && resp->error && !body &&
-        g_str_has_prefix(fetch_url, "https://") &&
+    if (resp && !body && (resp->error || resp->status >= 400) &&
         (!resp->body || resp->body->len == 0)) {
-        char *html = ns_build_error_page(fetch_url, 0, resp->error);
+        gboolean tls_failure = resp->error &&
+            g_str_has_prefix(fetch_url, "https://");
+        char *html = ns_build_error_page(fetch_url,
+                                         resp->error ? 0 : resp->status,
+                                         resp->error);
         if (html) {
             if (!resp->body)
                 resp->body = g_byte_array_new();
@@ -1116,7 +1119,8 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             resp->content_type = g_strdup("text/html; charset=utf-8");
             g_free(resp->final_url);
             resp->final_url = g_strdup(fetch_url);
-            resp->security = NS_SEC_INVALID;
+            if (tls_failure)
+                resp->security = NS_SEC_INVALID;
         }
     }
     if (!resp || resp->error || !resp->body) {
