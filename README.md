@@ -1,4 +1,4 @@
-# Northstar web browser (GPL edition)
+# Northstar web browser
 
 ![Northstar showing its about:start page](docs/screenshot.png)
 
