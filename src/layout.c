@@ -1499,6 +1499,26 @@ text_input_leading_spaces(const ns_style *s)
     return control_pad_spaces(s, NS_CSS_PADDING_LEFT);
 }
 
+static GHashTable *g_input_columns_for_layout;
+
+static int
+text_input_size_attr(const ns_node *n)
+{
+    const char *size_str = ns_element_get_attr(n, "size");
+    return size_str ? ns_parse_int(size_str, 20, 4, 80) : 20;
+}
+
+static int
+text_input_columns(const ns_node *n)
+{
+    int size = text_input_size_attr(n);
+    if (!g_input_columns_for_layout) return size;
+    gpointer fitted = g_hash_table_lookup(g_input_columns_for_layout, n);
+    if (!fitted) return size;
+    int cols = GPOINTER_TO_INT(fitted);
+    return cols > size ? cols : size;
+}
+
 static gboolean
 text_input_align_rtl(const ns_style *s, const ns_node *n)
 {
@@ -2728,8 +2748,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             if (real_value && anchor_byte > strlen(real_value))
                 anchor_byte = strlen(real_value);
             else if (!real_value) anchor_byte = 0;
-            const char *size_str = ns_element_get_attr(n, "size");
-            int size = size_str ? ns_parse_int(size_str, 20, 4, 80) : 20;
+            int size = text_input_columns(n);
             glong displayed_chars = 0;
             if (v && *v && is_password && !is_placeholder) {
                 glong cps = g_utf8_strlen(v, -1);
@@ -11108,6 +11127,83 @@ ns_layout_frame_viewport(const ns_node *frame, double *w, double *h)
     return TRUE;
 }
 
+static double
+control_char_cell_px(const ns_style *s)
+{
+    NsPangoLayout *layout = make_pango_layout(s);
+    if (!layout) return 0;
+    NsPangoContext *ctx = ns_pango_layout_get_context(layout);
+    const NsPangoFontDescription *fd =
+        ns_pango_layout_get_font_description(layout);
+    if (!fd) fd = ns_pango_context_get_font_description(ctx);
+    NsPangoFontMetrics *fm = fd ? ns_pango_context_get_metrics(ctx, fd, NULL)
+                                : NULL;
+    double cell = 0;
+    if (fm) {
+        cell = (double)ns_pango_font_metrics_get_approximate_char_width(fm) /
+               NS_PANGO_SCALE;
+        ns_pango_font_metrics_unref(fm);
+    }
+    g_object_unref(layout);
+    return cell;
+}
+
+static gboolean
+node_is_windowed_text_input(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    if (strcmp(n->name, "input") != 0) return FALSE;
+    const char *type = ns_element_get_attr(n, "type");
+    return !type || !*type ||
+        g_ascii_strcasecmp(type, "text") == 0 ||
+        g_ascii_strcasecmp(type, "search") == 0 ||
+        g_ascii_strcasecmp(type, "email") == 0 ||
+        g_ascii_strcasecmp(type, "url") == 0 ||
+        g_ascii_strcasecmp(type, "tel") == 0 ||
+        g_ascii_strcasecmp(type, "number") == 0 ||
+        g_ascii_strcasecmp(type, "password") == 0;
+}
+
+static glong
+text_input_display_cps(const ns_node *n)
+{
+    const char *v = ns_input_used_value(n);
+    if (!v || !*v) v = ns_element_get_attr(n, "placeholder");
+    return (v && *v) ? g_utf8_strlen(v, -1) : 0;
+}
+
+static gboolean
+collect_text_input_columns(const ns_box *b, GHashTable *cols)
+{
+    if (!b) return FALSE;
+    gboolean changed = FALSE;
+    if (b->style && b->content_width > 0 &&
+        node_is_windowed_text_input(b->dom)) {
+        int have = text_input_size_attr(b->dom);
+        if (text_input_display_cps(b->dom) > have) {
+            double cell = control_char_cell_px(b->style);
+            if (cell > 0) {
+                int overhead = 2 + text_input_leading_spaces(b->style);
+                int fit = (int)floor(b->content_width / cell) - overhead;
+                if (fit > have) {
+                    g_hash_table_insert(cols, (gpointer)b->dom,
+                                        GINT_TO_POINTER(fit));
+                    changed = TRUE;
+                }
+            }
+        }
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        if (collect_text_input_columns(c, cols)) changed = TRUE;
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++)
+            if (collect_text_input_columns(
+                    g_array_index(b->inline_atomics, ns_inline_atomic, i).box,
+                    cols))
+                changed = TRUE;
+    return changed;
+}
+
 ns_box *
 ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
                 const ns_node *focused_input, gsize focused_caret_byte,
@@ -11130,6 +11226,17 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     ns_image_cache_begin_generation(image_cache);
     g_counters_for_layout = build_counter_snapshots(doc, styles);
     ns_box *root = ns_layout_build_(doc, styles, viewport_width);
+    if (!g_input_columns_for_layout) {
+        GHashTable *cols = g_hash_table_new(g_direct_hash, g_direct_equal);
+        if (collect_text_input_columns(root, cols)) {
+            g_input_columns_for_layout = cols;
+            ns_box_free(root);
+            ns_image_cache_begin_generation(image_cache);
+            root = ns_layout_build_(doc, styles, viewport_width);
+            g_input_columns_for_layout = NULL;
+        }
+        g_hash_table_destroy(cols);
+    }
     ns_image_cache_collect(image_cache);
     g_focused_input_for_layout = NULL;
     g_focused_is_contenteditable_for_layout = FALSE;
