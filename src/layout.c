@@ -7873,14 +7873,15 @@ estimate_natural_width(const ns_box *b, double cap)
 }
 
 static double
-flex_content_basis_from_natural(ns_box *b)
+flex_content_basis_from_natural(ns_box *b, const ns_style *inherited)
 {
-    double w = measure_natural_width(b, b->style);
+    double w = measure_natural_width(b, inherited ? inherited : b->style);
     return w > 0 ? w : 0;
 }
 
 static double
-flex_item_min_main(ns_box *c, double cw, double basis)
+flex_item_min_main(ns_box *c, double cw, double basis,
+                   const ns_style *inherited)
 {
     const ns_css_value *mnw = c->style ? c->style->values[NS_CSS_MIN_WIDTH] : NULL;
     if (mnw && (mnw->kind == NS_CSS_V_LENGTH || mnw->kind == NS_CSS_V_CALC)) {
@@ -7890,7 +7891,7 @@ flex_item_min_main(ns_box *c, double cw, double basis)
     if (mnw && mnw->kind == NS_CSS_V_KEYWORD && !keyword_is(mnw, "auto"))
         return 0;
     if (box_clips_children(c)) return 0;
-    double mn = measure_min_width(c, c->style);
+    double mn = measure_min_width(c, inherited ? inherited : c->style);
     if (mn < 0) mn = 0;
     return mn > basis ? basis : mn;
 }
@@ -8098,8 +8099,8 @@ layout_flex_row(ns_box *box, double cw,
         total_grow   += flex_grow_of(c);
         double b = 0;
         gboolean exp_flag = flex_main_basis_explicit(c, cw, &b);
-        if (!exp_flag) b = flex_content_basis_from_natural(c);
-        double mn = flex_item_min_main(c, cw, b);
+        if (!exp_flag) b = flex_content_basis_from_natural(c, child_inherited);
+        double mn = flex_item_min_main(c, cw, b, child_inherited);
         g_array_append_val(basis, b);
         g_array_append_val(mins, mn);
         g_array_append_val(explicit_flags, exp_flag);
@@ -8446,7 +8447,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             c->border.left + c->border.right;
         double b = 0;
         gboolean exp = flex_main_basis_explicit(c, cw, &b);
-        if (!exp) b = flex_content_basis_from_natural(c);
+        if (!exp) b = flex_content_basis_from_natural(c, child_inherited);
         const ns_css_value *mxw = c->style
             ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
         if (mxw && (mxw->kind == NS_CSS_V_LENGTH ||
@@ -8455,7 +8456,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
                 c, length_resolve(mxw, cw, -1));
             if (mx >= 0 && b > mx) b = mx;
         }
-        double mn = flex_item_min_main(c, cw, b);
+        double mn = flex_item_min_main(c, cw, b, child_inherited);
         if (b < mn) b = mn;
         g_array_index(basis_arr, double, n) = b;
     }
@@ -9638,7 +9639,7 @@ layout_grid_areas(ns_box *box, double cw,
             double nw = fixed_w
                       ? length_resolve(wv, avail, 0)
                       : measure_natural_width(c, child_inherited);
-            double mw = fixed_w ? nw : measure_min_width(c, c->style);
+            double mw = fixed_w ? nw : measure_min_width(c, child_inherited);
             if (c->style) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
                 edges_from_style(c->style, nw, &m, &pd, &bd);
@@ -10022,7 +10023,7 @@ layout_grid(ns_box *box, double cw,
                 g_array_index(col_spans, int, k) != 1) continue;
             ns_box *c = items->pdata[k];
             double nw = estimate_natural_width(c, avail);
-            double mw = measure_min_width(c, c->style);
+            double mw = measure_min_width(c, child_inherited);
             if (c->style) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
                 edges_from_style(c->style, mw, &m, &pd, &bd);

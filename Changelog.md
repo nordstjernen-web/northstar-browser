@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* Flex and grid items measure their intrinsic sizes in the font they will
+  actually be drawn in. The base size of a flex item and the min-content
+  floor of a flex or grid item were measured against the item's own style
+  rather than the style its text inherits, so text in a web font was sized
+  by the fallback face. An item then got a base size a pixel or two under
+  what the real font needs and wrapped mid-phrase however much room the
+  container had -- dn.no's nav pills broke "DN Helg" and "DN i VM" across
+  two lines inside a box wide enough for either.
 * An absolutely positioned box with `width: auto` gets the shrink-to-fit
   width CSS 2.1 asks for -- its max-content size clamped to the available
   space and floored at min-content -- measured by shaping the text. It used
