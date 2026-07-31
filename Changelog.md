@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* An IndexedDB write no longer walks the origin's whole storage directory.
+  Every `put` recomputed the origin's quota by opening each `.sqlite` file
+  beside the current one, asking it for `page_count` and closing it again --
+  a directory scan and a fresh SQLite connection per record written, inside
+  the write transaction. A page that stores a burst of records stalled the
+  browser in the filesystem for as long as the burst lasted: starting a game
+  on chess.com left the main thread inside `CreateFile` and it never came
+  back. Cache the siblings' total for five seconds; the current database is
+  still measured live, so the limit is enforced as before.
 * The font metrics behind the `ex`, `ch`, `cap` and `ic` units are measured
   once per font rather than once per length. Resolving any of them shaped
   four probe glyphs through a fresh layout, and a stylesheet asks for the
