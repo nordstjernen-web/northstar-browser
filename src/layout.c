@@ -12410,10 +12410,81 @@ ns_box_hit_scrollbar(ns_box *root, double x, double y, double *lx, double *ly)
     return NULL;
 }
 
-const ns_box *
-ns_box_hit_test(const ns_box *root, double x, double y)
+typedef struct {
+    const ns_box *box;
+    double x, y;
+    guint order;
+    int   z;
+} hit_deferred;
+
+static __thread GArray       *g_hit_deferred;
+static __thread int           g_hit_defer_depth;
+static __thread const ns_box *g_hit_flush_box;
+
+static gboolean
+box_defers_hit_layer(const ns_box *b, int *out_z)
+{
+    if (!b || !b->style) return FALSE;
+    const ns_css_value *p = b->style->values[NS_CSS_POSITION];
+    if (!p || p->kind != NS_CSS_V_KEYWORD || !p->u.keyword) return FALSE;
+    const char *kw = p->u.keyword;
+    if (strcmp(kw, "relative") && strcmp(kw, "absolute") &&
+        strcmp(kw, "fixed") && strcmp(kw, "sticky")) return FALSE;
+    const ns_css_value *v = b->style->values[NS_CSS_Z_INDEX];
+    int z = (v && v->kind == NS_CSS_V_LENGTH) ? (int)v->u.length.v : 0;
+    if (z < 0) return FALSE;
+    if (out_z) *out_z = z;
+    return TRUE;
+}
+
+static gboolean
+box_has_hit_transform(const ns_box *b)
+{
+    const ns_style *s = b ? b->style : NULL;
+    return s && (s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
+                 s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]);
+}
+
+static int
+hit_deferred_cmp(const void *a, const void *b)
+{
+    const hit_deferred *pa = a, *pb = b;
+    if (pa->z != pb->z) return pa->z < pb->z ? -1 : 1;
+    return pa->order < pb->order ? -1 : pa->order > pb->order ? 1 : 0;
+}
+
+static const ns_box *box_hit_test_tree(const ns_box *root, double x, double y);
+
+static const ns_box *
+hit_flush_deferred(GArray *list)
+{
+    if (!list || list->len == 0) return NULL;
+    g_array_sort(list, hit_deferred_cmp);
+    const ns_box *best = NULL;
+    const ns_box *saved_flush = g_hit_flush_box;
+    for (guint i = 0; i < list->len; i++) {
+        const hit_deferred *d = &g_array_index(list, hit_deferred, i);
+        g_hit_flush_box = d->box;
+        const ns_box *m = box_hit_test_tree(d->box, d->x, d->y);
+        if (m) best = m;
+    }
+    g_hit_flush_box = saved_flush;
+    return best;
+}
+
+static const ns_box *
+box_hit_test_tree(const ns_box *root, double x, double y)
 {
     if (!root) return NULL;
+    int defer_z = 0;
+    if (g_hit_defer_depth > 0 && root != g_hit_flush_box &&
+        box_defers_hit_layer(root, &defer_z)) {
+        if (!g_hit_deferred)
+            g_hit_deferred = g_array_new(FALSE, FALSE, sizeof(hit_deferred));
+        hit_deferred d = { root, x, y, g_hit_deferred->len, defer_z };
+        g_array_append_val(g_hit_deferred, d);
+        return NULL;
+    }
     if (!box_hit_untransform_point(root, &x, &y)) return NULL;
     if (root->paint_bottom > root->paint_top &&
         (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
@@ -12429,17 +12500,25 @@ ns_box_hit_test(const ns_box *root, double x, double y)
     const ns_box *best = NULL;
     double cx = x + root->scroll_x;
     double cy = y + root->scroll_y;
+    gboolean own_scope = root->parent == NULL || root == g_hit_flush_box ||
+                         clipped || box_has_hit_transform(root);
+    GArray *saved_deferred = NULL;
+    if (own_scope) {
+        saved_deferred = g_hit_deferred;
+        g_hit_deferred = NULL;
+        g_hit_defer_depth++;
+    }
     guint sn = 0;
     const ns_box **stacked = hit_children_stacked(root, &sn);
     if (stacked) {
         for (guint i = 0; i < sn; i++) {
-            const ns_box *m = ns_box_hit_test(stacked[i], cx, cy);
+            const ns_box *m = box_hit_test_tree(stacked[i], cx, cy);
             if (m) best = m;
         }
         g_free(stacked);
     } else {
         for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
-            const ns_box *m = ns_box_hit_test(c, cx, cy);
+            const ns_box *m = box_hit_test_tree(c, cx, cy);
             if (m) best = m;
         }
     }
@@ -12451,9 +12530,17 @@ ns_box_hit_test(const ns_box *root, double x, double y)
             if (!ab) continue;
             double ax, ay;
             inline_atomic_hit_point(root, atomic, cx, cy, &ax, &ay);
-            const ns_box *m = ns_box_hit_test(ab, ax, ay);
+            const ns_box *m = box_hit_test_tree(ab, ax, ay);
             if (m) best = m;
         }
+    if (own_scope) {
+        GArray *mine = g_hit_deferred;
+        g_hit_deferred = saved_deferred;
+        g_hit_defer_depth--;
+        const ns_box *m = hit_flush_deferred(mine);
+        if (m) best = m;
+        if (mine) g_array_free(mine, TRUE);
+    }
     if (best) return best;
 self_test: ;
     gboolean block_edges = box_hit_uses_border_bounds(root);
@@ -12473,6 +12560,34 @@ self_test: ;
         inside_x && inside_y && root->dom)
         return root;
     return NULL;
+}
+
+static const ns_box *
+box_for_dom_node(const ns_box *root, const ns_node *node)
+{
+    if (!root) return NULL;
+    if (root->dom == node) return root;
+    for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
+        const ns_box *m = box_for_dom_node(c, node);
+        if (m) return m;
+    }
+    return NULL;
+}
+
+static const ns_box *
+hit_root_for_point(const ns_box *root, double x, double y)
+{
+    const ns_node *modal = ns_dom_active_modal();
+    if (!modal) return root;
+    const ns_box *top = box_for_dom_node(root, modal);
+    if (!top || top == root) return root;
+    return box_hit_test_tree(top, x, y) ? top : root;
+}
+
+const ns_box *
+ns_box_hit_test(const ns_box *root, double x, double y)
+{
+    return box_hit_test_tree(hit_root_for_point(root, x, y), x, y);
 }
 
 typedef struct {
@@ -12560,19 +12675,27 @@ box_hit_stack_walk(const ns_box *root, double x, double y, GArray *hits)
         }
 }
 
-GPtrArray *
-ns_box_hit_dom_stack(const ns_box *root, double x, double y)
+static void
+box_hit_stack_collect(const ns_box *root, double x, double y, GPtrArray *hits)
 {
     GArray *entries = g_array_new(FALSE, FALSE, sizeof(dom_hit_entry));
     box_hit_stack_walk(root, x, y, entries);
     g_array_sort(entries, dom_hit_entry_cmp);
-    GPtrArray *hits = g_ptr_array_sized_new(entries->len);
     for (guint i = entries->len; i > 0; i--) {
         const dom_hit_entry *entry =
             &g_array_index(entries, dom_hit_entry, i - 1);
         g_ptr_array_add(hits, (gpointer)entry->dom);
     }
     g_array_free(entries, TRUE);
+}
+
+GPtrArray *
+ns_box_hit_dom_stack(const ns_box *root, double x, double y)
+{
+    GPtrArray *hits = g_ptr_array_new();
+    const ns_box *top = hit_root_for_point(root, x, y);
+    if (top != root) box_hit_stack_collect(top, x, y, hits);
+    box_hit_stack_collect(root, x, y, hits);
     return hits;
 }
 
@@ -12760,12 +12883,13 @@ hit_node_refines(const ns_node *candidate, const ns_node *current)
 const ns_node *
 ns_box_hit_dom(const ns_box *root, double x, double y)
 {
-    const ns_box *hit = ns_box_hit_test(root, x, y);
+    const ns_box *from = hit_root_for_point(root, x, y);
+    const ns_box *hit = box_hit_test_tree(from, x, y);
     const ns_node *target = hit ? hit->dom : NULL;
-    const ns_node *inline_target = ns_box_hit_inline_dom(root, x, y);
+    const ns_node *inline_target = ns_box_hit_inline_dom(from, x, y);
     if (inline_target && (!target || hit_node_refines(inline_target, target)))
         target = inline_target;
-    const ns_node *form_target = ns_box_hit_form_dom(root, x, y);
+    const ns_node *form_target = ns_box_hit_form_dom(from, x, y);
     if (form_target && (!target || hit_node_refines(form_target, target)))
         target = form_target;
     return target;
