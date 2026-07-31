@@ -360,6 +360,29 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
     g_free(host);
 }
 
+static gboolean
+current_page_bookmarked(ProcWindow *pw)
+{
+    NsProcView *v = current_view(pw);
+    const char *url = v ? ns_proc_view_url(v) : NULL;
+    return url && *url && pw->bookmarks &&
+           ns_bookmarks_contains(pw->bookmarks, url);
+}
+
+static void
+update_bookmark_indicator(ProcWindow *pw)
+{
+    if (!pw->bookmarks_button)
+        return;
+    gboolean saved = current_page_bookmarked(pw);
+    gtk_button_set_icon_name(GTK_BUTTON(pw->bookmarks_button),
+                             saved ? "starred-symbolic"
+                                   : "non-starred-symbolic");
+    gtk_widget_set_tooltip_text(pw->bookmarks_button,
+                                saved ? ns_i18n("Bookmarked — open bookmarks")
+                                      : ns_i18n("Bookmarks"));
+}
+
 static void
 apply_color_scheme(ProcWindow *pw)
 {
@@ -430,6 +453,8 @@ update_chrome(ProcWindow *pw)
     gtk_widget_set_sensitive(pw->back, ns_proc_view_can_back(v));
     gtk_widget_set_sensitive(pw->forward, ns_proc_view_can_forward(v));
     update_security_indicator(pw, v);
+    update_zoom_indicator(pw, v);
+    update_bookmark_indicator(pw);
 }
 
 static void proc_window_load(ProcWindow *pw, const char *url);
@@ -1639,7 +1664,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
 
     GtkWidget *go = toolbar_button("northstar-go", ns_i18n("Go"),
                                    G_CALLBACK(on_go_clicked), pw);
-    pw->bookmarks_button = toolbar_button("user-bookmarks-symbolic",
+    pw->bookmarks_button = toolbar_button("non-starred-symbolic",
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
 
@@ -1845,23 +1870,32 @@ on_bookmark_remove(GtkButton *button, gpointer user_data)
         GtkWidget *list = row ? gtk_widget_get_parent(row) : NULL;
         if (list && row)
             gtk_box_remove(GTK_BOX(list), row);
+        update_bookmark_indicator(pw);
     }
 }
 
 static void
 on_add_bookmark(GtkButton *button, gpointer user_data)
 {
-    (void)button;
     ProcWindow *pw = user_data;
     NsProcView *v = current_view(pw);
     if (!v || !pw->bookmarks)
         return;
     const char *url = ns_proc_view_url(v);
-    const char *title = ns_proc_view_title(v);
-    if (url && *url && !ns_bookmarks_contains(pw->bookmarks, url)) {
-        ns_bookmarks_add(pw->bookmarks, url, title);
+    if (!url || !*url)
+        return;
+    if (ns_bookmarks_contains(pw->bookmarks, url)) {
+        ns_bookmarks_remove(pw->bookmarks, url);
+        pw_set_status(pw, ns_i18n("Bookmark removed"));
+    } else {
+        ns_bookmarks_add(pw->bookmarks, url, ns_proc_view_title(v));
         pw_set_status(pw, ns_i18n("Bookmark added"));
     }
+    update_bookmark_indicator(pw);
+    GtkWidget *pop = gtk_widget_get_ancestor(GTK_WIDGET(button),
+                                             GTK_TYPE_POPOVER);
+    if (pop)
+        gtk_popover_popdown(GTK_POPOVER(pop));
 }
 
 static GtkWidget *
@@ -1874,7 +1908,9 @@ build_bookmarks_popover(ProcWindow *pw)
     gtk_widget_set_margin_end(box, 6);
     gtk_widget_set_size_request(box, 320, -1);
 
-    GtkWidget *add = gtk_button_new_with_label(ns_i18n("Bookmark this page"));
+    GtkWidget *add = gtk_button_new_with_label(
+        current_page_bookmarked(pw) ? ns_i18n("Remove this bookmark")
+                                    : ns_i18n("Bookmark this page"));
     g_signal_connect(add, "clicked", G_CALLBACK(on_add_bookmark), pw);
     gtk_box_append(GTK_BOX(box), add);
     gtk_box_append(GTK_BOX(box),
