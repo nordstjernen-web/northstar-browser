@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* A finished keyframe animation keeps the value `animation-fill-mode`
+  says it should. The engine sampled the last keyframe correctly, then threw
+  the sample away: every getter the painter calls required the animation to
+  still be running, so at the moment it ended the box snapped back to its
+  specified value. The common `opacity: 0` plus a `fade ... forwards`
+  animation therefore faded in and vanished again within one frame, and the
+  content stayed invisible for the life of the page -- chess.com's bot
+  gallery, which is exactly that pattern, was a set of empty boxes.
 * `AbortSignal` is an interface object, not a bare namespace. It was a plain
   object carrying `abort()`, `timeout()` and `any()`, and the signals an
   `AbortController` hands out did not inherit from it, so `signal instanceof
