@@ -12058,8 +12058,14 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             (atv->kind == NS_CSS_V_LENGTH || atv->kind == NS_CSS_V_CALC);
         gboolean b_set = abv && !length_is_auto(abv) &&
             (abv->kind == NS_CSS_V_LENGTH || abv->kind == NS_CSS_V_CALC);
+        gboolean intrinsic_height = ahv && ahv->kind == NS_CSS_V_KEYWORD &&
+            ahv->u.keyword &&
+            (strcmp(ahv->u.keyword, "fit-content") == 0 ||
+             strcmp(ahv->u.keyword, "min-content") == 0 ||
+             strcmp(ahv->u.keyword, "max-content") == 0);
         double stretched_h = -1;
-        if (!has_explicit_height && t_set && b_set && cb_h > 0) {
+        if (!has_explicit_height && !intrinsic_height &&
+            t_set && b_set && cb_h > 0) {
             double t = length_resolve(atv, cb_h, 0);
             double bb = length_resolve(abv, cb_h, 0);
             double h = cb_h - t - bb
