@@ -3089,11 +3089,25 @@ ns_style_getPropertyPriority(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_style_call_own(JSContext *ctx, JSValueConst this_val, const char *method,
+                  int argc, JSValueConst *argv)
+{
+    JSValue fn = JS_GetPropertyStr(ctx, this_val, method);
+    if (!JS_IsFunction(ctx, fn)) {
+        JS_FreeValue(ctx, fn);
+        return JS_UNDEFINED;
+    }
+    JSValue r = JS_Call(ctx, fn, this_val, argc, argv);
+    JS_FreeValue(ctx, fn);
+    return r;
+}
+
+static JSValue
 ns_style_get_cssFloat(JSContext *ctx, JSValueConst this_val)
 {
     JSValue name = JS_NewString(ctx, "float");
     JSValueConst args[1] = { name };
-    JSValue r = ns_style_getPropertyValue(ctx, this_val, 1, args);
+    JSValue r = ns_style_call_own(ctx, this_val, "getPropertyValue", 1, args);
     JS_FreeValue(ctx, name);
     return r;
 }
@@ -3103,7 +3117,7 @@ ns_style_set_cssFloat(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     JSValue name = JS_NewString(ctx, "float");
     JSValueConst args[2] = { name, val };
-    JSValue r = ns_style_setProperty(ctx, this_val, 2, args);
+    JSValue r = ns_style_call_own(ctx, this_val, "setProperty", 2, args);
     JS_FreeValue(ctx, name);
     JS_FreeValue(ctx, r);
     return JS_UNDEFINED;

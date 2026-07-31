@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* `getComputedStyle(el).cssFloat` reports the used float. The accessor read
+  the declaration block directly rather than going through whichever
+  `getPropertyValue` the object carries, so on a computed style -- which has
+  its own -- it always came back as the empty string, while the equivalent
+  `getPropertyValue('float')` answered correctly.
 * An inline-block, inline-flex or inline-grid sits on the text baseline by
   the baseline of its own last line box, the way CSS 2.1 asks, instead of
   resting its bottom margin edge there and then being placed at the top of
