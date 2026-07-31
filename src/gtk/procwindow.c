@@ -74,18 +74,21 @@ configure_media_inputs(void)
 
     GtkSettings *settings = gtk_settings_get_default();
     if (settings) {
-        gboolean dark = FALSE;
         gboolean animations = TRUE;
-        g_object_get(settings,
-                     "gtk-application-prefer-dark-theme", &dark,
-                     "gtk-enable-animations", &animations,
-                     NULL);
-        ns_css_set_color_scheme(dark ? NS_CSS_COLOR_SCHEME_DARK
-                                     : NS_CSS_COLOR_SCHEME_LIGHT);
+        g_object_get(settings, "gtk-enable-animations", &animations, NULL);
         ns_css_set_reduced_motion(animations
             ? NS_CSS_REDUCED_MOTION_NO_PREFERENCE
             : NS_CSS_REDUCED_MOTION_REDUCE);
     }
+}
+
+static ns_css_color_scheme
+desktop_color_scheme(GtkWidget *styled)
+{
+    GdkRGBA fg;
+    gtk_widget_get_color(styled, &fg);
+    double luma = 0.2126 * fg.red + 0.7152 * fg.green + 0.0722 * fg.blue;
+    return luma > 0.5 ? NS_CSS_COLOR_SCHEME_DARK : NS_CSS_COLOR_SCHEME_LIGHT;
 }
 
 void
@@ -109,6 +112,7 @@ typedef struct {
     GtkWidget      *status;
     char           *status_base;
     guint           status_timer;
+    gulong          theme_watch[2];
     GtkWidget      *bookmarks_button;
     char           *home_url;
     ns_bookmarks   *bookmarks;
@@ -137,6 +141,10 @@ procwindow_free(gpointer data)
         g_source_remove(pw->session_timer);
     if (pw->status_timer)
         g_source_remove(pw->status_timer);
+    GtkSettings *settings = gtk_settings_get_default();
+    for (int i = 0; settings && i < 2; i++)
+        if (pw->theme_watch[i])
+            g_signal_handler_disconnect(settings, pw->theme_watch[i]);
     g_free(pw->session_path);
     g_free(pw->home_url);
     g_free(pw->status_base);
@@ -350,6 +358,26 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
     gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_PRIMARY, tip->str);
     g_string_free(tip, TRUE);
     g_free(host);
+}
+
+static void
+apply_color_scheme(ProcWindow *pw)
+{
+    ns_css_color_scheme want = desktop_color_scheme(pw->window);
+    if (want == ns_css_get_color_scheme())
+        return;
+    ns_css_set_color_scheme(want);
+    NsProcView *v = current_view(pw);
+    const char *url = v ? ns_proc_view_url(v) : NULL;
+    if (url && *url)
+        ns_proc_view_reload(v);
+}
+
+static void
+on_theme_changed(GObject *settings, GParamSpec *pspec, gpointer ud)
+{
+    (void)settings; (void)pspec;
+    apply_color_scheme(ud);
 }
 
 static void
@@ -715,6 +743,10 @@ pw_set_status(ProcWindow *pw, const char *text)
 {
     if (pw->status_timer)
         g_source_remove(pw->status_timer);
+    GtkSettings *settings = gtk_settings_get_default();
+    for (int i = 0; settings && i < 2; i++)
+        if (pw->theme_watch[i])
+            g_signal_handler_disconnect(settings, pw->theme_watch[i]);
     g_free(pw->status_base);
     pw->status_base = g_strdup(text ? text : "");
     pw_render_status(pw);
@@ -1706,6 +1738,16 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_window_set_child(GTK_WINDOW(pw->window), vbox);
     install_shortcuts(pw);
 
+    GtkSettings *settings = gtk_settings_get_default();
+    if (settings) {
+        pw->theme_watch[0] = g_signal_connect(
+            settings, "notify::gtk-theme-name",
+            G_CALLBACK(on_theme_changed), pw);
+        pw->theme_watch[1] = g_signal_connect(
+            settings, "notify::gtk-application-prefer-dark-theme",
+            G_CALLBACK(on_theme_changed), pw);
+    }
+
     return pw;
 }
 
@@ -1746,8 +1788,8 @@ act_new_window(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     ProcWindow *pw = user_data;
     ProcWindow *nw = proc_window_new(pw->app, pw->home_url,
                                      ns_proc_view_is_private(pw->view));
-    proc_window_load(nw, nw->home_url);
     gtk_window_present(GTK_WINDOW(nw->window));
+    proc_window_load(nw, nw->home_url);
 }
 
 static void
@@ -1971,6 +2013,8 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
         }
         g_free(contents);
     }
+    gtk_window_present(GTK_WINDOW(pw->window));
+    apply_color_scheme(pw);
     proc_window_load(pw, recovered_url ? recovered_url
                                       : ctx->url ? ctx->url : "about:start");
     if (recovered_url)
@@ -1980,8 +2024,6 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
 
     if (pw->session_path)
         pw->session_timer = g_timeout_add_seconds(4, write_session_cb, pw);
-
-    gtk_window_present(GTK_WINDOW(pw->window));
 }
 
 static void
