@@ -625,6 +625,7 @@ ns_box_free(ns_box *box)
 }
 
 static gboolean box_clips_children(const ns_box *b);
+static gboolean box_first_baseline(const ns_box *b, double *out);
 
 static gboolean
 box_clips_for_page_height(const ns_box *b)
@@ -5080,6 +5081,9 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
             const char *va = ab->style
                 ? ns_style_keyword(ab->style, NS_CSS_VERTICAL_ALIGN) : NULL;
             double a_asc = h;
+            double ab_baseline;
+            if (!box_clips_children(ab) && box_first_baseline(ab, &ab_baseline))
+                a_asc = ab->margin.top + ab_baseline;
             if (va) {
                 if (strcmp(va, "middle") == 0)      a_asc = h / 2 + xh / 2;
                 else if (strcmp(va, "super") == 0)  a_asc = h + fs * 0.3;
@@ -5109,6 +5113,9 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
                                             : NULL, 16);
             double asc = fs * 0.8, desc = fs * 0.2, xh = fs * 0.5;
             double top = -h;
+            double ab_baseline;
+            if (!box_clips_children(ab) && box_first_baseline(ab, &ab_baseline))
+                top = -(ab->margin.top + ab_baseline);
             if (ab->kind == NS_BOX_MATH) {
                 double mw = 0, ma = 0, md = 0;
                 ns_math_measure(ab->dom, fs, &mw, &ma, &md);
@@ -5123,8 +5130,8 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
                 else if (strcmp(va, "top") == 0)         top = -line_asc;
                 else if (strcmp(va, "text-bottom") == 0) top = desc - h;
                 else if (strcmp(va, "bottom") == 0)      top = desc - h;
-                else if (strcmp(va, "super") == 0)       top = -h - fs * 0.3;
-                else if (strcmp(va, "sub") == 0)         top = -h + fs * 0.2;
+                else if (strcmp(va, "super") == 0)       top -= fs * 0.3;
+                else if (strcmp(va, "sub") == 0)         top += fs * 0.2;
             }
             NsPangoRectangle r = { 0, (int)(top * NS_PANGO_SCALE),
                                  (int)(w * NS_PANGO_SCALE), (int)(h * NS_PANGO_SCALE) };
@@ -5312,6 +5319,15 @@ inline_box_measure_cacheable(const ns_box *box)
 }
 
 static double measure_natural_width(ns_box *box, const ns_style *parent_style);
+
+static double
+inline_atomic_outer_height(const ns_box *b)
+{
+    if (!b) return 0;
+    return b->content_height + b->padding.top + b->padding.bottom +
+           b->border.top + b->border.bottom + b->margin.top + b->margin.bottom;
+}
+
 
 static gboolean
 inline_box_has_measure_attrs(const ns_box *box)
@@ -5633,6 +5649,17 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 
     if (box->inline_atomics && box->inline_atomics->len > 0) {
         ns_pango_layout_set_text(layout, box->text, -1);
+        double *line_tops = g_new0(double, line_count);
+        double *line_pango_h = g_new0(double, line_count);
+        NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+        for (int j = 0; j < line_count; j++) {
+            NsPangoRectangle logical;
+            ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
+            line_tops[j] = (double)logical.y / NS_PANGO_SCALE;
+            line_pango_h[j] = (double)logical.height / NS_PANGO_SCALE;
+            if (!ns_pango_layout_iter_next_line(iter)) break;
+        }
+        ns_pango_layout_iter_free(iter);
         double text_x0 = box->x;
         double ti = ns_text_indent_px(parent_style, content_width);
         if (ti < 0) text_x0 += ti;
@@ -5648,10 +5675,21 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             double line_y = 0;
             for (int j = 0; j < line && j < line_count; j++)
                 line_y += line_heights[j];
+            double within = 0;
+            if (line >= 0 && line < line_count)
+                within = (double)pos.y / NS_PANGO_SCALE - line_tops[line]
+                       + (line_heights[line] - line_pango_h[line]) / 2.0;
+            double slack = (line >= 0 && line < line_count)
+                ? line_heights[line] - inline_atomic_outer_height(a->box) : 0;
+            if (slack < 0) slack = 0;
+            if (within < 0) within = 0;
+            if (within > slack) within = slack;
             double nx = text_x0 + (double)pos.x / NS_PANGO_SCALE + a->box->margin.left;
-            double ny = box->y + line_y + a->box->margin.top;
+            double ny = box->y + line_y + within + a->box->margin.top;
             shift_box_tree(a->box, nx - a->box->x, ny - a->box->y);
         }
+        g_free(line_tops);
+        g_free(line_pango_h);
     }
 
     g_free(line_heights);

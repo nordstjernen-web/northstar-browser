@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* An inline-block, inline-flex or inline-grid sits on the text baseline by
+  the baseline of its own last line box, the way CSS 2.1 asks, instead of
+  resting its bottom margin edge there and then being placed at the top of
+  the line regardless. A badge or button written inline with a sentence was
+  drawn several pixels high, its own text floating above the words on either
+  side, and the line box was made taller than it needed to be to cover the
+  overshoot -- duck.ai's "Alle chatter er private" was the visible case.
 * Instantiating a module through the `WebAssembly` JS API runs the module's
   start section and nothing else. WAMR, built for a standalone runtime, also
   called `_initialize`, `__wasm_call_ctors` and `__post_instantiate` from
