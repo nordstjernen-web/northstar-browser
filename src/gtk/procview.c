@@ -2230,6 +2230,30 @@ ctx_install_actions(NsProcView *v)
                                    G_ACTION_GROUP(v->ctx_actions));
 }
 
+static gboolean
+popover_present_idle(gpointer data)
+{
+    GtkWidget *pop = data;
+    if (gtk_widget_get_mapped(pop))
+        gtk_popover_present(GTK_POPOVER(pop));
+    g_object_unref(pop);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_popover_menu_mapped(GtkWidget *pop, gpointer user_data)
+{
+    (void)user_data;
+    g_idle_add(popover_present_idle, g_object_ref(pop));
+}
+
+void
+ns_popover_menu_fit(GtkWidget *popover)
+{
+    if (!GTK_IS_POPOVER(popover)) return;
+    g_signal_connect(popover, "map", G_CALLBACK(on_popover_menu_mapped), NULL);
+}
+
 static void
 show_context_menu(NsProcView *v, const char *href)
 {
@@ -2275,6 +2299,7 @@ show_context_menu(NsProcView *v, const char *href)
     v->ctx_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
     g_object_unref(menu);
     gtk_widget_set_parent(v->ctx_popover, v->area);
+    ns_popover_menu_fit(v->ctx_popover);
     gtk_popover_set_has_arrow(GTK_POPOVER(v->ctx_popover), FALSE);
     gtk_popover_set_pointing_to(GTK_POPOVER(v->ctx_popover),
         &(GdkRectangle){ (int)v->ctx_x, (int)v->ctx_y, 1, 1 });

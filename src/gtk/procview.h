@@ -14,6 +14,11 @@ typedef struct NsProcView NsProcView;
 
 const char *ns_app_self_exe(void);
 
+/* Re-present a popover menu once its sections have been built, so it takes
+   the height its items need instead of scrolling the last one. Call once,
+   at construction. */
+void ns_popover_menu_fit(GtkWidget *popover);
+
 typedef enum {
     NS_PROC_EVT_TITLE,
     NS_PROC_EVT_URL,
