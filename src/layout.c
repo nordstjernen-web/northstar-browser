@@ -1514,9 +1514,7 @@ text_input_columns(const ns_node *n)
     int size = text_input_size_attr(n);
     if (!g_input_columns_for_layout) return size;
     gpointer fitted = g_hash_table_lookup(g_input_columns_for_layout, n);
-    if (!fitted) return size;
-    int cols = GPOINTER_TO_INT(fitted);
-    return cols > size ? cols : size;
+    return fitted ? GPOINTER_TO_INT(fitted) : size;
 }
 
 static gboolean
@@ -11173,6 +11171,14 @@ text_input_display_cps(const ns_node *n)
 }
 
 static gboolean
+control_width_is_definite(const ns_style *s)
+{
+    double fs = length_or(s->values[NS_CSS_FONT_SIZE], 16);
+    return ns_css_clamped_dimension_px(s, NS_CSS_WIDTH, NS_CSS_MIN_WIDTH,
+                                       NS_CSS_MAX_WIDTH, fs, 0) > 0;
+}
+
+static gboolean
 collect_text_input_columns(const ns_box *b, GHashTable *cols)
 {
     if (!b) return FALSE;
@@ -11180,16 +11186,19 @@ collect_text_input_columns(const ns_box *b, GHashTable *cols)
     if (b->style && b->content_width > 0 &&
         node_is_windowed_text_input(b->dom)) {
         int have = text_input_size_attr(b->dom);
-        if (text_input_display_cps(b->dom) > have) {
-            double cell = control_char_cell_px(b->style);
-            if (cell > 0) {
-                int overhead = 2 + text_input_leading_spaces(b->style);
-                int fit = (int)floor(b->content_width / cell) - overhead;
-                if (fit > have) {
-                    g_hash_table_insert(cols, (gpointer)b->dom,
-                                        GINT_TO_POINTER(fit));
-                    changed = TRUE;
-                }
+        glong shown = text_input_display_cps(b->dom);
+        double cell = shown > 0 ? control_char_cell_px(b->style) : 0;
+        if (cell > 0) {
+            int overhead = 2 + text_input_leading_spaces(b->style);
+            int fit = (int)floor(b->content_width / cell) - overhead;
+            if (fit < 1) fit = 1;
+            gboolean grow = fit > have && shown > have;
+            gboolean shrink = fit < have && shown > fit &&
+                              control_width_is_definite(b->style);
+            if (grow || shrink) {
+                g_hash_table_insert(cols, (gpointer)b->dom,
+                                    GINT_TO_POINTER(fit));
+                changed = TRUE;
             }
         }
     }
