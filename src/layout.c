@@ -12445,6 +12445,25 @@ box_has_hit_transform(const ns_box *b)
                  s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]);
 }
 
+static gboolean
+box_svg_yields_hit(const ns_box *b)
+{
+    if (!b || b->kind != NS_BOX_SVG) return FALSE;
+    const ns_style *s = b->style;
+    if (!s) return TRUE;
+    const ns_css_value *pe = s->values[NS_CSS_POINTER_EVENTS];
+    if (pe && pe->kind == NS_CSS_V_KEYWORD && pe->u.keyword &&
+        strcmp(pe->u.keyword, "all") == 0)
+        return FALSE;
+    const ns_css_value *bg = s->values[NS_CSS_BACKGROUND_COLOR];
+    if (bg && bg->kind == NS_CSS_V_COLOR && bg->u.color.a > 0) return FALSE;
+    const ns_css_value *bi = s->values[NS_CSS_BACKGROUND_IMAGE];
+    if (bi && (bi->kind == NS_CSS_V_URL || bi->kind == NS_CSS_V_GRADIENT))
+        return FALSE;
+    return b->border.top <= 0 && b->border.right <= 0 &&
+           b->border.bottom <= 0 && b->border.left <= 0;
+}
+
 static int
 hit_deferred_cmp(const void *a, const void *b)
 {
@@ -12508,18 +12527,21 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         g_hit_deferred = NULL;
         g_hit_defer_depth++;
     }
+    const ns_box *yielding = NULL;
     guint sn = 0;
     const ns_box **stacked = hit_children_stacked(root, &sn);
     if (stacked) {
         for (guint i = 0; i < sn; i++) {
             const ns_box *m = box_hit_test_tree(stacked[i], cx, cy);
-            if (m) best = m;
+            if (!m) continue;
+            if (box_svg_yields_hit(m)) yielding = m; else best = m;
         }
         g_free(stacked);
     } else {
         for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
             const ns_box *m = box_hit_test_tree(c, cx, cy);
-            if (m) best = m;
+            if (!m) continue;
+            if (box_svg_yields_hit(m)) yielding = m; else best = m;
         }
     }
     if (root->inline_atomics)
@@ -12531,16 +12553,18 @@ box_hit_test_tree(const ns_box *root, double x, double y)
             double ax, ay;
             inline_atomic_hit_point(root, atomic, cx, cy, &ax, &ay);
             const ns_box *m = box_hit_test_tree(ab, ax, ay);
-            if (m) best = m;
+            if (!m) continue;
+            if (box_svg_yields_hit(m)) yielding = m; else best = m;
         }
     if (own_scope) {
         GArray *mine = g_hit_deferred;
         g_hit_deferred = saved_deferred;
         g_hit_defer_depth--;
         const ns_box *m = hit_flush_deferred(mine);
-        if (m) best = m;
+        if (m) { if (box_svg_yields_hit(m)) yielding = m; else best = m; }
         if (mine) g_array_free(mine, TRUE);
     }
+    if (!best) best = yielding;
     if (best) return best;
 self_test: ;
     gboolean block_edges = box_hit_uses_border_bounds(root);
