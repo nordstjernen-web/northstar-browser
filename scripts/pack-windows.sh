@@ -10,6 +10,10 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUILDDIR=${BUILDDIR:-$ROOT/builddir-release}
 OUT=${OUT:-$ROOT/dist/northstar-win64}
+VERSION=${VERSION:-$(awk -F"'" \
+    '/^[[:space:]]*version[[:space:]]*:/ { print $2; exit }' "$ROOT/meson.build")}
+SLUG="northstar-${VERSION}-windows-x86_64"
+ZIP="$ROOT/dist/${SLUG}.zip"
 APP=$OUT/app
 BIN_SRC=$BUILDDIR/src/gtk/northstar.exe
 LAUNCHER_SRC=$BUILDDIR/src/northstar-launcher.exe
@@ -207,3 +211,25 @@ done
 bundled=$(find "$APP" -maxdepth 1 -name '*.dll' | wc -l)
 size=$(du -sh "$OUT" | awk '{print $1}')
 printf 'pack-windows: bundled %s DLLs, total size %s, output: %s\n' "$bundled" "$size" "$OUT"
+
+if [ -n "${NS_SKIP_ZIP:-}" ]; then
+    exit 0
+fi
+
+STAGE=$ROOT/dist/$SLUG
+rm -rf "$STAGE" "$ZIP"
+cp -r "$OUT" "$STAGE"
+if command -v zip >/dev/null 2>&1; then
+    ( cd "$ROOT/dist" && zip -qr "${SLUG}.zip" "$SLUG" )
+else
+    powershell.exe -NoProfile -NonInteractive -Command \
+        "Add-Type -AssemblyName System.IO.Compression.FileSystem; \
+         [System.IO.Compression.ZipFile]::CreateFromDirectory( \
+             '$(cygpath -w "$STAGE")', '$(cygpath -w "$ZIP")', \
+             [System.IO.Compression.CompressionLevel]::Optimal, \$true)" >/dev/null
+fi
+rm -rf "$STAGE"
+
+[ -s "$ZIP" ] || { echo "pack-windows: $ZIP missing or empty" >&2; exit 1; }
+zip_size=$(du -h "$ZIP" | awk '{print $1}')
+printf 'pack-windows: zip -> %s (%s)\n' "$ZIP" "$zip_size"
