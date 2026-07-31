@@ -12527,21 +12527,18 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         g_hit_deferred = NULL;
         g_hit_defer_depth++;
     }
-    const ns_box *yielding = NULL;
     guint sn = 0;
     const ns_box **stacked = hit_children_stacked(root, &sn);
     if (stacked) {
         for (guint i = 0; i < sn; i++) {
             const ns_box *m = box_hit_test_tree(stacked[i], cx, cy);
-            if (!m) continue;
-            if (box_svg_yields_hit(m)) yielding = m; else best = m;
+            if (m) best = m;
         }
         g_free(stacked);
     } else {
         for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
             const ns_box *m = box_hit_test_tree(c, cx, cy);
-            if (!m) continue;
-            if (box_svg_yields_hit(m)) yielding = m; else best = m;
+            if (m) best = m;
         }
     }
     if (root->inline_atomics)
@@ -12553,18 +12550,16 @@ box_hit_test_tree(const ns_box *root, double x, double y)
             double ax, ay;
             inline_atomic_hit_point(root, atomic, cx, cy, &ax, &ay);
             const ns_box *m = box_hit_test_tree(ab, ax, ay);
-            if (!m) continue;
-            if (box_svg_yields_hit(m)) yielding = m; else best = m;
+            if (m) best = m;
         }
     if (own_scope) {
         GArray *mine = g_hit_deferred;
         g_hit_deferred = saved_deferred;
         g_hit_defer_depth--;
         const ns_box *m = hit_flush_deferred(mine);
-        if (m) { if (box_svg_yields_hit(m)) yielding = m; else best = m; }
+        if (m) best = m;
         if (mine) g_array_free(mine, TRUE);
     }
-    if (!best) best = yielding;
     if (best) return best;
 self_test: ;
     gboolean block_edges = box_hit_uses_border_bounds(root);
@@ -12581,9 +12576,25 @@ self_test: ;
     gboolean inside_y = y >= y0 &&
         (root->kind == NS_BOX_TABLE_CELL ? y < y1 : y <= y1);
     if (!box_blocks_hit_testing(root) && !box_is_table_hit_internal(root) &&
-        inside_x && inside_y && root->dom)
+        !box_svg_yields_hit(root) && inside_x && inside_y && root->dom)
         return root;
     return NULL;
+}
+
+static const ns_box *
+box_hit_test_root(const ns_box *root, double x, double y)
+{
+    GArray *saved_list = g_hit_deferred;
+    int saved_depth = g_hit_defer_depth;
+    const ns_box *saved_flush = g_hit_flush_box;
+    g_hit_deferred = NULL;
+    g_hit_defer_depth = 0;
+    g_hit_flush_box = root;
+    const ns_box *m = box_hit_test_tree(root, x, y);
+    g_hit_deferred = saved_list;
+    g_hit_defer_depth = saved_depth;
+    g_hit_flush_box = saved_flush;
+    return m;
 }
 
 static const ns_box *
@@ -12605,13 +12616,13 @@ hit_root_for_point(const ns_box *root, double x, double y)
     if (!modal) return root;
     const ns_box *top = box_for_dom_node(root, modal);
     if (!top || top == root) return root;
-    return box_hit_test_tree(top, x, y) ? top : root;
+    return box_hit_test_root(top, x, y) ? top : root;
 }
 
 const ns_box *
 ns_box_hit_test(const ns_box *root, double x, double y)
 {
-    return box_hit_test_tree(hit_root_for_point(root, x, y), x, y);
+    return box_hit_test_root(hit_root_for_point(root, x, y), x, y);
 }
 
 typedef struct {
@@ -12908,7 +12919,7 @@ const ns_node *
 ns_box_hit_dom(const ns_box *root, double x, double y)
 {
     const ns_box *from = hit_root_for_point(root, x, y);
-    const ns_box *hit = box_hit_test_tree(from, x, y);
+    const ns_box *hit = box_hit_test_root(from, x, y);
     const ns_node *target = hit ? hit->dom : NULL;
     const ns_node *inline_target = ns_box_hit_inline_dom(from, x, y);
     if (inline_target && (!target || hit_node_refines(inline_target, target)))
