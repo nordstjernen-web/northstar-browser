@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.6:
 ======
+* `AbortSignal` is an interface object, not a bare namespace. It was a plain
+  object carrying `abort()`, `timeout()` and `any()`, and the signals an
+  `AbortController` hands out did not inherit from it, so `signal instanceof
+  AbortSignal` -- the guard every fetch wrapper writes -- threw "invalid
+  'instanceof' right operand" instead of answering. chess.com's RPC client
+  turned that TypeError into a 500 and never issued its first request.
+  `MessagePort` gains the same treatment in the window: it existed only in
+  workers, so ports came back with no prototype at all.
 * A grid container's max-content width is the sum of its columns, not the
   width of its widest item. Anything that shrink-wraps a grid -- a float, a
   table cell, an inline-grid, `width: max-content` -- was sized as if the

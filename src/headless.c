@@ -835,6 +835,11 @@ headless_submit_form_from(headless_flush_ctx *fc, headless_nav_capture *nav,
     headless_js_form_submit(form, trigger, nav);
 }
 
+static gboolean
+headless_emit_pointer_and_mouse(headless_flush_ctx *fc, const ns_node *target,
+                                const char *ptr_type, const char *mouse_type,
+                                double x, double y, int button, int buttons);
+
 static void
 headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
                double x, double y)
@@ -884,7 +889,13 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
         if (ns_node_is_editable(cur)) { editable = cur; break; }
     gboolean prevented = FALSE;
     if (fc->js) {
-        ns_js_dispatch_event(fc->js, dom, "click", &prevented);
+        headless_emit_pointer_and_mouse(fc, dom, "pointerdown", "mousedown",
+                                        x, y, 0, 1);
+        headless_emit_pointer_and_mouse(fc, dom, "pointerup", "mouseup",
+                                        x, y, 0, 0);
+        ns_js_dispatch_mouse_event(fc->js, dom, "click", x, y, x, y, 0, 0,
+                                   FALSE, FALSE, FALSE, FALSE, NULL,
+                                   &prevented);
         ns_js_consume_mutated(fc->js);
     }
     if (editable) {
