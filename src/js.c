@@ -11809,10 +11809,11 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         }
         ns_js_budget_pop(js, &bg);
     } else if (js && js->ctx) {
-        JSValue main_global = JS_GetGlobalObject(js->ctx);
+        JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+        JSValue main_global = JS_GetGlobalObject(main_ctx);
         gboolean is_main =
             JS_VALUE_GET_PTR(main_global) == JS_VALUE_GET_PTR(actual_target);
-        JS_FreeValue(js->ctx, main_global);
+        JS_FreeValue(main_ctx, main_global);
         if (is_main) {
             ns_js_dispatch_window_only_event(js, "message",
                                              JS_DupValue(ctx, ev), NULL);

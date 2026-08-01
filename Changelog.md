@@ -4,6 +4,18 @@ Significant changes in each release:
 
 1.0.7:
 ======
+* A message a frame posts to its parent reaches the parent's listeners.
+  Delivery decided whether the recipient was the top window by comparing
+  it against whichever realm was executing, and while a frame's script
+  runs that is the frame's own realm, so a message correctly addressed to
+  the parent was judged to belong to some other window and handed to a
+  dispatch path where the top window's `message` listeners are not
+  registered. The message was built, cloned and queued, and then went
+  nowhere; posting from the top window to itself worked, which is why
+  this survived. The comparison is now against the main realm, which does
+  not move. Freenet's River runs in a sandboxed frame and reaches the
+  network by asking the shell around it to hold the WebSocket on its
+  behalf, so every request it made was dropped in silence.
 * A framed document is governed by its own Content-Security-Policy, not
   by the one that came with the page framing it. A policy was kept once
   per browser, so whatever header arrived last decided what every
