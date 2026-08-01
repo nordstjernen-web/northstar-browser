@@ -321,6 +321,9 @@ static const char *ns_http_status_text(int status);
 static gboolean ns_node_is_media_element(const ns_node *n);
 static char *ns_media_resolve_src(JSContext *ctx, ns_node *node);
 static void ns_attach_body_consumers(JSContext *ctx, JSValueConst obj);
+static void ns_set_instance_proto(JSContext *ctx, JSValueConst object,
+                                  const char *constructor_name);
+static const ns_csp *ns_js_csp_for_node(ns_js *js, const ns_node *n);
 static char *ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob,
                                      gsize *out_len);
 static char *ns_fetch_normalize_method(const char *method);
@@ -7854,6 +7857,7 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
             return;
         }
         JSValue r = JS_NewObject(st->ctx);
+        ns_set_instance_proto(st->ctx, r, "Response");
         JS_SetPropertyStr(st->ctx, r, "ok",
             JS_NewBool(st->ctx, allow && resp->status >= 200 && resp->status < 300));
         long status = allow ? resp->status : 0;
@@ -40420,6 +40424,7 @@ static const char ns_iframe_global_bootstrap[] =
     "      } catch (e) {}"
     "    }"
     "  } catch (e) {}"
+    "  try { Object.setPrototypeOf(G, Object.getPrototypeOf(realWin)); } catch (e) {}"
     "  return { location: loc, history: hist };"
     "})";
 
@@ -49858,6 +49863,7 @@ ns_js_free(ns_js *js)
     ns_storage_flush(js);
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);
     if (js->csp) { ns_csp_free(js->csp); js->csp = NULL; }
+    if (js->doc_csp) { g_hash_table_destroy(js->doc_csp); js->doc_csp = NULL; }
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
     g_free(js->local_storage_path);
@@ -51219,8 +51225,9 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             return;
         }
         gboolean parser_inserted = !(n->flags & NS_NODE_NOT_PARSER_INSERTED);
-        if (js->csp &&
-            !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
+        const ns_csp *script_csp = ns_js_csp_for_node(js, n);
+        if (script_csp &&
+            !ns_csp_allows_with_nonce(script_csp, NS_CSP_SCRIPT, abs_url, origin,
                                       nonce, parser_inserted)) {
             if (js->log_cb) {
                 char *line = g_strdup_printf("CSP blocked: script %s", abs_url);
@@ -51289,7 +51296,8 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_TEXT || !c->text) continue;
         gsize tlen = strlen(c->text);
-        if (!ns_csp_inline_script_allowed(js->csp, c->text, tlen, nonce)) {
+        if (!ns_csp_inline_script_allowed(ns_js_csp_for_node(js, n),
+                                          c->text, tlen, nonce)) {
             if (js->log_cb) {
                 char *line = g_strdup_printf(
                     "CSP blocked: inline <script> on %s", origin);
@@ -51538,7 +51546,8 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
         return;
     }
     gboolean loaded = FALSE;
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_STYLE, abs_url, origin)) {
+    const ns_csp *link_csp = ns_js_csp_for_node(js, n);
+    if (link_csp && !ns_csp_allows(link_csp, NS_CSP_STYLE, abs_url, origin)) {
         if (js->log_cb) {
             char *line = g_strdup_printf("CSP blocked: stylesheet %s", abs_url);
             js->log_cb(line, js->log_user_data);
@@ -52749,6 +52758,54 @@ ns_iframe_framing_blocked(const char *embedder_url, const char *framed_url,
     return FALSE;
 }
 
+static const ns_csp *
+ns_js_csp_for_node(ns_js *js, const ns_node *n)
+{
+    if (!js) return NULL;
+    if (!js->doc_csp || !n) return js->csp;
+    for (const ns_node *p = n; p; p = p->parent) {
+        gpointer found = NULL;
+        if (g_hash_table_lookup_extended(js->doc_csp, p, NULL, &found))
+            return found;
+    }
+    return js->csp;
+}
+
+static void
+ns_js_frame_collect_meta_csp(ns_js *js, const ns_node *node, int depth)
+{
+    if (depth > 1024) return;
+    for (const ns_node *c = node ? node->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            g_ascii_strcasecmp(c->name, "meta") == 0) {
+            const char *he = ns_element_get_attr(c, "http-equiv");
+            if (he && g_ascii_strcasecmp(he, "content-security-policy") == 0) {
+                const char *content = ns_element_get_attr(c, "content");
+                if (content && *content)
+                    ns_js_add_csp_header(js, content);
+            }
+        }
+        ns_js_frame_collect_meta_csp(js, c, depth + 1);
+    }
+}
+
+static void
+ns_js_frame_register_csp(ns_js *js, ns_node *content_doc, const char *header)
+{
+    if (!js || !content_doc) return;
+    if (!js->doc_csp)
+        js->doc_csp = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+                                            (GDestroyNotify)ns_csp_free);
+    ns_csp *outer = js->csp;
+    js->csp = NULL;
+    ns_js_add_csp_header(js, header);
+    ns_js_frame_collect_meta_csp(js, content_doc, 0);
+    ns_csp *frame_csp = js->csp;
+    js->csp = outer;
+    g_hash_table_replace(js->doc_csp, content_doc, frame_csp);
+}
+
 static void
 ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 {
@@ -52790,8 +52847,9 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         abs_url = ns_url_resolve(origin, src);
         gboolean is_object = ns_node_is_element_named(iframe, "object");
         ns_csp_kind frame_kind = is_object ? NS_CSP_OBJECT : NS_CSP_FRAME;
-        if (abs_url && js->csp &&
-            !ns_csp_allows(js->csp, frame_kind, abs_url, origin)) {
+        const ns_csp *frame_csp = ns_js_csp_for_node(js, iframe);
+        if (abs_url && frame_csp &&
+            !ns_csp_allows(frame_csp, frame_kind, abs_url, origin)) {
             if (js->log_cb) {
                 char *line = g_strdup_printf(
                     "Blocked %s %s by Content-Security-Policy %s",
@@ -53054,6 +53112,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         }
         ns_node *prev_frame_ctx = js->raf_frame_ctx;
         js->raf_frame_ctx = iframe;
+        if (resp)
+            ns_js_frame_register_csp(js, content_doc, resp->csp_header);
         GHashTable *globals_before = ns_js_snapshot_globals(js);
         js->iframe_load_depth++;
         if (xhtml_suppress_scripts)

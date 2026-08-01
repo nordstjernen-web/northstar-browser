@@ -4,6 +4,32 @@ Significant changes in each release:
 
 1.0.7:
 ======
+* A framed document is governed by its own Content-Security-Policy, not
+  by the one that came with the page framing it. A policy was kept once
+  per browser, so whatever header arrived last decided what every
+  document was allowed to load. Freenet's River is served as a shell page
+  whose own policy names no script host at all -- correct, because every
+  script it runs is inline -- wrapped around an iframe holding the actual
+  chat app, whose policy does allow its origin; the app's module was
+  judged against the shell's policy and refused, and the page never got
+  past the header bar. Each framed document now carries the policy from
+  its own response and `<meta>`, and a resource is judged against the
+  policy of the document holding it, which also survives the app adding
+  a stylesheet from a timer long after the frame finished loading.
+* `fetch()` resolves with a real `Response`. The object had the right
+  properties and methods but not the prototype, so `instanceof Response`
+  was false and `constructor.name` was `Object`. Code that branches on
+  the type rather than duck-typing took the wrong path: wasm-bindgen's
+  loader treats a non-`Response` as an already-compiled module and hands
+  it straight to `WebAssembly.instantiate`, which is why River's
+  WebAssembly failed with a `BufferSource or Module` type error instead
+  of loading.
+* `window` inside a frame is a `Window`. Frames get their own realm whose
+  global was left an ordinary object, so `window instanceof Window` was
+  false there while it was true at the top level. `web_sys::window()`
+  makes exactly that test, so every Rust and WebAssembly UI framework hit
+  it: Dioxus panicked with ``access to `window` `` the moment River
+  started, taking the whole app down with an unreachable trap.
 * `--version` prints the version and exits. The flag was never
   recognised, so it fell through to an ordinary startup: the browser
   armed the watchdog, opened a window and left the caller with exit 255
