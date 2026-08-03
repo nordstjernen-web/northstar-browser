@@ -20,9 +20,12 @@ Significant changes in each release:
   to upstream sources; it lost libepoxy from the statically-linked
   section, since nothing links it. `docs/debian.md` is gone — a dated
   packaging status and a list of accounts to register, whose one durable
-  recipe already lives in `debian/README.source`. `AGENTS.md` is a
-  pointer to `CLAUDE.md` rather than a second copy of it that drifts, and
-  `docs/compliance.md` no longer repeats this changelog.
+  recipe already lives in `debian/README.source` — and so is
+  `docs/preloading.md`, three hundred lines on the fetch path of one
+  subsystem, reduced to the sentence in the pipeline table that says a
+  subresource is fetched once. `AGENTS.md` is a pointer to `CLAUDE.md`
+  rather than a second copy of it that drifts, and `docs/compliance.md`
+  no longer repeats this changelog.
 * A message a frame posts to its parent reaches the parent's listeners.
   Delivery decided whether the recipient was the top window by comparing
   it against whichever realm was executing, and while a frame's script
