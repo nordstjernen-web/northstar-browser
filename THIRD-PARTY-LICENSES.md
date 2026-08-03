@@ -33,10 +33,36 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 implied. See the License for the specific language governing permissions
 and limitations under the License.
 
+### ns-pango — GNU LGPL 2.1 or later
+
+> Text itemization, shaping and line breaking. A fork of Pango carrying a
+> process-wide glyph-string cache and a per-context metrics cache, with
+> every symbol renamed to `ns_pango_*` / `NsPango*` so it can coexist with
+> the system Pango that GTK loads into the same process. Fetched as a
+> pinned meson subproject (`subprojects/ns-pango.wrap`) and linked
+> statically.
+> <https://github.com/nordstjernen-web/ns-pango>,
+> <https://gitlab.gnome.org/GNOME/pango>
+>
+> Copyright the GNU Project, the Pango contributors, and the ns-pango
+> contributors.
+
+Licensed under the GNU Lesser General Public License version 2.1, or (at
+your option) any later version. The full license text is available at:
+
+  <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
+
+Because ns-pango is linked statically rather than dynamically, LGPL
+section 6 is satisfied through source availability: Northstar's own
+source is GPL-3.0-or-later and complete, the fork's source is public at
+the URL above, and the pinned revision is recorded in
+`subprojects/ns-pango.wrap`, so a recipient can modify the library and
+rebuild the binary against it.
+
 ### Wuffs — Apache License 2.0
 
-> Memory-safe PNG / GIF / BMP / JPEG decoders, transpiled from the
-> Wuffs language to C. Vendored as the single-file release in
+> Memory-safe PNG / APNG / GIF / BMP / JPEG / WebP decoders, transpiled
+> from the Wuffs language to C. Vendored as the single-file release in
 > `subprojects/wuffs/wuffs-v0.4.c`.
 > <https://github.com/google/wuffs-mirror-release-c>
 >
@@ -103,8 +129,8 @@ public domain worldwide. See:
 
 > MPEG-1 Part 2 video decoder for `<video>` and MPEG-1 Audio Layer II
 > (MP2) decoder for in-process audio playback.
-> Fetched as the `plmpeg` meson subproject
-> (`subprojects/plmpeg/pl_mpeg.h`).
+> Vendored as the `plmpeg` meson subproject
+> (`subprojects/plmpeg/pl_mpeg.h`), with a local change.
 > <https://github.com/phoboslab/pl_mpeg>
 >
 > Copyright (c) 2019 Dominic Szablewski
@@ -160,17 +186,6 @@ full text (same license).
 SQLite is in the public domain. The authors disclaim copyright to the
 source code; it may be used for any purpose, commercial or
 non-commercial, without restriction.
-
-### libepoxy — MIT License
-
-> OpenGL / OpenGL ES function-pointer management (pulled in transitively
-> by GTK's GL rendering).
-> <https://github.com/anholt/libepoxy>
->
-> Copyright (c) 2013-2014 Intel Corporation
-
-Licensed under the MIT License. See the quickjs-ng section above for the
-full text (same license).
 
 ### zlib — zlib License
 
@@ -263,8 +278,8 @@ Mozilla Public License 1.1. See:
 
 ### libavif — BSD 2-Clause
 
-> AVIF image decoding (AV1 still images). A required dependency
-> (`libavif`), optional; decodes AVIF bytes.
+> AVIF image decoding (AV1 still images). Optional and auto-detected
+> (meson `avif` feature); `-Davif=disabled` drops it.
 > <https://github.com/AOMediaCodec/libavif>
 >
 > Copyright the AOMedia / libavif authors.
@@ -277,9 +292,13 @@ are met. See:
 
 ### Optional dynamic dependencies
 
-These are linked only when present on the build host (meson
-`required: false`). When a build bundles them, their notices apply:
+These are linked only when present on the build host, or reached
+transitively through a library Northstar does link. When a build bundles
+them, their notices apply:
 
+- **libepoxy** — MIT License, © 2013-2014 Intel Corporation. OpenGL
+  function-pointer management, pulled in transitively by GTK's GL
+  renderer; Northstar links nothing against it directly.
 - **Fontconfig** — MIT-style license, © Keith Packard and contributors.
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
   GPL 2.0, at your option, © The FreeType Project.
@@ -298,6 +317,24 @@ shipped with the upstream sources. As of this release:
 
 - lexbor ships no `NOTICE` file.
 - Wuffs ships no `NOTICE` file.
+- WAMR ships no `NOTICE` file separate from its `LICENSE`, which is
+  reproduced at `src/wamr/LICENSE`.
 
 If a future upstream release adds one, it will be included verbatim
 in this section.
+
+## Modifications to upstream sources
+
+Where Northstar changes a third-party source, the change is carried as a
+patch rather than as an edited copy, so what was modified stays legible
+and separable:
+
+- `subprojects/packagefiles/lexbor-conv-buffer-bound.patch`
+- `subprojects/packagefiles/quickjs-ng-windows-link.patch`
+- `subprojects/packagefiles/quickjs-ng-sort-identical.patch`
+
+Meson applies them to the fetched sources at `meson setup`; the wrap
+files name them under `diff_files`. pl_mpeg carries its local change in
+the vendored copy directly. ns-pango is a public fork whose full history
+is at the URL in its section above. Northstar's own source is
+GPL-3.0-or-later.

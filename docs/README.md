@@ -9,8 +9,9 @@ libcurl, carrying no upstream browser engine.
 - **[architecture.md](architecture.md)** — the process model (single-process
   in this edition), the page-load pipeline, and a map of which source file
   owns which job.
-- **[building.md](building.md)** — dependencies per distro, the meson/ninja
-  build, meson options, headless mode, and the render-test fixtures.
+- **[building.md](building.md)** — dependencies per platform, the
+  meson/ninja build, meson options, headless mode, and the smoke and
+  render-test fixtures.
 - **[preloading.md](preloading.md)** — the speculative preload scan, the
   request key that identifies a fetch, and the four layers that keep a
   subresource from being fetched twice.
@@ -32,7 +33,8 @@ libcurl, carrying no upstream browser engine.
 ## Scope of this edition
 
 This is the minimalist GPL desktop edition. It is single-process (the
-engine runs in the shell process), targets Linux (primary), macOS and Windows, and
-deliberately omits tabs-as-processes, WebGL/WebGPU, inline video decoding,
-the PDF viewer, local-AI features, and the embeddable-library API. See
+engine runs in the shell process), targets Linux (primary), macOS and
+Windows, and deliberately omits tabs-as-processes, WebGL/WebGPU, the PDF
+viewer, local-AI features, and the embeddable-library API. `<video>`
+decodes MPEG-1 and nothing else, in the browser process. See
 [../CLAUDE.md](../CLAUDE.md) for the authoritative scope statement.

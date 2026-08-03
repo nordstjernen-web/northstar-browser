@@ -59,13 +59,13 @@ Two caveats when reading any of this:
 ## Current scores
 
 Measured at `7b38d66` against a WPT checkout of 2026-07-29, 8 s per-test
-timeout. "Files" counts test files where every subtest passed and the
-harness reported OK.
+timeout.
 
-The table predates the colour, `border-radius`, flex-baseline and CSSOM
-fixes listed under "Recent fixes" below, which have not been re-measured
-against it — each was verified against the behaviour it names rather
-than against a WPT run. Re-run the areas before quoting these numbers as
+**These numbers are a snapshot, not a running total.** Engine work has
+landed since — the colour, `border-radius`, flex-baseline and CSSOM fixes,
+and everything in `Changelog.md` after 1.0.5 — and none of it has been
+re-measured against this table; each change was verified against the
+behaviour it names. Re-run the areas below before quoting any of this as
 current.
 
 | Area | Subtests | Pass rate |
@@ -90,40 +90,13 @@ Read `html/semantics/scripting-1` with its denominator in view: roughly
 a quarter of its 474 files load modules or iframes over the network and
 time out under load, so the total swings by tens of subtests between
 runs of the same binary (1944, 1962 and 1980 across three runs). A
-change smaller than about thirty subtests there is noise; the one
-recorded below is an order of magnitude larger.
+change smaller than about thirty subtests there is noise.
 
 `html/dom` is the largest single area in WPT and the one most ordinary
 pages depend on. `css/css-flexbox` is the weakest and the most
-consequential for real pages — see below. `css/css-color` is nearly as
-low, but almost all of its failures are the two structural gaps
-described below rather than scattered bugs.
-
-### Effect of the fixes on this branch
-
-Same runner, same WPT checkout, the commit before this work versus this
-branch. The CSS rows were taken at `7b38d66`, before the two `<script>`
-fixes landed; the `scripting-1` row at `d747520`, before the NUL
-follow-up that adds a further 57 subtests on one of its files. Both
-"after" figures are therefore slightly conservative.
-
-| Area | Before | After |
-| --- | --- | --- |
-| `html/semantics/scripting-1` | 981 | 1304 |
-| `css/css-cascade` | 639 | 951 |
-| `css/css-backgrounds` | 421 | 474 |
-| `css/css-transforms` | 265 | 310 |
-| `css/css-color` | 5156 | 5219 |
-| `css/css-values` | 3445 | 3468 |
-| `css/css-flexbox` | 760 | 780 |
-| `css/cssom` | 3229 | 3230 |
-
-No area regressed. `dom/nodes` is not in that table because its
-denominator is not stable between runs: the before run reached 12351
-subtests with 3 files timing out and the after run 11680 with 18, the
-machine being busier. On the metric that does not move, files where
-every subtest passed, it went from 182 to 184, and its failure count
-from 213 to 209.
+consequential for real pages. `css/css-color` is nearly as low, but
+almost all of its failures are the two structural gaps under *Known
+gaps* rather than scattered bugs.
 
 ## Known gaps
 
@@ -189,97 +162,9 @@ not settle on. The subtests that do run mostly pass.
 
 ## Recent fixes
 
-Changes on this branch, each verified against the tests named:
-
-- **Dynamic `:has()` invalidation.** The incremental restyle index used
-  the final subject of a selector containing `:has()` as its mutation
-  key. For `div:has(+ .test) #subject`, that indexed `#subject` instead
-  of the `div` whose match actually changes. It now indexes the compound
-  that owns `:has()` and invalidates its descendant and following-sibling
-  dependent region. The 78 files under `css/selectors/invalidation/`
-  gain 311 passing subtests with no regression; the four largest affected
-  files pass all 1,029 subtests. Typical mutation flushes in the largest
-  file recompute 8–10 styles while reusing the rest of the tree.
-- **One colour-argument scanner, and relative colour syntax.** The six
-  colour functions each carried their own argument loop and each
-  accepted whatever its loop happened not to reject — `rgb(1 2 3 4 5)`,
-  `rgb(0,0,0,0,0)`, `rgb(10, 20 30)`, `rgb(10 20 30, 0.5)` and
-  `hsl(120 50% 50% extra)` all parsed, and a colour split over two lines
-  in a stylesheet parsed as nothing at all, because the loops skipped
-  only spaces. One scanner now enforces the legacy comma form and the
-  modern whitespace-with-slash form as alternatives and rejects trailing
-  text. `lch()` scaled a percentage chroma by 1.25, `lab()`'s factor,
-  instead of 1.5. Relative colour syntax — `rgb(from <color> r g b)` and
-  the `from` form of the other seven functions, with `calc()` over a
-  channel keyword — is implemented by converting the origin colour into
-  the destination space and substituting the channel keywords before the
-  value is parsed again.
-- **Unclosed functions no longer empty a style block.** CSS
-  tokenization closes an open function at end of input, so
-  `el.style.color = "rgb(1,2,3"` should set the colour. Northstar
-  spliced the raw text into the style attribute, where the unclosed
-  paren swallowed every declaration after it and the whole block was
-  then thrown away as invalid.
-- **`border-radius`.** Percentage radii were used as pixel counts —
-  `border-radius: 50%` painted a 50-pixel corner — and a `calc()` radius
-  was dropped. The elliptical forms did not work: the two-value corner
-  longhand was rejected, `10px / 20px` kept only the horizontal radii,
-  and through the CSSOM the declaration was rejected whole because the
-  shorthand was validated against the single-length grammar of the
-  legacy property.
-- **Shorthands that share a name with a longhand.** `el.style.overflow =
-  "hidden auto"` and `el.style.gap = "10px 20px"` silently dropped the
-  declaration while the same value worked in a stylesheet. Validation
-  now falls back to the declaration-block parse, which covers every
-  shorthand of that shape. `grid-area` gained its four longhands and
-  single-value `overflow` its two.
-- **`align-items: baseline`.** Flex items aligned on their tops, because
-  nothing in the box tree recorded where a box's first baseline was.
-- **Numeric computed values.** `hypot()` returned a plain number, so
-  `hypot(3px, 4px)` was rejected by every property wanting a length;
-  `z-index: calc(infinity)` computed to `inf`; numbers past six
-  significant digits serialized in exponent form; and a transform built
-  from 3D functions serialized as a 2D `matrix()` whenever the resulting
-  matrix happened to be flat.
-- **Insertion steps for `ChildNode`/`ParentNode`.** `append`,
-  `prepend`, `before`, `after`, `replaceWith` and `replaceChildren` did
-  not run the insertion steps, so a `<script>` inserted through any of
-  them never executed and custom elements never got
-  `connectedCallback`. Cloning a `<template>` and handing it to
-  `replaceWith` — the ordinary way to stamp a template — dropped every
-  script in it.
-- **Complete computed-style resolution.** `getComputedStyle` enumerated
-  218 properties but returned `""` for 126 of them, because the
-  initial-value fallback was a hand-written `strcmp` chain covering
-  about fifty longhands. It is now a table covering everything the
-  enumeration reports; `currentcolor`-initial properties resolve to the
-  element's `color`, and inherited properties walk to the nearest styled
-  ancestor. `css/css-cascade` went from 639 to 951 passing subtests.
-- **`<position>` normalization.** `background-position` and
-  `object-position` kept their specified text as the computed value, and
-  the four-value edge-offset form was mis-split (`right 30% top 60px`
-  gave x=100% y=30% instead of x=70% y=60px). Both shorthands now share
-  one splitter. `transform-origin` and `perspective-origin` serialized
-  as `translate(0%, 0%)`, which is not a valid value for either
-  property; they now resolve against the border box and serialize as
-  lengths.
-- **The `color()` function.** `color(srgb …)`, `srgb-linear`,
-  `display-p3`, `a98-rgb`, `prophoto-rgb`, `rec2020`, `xyz`, `xyz-d50`
-  and `xyz-d65` parse and convert to sRGB, with number, percentage and
-  `none` components and an optional alpha.
-- **`<script>` type handling.** Only two of the sixteen JavaScript MIME
-  type essences the spec lists were accepted, so a script labelled
-  `application/ecmascript`, `text/jscript`, `text/livescript` or any of
-  the `text/javascript1.0`–`1.5` series was silently skipped — and a
-  skipped script leaves no trace. The type is now stripped of
-  surrounding whitespace and matched against the full list, a
-  `language` attribute with no `type` beside it contributes
-  `text/` + its value, and the comparison runs over the attribute's real
-  byte length so an embedded NUL no longer truncates
-  `type="text/javascript\0"` into a match.
-  `script-type-and-language-js.html` goes from 91 to 456 of 456
-  subtests, and `html/semantics/scripting-1` as a whole from 981 to
-  1304.
+Engine changes are recorded in [`../Changelog.md`](../Changelog.md), which
+is the single list. This page tracks where the engine stands and what is
+structurally missing; it is not a second changelog.
 
 ## Keeping this current
 

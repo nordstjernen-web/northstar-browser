@@ -40,9 +40,12 @@ per-origin renderer process; every page shares one address space.
   contexts keep page state separate.
 
 A single internal HTTP/JSON request protocol (`renderer_serve.c`,
-`rproc_http.c`) still describes each render as a request/response; in
-single-process mode both ends live in the one process
+`rproc_http.c`, framed by `ipc_http.c`) still describes each render as a
+request/response; in single-process mode both ends live in the one process
 (`rproc_inproc.c`), and the same protocol is what a headless dump drives.
+`libnorthstar.c` is the page-engine host both the renderer and the headless
+driver call — an internal interface, not the embeddable library API, which
+this edition does not carry.
 
 ## Page-load pipeline
 
@@ -56,9 +59,9 @@ and headless drivers share the same path).
 | 2. Safety gate | `safebrowsing.c`, `csp.c` | Top-level host checked against the local SHA-256 blocklist; Content-Security-Policy parsed and enforced; Subresource-Integrity verified. |
 | 3. Parse | `html_lexbor.c`, `html.c`, `xml.c` | Bytes → DOM via lexbor (WHATWG HTML). `xml.c` handles XHTML/namespaced XML. Charset via uchardet. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
-| 5. Style | `css.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `anim.c` runs transitions and `@keyframes`; `font.c` loads `@font-face` web fonts. |
-| 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. `mathml.c` lays out presentation MathML. Anonymous table boxes are generated around any run of table-internal siblings. |
-| 7. Paint | `paint.c`, `image.c` | Builds and rasterises the Cairo display list. `image.c` decodes images on demand. |
+| 5. Style | `css.c`, `css_syntax.c`, `css_media.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_media.c` the Media Queries Level 4 parser and evaluator. `anim.c` runs transitions and `@keyframes`; `font.c` loads `@font-face` web fonts. |
+| 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. Text is itemized, shaped and broken into lines by ns-pango. `mathml.c` lays out presentation MathML. Anonymous table boxes are generated around any run of table-internal siblings. |
+| 7. Paint | `paint.c`, `image.c`, `texture.c` | Builds and rasterises the Cairo display list. `image.c` decodes images on demand into the `texture.c` pixel abstraction. |
 | 8. Present | `src/gtk/procview.c`, `headless.c` | GUI blits the surface into the GTK widget; headless dumps it to PNG or a text/layout tree. |
 
 Most computed values stay as parsed `ns_css_value`s, but `display` is
@@ -88,8 +91,10 @@ reclaims the full width.
 | Canvas 2D, `Path2D`, `ImageBitmap`, `DOMMatrix` | `js_canvas.c` |
 | `Date`, `Intl`, `performance`, realm helpers | `js_date.c`, `js_intl.c`, `js_perf.c`, `js_realm.c` |
 | `crypto.subtle` (WebCrypto over OpenSSL) | `webcrypto.c` |
-| WebAssembly JS API (over vendored WAMR) | `wasm.c` |
+| Offline Web Audio graph rendering | `webaudio.c` |
+| WebAssembly JS API (over vendored WAMR) | `wasm.c`, `src/wamr/` |
 | `WebSocket`, `EventSource` (SSE) | `ws.c`, `eventsource.c` |
+| `getUserMedia` video: V4L2 capture and per-site permission | `camera.c` |
 | Service worker registration, persistence and worker host | `js.c` |
 | WebExtension manifests, resources, storage and messaging | `ext.c`, `js.c` |
 | Forms: validation, serialization, submission | `forms.c` |
@@ -98,7 +103,12 @@ reclaims the full width.
 The DOM/JS bridge invalidates opaque node pointers on free and
 re-validates them on every call, so DOM mutation cannot dangle a
 JS-held handle. Pure-JS polyfills live in `data/js/polyfills.js` and are
-embedded at build time (`src/meson.build`).
+embedded at build time (`src/meson.build`); some page-facing surfaces are
+assembled there over native hooks rather than bound in C, which is why
+`navigator.mediaDevices.getUserMedia` rejects until the polyfill replaces
+it with the one that reaches `camera.c`. Video capture works and audio
+capture does not: `mic.c` is a stub, and this edition does no audio
+capture.
 
 ## Storage and state (SQLite / files)
 
@@ -111,7 +121,7 @@ embedded at build time (`src/meson.build`).
 | Bookmarks | `bookmarks.c` |
 | Service worker registrations | `js.c` |
 | WebExtension local storage | `ext.c` |
-| Sealed secrets (PBKDF2-SHA256 + AES-256-GCM) | `secretbox.c` |
+| Compiled-script bytecode | `bytecode_cache.c` |
 
 On-disk state lives under the XDG config/data/cache directories with
 owner-only permissions. See [`../SECURITY.md`](../SECURITY.md) for the
@@ -169,16 +179,37 @@ Source Extensions and a modern codec, neither of which this edition has.
 | File | Role |
 |------|------|
 | `security.c` | Refuse privileged startup, Linux Landlock + seccomp sandbox, macOS Seatbelt profile, Windows process mitigations. |
-| `csp.c` | Content-Security-Policy parse and enforcement. |
+| `csp.c` | Content-Security-Policy parse and enforcement, per document. |
 | `safebrowsing.c` | Local phishing/malware blocklist + interstitial. |
-| `secretbox.c` | Authenticated secret sealing. |
+| `watchdog.c` | Supervisor that restarts the browser on crash or hang. |
 
 ## Third-party components
 
-Fetched by `meson setup` as pinned subprojects: **lexbor** (HTML/CSS/URL)
-and **quickjs-ng** (JS). Vendored in-tree: **Wuffs** (images), **pl_mpeg**
-(MPEG-1 video and MP2 audio), **WAMR** (WebAssembly, `src/wamr/`) and **minimp3** (MP3,
+Fetched by `meson setup` as pinned subprojects: **lexbor** (HTML/CSS/URL),
+**quickjs-ng** (JS) and **ns-pango** (text itemization, shaping and line
+breaking). Vendored in-tree: **Wuffs** (images), **pl_mpeg** (MPEG-1 video
+and MP2 audio), **WAMR** (WebAssembly, `src/wamr/`) and **minimp3** (MP3,
 `src/audio/minimp3.h`). See [`../THIRD-PARTY-LICENSES.md`](../THIRD-PARTY-LICENSES.md).
+
+ns-pango is a Pango fork that exists for one reason: stock Pango keeps no
+cache outliving a `PangoLayout`, so the same bytes were shaped once to
+measure a run and again to paint it. The fork adds a process-wide cache of
+finished glyph strings and a per-context metrics cache. Every symbol in it
+is renamed (`ns_pango_*`, `NsPango*`), because GTK loads the system Pango
+into the same process and GObject aborts if two libraries register the same
+type name — so the engine includes `<ns-pango/…>` and the GTK shell keeps
+using the system Pango for its own widgets. A run is cached only when its
+shaping cannot depend on the text around it, which means whitespace or a
+paragraph edge at each end; `NS_PANGO_SHAPE_CACHE=verify` shapes both ways
+and warns on any difference, and `NS_PANGO_SHAPE_CACHE=0` disables it.
+
+## Diagnostics
+
+`debuglog.c` is the in-process log ring the JS console and the `--debug`
+flag both read. `--debug=info,warn,error,render,net,js` selects levels,
+`--debug` alone selects all of them, and `net` is where ns-pango reports
+shape-cache hits, misses and skips. `threaddump.c` dumps every thread to
+stderr, on demand or from a `SIGQUIT`.
 
 ## UI translation
 

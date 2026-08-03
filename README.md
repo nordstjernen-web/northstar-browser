@@ -26,7 +26,7 @@ filter in both GUI and headless/tooling modes · no JIT.
 See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 
 **Minimalism:** one window, one page, one process. The engine is a
-compact body of C — about 149,000 lines of original C (excluding the
+compact body of C — about 159,000 lines of original C (excluding the
 vendored WAMR, Wuffs and audio decoders, and the generated image-data
 tables) — small enough for one person to read and audit end-to-end.
 

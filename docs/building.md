@@ -11,7 +11,8 @@ Debian / Ubuntu:
 sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
-    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev
+    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev \
+    zlib1g-dev
 ```
 
 Fedora / RHEL:
@@ -20,7 +21,7 @@ Fedora / RHEL:
 sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
     openssl-devel uchardet-devel harfbuzz-devel fribidi-devel cairo-devel \
     fontconfig-devel freetype-devel libpsl-devel sqlite-devel \
-    libseccomp-devel SDL2-devel
+    libseccomp-devel SDL2-devel zlib-devel
 ```
 
 openSUSE:
@@ -29,7 +30,7 @@ openSUSE:
 sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
     libopenssl-devel libuchardet-devel harfbuzz-devel fribidi-devel \
     cairo-devel fontconfig-devel freetype2-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libSDL2-devel
+    libseccomp-devel libSDL2-devel zlib-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it. On
@@ -48,7 +49,7 @@ With Homebrew:
 
 ```sh
 brew install meson ninja pkg-config cmake gtk4 curl openssl@3 uchardet libpsl \
-    sqlite sdl2
+    sqlite sdl2 zlib
 ```
 
 Export `PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig"`
@@ -69,10 +70,16 @@ meson compile -C builddir
 ./builddir/src/gtk/northstar
 ```
 
-`meson setup` fetches the pinned upstream subprojects **lexbor** (HTML/CSS/
-URL parser) and **quickjs-ng** (JavaScript) and exposes them as the
-`liblexbor` / `libquickjs` dependencies. WAMR, Wuffs, pl_mpeg and minimp3
-are vendored in-tree. No in-tree fork of any engine is carried.
+`meson setup` fetches three pinned upstream subprojects — **lexbor**
+(HTML/CSS/URL parser), **quickjs-ng** (JavaScript) and **ns-pango** (text
+itemization, shaping and line breaking) — and exposes them as the
+`liblexbor` / `libquickjs` / `ns-pango` dependencies. WAMR, Wuffs, pl_mpeg
+and minimp3 are vendored in-tree. No in-tree fork of any browser engine is
+carried.
+
+The build needs network access the first time, to clone those three. A
+tarball that must build offline has to embed them; `debian/README.source`
+carries the recipe.
 
 `./scripts/dev.sh build` runs `meson setup` (only when needed) and
 `meson compile -C builddir` in one step.
@@ -88,9 +95,10 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `gtk` | `auto` | Build the GTK 4 desktop shell. Disable for an engine-only build. |
-| `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. |
+| `gtk` | `auto` | Build the GTK 4 desktop shell. Disable for an engine-only build that needs no GTK 4 at all. |
+| `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. Disable on platforms WAMR does not support. |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL2). |
+| `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |
 | `build_date` | *(configure date)* | Build-date stamp shown in the About dialog. |
 
 Set with `-Dname=value`, e.g. `meson setup builddir -Dwasm=disabled`.
@@ -117,13 +125,21 @@ Running as `root` is refused for safety; set `NS_ALLOW_ROOT=1` only in a
 throwaway container. `NS_NO_SANDBOX=1` / `NS_NO_SECCOMP=1` disable the
 sandbox layers for debugging — never in normal use.
 
-## Render-test fixtures
+## Smoke and render-test fixtures
+
+`./scripts/dev.sh smoke` renders each fixture in `data/fixtures/` headless
+and diffs it against the checked-in baseline in `data/baseline/`, reporting
+drift. Text fixtures use `--dump=text`; the `geo-*` ones use
+`--dump=layout`, which is text-free and fixed-size so the diff is
+font-stable. After an intended change, refresh with
+`./scripts/dev.sh baselines` (or `dev.sh baseline <target>` for one).
 
 `scripts/render-tests.sh [out-dir]` serves `data/render-tests/*.html` over
-a local HTTP server and renders each to a PNG for visual inspection. These
-are reference renderings for spotting regressions by eye, not automated
-assertions — this project has **no automated test suite** by design. Verify
-behaviour by running the browser.
+a local HTTP server and renders each to a PNG for visual inspection.
+
+Neither is an automated test suite, and this project has none by design:
+the baselines catch drift, the PNGs are read by eye, and correctness is
+verified by running the browser.
 
 ## Definition of done
 

@@ -4,6 +4,25 @@ Significant changes in each release:
 
 1.0.7:
 ======
+* The documentation says what the code does. Several claims had outgrown
+  the tree: `docs/architecture.md` gave a storage and security role to
+  `secretbox.c`, a file that does not exist, and omitted ns-pango
+  entirely; `docs/README.md` and `AGENTS.md` still said `<video>` laid out
+  without decoding; `CLAUDE.md` still routed unrecognised images through a
+  GDK-Pixbuf fallback removed in 1.0.6; `SECURITY.md` located the
+  single-process startup path in `src/gtk/appmain.c`, which is
+  `src/appmain.c`, and claimed no video codec attack surface at all — the
+  pl_mpeg decoder is one, so it is now described with its bounds rather
+  than denied. Cross-document `postMessage` is documented as working in
+  both directions, with what it does and does not guarantee, now that it
+  does. `THIRD-PARTY-LICENSES.md` gained the missing notice for ns-pango,
+  which is LGPL and statically linked, and a list of the patches applied
+  to upstream sources; it lost libepoxy from the statically-linked
+  section, since nothing links it. `docs/debian.md` is gone — a dated
+  packaging status and a list of accounts to register, whose one durable
+  recipe already lives in `debian/README.source`. `AGENTS.md` is a
+  pointer to `CLAUDE.md` rather than a second copy of it that drifts, and
+  `docs/compliance.md` no longer repeats this changelog.
 * A message a frame posts to its parent reaches the parent's listeners.
   Delivery decided whether the recipient was the top window by comparing
   it against whichever realm was executing, and while a frame's script

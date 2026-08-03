@@ -79,6 +79,9 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `musl.yml`
 - No "section banner" comments (`/* ---------- helpers ---------- */`).
   Group code by file or function instead.
 - No `TODO`/`FIXME`/`XXX` markers — file a real task instead.
+- Bundled external projects are exempt. Don't reformat or strip
+  comments from anything under `subprojects/` or the vendored
+  `src/wamr/` to satisfy Northstar style.
 
 ## Autonomous mode — read this every session
 
@@ -191,12 +194,13 @@ PNG, GIF, BMP, JPEG and WebP bytes are decoded through
 [Wuffs](https://github.com/google/wuffs), a memory-safe
 transpiled-to-C image-decoder library. The single-file release is
 vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static
-subproject. `src/image_wuffs.c::ns_image_decode_wuffs` is tried
-first; it returns NULL for any other format, in which case
-`src/image.c::ns_image_decode_bytes` falls back to libavif (AVIF, when
-built with it),
-then GDK-Pixbuf (for TIFF / ICO / other installed loaders) and,
-last, to the in-engine SVG renderer (`src/svg.c`).
+subproject. `src/image.c::ns_image_decode_bytes` unwraps ICO through
+`image_ico.c`, then tries `src/image_wuffs.c::ns_image_decode_wuffs`,
+then libavif (AVIF, when built with it), and last the in-engine SVG
+renderer (`src/svg.c`). Nothing follows: a format none of those cover
+fails to decode. There is no GDK-Pixbuf fallback and no plugin-loaded
+decoder, so the set of parsers exposed to untrusted bytes is fixed at
+build time.
 
 ### URL parsing: lexbor URL module
 
@@ -234,7 +238,8 @@ System packages required on Debian/Ubuntu:
 sudo apt install build-essential pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
-    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev
+    libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev \
+    zlib1g-dev
 ```
 
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
@@ -252,7 +257,7 @@ On Fedora/RHEL:
 sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
     openssl-devel uchardet-devel harfbuzz-devel fribidi-devel cairo-devel \
     fontconfig-devel freetype-devel libpsl-devel sqlite-devel \
-    libseccomp-devel SDL2-devel
+    libseccomp-devel SDL2-devel zlib-devel
 ```
 
 On openSUSE:
@@ -261,7 +266,7 @@ On openSUSE:
 sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
     libopenssl-devel libuchardet-devel harfbuzz-devel fribidi-devel \
     cairo-devel fontconfig-devel freetype2-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libSDL2-devel
+    libseccomp-devel libSDL2-devel zlib-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.

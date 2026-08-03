@@ -45,7 +45,7 @@ trusted.
 
 This minimalist edition runs **single-process**: the HTML/CSS/JS/layout
 engine parses and renders untrusted content in the GTK shell process
-itself (`ns_rproc_single_process_enable`, `src/gtk/appmain.c`). There is
+itself (`ns_rproc_single_process_enable`, `src/appmain.c`). There is
 no separate `northstar-renderer` executable and no per-tab renderer
 process — every page shares one OS process and one address space. The
 audio decoders and SDL2 mixer also run in that browser process on an
@@ -97,7 +97,7 @@ installed from `src/security.c` before any HTML or audio is parsed:
 | Headless / `--dump` / `--eval` / WPT tooling | ✅ | ✅ | ✅ |
 
 The interactive GUI runs single-process (the engine is in the shell), and
-its startup path (`proc_mode` in `src/gtk/appmain.c`) applies both Landlock
+its startup path (`proc_mode` in `src/appmain.c`) applies both Landlock
 and `ns_security_seccomp_init()`. No renderer or media executable needs
 `fork`/`execve`, so the browser process can use the same no-`execve`
 syscall allow-list as headless/tooling mode.
@@ -138,8 +138,19 @@ syscall allow-list as headless/tooling mode.
   restrictions, but codec memory corruption is no longer isolated from
   the browser address space. Audio Media Source buffers stay in process:
   the page engine resolves their opaque blob URL to bytes and queues those
-  bytes directly to the same mixer worker. `<video>` lays out but is **not**
-  decoded in this edition, so there is no video codec attack surface.
+  bytes directly to the same mixer worker.
+- **Video.** `<video>` decodes MPEG-1 (`video/mpeg`) and nothing else,
+  through the same vendored pl_mpeg that supplies the MP2 audio decoder
+  (`src/video.c`). This is a real codec attack surface, in the browser
+  process, with no isolation from it — pl_mpeg is ordinary C, not a
+  memory-safe decoder like Wuffs. It is deliberately a small one: one
+  decoder for one format, no demuxer beyond MPEG-1 Program Stream, no
+  adaptive streaming, no Media Source Extensions and no DRM. Frames are
+  decoded up front rather than streamed, bounded by `NS_VIDEO_MAX_FRAMES`
+  (4096) and `NS_VIDEO_MAX_TOTAL_BYTES` (256 MB of decoded pixels), so a
+  crafted clip cannot drive unbounded allocation; a longer one is
+  truncated. Decoded dimensions are clamped before any `width × height`
+  multiplication, as for images.
 
 The sandbox can be disabled for debugging with `NS_NO_SANDBOX=1` (Landlock)
 / `NS_NO_SECCOMP=1` (seccomp). Don't use those in normal operation.
@@ -278,9 +289,12 @@ attacker-controlled bytes and no path-traversal is possible.
 - URL parsing routes through lexbor's WHATWG URL module.
 - PNG/APNG, GIF, BMP, JPEG and WebP bytes are decoded by
   [Wuffs](https://github.com/google/wuffs) (memory-safe,
-  transpiled-to-C). SVG is rendered in-engine. Nothing else decodes
-  images: there is no plugin-loaded fallback decoder, so the set of
-  parsers exposed to untrusted bytes is fixed at build time.
+  transpiled-to-C). ICO is unwrapped in `image_ico.c` and handed to
+  Wuffs; SVG is rendered in-engine; AVIF goes to libavif when the build
+  has it, which is the one image path that is neither memory-safe nor
+  in-tree — `-Davif=disabled` removes it. Nothing else decodes images:
+  there is no GDK-Pixbuf fallback and no plugin-loaded decoder, so the
+  set of parsers exposed to untrusted bytes is fixed at build time.
 - Charset sniffing is delegated to uchardet, not hand-rolled.
 - The engine's own parsers bound attacker-controlled nesting and sizes.
   The recursive CSS parsers — selectors, `@supports`, `@media` queries,
@@ -346,9 +360,17 @@ inheriting the intersection of their ancestors' sandboxes:
   `alert`/`confirm`/`prompt`/`print`; no `allow-popups` makes
   `window.open` return `null`.
 
-A plain `<iframe>` with no `sandbox` attribute runs its scripts. Cross-
-document `postMessage` between a frame and its parent is currently limited
-(see Known gaps).
+A plain `<iframe>` with no `sandbox` attribute runs its scripts.
+
+Cross-document `postMessage` is delivered in both directions between a
+frame and its parent. A `targetOrigin` other than `*` or `/` is checked
+against the recipient window's origin and the message is dropped on a
+mismatch; the delivered event's `origin` is the sender's real origin and
+its `source` is the sender's window proxy, so a listener can authenticate
+what it received. Delivery is asynchronous, through the job queue. What
+this is not is a memory boundary: sender and recipient share one QuickJS
+runtime, so `postMessage` is the ordinary channel between frames, not a
+containment mechanism.
 
 ### Cookies and the `document.cookie` surface
 
@@ -393,10 +415,13 @@ The `document.cookie` setter:
   A loaded frame shares the parent page's QuickJS runtime and global
   prototypes; its separate `window`/`document`/`location` and redirected
   `top`/`parent` are a synthetic scope, not a true cross-origin sandbox.
-  Cross-document `postMessage` is correspondingly limited. A
-  per-origin/per-frame runtime would close this and is tracked as future
+  A per-origin/per-frame runtime would close this and is tracked as future
   work; until then, do not rely on a cross-origin frame being contained
   from the embedding origin.
+- **In-process video decode.** MPEG-1 is decoded by pl_mpeg in the browser
+  process (see *Media*). It is a small and bounded surface, but it is
+  ordinary C parsing attacker-controlled bytes with nothing between it and
+  the rest of the process.
 - **No per-path filesystem sandbox on Windows.** The mitigation
   suite restricts the *process* (no remote DLL loads, no dynamic
   code, etc.) but does not allow-list the files the process can
