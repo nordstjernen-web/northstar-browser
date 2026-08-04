@@ -13,7 +13,7 @@
 <div class="frame">
 
   <div class="header">
-    <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen-browser">
       <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
     </a>
     <div class="brand">
@@ -28,12 +28,12 @@
     <a href="index.html#news">News</a>
     <a href="screenshots.html">Screenshots</a>
     <a href="download.html">Download</a>
-    <a href="https://github.com/nordstjernen-web/nordstjernen">GitHub</a>
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser">GitHub</a>
     <input type="checkbox" id="nav-more" class="nav-more-toggle">
     <label class="nav-more-btn" for="nav-more">More <span aria-hidden="true">&#9662;</span></label>
     <div class="nav-sec">
       <a href="index.html#specs">Specifications</a>
-      <a href="https://github.com/nordstjernen-web/nordstjernen/releases">Releases</a>
+      <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">Releases</a>
       <a href="https://discord.gg/4W959nW5vF">Discord</a>
     </div>
   </nav>
@@ -44,7 +44,7 @@
         <h1>Nordstjernen Browser 1.0.21 released!</h1>
         <p>Today, 28 July 2026, we are pleased to announce the release of <b>Nordstjernen 1.0.21</b>. This release brings a full Media Queries Level 4 evaluator, in-engine SVG rendering, HLS and DASH streaming through Media Source Extensions, a redesigned <code>about:start</code> splash, and client hints that identify Nordstjernen as itself instead of impersonating Chrome. Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, macOS and Linux, with builds for Android, iOS, FreeBSD, NetBSD and the JVM. Nordstjernen is built in Norway.</p>
 
-        <p>Nordstjernen Browser version 1.0.21 is available now! <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.21">Read the full release notes here</a>, or <a href="#download">jump straight to the downloads</a>.</p>
+        <p>Nordstjernen Browser version 1.0.21 is available now! <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.21">Read the full release notes here</a>, or <a href="#download">jump straight to the downloads</a>.</p>
 
         <p>It ships alongside <a href="northstar-release-1-0-5.html">Northstar 1.0.5</a>, the GPL-licensed single-process edition of the same engine.</p>
 
@@ -65,11 +65,11 @@
           <li><b>Safety.</b> A reachable over-read in the vendored MPEG-1 decoder &mdash; found by fuzzing under AddressSanitizer, and reachable from page content through an MPEG-1 <code>&lt;video&gt;</code> &mdash; was contained. No bound was tightened, so video that decoded before still decodes.</li>
           <li><b>Privacy.</b> <code>Sec-CH-UA</code> and <code>navigator.userAgentData</code> report <code>"Nordstjernen"</code> instead of impersonating Chromium and Google Chrome, and a new <code>--private</code> flag starts the browser in private-browsing mode.</li>
           <li><b>A redesigned <code>about:start</code>.</b> The splash is now a daytime scene whose ground is a procedurally generated planet surface sampled through a real pinhole projection, with an ocean-to-snow terrain ramp, clouds, a specular sun column and atmospheric haze into the limb. The loading bar is gone and the animation is 322&nbsp;KB, down from 1.8&nbsp;MB.</li>
-          <li><b>Documentation.</b> A new <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/Software-Architecture.md">whole-system architecture guide</a> maps the process tree, IPC boundaries, engine pipeline and information flows.</li>
+          <li><b>Documentation.</b> A new <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/docs/Software-Architecture.md">whole-system architecture guide</a> maps the process tree, IPC boundaries, engine pipeline and information flows.</li>
         </ul>
 
         <h2>about Nordstjernen</h2>
-        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial, 0 absent across WHATWG HTML sections 1&ndash;16 as of July 2026. Against the <a href="https://github.com/web-platform-tests/wpt">Web Platform Tests</a>, the full wpt-fast tree passes 88.4% of subtests overall &mdash; 91.7% of the HTML suite. See <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial, 0 absent across WHATWG HTML sections 1&ndash;16 as of July 2026. Against the <a href="https://github.com/web-platform-tests/wpt">Web Platform Tests</a>, the full wpt-fast tree passes 88.4% of subtests overall &mdash; 91.7% of the HTML suite. See <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
         <p><b>Secure.</b> Process-per-tab design &mdash; each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
         <p><b>Minimalism.</b> The whole engine is about 160,000 lines of project C and headers (plus a thin GTK 4 shell), excluding the vendored libraries and generated assets &mdash; small enough for one person to read and audit end-to-end.</p>
         <p><b>Private.</b> Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind, and deliberately includes no AI assistant and no AI-style web APIs.</p>
@@ -78,7 +78,7 @@
         <h2>news</h2>
         <p><span class="date">28&nbsp;JUL&nbsp;2026</span> &middot;
         Nordstjernen <b>1.0.21</b> released &mdash; Media Queries Level 4, in-engine SVG, HLS and DASH streaming, a redesigned about:start, and honest client hints.
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.21">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.21">Release notes &raquo;</a></p>
 
         <p><span class="date">28&nbsp;JUL&nbsp;2026</span> &middot;
         Northstar <b>1.0.5</b> released &mdash; in-engine SVG, WebP/APNG, and MPEG-1 video playback.
@@ -92,7 +92,7 @@
         <p><span class="date">22&nbsp;JUL&nbsp;2026</span> &middot;
         Nordstjernen <b>1.0.20</b> released &mdash; WebGL on by default, a blinking caret, site-compatibility and memory-safety work.
         <a href="release-1-0-20.html">Announcement &raquo;</a> &middot;
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.20">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.20">Release notes &raquo;</a></p>
 
         <p><span class="date">22&nbsp;JUL&nbsp;2026</span> &middot;
         Northstar <b>1.0.3</b> released &mdash; the GPL-licensed single-process edition.
@@ -102,22 +102,22 @@
         <p><span class="date">17&nbsp;JUL&nbsp;2026</span> &middot;
         Nordstjernen <b>1.0.19</b> released &mdash; web-standards conformance, a new animated splash, and an iOS port.
         <a href="release-1-0-19.html">Announcement &raquo;</a> &middot;
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.19">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.19">Release notes &raquo;</a></p>
 
         <p><span class="date">6&nbsp;JUL&nbsp;2026</span> &middot;
         Nordstjernen <b>1.0.18</b> released &mdash; a maintenance release.
         <a href="release-1-0-18.html">Announcement &raquo;</a> &middot;
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.18">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.18">Release notes &raquo;</a></p>
 
         <p><span class="date">5&nbsp;JUN&nbsp;2026</span> &middot;
         Nordstjernen <b>1.0.0</b> released &mdash; the first stable release.
         <a href="release-1-0-0.html">Announcement &raquo;</a> &middot;
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.0">Release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.0">Release notes &raquo;</a></p>
 
         <a id="download"></a>
         <h2>download</h2>
         <p>Latest tagged release: Nordstjernen <b>1.0.21</b> &mdash; released 28 July 2026.
-        <a href="https://github.com/nordstjernen-web/nordstjernen/releases/tag/1.0.21">full release notes &raquo;</a></p>
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.21">full release notes &raquo;</a></p>
 
         <p>Nordstjernen is also available on the
         <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a> and
@@ -126,40 +126,40 @@
         <table class="spec dl">
           <tr>
             <th>Windows</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-windows-x86_64.zip">nordstjernen-windows-x86_64.zip</a> &middot;
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-windows-x86_64.zip">nordstjernen-windows-x86_64.zip</a> &middot;
                 <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a></td>
           </tr>
           <tr>
             <th>macOS</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-macos.dmg">nordstjernen-macos.dmg</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-macos.dmg">nordstjernen-macos.dmg</a></td>
           </tr>
           <tr>
             <th>Debian</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-debian-amd64.deb">nordstjernen-debian-amd64.deb</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-debian-amd64.deb">nordstjernen-debian-amd64.deb</a></td>
           </tr>
           <tr>
             <th>Ubuntu</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-ubuntu-amd64.deb">nordstjernen-ubuntu-amd64.deb</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-ubuntu-amd64.deb">nordstjernen-ubuntu-amd64.deb</a></td>
           </tr>
           <tr>
             <th>openSUSE</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-opensuse-x86_64.rpm">nordstjernen-opensuse-x86_64.rpm</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-opensuse-x86_64.rpm">nordstjernen-opensuse-x86_64.rpm</a></td>
           </tr>
           <tr>
             <th>Linux (portable)</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-linux-x86_64.zip">nordstjernen-linux-x86_64.zip</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-linux-x86_64.zip">nordstjernen-linux-x86_64.zip</a></td>
           </tr>
           <tr>
             <th>Alpine (musl)</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-alpine-x86_64.apk">nordstjernen-alpine-x86_64.apk</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-alpine-x86_64.apk">nordstjernen-alpine-x86_64.apk</a></td>
           </tr>
           <tr>
             <th>FreeBSD (portable)</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-freebsd-x86_64.zip">nordstjernen-freebsd-x86_64.zip</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-freebsd-x86_64.zip">nordstjernen-freebsd-x86_64.zip</a></td>
           </tr>
           <tr>
             <th>NetBSD (portable)</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-netbsd-x86_64.zip">nordstjernen-netbsd-x86_64.zip</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-netbsd-x86_64.zip">nordstjernen-netbsd-x86_64.zip</a></td>
           </tr>
           <tr>
             <th>Android</th>
@@ -167,17 +167,17 @@
           </tr>
           <tr>
             <th>Java API (JDK 21)</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases/download/1.0.21/nordstjernen-java.jar">nordstjernen-java.jar</a> &middot;
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.21/nordstjernen-java.jar">nordstjernen-java.jar</a> &middot;
                 <a href="https://www.nordstjernen.org/nightly/java/apidocs/">API docs</a></td>
           </tr>
           <tr>
             <th>Source</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/archive/refs/tags/1.0.21.tar.gz">1.0.21.tar.gz</a> &middot;
-                <a href="https://github.com/nordstjernen-web/nordstjernen/archive/refs/tags/1.0.21.zip">1.0.21.zip</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.21.tar.gz">1.0.21.tar.gz</a> &middot;
+                <a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.21.zip">1.0.21.zip</a></td>
           </tr>
           <tr>
             <th>All releases</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen/releases">github.com/nordstjernen-web/nordstjernen/releases</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">github.com/nordstjernen-web/nordstjernen-browser/releases</a></td>
           </tr>
         </table>
 
@@ -191,9 +191,8 @@
   <div class="footer">
     <div class="counter"><img src="counter.php" alt="visitor count"></div>
     Copyright &copy; 2026 the Nordstjernen project &middot;
-    <a href="https://github.com/nordstjernen-web/nordstjernen/blob/main/License.md">NSL-1.0</a> &middot;
-    <a href="https://discord.gg/4W959nW5vF">Discord</a> &middot;
-    <a href="mailto:andreas.rosdal@hotmail.com">andreas.rosdal@hotmail.com</a>
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="https://discord.gg/4W959nW5vF">Discord</a>
   </div>
 
 </div>
