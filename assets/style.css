@@ -97,11 +97,9 @@
   /* Secondary links: one set of markup for all screen sizes. On desktop
      .nav-sec shows inline and the "More" toggle is hidden; on mobile the
      hidden checkbox + label collapse .nav-sec — no JavaScript needed. */
-  .nav-more-toggle {
-    position: absolute;
-    width: 1px; height: 1px;
-    opacity: 0;
-  }
+  /* Hidden outright on desktop, where the "More" label it drives is hidden
+     too — otherwise it stays in the tab order as an invisible, inert stop. */
+  .nav-more-toggle { display: none; }
   .nav-more-btn { display: none; cursor: pointer; gap: 6px; }
   .nav-more-toggle:focus-visible + .nav-more-btn { outline: 2px solid #006633; outline-offset: 2px; }
   .nav-more-toggle:checked + .nav-more-btn { color: #006633; border-color: #006633; }
@@ -307,6 +305,14 @@
       padding: 0 12px;
     }
     .nav-more-btn { display: inline-flex; }
+    /* Visually hidden but still focusable, so the toggle keeps a keyboard
+       stop next to the "More" label it drives. */
+    .nav-more-toggle {
+      display: block;
+      position: absolute;
+      width: 1px; height: 1px;
+      opacity: 0;
+    }
     .nav-sec { display: none; width: 100%; gap: 6px; }
     .nav-more-toggle:checked ~ .nav-sec { display: flex; }
     .content {
@@ -416,6 +422,9 @@
       line-height: 1.35;
       padding-right: 8px;
     }
+    /* The pinned column needs its own copy of the zebra stripe: it is opaque
+       so the row can scroll under it, so it cannot inherit the row's tint. */
+    table.spec.compare tr:nth-child(even) th:first-child { background: #f7f8fb; }
     .footer {
       border-top-width: 2px;
       line-height: 1.45;
