@@ -14,16 +14,6 @@ Significant changes in each release:
   the one a dark theme's inline chips take. Both places that build the
   attribute list now emit `background_alpha` alongside the colour, exactly
   as the foreground path does.
-* `data/showcase/index.html` is a single self-contained page that
-  exercises the engine rather than describing it: subgrid, container
-  queries, cascade layers, `@scope`, OKLCH, `color-mix()`, conic and
-  repeating gradients, blend modes, clip paths, multicol, first-letter
-  and first-line, vertical writing modes, 3D transforms, Canvas 2D,
-  in-engine SVG, MathML, a custom element with a shadow root, WebCrypto,
-  Intl, WebAssembly, the three observers, workers, storage, dialog and
-  popover, and native form controls. `:root:has(#theme:checked)` drives
-  the whole light/dark palette from one checkbox, with no script. The
-  screenshots in `docs/showcase*.png` are the page in the browser.
 * The documentation says what the code does. Several claims had outgrown
   the tree: `docs/architecture.md` gave a storage and security role to
   `secretbox.c`, a file that does not exist, and omitted ns-pango
