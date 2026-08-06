@@ -1873,12 +1873,18 @@ apply_first_line_attrs(NsPangoAttrList *attrs, const ns_style *fl,
                 start, len);
     }
     const ns_css_value *bg = fl->values[NS_CSS_BACKGROUND_COLOR];
-    if (bg && bg->kind == NS_CSS_V_COLOR)
+    if (bg && bg->kind == NS_CSS_V_COLOR) {
         attr_insert_range(attrs,
             ns_pango_attr_background_new((guint16)(bg->u.color.r * 0x101),
                                       (guint16)(bg->u.color.g * 0x101),
                                       (guint16)(bg->u.color.b * 0x101)),
             start, len);
+        if (bg->u.color.a < 255)
+            attr_insert_range(attrs,
+                ns_pango_attr_background_alpha_new(
+                    bg->u.color.a ? (guint16)(bg->u.color.a * 0x101) : 1),
+                start, len);
+    }
     int fw = ns_css_font_weight_number(fl->values[NS_CSS_FONT_WEIGHT], -1);
     if (fw > 0)
         attr_insert_range(attrs,
@@ -2380,6 +2386,11 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                     (guint16)(r->r * 0x101),
                     (guint16)(r->g * 0x101),
                     (guint16)(r->b * 0x101));
+                if (r->a < 255)
+                    attr_insert_range(attrs,
+                        ns_pango_attr_background_alpha_new(
+                            r->a ? (guint16)(r->a * 0x101) : 1),
+                        r->start, r->len);
                 break;
             case NS_INLINE_FONT_FAMILY:
                 if (r->family) {
