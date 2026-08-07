@@ -4,6 +4,33 @@ Significant changes in each release:
 
 1.0.7:
 ======
+* The JavaScript engine is quickjs-ng v0.16.1, up from v0.15.1. The two
+  patches the tree carries — the Windows link fix and the removal of the
+  identical-object shortcut in `Array.prototype.sort`, which skipped a
+  comparator the specification says must run — still apply and were
+  regenerated against the new sources so they land without fuzz.
+  `JS_NewArrayBuffer` grew a `max_len` parameter and now takes a
+  reallocating callback in place of a freeing one, so the WebAssembly
+  memory object passes a zero maximum and no callback, which is the
+  fixed-length, externally-owned buffer it was already asking for.
+* A page's ES modules load again. Reading `document.implementation`
+  before `DOMImplementation` existed on the global left a TypeError
+  pending on the context: the getter looked up the constructor's
+  `prototype` without first checking that the constructor was there, and
+  discarded the failure without clearing it. Nothing noticed until
+  quickjs-ng v0.16.1 began reporting a pending exception at the next
+  module boundary, at which point the stray error surfaced as the
+  rejection of every `import` on the page — static, dynamic, `data:` and
+  `blob:` alike — because the shape-normalising bootstrap reads that
+  getter one statement before it defines the constructor. The lookup now
+  guards the constructor the way every other prototype lookup in the file
+  already does.
+* The bytecode cache carries a new format stamp. quickjs-ng's own
+  bytecode version moved with the upgrade, so entries written by an
+  earlier build describe a layout the new engine will not read; they were
+  already rejected safely and recompiled, but the stamp is what the cache
+  has to discard them outright instead of paying for a failed read on
+  every load until they age out.
 * A translucent background on an inline box is translucent. Inline runs
   are painted through ns-pango attributes, and while a text colour
   carrying alpha already emitted a matching foreground-alpha attribute, a

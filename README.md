@@ -133,7 +133,7 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 | Component | Role |
 |-----------|------|
 | [lexbor](https://github.com/lexbor/lexbor) v3.0.0 | HTML5 → DOM parser and the WHATWG URL module |
-| [quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.15.1 | JavaScript engine — no JIT |
+| [quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.16.1 | JavaScript engine — no JIT |
 | [ns-pango](https://github.com/nordstjernen-web/ns-pango) | Text itemization, shaping and line breaking — a Pango fork with a cross-layout shaping cache |
 
 **Vendored in-tree** (built from the main tree, no submodules):

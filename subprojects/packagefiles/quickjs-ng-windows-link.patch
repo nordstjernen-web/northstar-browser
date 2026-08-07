@@ -1,8 +1,8 @@
 diff --git a/meson.build b/meson.build
-index a9bc640..ba009e1 100644
+index a444f10..33843c0 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -130,7 +130,9 @@ qjs_sys_deps = []
+@@ -132,7 +132,9 @@ qjs_sys_deps = []
  
  m_dep = cc.find_library('m', required: false)
  qjs_sys_deps += m_dep
@@ -13,7 +13,7 @@ index a9bc640..ba009e1 100644
  qjs_sys_deps += dependency('dl', required: false)
  
  qjs_srcs = files(
-@@ -307,6 +309,7 @@ qjsc_exe = executable(
+@@ -312,6 +314,7 @@ qjsc_exe = executable(
  
    c_args: qjs_c_args,
    dependencies: [qjs_dep, qjs_libc_dep],
@@ -21,10 +21,11 @@ index a9bc640..ba009e1 100644
    install: true,
  )
  
-@@ -332,5 +335,6 @@ qjs_exe = executable(
+@@ -338,6 +341,7 @@ qjs_exe = executable(
    dependencies: [qjs_dep, qjs_libc_dep, mimalloc_dep],
    export_dynamic: true,
  
 +  pie: host_system != 'windows',
    install: true,
  )
+ 

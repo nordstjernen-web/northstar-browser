@@ -12,7 +12,7 @@
 
 #define NS_BYTECODE_CACHE_MEM_CAP_BYTES   (16u * 1024u * 1024u)
 #define NS_BYTECODE_CACHE_VALUE_CAP_BYTES (4u  * 1024u * 1024u)
-#define NS_BYTECODE_CACHE_FORMAT_VERSION  2026052201u
+#define NS_BYTECODE_CACHE_FORMAT_VERSION  2026080701u
 
 typedef struct ns_bytecode_cache_entry {
     guint8 *bytes;

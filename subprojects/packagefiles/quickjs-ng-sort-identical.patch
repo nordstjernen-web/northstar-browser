@@ -1,11 +1,10 @@
 diff --git a/quickjs.c b/quickjs.c
-index 1111111..2222222 100644
+index bbac00c..6cdc977 100644
 --- a/quickjs.c
 +++ b/quickjs.c
-@@ -43784,11 +43784,6 @@ static int js_array_cmp_generic(const void *a, const void *b, void *opaque) {
-     if (psc->exception)
+@@ -44673,11 +44673,6 @@ static int js_array_cmp_generic(const void *a, const void *b, void *opaque) {
          return 0;
-
+ 
      if (psc->has_method) {
 -        /* custom sort function is specified as returning 0 for identical
 -         * objects: avoid method call overhead.

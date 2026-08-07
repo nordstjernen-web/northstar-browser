@@ -42672,7 +42672,8 @@ ns_make_dom_implementation(JSContext *ctx, JSValueConst this_val)
     {
         JSValue global = JS_GetGlobalObject(ctx);
         JSValue ctor = JS_GetPropertyStr(ctx, global, "DOMImplementation");
-        JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+        JSValue proto = JS_IsObject(ctor)
+            ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
         if (JS_IsObject(proto)) JS_SetPrototype(ctx, impl, proto);
         JS_FreeValue(ctx, proto);
         JS_FreeValue(ctx, ctor);
