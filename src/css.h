@@ -192,6 +192,9 @@ typedef enum ns_css_prop {
     NS_CSS_MAX_LINES,
     NS_CSS_HYPHENATE_LIMIT_LINES,
     NS_CSS_COLUMN_SPAN,
+    NS_CSS_BREAK_BEFORE,
+    NS_CSS_BREAK_AFTER,
+    NS_CSS_BREAK_INSIDE,
     NS_CSS_MARGIN_BLOCK_START,
     NS_CSS_MARGIN_BLOCK_END,
     NS_CSS_MARGIN_INLINE_START,
@@ -574,6 +577,8 @@ double   ns_css_media_viewport_current_h(void);
 void     ns_css_set_device_size(double w, double h);
 void     ns_css_set_media_device(const ns_css_media_device *device);
 void     ns_css_get_media_device(ns_css_media_device *device);
+void     ns_css_set_print_media(gboolean printing);
+gboolean ns_css_print_media(void);
 
 typedef struct ns_css_value {
     ns_css_value_kind kind;
@@ -842,6 +847,14 @@ typedef struct ns_css_keyframes {
 
 struct ns_css_rule_index;
 
+typedef struct ns_css_page_rule {
+    double   width, height;
+    gboolean has_size;
+    gboolean landscape;
+    double   margin[4];
+    gboolean has_margin[4];
+} ns_css_page_rule;
+
 typedef struct ns_css_stylesheet {
     GPtrArray *rules;
     GArray    *imports;
@@ -850,6 +863,7 @@ typedef struct ns_css_stylesheet {
     GArray    *font_faces;
     GArray    *keyframes;
     GArray    *property_rules;
+    ns_css_page_rule *page_rule;
     gboolean   has_container_rules;
     gboolean   has_hover_rules;
     gboolean   has_active_rules;
@@ -877,6 +891,7 @@ ns_css_stylesheet *ns_css_stylesheet_parse_url_cached(const char *url,
                                                       const char *css,
                                                       gssize len);
 void               ns_css_style_element_cache_begin(void);
+void               ns_css_stylesheet_cache_drop(void);
 void               ns_css_relayout_enter(void);
 void               ns_css_relayout_leave(void);
 void               ns_css_stylesheet_resolve_urls(ns_css_stylesheet *s,

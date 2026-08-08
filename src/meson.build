@@ -76,6 +76,7 @@ northstar_engine_sources = files(
   'net.c',
   'netutil.c',
   'paint.c',
+  'print.c',
   'render.c',
   'safebrowsing.c',
   'security.c',

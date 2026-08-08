@@ -69,6 +69,7 @@ int         ns_proc_view_renderer_pid(NsProcView *view);
 void        ns_proc_view_end_task(NsProcView *view);
 
 /* Ask the user for a destination and write the current page there. */
+void   ns_proc_view_print(NsProcView *view);
 void   ns_proc_view_save_pdf(NsProcView *view);
 void   ns_proc_view_save_image(NsProcView *view);
 

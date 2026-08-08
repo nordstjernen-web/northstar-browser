@@ -1063,6 +1063,8 @@ static void act_new_window(GSimpleAction *action, GVariant *parameter,
                            gpointer user_data);
 static void act_history(GSimpleAction *action, GVariant *parameter,
                         gpointer user_data);
+static void act_print(GSimpleAction *action, GVariant *parameter,
+                      gpointer user_data);
 static void act_save_pdf(GSimpleAction *action, GVariant *parameter,
                          gpointer user_data);
 static void act_save_image(GSimpleAction *action, GVariant *parameter,
@@ -1536,8 +1538,10 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Ctrl>n", NULL });
     install_action(pw, "history", G_CALLBACK(act_history),
                    (const char *[]){ "<Ctrl>h", NULL });
-    install_action(pw, "save-pdf", G_CALLBACK(act_save_pdf),
+    install_action(pw, "print", G_CALLBACK(act_print),
                    (const char *[]){ "<Ctrl>p", NULL });
+    install_action(pw, "save-pdf", G_CALLBACK(act_save_pdf),
+                   (const char *[]){ "<Ctrl><Shift>p", NULL });
     install_action(pw, "save-image", G_CALLBACK(act_save_image), NULL);
     install_action(pw, "fullscreen", G_CALLBACK(act_fullscreen),
                    (const char *[]){ "F11", NULL });
@@ -1688,6 +1692,8 @@ proc_window_new(GtkApplication *app, const char *home_url,
     GMenu *sec_page = g_menu_new();
     menu_append_accel(sec_page, ns_i18n("History"), "win.history", NULL);
     menu_append_accel(sec_page, ns_i18n("Downloads"), "win.downloads", NULL);
+    menu_append_accel(sec_page, ns_i18n("Print…"), "win.print",
+                      "<Ctrl>P");
     menu_append_accel(sec_page, ns_i18n("Save Page as PDF…"), "win.save-pdf",
                       NULL);
     menu_append_accel(sec_page, ns_i18n("Save Page as Image…"),
@@ -1815,6 +1821,13 @@ act_new_window(GSimpleAction *action, GVariant *parameter, gpointer user_data)
                                      ns_proc_view_is_private(pw->view));
     gtk_window_present(GTK_WINDOW(nw->window));
     proc_window_load(nw, nw->home_url);
+}
+
+static void
+act_print(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    ns_proc_view_print(current_view(user_data));
 }
 
 static void

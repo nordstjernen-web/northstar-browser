@@ -30,6 +30,7 @@
 #include "net.h"
 #include "spellcheck.h"
 #include "paint.h"
+#include "print.h"
 #include "render.h"
 #include "safebrowsing.h"
 #include "security.h"
@@ -1352,6 +1353,52 @@ ns_browser_render_image(ns_browser *browser, const char *path)
     ns_paint_set_anim(NULL);
     ns_paint_set_js(NULL);
     return rc;
+}
+
+GPtrArray *
+ns_browser_print_pages(ns_browser *browser, ns_print_setup *out_setup)
+{
+    if (!browser || !browser->doc || !out_setup) return NULL;
+
+    browser_wait_images(browser);
+
+    ns_print_setup setup;
+    ns_print_setup_default(&setup);
+
+    int saved_vw = browser->vw;
+    double saved_vh = browser->vh;
+
+    ns_css_set_print_media(TRUE);
+    browser->cascade_dirty = TRUE;
+    browser->vw = (int)(setup.width - setup.margin_left - setup.margin_right);
+    browser->vh = setup.height - setup.margin_top - setup.margin_bottom;
+    browser_relayout(browser);
+
+    const ns_css_page_rule *rule = ns_render_page_rule();
+    if (rule) {
+        ns_print_setup_apply_page_rule(&setup, rule);
+        int w = (int)(setup.width - setup.margin_left - setup.margin_right);
+        if (w > 0 && w != browser->vw) {
+            browser->vw = w;
+            browser->vh = setup.height - setup.margin_top - setup.margin_bottom;
+            browser_relayout(browser);
+        }
+    }
+
+    ns_paint_set_js(browser->js);
+    ns_paint_set_anim(browser->anim);
+    GPtrArray *pages = ns_engine_print_recordings(browser->layout, &setup);
+    ns_paint_set_anim(NULL);
+    ns_paint_set_js(NULL);
+
+    ns_css_set_print_media(FALSE);
+    browser->cascade_dirty = TRUE;
+    browser->vw = saved_vw;
+    browser->vh = saved_vh;
+    browser_relayout(browser);
+
+    *out_setup = setup;
+    return pages;
 }
 
 int

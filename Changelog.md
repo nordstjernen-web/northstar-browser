@@ -4,6 +4,28 @@ Significant changes in each release:
 
 1.0.7:
 ======
+* The browser prints. `Ctrl+P`, or *Print…* in the menu, lays the page out
+  for paper and hands the sheets to the operating system's own print
+  dialog through `GtkPrintOperation` — CUPS on Linux, the Win32 printer
+  dialog on Windows, and the Cocoa panel on macOS — so no printing code
+  is written per platform and no new dependency is added. The engine gets
+  the parts of CSS that a printer needs: `@media print` now matches (the
+  media type was hardcoded to `screen`, so a page's print stylesheet was
+  simply ignored), `@page` sets the sheet size from a name (`A4`,
+  `letter`, `legal`, `ledger`, the A/B series), from one or two lengths,
+  or from `portrait`/`landscape`, along with its margins, and
+  `break-before`, `break-after` and `break-inside` — with the legacy
+  `page-break-*` spellings mapping onto them, `always` becoming `page` —
+  decide where a sheet may end. A sheet is cut at a forced break if there
+  is one before the page is full; otherwise the cut is pulled up above
+  any box it would have split, which is every leaf box, every line of a
+  paragraph, and anything asking for `break-inside: avoid`. Printing
+  restores the on-screen layout afterwards, so the page a reader is
+  looking at does not reflow under them. `--dump=print:FILE` renders the
+  same pagination to a multi-page PDF without a printer, which is how
+  `data/render-tests/print-pagination.html` was checked: three A4 sheets,
+  every card whole, the `@media print` paragraph swapped in, and the
+  forced break starting sheet three.
 * Text layout is ns-pango `2f975d8`, and a paragraph now measures the same
   whether or not another paragraph shaped its words first. The shaping
   cache decided where a run could be cut by reasoning about Unicode — a
