@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nordstjernen Browser 1.0.23 released!</title>
+<meta name="description" content="Nordstjernen Browser 1.0.23 released - the browser prints, offsetLeft and offsetTop are measured correctly, flex static positions and wrap-reverse follow the spec, CSS Scroll Snap lands, and JavaScript moves to quickjs-ng 0.16.1. An independent web browser written from scratch in C. No telemetry, no JIT.">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen-browser">
+      <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
+    </a>
+    <div class="brand">
+      <a href="."><img class="logo" src="assets/nordstjernen.svg" alt="*"></a>
+      <span class="title"><a href=".">nordstjernen.org</a></span>
+    </div>
+    <div class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</div>
+  </div>
+
+  <nav class="nav" aria-label="Primary">
+    <a href="index.html#about">About</a>
+    <a href="index.html#news">News</a>
+    <a href="screenshots.html">Screenshots</a>
+    <a href="download.html">Download</a>
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser">GitHub</a>
+    <input type="checkbox" id="nav-more" class="nav-more-toggle">
+    <label class="nav-more-btn" for="nav-more">More <span aria-hidden="true">&#9662;</span></label>
+    <div class="nav-sec">
+      <a href="index.html#specs">Specifications</a>
+      <a href="northstar-browser/">Northstar</a>
+      <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">Releases</a>
+      <a href="https://discord.gg/4W959nW5vF">Discord</a>
+    </div>
+  </nav>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>Nordstjernen Browser 1.0.23 released!</h1>
+        <p>Today, 8 August 2026, we are pleased to announce the release of <b>Nordstjernen 1.0.23</b>. The headline is that the browser prints: <code>Ctrl+P</code> lays the page out for paper and hands the sheets to the operating system&rsquo;s own print dialog. Underneath it are the layout fixes that came out of getting there &mdash; correct <code>offsetLeft</code> and <code>offsetTop</code>, flexbox static positions, <code>flex-wrap: wrap-reverse</code> and CSS Scroll Snap &mdash; and a JavaScript engine moved up to quickjs-ng 0.16.1. Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, macOS and Linux, with builds for Android, iOS, FreeBSD, NetBSD and the JVM. Nordstjernen is built in Norway.</p>
+
+        <p>Nordstjernen Browser version 1.0.23 is available now! <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.23">Read the full release notes here</a>, or <a href="#download">jump straight to the downloads</a>.</p>
+
+        <p>It ships alongside <a href="northstar-release-1-0-7.html">Northstar 1.0.7</a>, the GPL-licensed single-process edition of the same engine.</p>
+
+        <p>&laquo; <a href="index.html">Back to nordstjernen.org</a></p>
+
+        <div class="shot">
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1013" height="758" alt="Nordstjernen 1.0.23's about:start start page — the Nordstjernen Navigator splash above a search box"></a>
+          <div class="cap">Nordstjernen 1.0.23&rsquo;s <code>about:start</code> page &mdash; the Nordstjernen Navigator splash, over the night side of the earth. <a href="screenshots.html">more screenshots &raquo;</a></div>
+        </div>
+
+        <h2>what&rsquo;s new in 1.0.23</h2>
+        <ul class="news">
+          <li><b>The browser prints.</b> <code>Ctrl+P</code>, or <i>Print&hellip;</i> in the menu, lays the page out for paper and hands the sheets to the operating system&rsquo;s own print dialog through <code>GtkPrintOperation</code> &mdash; CUPS on Linux, the Win32 printer dialog on Windows, the Cocoa panel on macOS &mdash; so no printing code is written per platform and no dependency is added. The sheets are cairo recording surfaces, which cross no process boundary, so the print action needs the in-process renderer: it works under <code>--single-process</code> (or <code>NS_SINGLE_PROCESS=1</code>) and reports <i>Nothing to print</i> otherwise. <code>--dump=print:FILE</code> renders the same pagination to a multi-page PDF from any mode, and needs no printer.</li>
+          <li><b>The CSS a printer needs.</b> <code>@media print</code> now matches &mdash; the media type was hardcoded to <code>screen</code>, so a page&rsquo;s print stylesheet was simply ignored. <code>@page</code> sets the sheet size from a name (<code>A4</code>, <code>letter</code>, <code>legal</code>, <code>ledger</code>, the A and B series), from one or two lengths, or from <code>portrait</code>/<code>landscape</code>, along with its margins. <code>break-before</code>, <code>break-after</code> and <code>break-inside</code> &mdash; with the legacy <code>page-break-*</code> spellings mapping onto them and <code>always</code> becoming <code>page</code> &mdash; decide where a sheet may end. A sheet is cut at a forced break when one falls before the page is full; otherwise the cut is pulled up above any box it would split, which is every leaf box, every line of a paragraph, and anything asking for <code>break-inside: avoid</code>. Printing restores the on-screen layout afterwards, so the page a reader is looking at does not reflow under them.</li>
+          <li><b><code>offsetLeft</code> and <code>offsetTop</code> are measured from the offsetParent again.</b> Both returned a document coordinate, built from the margin box rather than the border box, so an element inside any positioned ancestor reported where it sat on the page instead of where it sat in its parent. CSSOM View asks for the distance from the offsetParent&rsquo;s padding edge, with a statically positioned <code>body</code> or root the exception every engine makes. A great many pages measure this way, and so does the <code>checkLayout</code> harness most of WPT&rsquo;s layout tests are written against: in the sibling GPL edition, where this was measured, fixing it plus the flex change below took <code>css/css-flexbox</code> from 653 to 1437 of the same 3535 subtests.</li>
+          <li><b>Flexbox static positions and <code>wrap-reverse</code>.</b> An absolutely positioned child of a flex container landed at the container&rsquo;s content-box origin whatever the container asked for; CSS Flexbox 4.1 gives it a static position from <code>justify-content</code> and its own <code>align-self</code>, as though it were the only flex item, and <code>flex-direction: *-reverse</code>, <code>flex-wrap: wrap-reverse</code> and <code>direction: rtl</code> each turn around the axis they govern. And <code>flex-wrap: wrap-reverse</code> now puts the first line last: lines wrapped, but the cross axis was never turned around. Vertical writing modes are not covered &mdash; flex layout itself is horizontal-only here.</li>
+          <li><b>CSS Scroll Snap.</b> <code>scroll-snap-type</code> on a scroll container, with <code>scroll-snap-align</code> on the things inside it, moves the container onto the nearest snap position once a scroll lands &mdash; from the wheel, and from <code>scrollTop</code>/<code>scrollLeft</code>. <code>scroll-padding</code> on the container and <code>scroll-margin</code> on an item inset the snapport and outset the snap area, both as shorthands and per side; <code>mandatory</code> always snaps, <code>proximity</code> only from within half a page. A wheel tick shorter than the gap between two snap positions still moves the reader forward rather than falling back to the one behind. This is scroll containers only: the document scroller belongs to the window, not to a box, so <code>scroll-snap-type</code> on <code>html</code> or <code>body</code> does nothing yet.</li>
+          <li><b>JavaScript on quickjs-ng 0.16.1.</b> A regular expression whose <code>v</code>-flag class contains the empty string, <code>/[\q{}]/v</code>, no longer writes outside the string set it is building. The refresh carries that fix along with the iterator proposals &mdash; <code>Iterator.concat</code>, <code>Iterator.prototype.join</code> and <code>includes</code>, and the chunking proposal&rsquo;s <code>chunks</code> and <code>windows</code>, with <code>take</code> and <code>drop</code> now rejecting out-of-range limits &mdash; resizable externally managed ArrayBuffers, and a parser that no longer rescans the line to report an identifier&rsquo;s column.</li>
+          <li><b>A processing instruction is parsed as one.</b> <code>&lt;?target data?&gt;</code> produced a comment that the engine then took apart again by hand, guessing where the target ended; the HTML parser now implements the specification&rsquo;s own rules, so the node carries a real target and data, a target the specification disallows stays a comment, and serializing one writes <code>&lt;?target data&gt;</code> instead of dropping the target on the floor &mdash; which the XML parser&rsquo;s processing instructions had been doing all along. Two URL fixes come with the same refresh: a caret in a path is percent-encoded, and a URL that has userinfo but no host is rejected.</li>
+          <li><b>Two paragraphs measuring the same words come out the same width.</b> The text shaper cached a piece ending in a space together with the kerning the following word had induced on it, so &ldquo;Type of&rdquo; was laid out narrow after &ldquo;Type A&rdquo; had been drawn, and which paragraph came out wrong depended on what the process had already done. The shaper now asks HarfBuzz which pieces are safe to store.</li>
+          <li><b>Licences and vendored sources.</b> The bundled MP3 decoder and the WebGPU headers match their upstreams again &mdash; the headers move to wgpu-native v29.0.1.1, the release the build actually downloads. The third-party notices name every library in the binary: pl_mpeg and minimp3 are compiled into it and were listed nowhere, the wgpu-native headers were missing too, and lexbor&rsquo;s <code>NOTICE</code> file, which Apache 2.0 requires be propagated, was recorded as not existing.</li>
+          <li><b>Packaging that builds on a clean machine.</b> A distribution package built from a release tarball now declares the FFmpeg <code>libav*</code> libraries it needs &mdash; meson has required them on Linux and Windows since inline WebM landed, but the Debian control file, the OBS and Fedora spec files, the Alpine APKBUILD and the source-RPM recipe all still described them as optional, so each of those builds failed at configure time. A package built where the build host has no network reaches the system Pango, since ns-pango is cloned by meson at setup time and an OBS worker, an sbuild chroot, a mock root and Alpine&rsquo;s build phase all forbid that. The source RPM carries a version rpm accepts and installs everything it built, and the Debian tree has the changelog <code>dpkg-buildpackage</code> needs.</li>
+          <li><b>Android, iOS and the JVM compile again.</b> Each of those hosts builds its bridge against the engine&rsquo;s headers with nothing on the include path but <code>src/</code>, and printing had put <code>&lt;glib.h&gt;</code> and <code>print.h</code> into three of them. Every print entry point moves to <code>print.h</code> beside the pagination it drives, and the three headers are self-contained again. The Android bridge also attaches its in-process renderer again, after the callback that hands one over began returning a connection where Android still returned a status code.</li>
+          <li><b>Documentation and build instructions.</b> The build instructions install what the build requires: the Debian/Ubuntu, Fedora and openSUSE package lines omitted FFmpeg, so following them exactly produced a failing configure. The documentation stops pointing at files that are not there, the threading model no longer describes a per-tab worker thread that the move to process-per-tab removed, and every link to the project&rsquo;s own repository points at <a href="https://github.com/nordstjernen-web/nordstjernen-browser">nordstjernen-web/nordstjernen-browser</a>, its new home. The NetBSD build no longer rests on one package mirror.</li>
+        </ul>
+
+        <h2>about Nordstjernen</h2>
+        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial, 0 absent across WHATWG HTML sections 1&ndash;16 as of July 2026. Against the <a href="https://github.com/web-platform-tests/wpt">Web Platform Tests</a>, the full wpt-fast tree passes 88.4% of subtests overall &mdash; 91.7% of the HTML suite. See <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p><b>Secure.</b> Process-per-tab design &mdash; each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
+        <p><b>Minimalism.</b> The core engine is about 185,000 lines of project C and headers (plus a thin GTK 4 shell), excluding the vendored libraries and generated assets &mdash; small enough for one person to read and audit end-to-end.</p>
+        <p><b>Private.</b> Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind, and deliberately includes no AI assistant and no AI-style web APIs.</p>
+
+        <a id="news"></a>
+        <h2>news</h2>
+        <p><span class="date">8&nbsp;AUG&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.23</b> released &mdash; printing with <code>@page</code> and print stylesheets, correct <code>offsetLeft</code>/<code>offsetTop</code>, flexbox static positions, CSS Scroll Snap, and quickjs-ng 0.16.1.
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.23">Release notes &raquo;</a></p>
+
+        <p><span class="date">8&nbsp;AUG&nbsp;2026</span> &middot;
+        Northstar <b>1.0.7</b> released &mdash; printing, a rebuilt about:start sky and earth, CSS Scroll Snap, frames that talk to their parent, and quickjs-ng 0.16.1.
+        <a href="northstar-release-1-0-7.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7">Release notes &raquo;</a></p>
+
+        <p><span class="date">31&nbsp;JUL&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.22</b> released &mdash; real-site layout fixes, a rebuilt grid, faster text through ns-pango, a reworked toolbar, and a much more capable Android app.
+        <a href="release-1-0-22.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.22">Release notes &raquo;</a></p>
+
+        <p><span class="date">31&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.6</b> released &mdash; a rebuilt grid, an indexed CSS cascade, Web Audio that renders, and relative colour syntax.
+        <a href="northstar-release-1-0-6.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.6">Release notes &raquo;</a></p>
+
+        <p><span class="date">28&nbsp;JUL&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.21</b> released &mdash; Media Queries Level 4, in-engine SVG, HLS and DASH streaming, a redesigned about:start, and honest client hints.
+        <a href="release-1-0-21.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.21">Release notes &raquo;</a></p>
+
+        <p><span class="date">22&nbsp;JUL&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.20</b> released &mdash; WebGL on by default, a blinking caret, site-compatibility and memory-safety work.
+        <a href="release-1-0-20.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.20">Release notes &raquo;</a></p>
+
+        <p><span class="date">5&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.0</b> released &mdash; the first stable release.
+        <a href="release-1-0-0.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.0">Release notes &raquo;</a></p>
+
+        <a id="download"></a>
+        <h2>download</h2>
+        <p>Latest tagged release: Nordstjernen <b>1.0.23</b> &mdash; released 8 August 2026.
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.23">full release notes &raquo;</a></p>
+
+        <p>Nordstjernen is also available on the
+        <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a> and
+        <a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a>.</p>
+
+        <table class="spec dl">
+          <tr>
+            <th>Windows</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-windows-x86_64.zip">nordstjernen-windows-x86_64.zip</a> &middot;
+                <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a></td>
+          </tr>
+          <tr>
+            <th>macOS</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-macos.dmg">nordstjernen-macos.dmg</a></td>
+          </tr>
+          <tr>
+            <th>Debian</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-debian-amd64.deb">nordstjernen-debian-amd64.deb</a></td>
+          </tr>
+          <tr>
+            <th>Ubuntu</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-ubuntu-amd64.deb">nordstjernen-ubuntu-amd64.deb</a></td>
+          </tr>
+          <tr>
+            <th>openSUSE</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-opensuse-x86_64.rpm">nordstjernen-opensuse-x86_64.rpm</a></td>
+          </tr>
+          <tr>
+            <th>Linux (portable)</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-linux-x86_64.zip">nordstjernen-linux-x86_64.zip</a></td>
+          </tr>
+          <tr>
+            <th>Alpine (musl)</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-alpine-x86_64.apk">nordstjernen-alpine-x86_64.apk</a></td>
+          </tr>
+          <tr>
+            <th>FreeBSD (portable)</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-freebsd-x86_64.zip">nordstjernen-freebsd-x86_64.zip</a></td>
+          </tr>
+          <tr>
+            <th>NetBSD (portable)</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-netbsd-x86_64.zip">nordstjernen-netbsd-x86_64.zip</a></td>
+          </tr>
+          <tr>
+            <th>Android</th>
+            <td><a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a></td>
+          </tr>
+          <tr>
+            <th>Java API (JDK 21)</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.23/nordstjernen-java.jar">nordstjernen-java.jar</a> &middot;
+                <a href="https://www.nordstjernen.org/nightly/java/apidocs/">API docs</a></td>
+          </tr>
+          <tr>
+            <th>Source</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.23.tar.gz">1.0.23.tar.gz</a> &middot;
+                <a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.23.zip">1.0.23.zip</a></td>
+          </tr>
+          <tr>
+            <th>All releases</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">github.com/nordstjernen-web/nordstjernen-browser/releases</a></td>
+          </tr>
+        </table>
+
+        <p><b>Nightly builds</b> are rebuilt from <code>main</code> each night and point at the
+        latest code &mdash; bleeding edge, expect rough edges. See
+        <a href="https://www.nordstjernen.org/nightly/">all nightly files</a> and their
+        <a href="https://www.nordstjernen.org/nightly/SHA256SUMS">checksums</a>.</p>
+
+  </div>
+
+  <div class="footer">
+    <div class="counter"><img src="counter.php" alt="visitor count"></div>
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="https://discord.gg/4W959nW5vF">Discord</a>
+  </div>
+
+</div>
+
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('a').forEach(function (link) {
+    link.addEventListener('mouseenter', function () {
+      window.status = link.getAttribute('href') || '';
+    });
+    link.addEventListener('mouseleave', function () {
+      window.status = 'nordstjernen.org';
+    });
+  });
+  window.status = 'nordstjernen.org';
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northstar Browser 1.0.7 released!</title>
+<meta name="description" content="Northstar Browser 1.0.7 released - the browser prints, a rebuilt about:start sky and earth, correct offsetLeft/offsetTop, CSS Scroll Snap, frames that talk to their parent, and quickjs-ng 0.16.1. The GPL-licensed single-window, single-process edition of the Nordstjernen engine, written from scratch in C. No telemetry, no JIT.">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/northstar-browser">
+      <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
+    </a>
+    <div class="brand">
+      <a href="."><img class="logo" src="assets/nordstjernen.svg" alt="*"></a>
+      <span class="title"><a href=".">nordstjernen.org</a></span>
+    </div>
+    <div class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</div>
+  </div>
+
+  <nav class="nav" aria-label="Primary">
+    <a href="index.html#about">About</a>
+    <a href="index.html#news">News</a>
+    <a href="northstar-browser/">Northstar</a>
+    <a href="screenshots.html">Screenshots</a>
+    <a href="https://github.com/nordstjernen-web/northstar-browser">GitHub</a>
+    <input type="checkbox" id="nav-more" class="nav-more-toggle">
+    <label class="nav-more-btn" for="nav-more">More <span aria-hidden="true">&#9662;</span></label>
+    <div class="nav-sec">
+      <a href="index.html#specs">Specifications</a>
+      <a href="download.html">Download</a>
+      <a href="https://github.com/nordstjernen-web/northstar-browser/releases">Releases</a>
+      <a href="https://discord.gg/4W959nW5vF">Discord</a>
+    </div>
+  </nav>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>Northstar Browser 1.0.7 released!</h1>
+        <p>Today, 8 August 2026, we are pleased to announce the release of <b>Northstar 1.0.7</b>. Northstar is the free-software edition of the <a href="index.html">Nordstjernen</a> project: a single-window, single-page, single-process desktop browser built from the same clean-room C engine, licensed under the <b>GNU General Public License, version 3 or later</b>. It runs on Linux, macOS and Windows.</p>
+
+        <p>This release teaches the browser to print, rebuilds the <code>about:start</code> sky and earth, and closes the layout and framing gaps that kept WebAssembly-driven applications from running at all &mdash; frames can now reach their parent, each framed document carries its own Content-Security-Policy, and <code>fetch()</code> resolves with a real <code>Response</code>.</p>
+
+        <p>Northstar Browser version 1.0.7 is available now! <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7">Read the full release notes here</a>, or <a href="#download">jump straight to the downloads</a>. This release adds Linux binaries &mdash; a portable zip, an AppImage and a Debian package &mdash; alongside the Windows build.</p>
+
+        <p>It ships alongside <a href="release-1-0-23.html">Nordstjernen 1.0.23</a>, the source-available flagship built from the same engine.</p>
+
+        <p>&laquo; <a href="northstar-browser/">About the Northstar Browser</a> &middot; <a href="index.html">Back to nordstjernen.org</a></p>
+
+        <div class="shot">
+          <a href="screenshots/northstar-screenshot.png"><img src="screenshots/northstar-screenshot.png" width="1024" height="768" alt="Northstar 1.0.7's about:start start page — the rebuilt sky-and-earth splash above a search box"></a>
+          <div class="cap">Northstar 1.0.7&rsquo;s <code>about:start</code> page &mdash; the splash rebuilt for the release, with a scattering atmosphere and a settled earth below it. <a href="screenshots.html">more screenshots &raquo;</a></div>
+        </div>
+
+        <h2>highlights</h2>
+        <ul class="news">
+          <li><b>The browser prints.</b> <code>Ctrl+P</code>, or <i>Print&hellip;</i> in the menu, lays the page out for paper and hands the sheets to the operating system&rsquo;s own print dialog through <code>GtkPrintOperation</code> &mdash; CUPS on Linux, the Win32 printer dialog on Windows, the Cocoa panel on macOS &mdash; so no printing code is written per platform and no new dependency is added. <code>--dump=print:FILE</code> renders the same pagination to a multi-page PDF without a printer.</li>
+          <li><b>A new sky and a settled earth.</b> The <code>about:start</code> splash carries the release number and is redrawn from the ground up &mdash; see <a href="#splash">the splash</a> below.</li>
+          <li><b>Layout that real harnesses measure.</b> <code>offsetLeft</code> and <code>offsetTop</code> are measured from the offsetParent again, and an absolutely positioned flex child takes the static position the flexbox specification gives it. Together those two took <code>css/css-flexbox</code> from 653 to 1437 of the same 3535 subtests &mdash; 18.5% to 40.7%.</li>
+          <li><b>Frames work.</b> A message a frame posts to its parent reaches the parent&rsquo;s listeners, a framed document is governed by its own Content-Security-Policy rather than the page framing it, <code>fetch()</code> resolves with a real <code>Response</code>, and <code>window</code> inside a frame is a <code>Window</code>. Between them these are what a Rust/WebAssembly application needs to start at all.</li>
+          <li><b>CSS Scroll Snap</b>, and <b>quickjs-ng v0.16.1</b> with the ES-module regression it exposed fixed.</li>
+        </ul>
+
+        <h2 id="splash">the splash</h2>
+        <p>The sky was a two-stop vertical ramp drawn as one filled rectangle per scanline, which is both the slowest way to write a gradient and the one that bands worst. It is now a multi-stop atmosphere rendered as an array, with forward scattering around the sun, a haze band along the horizon and a scatter of stars that fades out as the sky brightens towards it. The north star hangs in the dark of the zenith, cool against the warm sun on the other side of the frame, and twinkles on its own period so the two never pulse together.</p>
+        <p>The earth had been a soft blur: its terrain came from one 1024&sup2; noise field sampled through three fixed mip taps, so coastlines dissolved and nothing on land read as relief. It is built at 2048&sup2; now from a continent field, a coastline field and ridged noise for mountain ranges, shaded from the height gradient, and sampled with a real trilinear filter across the whole mip chain &mdash; so there are coastlines with a shallow shelf inside them, snow that sits on the peaks rather than across whole regions, and deserts and forests that follow a moisture field. Aerial perspective now decays with distance the way it should, which had been inverted.</p>
+        <p>The land is settled, in the manner of a turn-based strategy map: capitals are scattered across it at a minimum separation and the ground divided between them by a Voronoi partition whose distances are warped by noise, so frontiers wander the way drawn ones do rather than meeting at straight bisectors. Each nation takes the lowest colour none of its neighbours holds, and wears it as a wash over its territory, a bolder line along its frontiers and a lighter one down its coast, with a capital and up to four towns marked inside. It rides as its own premultiplied overlay above the terrain and fades out with distance, so the markers do not turn into confetti where the texture repeats near the horizon, and passing cloud covers them the way cloud covers everything else.</p>
+
+        <h2>layout and CSS</h2>
+        <ul class="news">
+          <li><code>offsetLeft</code> and <code>offsetTop</code> returned a document coordinate &mdash; and one built from the margin box rather than the border box &mdash; so an element inside any positioned ancestor reported where it sat on the page instead of where it sat in its parent. CSSOM View asks for the distance from the offsetParent&rsquo;s padding edge, with a statically positioned <code>body</code> or root the exception every engine makes, and that is what they return now. The <code>checkLayout</code> harness most of WPT&rsquo;s layout tests are written against compares exactly those, so every layout area measured before this fix understates the engine.</li>
+          <li>An absolutely positioned child of a flex container landed at the container&rsquo;s content-box origin whatever the container asked for. CSS Flexbox 4.1 says its static position comes from <code>justify-content</code> and its own <code>align-self</code>, as though it were the only flex item, and <code>flex-direction: *-reverse</code>, <code>flex-wrap: wrap-reverse</code> and <code>direction: rtl</code> each turn the axis they govern around. Vertical writing modes are not covered &mdash; flex layout itself is horizontal-only here.</li>
+          <li><code>flex-wrap: wrap-reverse</code> puts the first line last. Lines wrapped, but the cross axis was never turned around, so the first line stayed at the top and <code>align-content: flex-start</code> stayed at the top with it. Lines are now mirrored within the container after <code>align-content</code> has placed them, and each item within its line.</li>
+          <li><b>CSS Scroll Snap.</b> <code>scroll-snap-type</code> on a scroll container, with <code>scroll-snap-align</code> on the things inside it, moves the container onto the nearest snap position once a scroll lands &mdash; from the wheel, and from <code>scrollTop</code>/<code>scrollLeft</code>. <code>scroll-padding</code> and <code>scroll-margin</code> inset the snapport and outset the snap area, both as shorthands and per side; <code>mandatory</code> always snaps, <code>proximity</code> only from within half a page. This is scroll containers only: <code>scroll-snap-type</code> on <code>html</code> or <code>body</code> does nothing yet.</li>
+          <li>A translucent background on an inline box is translucent. Inline runs are painted through ns-pango attributes, and while a text colour carrying alpha already emitted a matching foreground-alpha attribute, a background colour emitted only the opaque three-channel one &mdash; so <code>code { background: rgb(0 0 0 / 14%) }</code> painted a solid slab. The same colour on a block, an inline-block or a flex item was correct, which is why this survived: the wrong path is the one a dark theme&rsquo;s inline chips take.</li>
+        </ul>
+
+        <h2>printing</h2>
+        <p>The engine gets the parts of CSS that a printer needs. <code>@media print</code> now matches &mdash; the media type was hardcoded to <code>screen</code>, so a page&rsquo;s print stylesheet was simply ignored. <code>@page</code> sets the sheet size from a name (<code>A4</code>, <code>letter</code>, <code>legal</code>, <code>ledger</code>, the A and B series), from one or two lengths, or from <code>portrait</code>/<code>landscape</code>, along with its margins. <code>break-before</code>, <code>break-after</code> and <code>break-inside</code> &mdash; with the legacy <code>page-break-*</code> spellings mapping onto them and <code>always</code> becoming <code>page</code> &mdash; decide where a sheet may end.</p>
+        <p>A sheet is cut at a forced break if there is one before the page is full; otherwise the cut is pulled up above any box it would have split, which is every leaf box, every line of a paragraph, and anything asking for <code>break-inside: avoid</code>. Printing restores the on-screen layout afterwards, so the page a reader is looking at does not reflow under them.</p>
+
+        <h2>frames, JavaScript and the web platform</h2>
+        <ul class="news">
+          <li><b>A message a frame posts to its parent reaches the parent&rsquo;s listeners.</b> Delivery decided whether the recipient was the top window by comparing it against whichever realm was executing &mdash; and while a frame&rsquo;s script runs, that is the frame&rsquo;s own realm, so a message correctly addressed to the parent was judged to belong to some other window and handed to a dispatch path where the top window&rsquo;s <code>message</code> listeners are not registered. The message was built, cloned, queued, and then went nowhere. The comparison is now against the main realm, which does not move.</li>
+          <li><b>A framed document is governed by its own Content-Security-Policy.</b> A policy was kept once per browser, so whatever header arrived last decided what every document was allowed to load. Each framed document now carries the policy from its own response and <code>&lt;meta&gt;</code>, and a resource is judged against the policy of the document holding it &mdash; which also survives an application adding a stylesheet from a timer long after the frame finished loading.</li>
+          <li><b><code>fetch()</code> resolves with a real <code>Response</code>.</b> The object had the right properties and methods but not the prototype, so <code>instanceof Response</code> was false and <code>constructor.name</code> was <code>Object</code>. Code that branches on the type rather than duck-typing took the wrong path: wasm-bindgen&rsquo;s loader treats a non-<code>Response</code> as an already-compiled module and hands it straight to <code>WebAssembly.instantiate</code>.</li>
+          <li><b><code>window</code> inside a frame is a <code>Window</code>.</b> Frames get their own realm whose global was left an ordinary object, so <code>window instanceof Window</code> was false there while it was true at the top level &mdash; and <code>web_sys::window()</code> makes exactly that test, so every Rust and WebAssembly UI framework hit it.</li>
+          <li><b>A page&rsquo;s ES modules load again.</b> Reading <code>document.implementation</code> before <code>DOMImplementation</code> existed on the global left a TypeError pending on the context. Nothing noticed until quickjs-ng v0.16.1 began reporting a pending exception at the next module boundary, at which point the stray error surfaced as the rejection of every <code>import</code> on the page &mdash; static, dynamic, <code>data:</code> and <code>blob:</code> alike.</li>
+          <li><b>quickjs-ng v0.16.1</b>, up from v0.15.1. The two patches the tree carries &mdash; the Windows link fix and the removal of the identical-object shortcut in <code>Array.prototype.sort</code>, which skipped a comparator the specification says must run &mdash; still apply and were regenerated against the new sources. The bytecode cache carries a new format stamp, so entries written by an earlier build are discarded outright rather than costing a failed read on every load until they age out.</li>
+          <li><b><code>--version</code> prints the version and exits.</b> The flag was never recognised, so it fell through to an ordinary startup: the browser armed the watchdog, opened a window and left the caller with exit 255 and no version anywhere. It is now answered before the sandbox, the watchdog and GTK are touched.</li>
+        </ul>
+
+        <h2>text layout</h2>
+        <p>Text layout is ns-pango <code>2f975d8</code>, and a paragraph now measures the same whether or not another paragraph shaped its words first. The shaping cache decided where a run could be cut by reasoning about Unicode &mdash; a space either side of the boundary, or an ideograph &mdash; but Unicode does not know what a font does, and Liberation Sans and Liberation Serif, which fontconfig hands out for Arial, Helvetica and Times New Roman, kern the space against the letter that follows it and put the adjustment on the space. A cached piece ending in one therefore carried a width that belonged to whatever word had followed it that time, and served it in front of another: &ldquo;Type of&rdquo; came out 1024 units narrow once &ldquo;Type A&rdquo; had been laid out, and which paragraph was wrong depended on what the process had rendered earlier.</p>
+        <p>HarfBuzz answers this directly &mdash; asked for unsafe-to-concat flags it marks the clusters whose glyphs depend on the text beyond them &mdash; so a piece is now stored only when the shaper cleared both of its cuts, and an item whose pieces do not all survive that is stored whole instead. Verified by rendering the 45 pages in <code>data/render-tests/</code> with the cache on and with it off: identical layout on every one.</p>
+
+        <h2>documentation and known limitations</h2>
+        <p><a href="https://github.com/nordstjernen-web/northstar-browser/blob/main/docs/compliance.md">docs/compliance.md</a> records where the engine stands against the HTML and CSS specifications, how to reproduce the web-platform-tests scores, and the known structural gaps. <code>docs/building.md</code> gains a section on how a dependency is actually resolved and how to move a pin &mdash; lexbor and quickjs-ng take a system copy whenever the build finds one new enough and only fall back to the wrap, while ns-pango is always the subproject, because the renamed symbols are the whole reason it can sit beside the system Pango that GTK loads.</p>
+        <ul class="news">
+          <li>Web Audio renders mono, and <code>AudioParam</code> automation curves are ignored &mdash; a parameter reads as its current value for the whole render.</li>
+          <li>The stop button ends the loading state and marks the frame stale, but does not abort the network request behind it.</li>
+          <li><code>&lt;video&gt;</code> plays MPEG-1 only. There is no MPEG-4 or H.264 decoder, and no Media Source Extensions, so streaming video sites do not play.</li>
+          <li>Flex layout is horizontal-only: vertical writing modes are not covered, and <code>css/css-flexbox</code> remains the weakest layout area even after this release&rsquo;s jump.</li>
+        </ul>
+
+        <h2>about Northstar</h2>
+        <p><b>Free software.</b> Northstar is licensed under the GNU GPL, version 3 or later &mdash; use it, read it, change it, share it.</p>
+        <p><b>One process, one page.</b> All rendering happens in a single compact process &mdash; about 160,000 lines of original C, excluding the vendored WAMR, Wuffs and audio decoders &mdash; prioritizing auditability. On Linux it runs behind a Landlock filesystem sandbox (plus <code>PR_SET_NO_NEW_PRIVS</code>) with a default-deny seccomp syscall filter. No JIT.</p>
+        <p><b>Standards-first.</b> The same engine lineage as Nordstjernen: lexbor v3.0.0 for HTML/CSS, quickjs-ng v0.16.1 for JavaScript, ns-pango for text, WAMR for WebAssembly, Wuffs for image decoding. Modern CSS (flex, grid, transforms, gradients, keyframes, scroll snap), Shadow DOM, custom elements, the Navigation API, service workers and WebExtensions. Behaviour is measured against the spec text, section by section.</p>
+        <p><b>What it leaves out.</b> Compared with Nordstjernen: no multi-window browsing, no per-tab renderer processes, no WebGL or WebGPU, no embedded PDF viewer. Audio playback (MP3, MP2, Ogg Opus/Vorbis) is included, and video is MPEG-1 only &mdash; an ISO standard whose patents have expired, so it costs no dependency and no licence, but also not a format the modern web serves.</p>
+        <p>It sends no telemetry and no update pings, and includes no AI-style web APIs.</p>
+        <p>Read the <a href="northstar-browser/">full Northstar documentation</a>, or see the <a href="index.html#specs">comparison of Nordstjernen and Northstar</a> on the home page.</p>
+
+        <a id="news"></a>
+        <h2>news</h2>
+        <p><span class="date">8&nbsp;AUG&nbsp;2026</span> &middot;
+        Northstar <b>1.0.7</b> released &mdash; printing, a rebuilt about:start sky and earth, CSS Scroll Snap, frames that talk to their parent, and quickjs-ng 0.16.1.
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7">Release notes &raquo;</a></p>
+
+        <p><span class="date">8&nbsp;AUG&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.23</b> released &mdash; printing with <code>@page</code> and print stylesheets, correct <code>offsetLeft</code>/<code>offsetTop</code>, CSS Scroll Snap, and quickjs-ng 0.16.1.
+        <a href="release-1-0-23.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.23">Release notes &raquo;</a></p>
+
+        <p><span class="date">31&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.6</b> released &mdash; a rebuilt grid, an indexed CSS cascade, faster text through ns-pango, Web Audio that renders, and relative colour syntax.
+        <a href="northstar-release-1-0-6.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.6">Release notes &raquo;</a></p>
+
+        <p><span class="date">31&nbsp;JUL&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.22</b> released &mdash; real-site layout fixes, faster text and regular expressions, and a much more capable Android app.
+        <a href="release-1-0-22.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.22">Release notes &raquo;</a></p>
+
+        <p><span class="date">28&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.5</b> released &mdash; in-engine SVG, WebP/APNG, MPEG-1 video playback, and much better HTML, CSS and JavaScript compatibility.
+        <a href="northstar-release-1-0-5.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.5">Release notes &raquo;</a></p>
+
+        <p><span class="date">23&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.4</b> released &mdash; a maintenance release.
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.4">Release notes &raquo;</a></p>
+
+        <p><span class="date">22&nbsp;JUL&nbsp;2026</span> &middot;
+        Northstar <b>1.0.3</b> released &mdash; Media Queries Level 4, CSSOM used values, and use-after-free fixes.
+        <a href="northstar-release-1-0-3.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.3">Release notes &raquo;</a></p>
+
+        <a id="download"></a>
+        <h2>download</h2>
+        <p>Latest tagged release: Northstar <b>1.0.7</b> &mdash; released 8 August 2026.
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7">full release notes &raquo;</a></p>
+
+        <table class="spec dl">
+          <tr>
+            <th>Windows</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.7/northstar-1.0.7-windows-x86_64.zip">northstar-1.0.7-windows-x86_64.zip</a> &mdash; self-contained, no installer</td>
+          </tr>
+          <tr>
+            <th>Linux (portable)</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.7/northstar-1.0.7-linux-x86_64.zip">northstar-1.0.7-linux-x86_64.zip</a></td>
+          </tr>
+          <tr>
+            <th>Linux (AppImage)</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.7/northstar-1.0.7-x86_64.AppImage">northstar-1.0.7-x86_64.AppImage</a></td>
+          </tr>
+          <tr>
+            <th>Debian / Ubuntu</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.7/northstar_1.0.7_amd64.deb">northstar_1.0.7_amd64.deb</a></td>
+          </tr>
+          <tr>
+            <th>macOS</th>
+            <td>build from source with meson &mdash; see the <a href="northstar-browser/#build">build instructions</a></td>
+          </tr>
+          <tr>
+            <th>Source</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/archive/refs/tags/1.0.7.tar.gz">1.0.7.tar.gz</a> &middot;
+                <a href="https://github.com/nordstjernen-web/northstar-browser/archive/refs/tags/1.0.7.zip">1.0.7.zip</a></td>
+          </tr>
+          <tr>
+            <th>All releases</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases">github.com/nordstjernen-web/northstar-browser/releases</a></td>
+          </tr>
+        </table>
+
+        <p>The Windows build needs no installer and no MSYS2 &mdash; extract it anywhere and run
+        <code>northstar.exe</code>. Windows marks anything downloaded from the internet as
+        blocked, so before extracting, right-click the <code>.zip</code>, choose Properties,
+        tick <b>Unblock</b> at the bottom of the General tab and press OK. Doing it on the
+        archive first saves repeating it on <code>northstar.exe</code>, since the mark is
+        copied to every file extracted from a blocked archive.</p>
+
+        <p>On macOS, build from source with meson &mdash; see the
+        <a href="https://github.com/nordstjernen-web/northstar-browser">README</a> or the
+        <a href="northstar-browser/#build">build instructions</a>.</p>
+
+  </div>
+
+  <div class="footer">
+    <div class="counter"><img src="counter.php" alt="visitor count"></div>
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0-or-later</a> &middot;
+    <a href="https://discord.gg/4W959nW5vF">Discord</a>
+  </div>
+
+</div>
+
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('a').forEach(function (link) {
+    link.addEventListener('mouseenter', function () {
+      window.status = link.getAttribute('href') || '';
+    });
+    link.addEventListener('mouseleave', function () {
+      window.status = 'nordstjernen.org';
+    });
+  });
+  window.status = 'nordstjernen.org';
+});
+</script>
+
+</body>
+</html>
