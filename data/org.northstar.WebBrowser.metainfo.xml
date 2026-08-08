@@ -59,6 +59,19 @@
   </branding>
 
   <releases>
+    <release version="1.0.7" date="2026-08-08">
+      <description>
+        <p>Printing, layout and framed-document release.</p>
+        <ul>
+          <li>The browser prints: Ctrl+P lays the page out for paper and hands the sheets to the system print dialog, with @media print, @page and the break properties deciding where a sheet ends.</li>
+          <li>offsetLeft and offsetTop are measured from the offsetParent, which is what CSSOM View asks for and what most layout tests compare against.</li>
+          <li>CSS Scroll Snap moves a scroll container onto the nearest snap position, from the wheel and from scrollTop/scrollLeft.</li>
+          <li>Absolutely positioned flex children are placed by justify-content and align-self, and flex-wrap: wrap-reverse puts the first line last.</li>
+          <li>A frame reaches its parent: postMessage is delivered to the top window's listeners, each framed document is governed by its own Content-Security-Policy, and fetch() resolves with a real Response.</li>
+          <li>A paragraph measures the same whether or not another paragraph shaped its words first, because the font now decides where a shaped run may be cut.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.6" date="2026-07-30">
       <description>
         <p>CSS and text layout release.</p>
