@@ -4,6 +4,28 @@ Significant changes in each release:
 
 1.0.7:
 ======
+* Text layout is ns-pango `2f975d8`, and a paragraph now measures the same
+  whether or not another paragraph shaped its words first. The shaping
+  cache decided where a run could be cut by reasoning about Unicode — a
+  space either side of the boundary, or an ideograph — but Unicode does
+  not know what a font does, and Liberation Sans and Liberation Serif,
+  which fontconfig hands out for Arial, Helvetica and Times New Roman,
+  kern the space against the letter that follows it and put the
+  adjustment on the space. A cached piece ending in one therefore carried
+  a width that belonged to whatever word had followed it that time, and
+  served it in front of another: "Type of" came out 1024 units narrow
+  once "Type A" had been laid out, and which paragraph was wrong depended
+  on what the process had rendered earlier. HarfBuzz answers this
+  directly — asked for unsafe-to-concat flags it marks the clusters whose
+  glyphs depend on the text beyond them — so a piece is now stored only
+  when the shaper cleared both of its cuts, and an item whose pieces do
+  not all survive that is stored whole instead. `NS_PANGO_SHAPE_CACHE=0`
+  now switches off the item and break caches along with the shape cache,
+  and `verify` mode compares a served item against a fresh shaping field
+  by field rather than skipping anything longer than a word. Verified
+  here by rendering the 45 pages in `data/render-tests/` with the cache
+  on and with it off: identical layout on every one, and no mismatch
+  under `verify`.
 * The JavaScript engine is quickjs-ng v0.16.1, up from v0.15.1. The two
   patches the tree carries — the Windows link fix and the removal of the
   identical-object shortcut in `Array.prototype.sort`, which skipped a

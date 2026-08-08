@@ -199,9 +199,16 @@ is renamed (`ns_pango_*`, `NsPango*`), because GTK loads the system Pango
 into the same process and GObject aborts if two libraries register the same
 type name — so the engine includes `<ns-pango/…>` and the GTK shell keeps
 using the system Pango for its own widgets. A run is cached only when its
-shaping cannot depend on the text around it, which means whitespace or a
-paragraph edge at each end; `NS_PANGO_SHAPE_CACHE=verify` shapes both ways
-and warns on any difference, and `NS_PANGO_SHAPE_CACHE=0` disables it.
+shaping cannot depend on the text around it, and HarfBuzz is what decides
+that: asked for unsafe-to-concat flags, it marks every cluster whose glyphs
+would move if the neighbouring text changed, and a piece is stored only
+when both of its cuts came back clear — a font that kerns a space against
+the letter after it, as Liberation Sans and Liberation Serif do, therefore
+refuses the cut that a whitespace rule would have allowed. Whitespace or a
+paragraph edge still governs the item's own two ends.
+`NS_PANGO_SHAPE_CACHE=verify` serves each item from the cache, shapes it
+again and compares the two, warning on any difference;
+`NS_PANGO_SHAPE_CACHE=0` turns the shape, break and item caches all off.
 
 ## Diagnostics
 

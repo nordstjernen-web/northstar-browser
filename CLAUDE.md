@@ -167,12 +167,23 @@ Two rules matter when touching it:
   name. `ns-rename.py` in that repo performs the rewrite and is
   idempotent — re-run it after merging upstream, don't hand-edit.
 - **A run is cached only when its shaping cannot depend on the text
-  around it.** HarfBuzz gets the paragraph as context, so the cache
-  requires whitespace or a paragraph edge at each end of the item.
-  `NS_PANGO_SHAPE_CACHE=verify` shapes both ways and warns on any
+  around it.** HarfBuzz gets the paragraph as context, and it is HarfBuzz
+  that decides where the result may be cut: with
+  `HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT` it marks every cluster whose
+  glyphs would change if the text on the other side changed, and a piece
+  is stored only when both of its cuts came back clear. Unicode alone is
+  not enough — Liberation Sans and Liberation Serif, what fontconfig
+  hands out for Arial, Helvetica and Times New Roman, kern a space
+  against the letter after it and put the adjustment on the space, so a
+  piece ending in one carries a width belonging to whatever word followed
+  it that time. The whitespace-or-ideograph rule still governs the item's
+  own two ends, where the shaper has no opinion about what lies beyond.
+  `NS_PANGO_SHAPE_CACHE=verify` serves each item from the cache, shapes
+  it again and compares the two field by field, warning on any
   difference; run it over the affected pages after changing anything in
-  the cache key. `NS_PANGO_SHAPE_CACHE=0` disables the cache, and
-  `--debug=net` reports hits, misses and skips.
+  the cache key. `NS_PANGO_SHAPE_CACHE=0` disables all three caches —
+  shape, break and item — and `--debug=net` reports hits, misses and
+  skips.
 
 The GTK shell still uses the system Pango for its own widgets (the
 `PANGO_ELLIPSIZE_*` constants on GtkLabels); don't rename those.
