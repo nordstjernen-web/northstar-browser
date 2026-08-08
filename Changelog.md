@@ -22,7 +22,19 @@ Significant changes in each release:
   the peaks rather than across whole regions, and deserts and forests that
   follow a moisture field. Aerial perspective now decays with distance the
   way it should, which had been inverted: the haze thinned towards the
-  horizon and thickened over the ground nearest the viewer.
+  horizon and thickened over the ground nearest the viewer. The land is
+  settled, in the manner of a turn-based strategy map: capitals are
+  scattered across it at a minimum separation and the ground divided
+  between them by a Voronoi partition whose distances are warped by noise,
+  so frontiers wander the way drawn ones do rather than meeting at
+  straight bisectors. Each nation takes the lowest colour none of its
+  neighbours holds, and wears it as a wash over its territory, a bolder
+  line along its frontiers and a lighter one down its coast, with a
+  capital and up to four towns marked inside. It rides as its own
+  premultiplied overlay above the terrain and fades out with distance, so
+  the markers do not turn into confetti where the texture repeats near the
+  horizon, and passing cloud covers them the way cloud covers everything
+  else.
 * `offsetLeft` and `offsetTop` are measured from the offsetParent again.
   Both returned a document coordinate — and one built from the margin box
   rather than the border box — so an element inside any positioned

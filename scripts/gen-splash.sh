@@ -128,6 +128,7 @@ PLANET_RX=$(python3 -c "print(int($W*1.28))")
 PLANET_RY=$(python3 -c "print(int($H*2.05))")
 
 python3 - "$w" <<'PY'
+import math
 import sys
 import numpy as np
 
@@ -229,6 +230,140 @@ deep = np.clip((SEA - height)/0.34, 0.0, 1.0)
 surface[..., 2] += (150.0 - surface[..., 2])*((1.0 - land)*deep*0.16)
 surface = np.clip(surface, 0.0, 255.0)
 
+CIVCOL = np.array([
+    (206, 66, 60), (236, 138, 44), (244, 202, 66), (128, 192, 68),
+    (56, 156, 96), (58, 176, 176), (52, 128, 212), (88, 94, 198),
+    (140, 86, 194), (204, 78, 166), (230, 116, 130), (168, 118, 76),
+    (118, 132, 150), (70, 100, 132), (186, 174, 98), (94, 166, 138),
+], dtype=np.float32)
+
+crng = np.random.default_rng(4004)
+solid = height > SEA + 0.014
+seeds = []
+for _ in range(30000):
+    if len(seeds) >= 90:
+        break
+    cy = int(crng.integers(0, TH))
+    cx = int(crng.integers(0, TW))
+    if not solid[cy, cx]:
+        continue
+    clear = True
+    for sy, sx in seeds:
+        dy = min(abs(cy - sy), TH - abs(cy - sy))
+        dx = min(abs(cx - sx), TW - abs(cx - sx))
+        if dy*dy + dx*dx < 140*140:
+            clear = False
+            break
+    if clear:
+        seeds.append((cy, cx))
+
+wobble = (unit(fbm(9, 4)) - 0.5).astype(np.float32)
+rows = np.arange(TH, dtype=np.float32)[:, None]
+cols_ = np.arange(TW, dtype=np.float32)[None, :]
+best = np.full((TH, TW), 1e18, dtype=np.float32)
+owner = np.full((TH, TW), -1, dtype=np.int16)
+for i, (sy, sx) in enumerate(seeds):
+    dy = np.abs(rows - sy)
+    dy = np.minimum(dy, TH - dy)
+    dx = np.abs(cols_ - sx)
+    dx = np.minimum(dx, TW - dx)
+    reach = np.sqrt(dy*dy + dx*dx)*(1.0 + wobble*0.34)
+    closer = reach < best
+    best = np.where(closer, reach, best)
+    owner = np.where(closer, np.int16(i), owner)
+owner = np.where(solid, owner, np.int16(-1))
+
+adjacent = [set() for _ in seeds]
+inland = np.zeros((TH, TW), dtype=bool)
+shore = np.zeros((TH, TW), dtype=bool)
+for axis in (0, 1):
+    for step in (1, -1):
+        beside = np.roll(owner, step, axis=axis)
+        split = (owner >= 0) & (beside >= 0) & (owner != beside)
+        inland |= split
+        shore |= (owner >= 0) & (beside < 0)
+        if split.any():
+            for a, b in np.unique(np.stack([owner[split], beside[split]], axis=1), axis=0):
+                adjacent[int(a)].add(int(b))
+
+palette = []
+for i in range(len(seeds)):
+    taken = {palette[n] for n in adjacent[i] if n < i}
+    pick = 0
+    while pick in taken:
+        pick += 1
+    palette.append(pick % len(CIVCOL))
+
+lut = CIVCOL[np.array(palette, dtype=np.int64)] if seeds else np.zeros((1, 3), np.float32)
+natcol = lut[np.clip(owner, 0, None).astype(np.int64)]
+held = (owner >= 0)
+
+civp = np.zeros((TH, TW, 3), dtype=np.float32)
+civa = np.zeros((TH, TW), dtype=np.float32)
+
+
+def over(colour, alpha):
+    a = np.clip(alpha, 0.0, 1.0).astype(np.float32)[..., None]
+    civp[...] = np.asarray(colour, dtype=np.float32)*a + civp*(1.0 - a)
+    civa[...] = a[..., 0] + civa*(1.0 - a[..., 0])
+
+
+thick = inland.copy()
+for _ in range(2):
+    spread = thick.copy()
+    for axis in (0, 1):
+        for step in (1, -1):
+            spread |= np.roll(thick, step, axis=axis)
+    thick = spread
+thick &= held
+bright = np.clip(natcol*1.10 + 52.0, 0.0, 255.0)
+
+over(natcol, held*0.30)
+over(bright, (shore & ~thick)*0.50)
+over(bright, thick*0.86)
+
+
+def stamp(cy, cx, radius, colour, alpha):
+    span = int(math.ceil(radius)) + 1
+    ys_ = np.arange(cy - span, cy + span + 1) % TH
+    xs_ = np.arange(cx - span, cx + span + 1) % TW
+    dy = np.arange(-span, span + 1, dtype=np.float32)[:, None]
+    dx = np.arange(-span, span + 1, dtype=np.float32)[None, :]
+    a = (np.clip((radius - np.sqrt(dy*dy + dx*dx))*1.5, 0.0, 1.0)*alpha).astype(np.float32)[..., None]
+    where = np.ix_(ys_, xs_)
+    civp[where] = np.asarray(colour, dtype=np.float32)*a + civp[where]*(1.0 - a)
+    civa[where] = a[..., 0] + civa[where]*(1.0 - a[..., 0])
+
+
+WALL = np.array([40, 46, 56], dtype=np.float32)
+KEEP = np.array([255, 247, 226], dtype=np.float32)
+for i, (sy, sx) in enumerate(seeds):
+    towns = [(sy, sx, True)]
+    for _ in range(80):
+        if len(towns) >= 5:
+            break
+        ang = crng.uniform(0.0, 2.0*math.pi)
+        far = crng.uniform(34.0, 104.0)
+        ty = int(round(sy + math.sin(ang)*far)) % TH
+        tx = int(round(sx + math.cos(ang)*far)) % TW
+        if owner[ty, tx] != i:
+            continue
+        crowded = False
+        for py, px, _ in towns:
+            dy = min(abs(ty - py), TH - abs(ty - py))
+            dx = min(abs(tx - px), TW - abs(tx - px))
+            if dy*dy + dx*dx < 30*30:
+                crowded = True
+                break
+        if crowded:
+            continue
+        towns.append((ty, tx, False))
+    for ty, tx, capital in towns:
+        span = 5.8 if capital else 3.7
+        stamp(ty, tx, span + 1.4, WALL, 0.70)
+        stamp(ty, tx, span, lut[i], 0.95)
+        stamp(ty, tx, span*0.46, KEEP, 0.95)
+
 cloudbase = unit(fbm(4, 7))
 cloud = np.clip((cloudbase - 0.545)/0.185, 0.0, 1.0)**0.85
 cloud *= np.clip((unit(fbm(14, 4)) - 0.20)/0.55, 0.0, 1.0)**0.45
@@ -236,6 +371,7 @@ ocean = np.clip((SEA - height)/0.045, 0.0, 1.0)
 
 np.save(wd + "/tex_surface.npy", surface.astype(np.float32))
 np.save(wd + "/tex_extra.npy", np.stack([cloud, ocean], axis=-1).astype(np.float32))
+np.save(wd + "/tex_civ.npy", np.concatenate([civp, civa[..., None]], axis=-1).astype(np.float32))
 PY
 
 cat > "$w/earth.py" <<'PY'
@@ -269,6 +405,7 @@ def mips(img, levels):
 
 SURF = mips(np.load(wd + "/tex_surface.npy"), 6)
 EXTRA = mips(np.load(wd + "/tex_extra.npy"), 6)
+CIV = mips(np.load(wd + "/tex_civ.npy"), 6)
 TH, TW = SURF[0].shape[:2]
 
 
@@ -316,6 +453,10 @@ v = depth/(TILE*VSTRETCH)
 lod = np.maximum(np.log2(np.maximum((TW/TILE)*np.sqrt(FOCAL/VSTRETCH)/t**1.5, 1.0)) - LODBIAS, 0.0)
 
 col = sample(SURF, u, v, lod)
+civ = sample(CIV, u, v, lod)
+reach = np.clip(1.0 - lod/2.2, 0.0, 1.0)**1.2
+col = civ[..., :3]*reach[..., None] + col*(1.0 - (civ[..., 3]*reach)[..., None])
+
 extra = sample(EXTRA, u, v, lod)
 ocean = extra[..., 1]
 cover = sample(EXTRA, u/1.25, v/1.6, np.maximum(lod - 0.4, 0.0))[..., 0]
