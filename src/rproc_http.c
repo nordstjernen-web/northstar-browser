@@ -546,7 +546,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     if (!r || !out)
         return -1;
     memset(out, 0, sizeof *out);
-    out->scroll_y = -1;
+    out->scroll_y = out->scroll_x = -1;
     if (width > r->max_w)
         width = r->max_w;
     if (height > r->max_h)
@@ -584,6 +584,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         out->page_w = (int)head.x_page_w;
         out->page_h = (int)head.x_page_h;
         out->scroll_y = (int)head.x_scroll_y;
+        out->scroll_x = (int)head.x_scroll_x;
         out->render_rc = (int)head.x_render_rc;
         out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
         out->camera = head.x_camera[0] ? strdup(head.x_camera) : NULL;
@@ -607,6 +608,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     out->page_w = (int)head.x_page_w;
     out->page_h = (int)head.x_page_h;
     out->scroll_y = (int)head.x_scroll_y;
+    out->scroll_x = (int)head.x_scroll_x;
     out->render_rc = (int)head.x_render_rc;
     out->pixels = r->shm ? r->map : r->rxbuf;
     out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;

@@ -2,6 +2,35 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.8:
+======
+* The page itself snaps. `scroll-snap-type` reached 1.0.7 on scroll
+  containers only, which left out the arrangement almost every page that
+  asks for snapping actually uses: full-height sections down the document,
+  with the property on `html` or `body` and nothing overflowing in between.
+  The document scroller is the one scroller that is not a box — the shell
+  owns its offsets in a `GtkAdjustment`, and the engine only learns them as
+  the coordinates it is asked to paint from — so the snap positions its
+  descendants offer were never consulted. The solver no longer derives the
+  snapport from the scrolling box: it takes one, so the viewport can supply
+  its own, and the renderer resolves the proposed offset against the root
+  element's `scroll-snap-type` on the way into a frame and hands the snapped
+  one back to the shell, which is the same channel `scrollIntoView` and
+  fragment navigation already return a scroll position through. Every source
+  of document scrolling therefore snaps — the wheel, the scrollbar, the
+  keyboard — because each of them ends in a frame rendered at a new offset.
+  `scroll-padding` on the root insets the viewport snapport as it insets a
+  box's, `mandatory` and `proximity` keep their meanings, and the horizontal
+  axis rides back alongside the vertical one. The root element is `html`,
+  and `body` is honoured as a source too, which is how the root's `overflow`
+  is already read here and what the pages that set it there expect.
+  Verified on `data/render-tests/scroll-snap-viewport.html`, four
+  hundred-viewport-height sections in a 955-pixel viewport: proposed offsets
+  of 100, 400, 600, 1000 and 1400 all resolve to 955, 2000 to 1910, and
+  anything past the end to 2865, while `scroll-snap.html`, whose snapping is
+  all inside boxes, and the ordinary layout pages resolve to no snap at all
+  and scroll exactly as before.
+
 1.0.7:
 ======
 * The `about:start` splash carries the release number and a better sky and
