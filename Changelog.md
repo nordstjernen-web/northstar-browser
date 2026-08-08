@@ -26,6 +26,21 @@ Significant changes in each release:
   here by rendering the 45 pages in `data/render-tests/` with the cache
   on and with it off: identical layout on every one, and no mismatch
   under `verify`.
+* The build documentation says how a dependency is actually resolved and
+  how to move one. `docs/building.md` and `README.md` both said `meson
+  setup` fetches lexbor, quickjs-ng and ns-pango, when the first two take
+  a system copy whenever the build finds one new enough and only fall
+  back to the wrap — and ns-pango is the one that is always the
+  subproject, because the renamed symbols are the whole reason it can sit
+  beside the system Pango that GTK loads. README also listed the vendored
+  components and then named only lexbor and quickjs-ng as fetched,
+  leaving ns-pango in neither list. `docs/building.md` gains a section on
+  updating a pin: that editing `revision =` does not move the checkout on
+  its own, that `meson subprojects update --reset <name>` does and works
+  on the shallow clones these wraps ask for, where the three `diff_files`
+  patches live and when to regenerate them, which vendored copies are
+  byte-identical to upstream and which two are not, and what to verify
+  afterwards.
 * The JavaScript engine is quickjs-ng v0.16.1, up from v0.15.1. The two
   patches the tree carries — the Windows link fix and the removal of the
   identical-object shortcut in `Array.prototype.sort`, which skipped a

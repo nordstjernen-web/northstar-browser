@@ -118,9 +118,11 @@ single page can also be rendered directly:
 Meson feature options include `-Davif=disabled`, `-Daudio=disabled`,
 `-Dwasm=disabled` and `-Dgtk=disabled` for smaller or engine-only builds.
 
-WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree. lexbor and
-quickjs-ng are fetched by `meson setup` as pinned upstream subprojects
-(see `subprojects/*.wrap`).
+WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree. ns-pango, lexbor
+and quickjs-ng are pinned upstream subprojects (see `subprojects/*.wrap`)
+that `meson setup` fetches; see
+[docs/building.md](docs/building.md#updating-a-pinned-dependency) for how
+a pin is moved.
 
 ## Dependencies
 
@@ -128,13 +130,18 @@ Northstar's engine is written from scratch — it contains no forked
 browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 [Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
 
-**Fetched at `meson setup`** (pinned upstream meson subprojects, `subprojects/*.wrap`):
+**Pinned upstream meson subprojects** (`subprojects/*.wrap`), fetched by
+`meson setup`:
 
 | Component | Role |
 |-----------|------|
 | [lexbor](https://github.com/lexbor/lexbor) v3.0.0 | HTML5 → DOM parser and the WHATWG URL module |
 | [quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.16.1 | JavaScript engine — no JIT |
 | [ns-pango](https://github.com/nordstjernen-web/ns-pango) | Text itemization, shaping and line breaking — a Pango fork with a cross-layout shaping cache |
+
+lexbor and quickjs-ng take a system copy instead when the build finds one
+new enough; ns-pango is always the subproject, since the fork's renamed
+symbols are what let it coexist with the system Pango that GTK loads.
 
 **Vendored in-tree** (built from the main tree, no submodules):
 

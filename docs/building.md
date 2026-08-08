@@ -70,19 +70,69 @@ meson compile -C builddir
 ./builddir/src/gtk/northstar
 ```
 
-`meson setup` fetches three pinned upstream subprojects — **lexbor**
-(HTML/CSS/URL parser), **quickjs-ng** (JavaScript) and **ns-pango** (text
-itemization, shaping and line breaking) — and exposes them as the
-`liblexbor` / `libquickjs` / `ns-pango` dependencies. WAMR, Wuffs, pl_mpeg
-and minimp3 are vendored in-tree. No in-tree fork of any browser engine is
-carried.
+`meson setup` resolves three upstream projects through
+`subprojects/*.wrap`, and exposes them as the `liblexbor` / `libquickjs` /
+`ns-pango` dependencies:
 
-The build needs network access the first time, to clone those three. A
-tarball that must build offline has to embed them; `debian/README.source`
-carries the recipe.
+| Dependency | Pinned to | Resolution |
+|------------|-----------|------------|
+| [lexbor](https://github.com/lexbor/lexbor) — HTML/CSS/URL parser | `v3.0.0` | A system lexbor ≥ 3.0.0 is used when `pkg-config` or CMake finds one; otherwise the wrap is cloned and its static library built through meson's CMake module. |
+| [quickjs-ng](https://github.com/quickjs-ng/quickjs) — JavaScript | `v0.16.1` | System package first, the wrap as fallback. |
+| [ns-pango](https://github.com/nordstjernen-web/ns-pango) — text itemization, shaping, line breaking | a commit | Always the subproject. There is no system copy to find: the fork renames every symbol precisely so it can coexist with the system Pango that GTK loads. |
+
+WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree and need no network.
+No in-tree fork of any browser engine is carried.
+
+So the first build needs network access for whichever of those three it
+cannot satisfy locally — ns-pango always, the other two unless the system
+supplies them. A tarball that must build offline has to embed them;
+`debian/README.source` carries the recipe.
 
 `./scripts/dev.sh build` runs `meson setup` (only when needed) and
 `meson compile -C builddir` in one step.
+
+## Updating a pinned dependency
+
+Editing the `revision =` line in a wrap is not enough on its own: meson
+keeps the checkout it already has. Move the pin, then reset the checkout
+to it.
+
+```sh
+$EDITOR subprojects/ns-pango.wrap        # revision = <new tag or commit>
+meson subprojects update --reset ns-pango
+meson compile -C builddir
+```
+
+`--reset` hard-resets the subproject to the wrap's revision and works on
+the shallow clones these wraps ask for, in either direction. Deleting
+`subprojects/<name>/` and reconfiguring does the same thing more slowly.
+
+Three local patches ride on top of the fetched sources, named by
+`diff_files` in the wraps and living in `subprojects/packagefiles/`: one
+for lexbor and two for quickjs-ng. Regenerate them against the new
+sources when a pin moves, or drop one upstream has taken.
+
+The vendored copies are updated by replacing the files. Wuffs
+(`subprojects/wuffs/wuffs-v0.4.c`) and minimp3 (`src/audio/minimp3.h`) are
+byte-identical to their upstream releases, so syncing either is a copy.
+pl_mpeg carries one Northstar change — a bounds fix for half-pel motion
+compensation, which read a row past the plane — marked in place in the
+vendored header; keep it when syncing. WAMR (`src/wamr/`) is a subset of
+upstream: `core/` plus `ns_wamr.c`, the narrow accessors the WebAssembly
+JS API needs, which are Northstar's own.
+[`../THIRD-PARTY-LICENSES.md`](../THIRD-PARTY-LICENSES.md) lists every
+component and every patch, and is the file to update when any of this
+moves.
+
+Verify a dependency move the way any other change is verified: a clean
+`meson compile` with no new warnings, `./scripts/dev.sh smoke` for layout
+drift, and the browser launched on the paths the dependency touches. A
+text-layout change wants more than that, because the shaping cache can be
+wrong only for the second paragraph that shares a word with the first:
+render `data/render-tests/` twice, once with `NS_PANGO_SHAPE_CACHE=0` and
+once with the cache on, and require the layout dumps to be identical, then
+check that `NS_PANGO_SHAPE_CACHE=verify` reports no mismatch over the same
+pages.
 
 ## Fast iteration
 
