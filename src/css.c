@@ -339,6 +339,17 @@ static const ns_css_property_meta kProperty[NS_CSS_PROP_COUNT] = {
     [NS_CSS_BREAK_BEFORE]         = P("break-before"),
     [NS_CSS_BREAK_AFTER]          = P("break-after"),
     [NS_CSS_BREAK_INSIDE]         = P("break-inside"),
+    [NS_CSS_SCROLL_SNAP_TYPE]     = P("scroll-snap-type"),
+    [NS_CSS_SCROLL_SNAP_ALIGN]    = P("scroll-snap-align"),
+    [NS_CSS_SCROLL_SNAP_STOP]     = P("scroll-snap-stop"),
+    [NS_CSS_SCROLL_PADDING_TOP]   = P("scroll-padding-top"),
+    [NS_CSS_SCROLL_PADDING_RIGHT] = P("scroll-padding-right"),
+    [NS_CSS_SCROLL_PADDING_BOTTOM]= P("scroll-padding-bottom"),
+    [NS_CSS_SCROLL_PADDING_LEFT]  = P("scroll-padding-left"),
+    [NS_CSS_SCROLL_MARGIN_TOP]    = P("scroll-margin-top"),
+    [NS_CSS_SCROLL_MARGIN_RIGHT]  = P("scroll-margin-right"),
+    [NS_CSS_SCROLL_MARGIN_BOTTOM] = P("scroll-margin-bottom"),
+    [NS_CSS_SCROLL_MARGIN_LEFT]   = P("scroll-margin-left"),
     [NS_CSS_CARET_COLOR]          = PI("caret-color"),
     [NS_CSS_TAB_SIZE]             = PI("tab-size"),
     [NS_CSS_JUSTIFY_ITEMS]        = P("justify-items"),
@@ -7399,6 +7410,93 @@ prop_is_corner_radius(ns_css_prop prop)
            prop == NS_CSS_BORDER_BOTTOM_LEFT_RADIUS;
 }
 
+static gboolean
+word_is_one_of(const char *w, const char *choices)
+{
+    gsize n = strlen(w);
+    for (const char *p = choices; *p; ) {
+        while (*p == ' ') p++;
+        const char *end = strchr(p, ' ');
+        gsize len = end ? (gsize)(end - p) : strlen(p);
+        if (len == n && g_ascii_strncasecmp(p, w, n) == 0) return TRUE;
+        if (!end) break;
+        p = end + 1;
+    }
+    return FALSE;
+}
+
+static ns_css_value *
+keyword_value(const char *canonical)
+{
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_KEYWORD;
+    v->u.keyword = g_strdup(canonical);
+    return v;
+}
+
+static ns_css_value *
+parse_scroll_snap_type(const char *text)
+{
+    char **w = g_strsplit_set(text, " \t\r\n", -1);
+    GPtrArray *words = g_ptr_array_new();
+    for (int i = 0; w[i]; i++)
+        if (*w[i]) g_ptr_array_add(words, w[i]);
+    ns_css_value *v = NULL;
+    if (words->len == 1 &&
+        g_ascii_strcasecmp(g_ptr_array_index(words, 0), "none") == 0) {
+        v = keyword_value("none");
+    } else if (words->len >= 1 && words->len <= 2 &&
+               word_is_one_of(g_ptr_array_index(words, 0),
+                              "x y block inline both")) {
+        const char *axis = g_ptr_array_index(words, 0);
+        const char *strictness = words->len == 2
+            ? g_ptr_array_index(words, 1) : "proximity";
+        if (word_is_one_of(strictness, "mandatory proximity")) {
+            char *lower_axis = g_ascii_strdown(axis, -1);
+            char *lower_strict = g_ascii_strdown(strictness, -1);
+            char *joined = g_strconcat(lower_axis, " ", lower_strict, NULL);
+            v = keyword_value(joined);
+            g_free(joined);
+            g_free(lower_strict);
+            g_free(lower_axis);
+        }
+    }
+    g_ptr_array_free(words, TRUE);
+    g_strfreev(w);
+    return v;
+}
+
+static ns_css_value *
+parse_scroll_snap_align(const char *text)
+{
+    char **w = g_strsplit_set(text, " \t\r\n", -1);
+    GPtrArray *words = g_ptr_array_new();
+    for (int i = 0; w[i]; i++)
+        if (*w[i]) g_ptr_array_add(words, w[i]);
+    ns_css_value *v = NULL;
+    if (words->len >= 1 && words->len <= 2) {
+        gboolean ok = TRUE;
+        for (guint i = 0; i < words->len; i++)
+            if (!word_is_one_of(g_ptr_array_index(words, i),
+                                "none start end center"))
+                ok = FALSE;
+        if (ok) {
+            char *a = g_ascii_strdown(g_ptr_array_index(words, 0), -1);
+            char *b = words->len == 2
+                ? g_ascii_strdown(g_ptr_array_index(words, 1), -1)
+                : g_strdup(a);
+            char *joined = g_strconcat(a, " ", b, NULL);
+            v = keyword_value(joined);
+            g_free(joined);
+            g_free(b);
+            g_free(a);
+        }
+    }
+    g_ptr_array_free(words, TRUE);
+    g_strfreev(w);
+    return v;
+}
+
 static ns_css_value *
 parse_keyword_choice(const char *text, const char *choices)
 {
@@ -7753,6 +7851,15 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_keyword_choice(t,
             "auto avoid avoid-page avoid-column avoid-region");
         break;
+    case NS_CSS_SCROLL_SNAP_TYPE:
+        v = parse_scroll_snap_type(t);
+        break;
+    case NS_CSS_SCROLL_SNAP_ALIGN:
+        v = parse_scroll_snap_align(t);
+        break;
+    case NS_CSS_SCROLL_SNAP_STOP:
+        v = parse_keyword_choice(t, "normal always");
+        break;
     case NS_CSS_WRITING_MODE:
         v = parse_keyword_choice(t,
             "horizontal-tb vertical-rl vertical-lr sideways-rl sideways-lr "
@@ -8027,6 +8134,10 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_TOP: case NS_CSS_RIGHT:
     case NS_CSS_BOTTOM: case NS_CSS_LEFT:
     case NS_CSS_COLUMN_WIDTH:
+    case NS_CSS_SCROLL_PADDING_TOP: case NS_CSS_SCROLL_PADDING_RIGHT:
+    case NS_CSS_SCROLL_PADDING_BOTTOM: case NS_CSS_SCROLL_PADDING_LEFT:
+    case NS_CSS_SCROLL_MARGIN_TOP: case NS_CSS_SCROLL_MARGIN_RIGHT:
+    case NS_CSS_SCROLL_MARGIN_BOTTOM: case NS_CSS_SCROLL_MARGIN_LEFT:
     case NS_CSS_COLUMN_RULE_WIDTH: {
         if (prop == NS_CSS_FONT_SIZE) {
             if (g_ascii_strcasecmp(t, "larger") == 0 ||
@@ -11248,6 +11359,8 @@ parse_declaration_block(const char **pp, const char *end,
 
         if (strcmp(pname, "margin") == 0 ||
             strcmp(pname, "padding") == 0 ||
+            strcmp(pname, "scroll-margin") == 0 ||
+            strcmp(pname, "scroll-padding") == 0 ||
             strcmp(pname, "border-width") == 0 ||
             strcmp(pname, "border-color") == 0 ||
             strcmp(pname, "border-style") == 0) {
@@ -11263,6 +11376,16 @@ parse_declaration_block(const char **pp, const char *end,
                     emit_quad(decls_out,
                         NS_CSS_PADDING_TOP, NS_CSS_PADDING_RIGHT,
                         NS_CSS_PADDING_BOTTOM, NS_CSS_PADDING_LEFT,
+                        tokens, n, important);
+                else if (strcmp(pname, "scroll-margin") == 0)
+                    emit_quad(decls_out,
+                        NS_CSS_SCROLL_MARGIN_TOP, NS_CSS_SCROLL_MARGIN_RIGHT,
+                        NS_CSS_SCROLL_MARGIN_BOTTOM, NS_CSS_SCROLL_MARGIN_LEFT,
+                        tokens, n, important);
+                else if (strcmp(pname, "scroll-padding") == 0)
+                    emit_quad(decls_out,
+                        NS_CSS_SCROLL_PADDING_TOP, NS_CSS_SCROLL_PADDING_RIGHT,
+                        NS_CSS_SCROLL_PADDING_BOTTOM, NS_CSS_SCROLL_PADDING_LEFT,
                         tokens, n, important);
                 else if (strcmp(pname, "border-width") == 0)
                     emit_quad(decls_out,

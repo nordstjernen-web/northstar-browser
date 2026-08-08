@@ -4,6 +4,44 @@ Significant changes in each release:
 
 1.0.7:
 ======
+* `offsetLeft` and `offsetTop` are measured from the offsetParent again.
+  Both returned a document coordinate — and one built from the margin box
+  rather than the border box — so an element inside any positioned
+  ancestor reported where it sat on the page instead of where it sat in
+  its parent. CSSOM View asks for the distance from the offsetParent's
+  padding edge, with a statically positioned `body` or root the exception
+  every engine makes, and that is what they return now. A great many
+  pages measure this way, and so does the `checkLayout` harness that most
+  of WPT's layout tests are written against: the reading of
+  `css/css-flexbox` was flat at 653 subtests before the fix below and
+  after it, because the fix could not be seen through this one. With both
+  in, `css/css-flexbox` goes from 653 to 1437 of the same 3535 subtests,
+  18.5% to 40.7%.
+* An absolutely positioned child of a flex container is placed where the
+  flexbox specification says. It landed at the container's content-box
+  origin whatever the container asked for; CSS Flexbox 4.1 says its
+  static position comes from `justify-content` and its own `align-self`,
+  as though it were the only flex item, and `flex-direction: *-reverse`,
+  `flex-wrap: wrap-reverse` and `direction: rtl` each turn the axis they
+  govern around. Vertical writing modes are not covered — flex layout
+  itself is horizontal-only here.
+* `flex-wrap: wrap-reverse` puts the first line last. Lines wrapped, but
+  the cross axis was never turned around, so the first line stayed at the
+  top and `align-content: flex-start` stayed at the top with it. The
+  lines are now mirrored within the container after `align-content` has
+  placed them, and each item is mirrored within its line, which reverses
+  `align-items: flex-start`/`flex-end` along with them.
+* CSS Scroll Snap. `scroll-snap-type` on a scroll container, with
+  `scroll-snap-align` on the things inside it, moves the container onto
+  the nearest snap position once a scroll lands — from the wheel, and
+  from `scrollTop`/`scrollLeft`. `scroll-padding` on the container and
+  `scroll-margin` on an item inset the snapport and outset the snap area,
+  both as shorthands and per side; `mandatory` always snaps, `proximity`
+  only from within half a page. A wheel tick shorter than the gap between
+  two snap positions still moves the reader forward rather than falling
+  back to the one behind. This is scroll containers only: the document
+  scroller belongs to the window, not to a box, so `scroll-snap-type` on
+  `html` or `body` does nothing yet.
 * The browser prints. `Ctrl+P`, or *Print…* in the menu, lays the page out
   for paper and hands the sheets to the operating system's own print
   dialog through `GtkPrintOperation` — CUPS on Linux, the Win32 printer

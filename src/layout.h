@@ -249,6 +249,13 @@ const ns_node *ns_box_hit_dom(const ns_box *root, double x, double y);
 GPtrArray *ns_box_hit_dom_stack(const ns_box *root, double x, double y);
 
 ns_box *ns_box_hit_scrollable(ns_box *root, double x, double y);
+
+/* CSS Scroll Snap: moves a scroll container's offsets onto the nearest snap
+   position its descendants offer. Does nothing without scroll-snap-type.
+   The _from variant knows where the scroll started, so a short gesture
+   still lands on the next snap position rather than falling back. */
+void ns_box_scroll_snap(ns_box *scroller);
+void ns_box_scroll_snap_from(ns_box *scroller, double prev_x, double prev_y);
 ns_box *ns_box_hit_scrollbar(ns_box *root, double x, double y,
                              double *lx, double *ly);
 

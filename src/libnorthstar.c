@@ -1776,6 +1776,7 @@ ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy)
     ns_box *box = ns_box_hit_scrollable(browser->layout, (double)x, (double)y);
     if (!box) return 0;
 
+    double prev_x = box->scroll_x, prev_y = box->scroll_y;
     int consumed = 0;
     if (dy != 0 && box->scroll_max_y > 0) {
         double ny = box->scroll_y + dy;
@@ -1790,8 +1791,11 @@ ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy)
         if (nx != box->scroll_x) { box->scroll_x = nx; consumed = 1; }
     }
 
-    if (consumed && browser->js && box->dom)
-        ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
+    if (consumed) {
+        ns_box_scroll_snap_from(box, prev_x, prev_y);
+        if (browser->js && box->dom)
+            ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
+    }
     return consumed;
 }
 

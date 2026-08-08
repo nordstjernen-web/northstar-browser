@@ -59,14 +59,18 @@ Two caveats when reading any of this:
 ## Current scores
 
 Measured at `7b38d66` against a WPT checkout of 2026-07-29, 8 s per-test
-timeout.
+timeout — except `css/css-flexbox`, re-measured against a checkout of
+2026-08-08 with a 6 s timeout after the CSSOM and flex work in 1.0.7.
 
 **These numbers are a snapshot, not a running total.** Engine work has
 landed since — the colour, `border-radius`, flex-baseline and CSSOM fixes,
 and everything in `Changelog.md` after 1.0.5 — and none of it has been
 re-measured against this table; each change was verified against the
-behaviour it names. Re-run the areas below before quoting any of this as
-current.
+behaviour it names. Treat every row but the flexbox one as a **floor**
+rather than a reading: they were all taken while `offsetLeft` and
+`offsetTop` returned document coordinates, which `checkLayout` compares
+directly, so any area with layout assertions scored lower than the engine
+deserved. Re-run the areas below before quoting any of this as current.
 
 | Area | Subtests | Pass rate |
 | --- | --- | --- |
@@ -84,7 +88,7 @@ current.
 | `css/css-transforms` | 310 / 705 | 44.0% |
 | `html/semantics/document-metadata` | 68 / 171 | 39.8% |
 | `html/semantics/scripting-1` | 1304 / 1980 | 65.9% |
-| `css/css-flexbox` | 780 / 3905 | 20.0% |
+| `css/css-flexbox` | 1437 / 3535 | 40.7% |
 
 Read `html/semantics/scripting-1` with its denominator in view: roughly
 a quarter of its 474 files load modules or iframes over the network and
@@ -93,37 +97,46 @@ runs of the same binary (1944, 1962 and 1980 across three runs). A
 change smaller than about thirty subtests there is noise.
 
 `html/dom` is the largest single area in WPT and the one most ordinary
-pages depend on. `css/css-flexbox` is the weakest and the most
-consequential for real pages. `css/css-color` is nearly as low, but
-almost all of its failures are the two structural gaps under *Known
+pages depend on. `css/css-flexbox` is still the weakest layout area and
+the most consequential for real pages. `css/css-color` is nearly as low,
+but almost all of its failures are the one structural gap under *Known
 gaps* rather than scattered bugs.
 
 ## Known gaps
 
-### Flex layout is the weakest area
+### Flex layout is still the weakest area, but much less so
 
-At 20% this is the lowest score in the table and, unlike `css/css-color`,
-it is about layout rather than serialization — so it is the gap most
-likely to make a real page render wrong. Simple cases are correct: a
-row of `flex: 1 1 auto` / `flex: 2 1 0` / fixed-width items resolves to
-the same geometry a browser produces, `flex-direction: column` with
-`align-items` and `justify-content` places items correctly, and
-`align-items: baseline` now aligns baselines rather than tops. The
-failures are concentrated in the harder parts of the algorithm —
-percentage resolution against an indefinite container, wrapping with
-`align-content`, nested flex containers, and the intrinsic-size
-contribution of a flex container to its parent. This deserves attention
-before any further colour work.
+`css/css-flexbox` was re-measured after the `offsetLeft`/`offsetTop` and
+flex static-position work described in `Changelog.md`: **1437 of 3535
+subtests, 40.7%**, up from 653 (18.5%) on the same checkout and the same
+denominator. That single jump also says something about the table above —
+`offsetLeft` and `offsetTop` returned document coordinates instead of
+offsetParent-relative ones, and `checkLayout`, the harness most of WPT's
+layout tests are written against, compares exactly those. Every number in
+the table measured before that fix understates the engine by an unknown
+amount, and every layout area is worth re-running before it is quoted.
 
-### `getComputedStyle` does not force a style flush
+What is correct: a row of `flex: 1 1 auto` / `flex: 2 1 0` / fixed-width
+items resolves to the same geometry a browser produces,
+`flex-direction: column` with `align-items` and `justify-content` places
+items correctly, `align-items: baseline` aligns baselines,
+`flex-wrap: wrap-reverse` reverses the cross axis, and an
+absolutely-positioned child takes its static position from the
+container's `justify-content` and its own `align-self`.
 
-Reading a computed value returns whatever the last completed style pass
-produced. Everything a rule depends on that is only known after layout —
-container queries, most obviously — therefore reads stale until a render
-has run, even though the same rule paints correctly. A page that sets a
-class and reads a computed value in the same task sees the old value.
-Making the read flush style, as the CSSOM requires, is a change to how
-the render pipeline is driven rather than to the CSSOM bindings.
+What remains, in the order it costs subtests:
+
+- **Vertical writing modes.** Flex layout is horizontal-only: `row` is
+  always the x axis. `abspos/position-absolute-013` alone is 216 of the
+  remaining failures and is almost entirely `vertical-rl`/`vertical-lr`.
+- **`flex-direction: column` with `flex-wrap: wrap`.** `layout_flex_column`
+  ignores wrapping altogether, so the `align-content-vert-*` files fail
+  as a group.
+- **Negative free space.** `negative-overflow-*` overflows the container
+  in the wrong direction.
+- Percentage resolution against an indefinite container, nested flex
+  containers, and the intrinsic-size contribution of a flex container to
+  its parent.
 
 ### Computed values keep no colour space
 
