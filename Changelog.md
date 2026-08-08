@@ -4,6 +4,25 @@ Significant changes in each release:
 
 1.0.7:
 ======
+* The `about:start` splash carries the release number and a better sky and
+  earth. The sky was a two-stop vertical ramp drawn as one filled rectangle
+  per scanline, which is both the slowest way to write a gradient and the
+  one that bands worst; it is now a multi-stop atmosphere rendered as an
+  array, with forward scattering around the sun, a haze band along the
+  horizon and a scatter of stars that fades out as the sky brightens
+  towards it. The north star hangs in the dark of the zenith, cool against
+  the warm sun on the other side of the frame, and twinkles on its own
+  period so the two never pulse together. The earth had been a soft blur:
+  its terrain came from one 1024² noise field sampled through three fixed
+  mip taps, so coastlines dissolved and nothing on land read as relief.
+  It is built at 2048² now from a continent field, a coastline field and
+  ridged noise for mountain ranges, shaded from the height gradient, and
+  sampled with a real trilinear filter across the whole mip chain — so
+  there are coastlines with a shallow shelf inside them, snow that sits on
+  the peaks rather than across whole regions, and deserts and forests that
+  follow a moisture field. Aerial perspective now decays with distance the
+  way it should, which had been inverted: the haze thinned towards the
+  horizon and thickened over the ground nearest the viewer.
 * `offsetLeft` and `offsetTop` are measured from the offsetParent again.
   Both returned a document coordinate — and one built from the margin box
   rather than the border box — so an element inside any positioned

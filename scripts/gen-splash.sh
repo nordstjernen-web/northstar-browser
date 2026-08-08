@@ -47,24 +47,81 @@ S=3
 W=$((940 * S)); H=$((320 * S))
 HORIZON=$(python3 -c "print(int($H*0.680))")
 
-python3 - "$W" "$H" > "$w/sky.mvg" <<'PY'
-import sys
-W, H = int(sys.argv[1]), int(sys.argv[2])
-ZENITH = (8, 58, 140)
-HAZE = (228, 245, 254)
-out = []
-for y in range(H):
-    e = ((y + 0.5)/H)**1.75
-    c = tuple(int(ZENITH[i] + (HAZE[i] - ZENITH[i])*e) for i in range(3))
-    out.append("fill #%02x%02x%02x stroke none rectangle 0,%.1f %d,%.1f" % (c + (y, W, y + 1.2)))
-sys.stdout.write(" ".join(out))
-PY
+SUNX=$(python3 -c "print(int($W*0.800))"); SUNY=$(python3 -c "print(int($H*0.360))")
+POLARX=$(python3 -c "print(int($W*0.588))"); POLARY=$(python3 -c "print(int($H*0.172))")
 
-convert -size ${W}x${H} xc:black -draw "@$w/sky.mvg" "$w/sky0.png"
-convert -size ${W}x${H} xc:none -fill '#b6d9f4' \
-    -draw "ellipse $((W/2)),${HORIZON} $((W)),$((62*S)) 0,360" -blur 0x$((46*S)) \
-    -background black -alpha remove -alpha off "$w/skyglow.png"
-convert "$w/sky0.png" "$w/skyglow.png" -compose screen -composite "$w/sky.png"
+python3 - "$W" "$H" "$HORIZON" "$SUNX" "$SUNY" "$POLARX" "$POLARY" "$S" "$w/sky.png" <<'PY'
+import sys
+import numpy as np
+from PIL import Image
+
+W, H, HZ = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+SUNX, SUNY = float(sys.argv[4]), float(sys.argv[5])
+POLARX, POLARY = float(sys.argv[6]), float(sys.argv[7])
+S = float(sys.argv[8])
+out = sys.argv[9]
+
+STOPS = [
+    (0.00, (3, 26, 88)), (0.16, (8, 46, 126)), (0.34, (20, 82, 168)),
+    (0.54, (54, 134, 208)), (0.74, (124, 188, 232)), (0.90, (196, 227, 248)),
+    (1.00, (231, 246, 254)),
+]
+WARM = np.array([255.0, 246.0, 218.0], dtype=np.float32)
+HAZE = np.array([233.0, 247.0, 255.0], dtype=np.float32)
+
+yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+t = np.clip(yy/float(HZ), 0.0, 1.0)
+t = t*t*(3.0 - 2.0*t)
+
+xs = np.array([s[0] for s in STOPS], dtype=np.float32)
+cs = np.array([s[1] for s in STOPS], dtype=np.float32)
+sky = np.stack([np.interp(t, xs, cs[:, k]) for k in range(3)], axis=-1)
+
+dsun = np.sqrt((xx - SUNX)**2 + (yy - SUNY)**2)
+mie = 0.55*np.exp(-(dsun/(W*0.062))**1.25) + 0.17*np.exp(-(dsun/(W*0.20))**1.6)
+sky += (WARM - sky)*np.clip(mie, 0.0, 1.0)[..., None]
+
+band = np.exp(-((yy - HZ)/(H*0.20))**2)*np.clip(1.0 - t*0.15, 0.0, 1.0)
+sky += (HAZE - sky)*(band*0.34)[..., None]
+
+rng = np.random.default_rng(20260808)
+dark = np.clip((0.46 - t)/0.46, 0.0, 1.0)**1.45
+
+
+def splat(cx, cy, radius, colour, gain):
+    x0 = max(int(cx - radius*3.5), 0)
+    x1 = min(int(cx + radius*3.5) + 1, W)
+    y0 = max(int(cy - radius*3.5), 0)
+    y1 = min(int(cy + radius*3.5) + 1, H)
+    if x1 <= x0 or y1 <= y0:
+        return
+    gy, gx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+    d2 = (gx - cx)**2 + (gy - cy)**2
+    a = np.exp(-d2/(2.0*radius*radius))*gain
+    tile = sky[y0:y1, x0:x1]
+    sky[y0:y1, x0:x1] = tile + (np.array(colour, dtype=np.float32) - tile)*np.clip(a, 0.0, 1.0)[..., None]
+
+
+for _ in range(210):
+    sx = rng.uniform(0, W)
+    sy = rng.uniform(0, HZ*0.72)
+    vis = float(np.interp(sy/float(HZ), [0.0, 0.46], [1.0, 0.0]))**1.45
+    wash = min(1.0, float(np.hypot(sx - SUNX, sy - SUNY))/(W*0.20))
+    mag = rng.random()**2.6
+    gain = (0.20 + 0.62*mag)*vis*wash
+    if gain < 0.035:
+        continue
+    tint = rng.random()
+    colour = (255.0, 250.0 - 12.0*tint, 236.0 + 19.0*tint)
+    splat(sx, sy, S*(0.42 + 0.62*mag), colour, gain)
+
+splat(POLARX, POLARY, S*11.0, (188.0, 220.0, 255.0), 0.30)
+splat(POLARX, POLARY, S*4.2, (232.0, 244.0, 255.0), 0.55)
+
+grain = rng.normal(0.0, 0.70, size=(H, W)).astype(np.float32)
+sky = np.clip(sky + grain[..., None]*(0.35 + 0.65*dark[..., None]), 0, 255)
+Image.fromarray(sky.astype(np.uint8), "RGB").save(out)
+PY
 
 PLANET_CY=$(python3 -c "print(int($HORIZON + $H*2.05))")
 PLANET_RX=$(python3 -c "print(int($W*1.28))")
@@ -75,17 +132,17 @@ import sys
 import numpy as np
 
 wd = sys.argv[1]
-TW = TH = 1024
-SEA = 0.578
+TW = TH = 2048
+SEA = 0.500
 rng = np.random.default_rng(1997)
 
 
 def vnoise(g):
-    grid = rng.random((g, g))
-    ys = np.arange(TH)*g/TH
-    xs = np.arange(TW)*g/TW
-    y0 = np.floor(ys).astype(int) % g
-    x0 = np.floor(xs).astype(int) % g
+    grid = rng.random((g, g)).astype(np.float32)
+    ys = np.arange(TH, dtype=np.float32)*g/TH
+    xs = np.arange(TW, dtype=np.float32)*g/TW
+    y0 = np.floor(ys).astype(np.int64) % g
+    x0 = np.floor(xs).astype(np.int64) % g
     fy = ys - np.floor(ys)
     fx = xs - np.floor(xs)
     fy = (fy*fy*(3 - 2*fy))[:, None]
@@ -100,10 +157,21 @@ def vnoise(g):
 
 
 def fbm(base, octaves, gain=0.5):
-    total = np.zeros((TH, TW))
+    total = np.zeros((TH, TW), dtype=np.float32)
     amp, norm, g = 1.0, 0.0, base
     for _ in range(octaves):
         total += amp*vnoise(g)
+        norm += amp
+        amp *= gain
+        g *= 2
+    return total/norm
+
+
+def ridged(base, octaves, gain=0.5):
+    total = np.zeros((TH, TW), dtype=np.float32)
+    amp, norm, g = 1.0, 0.0, base
+    for _ in range(octaves):
+        total += amp*(1.0 - np.abs(2.0*vnoise(g) - 1.0))**2
         norm += amp
         amp *= gain
         g *= 2
@@ -115,27 +183,56 @@ def unit(a):
 
 
 stops = [
-    (0.00, (14, 54, 122)), (0.26, (20, 82, 158)), (0.42, (32, 116, 190)),
-    (0.505, (58, 156, 212)), (0.548, (110, 200, 220)), (0.566, (172, 230, 226)),
-    (0.578, (238, 228, 176)), (0.600, (192, 202, 124)), (0.655, (106, 162, 76)),
-    (0.735, (60, 124, 62)), (0.815, (100, 124, 68)), (0.885, (156, 148, 120)),
-    (0.948, (224, 230, 234)), (1.00, (252, 254, 255)),
+    (0.000, (10, 38, 96)), (0.180, (14, 58, 132)), (0.320, (22, 92, 170)),
+    (0.410, (34, 124, 196)), (0.462, (58, 158, 212)), (0.486, (104, 196, 222)),
+    (0.496, (168, 226, 226)), (0.500, (226, 224, 184)), (0.508, (206, 202, 142)),
+    (0.535, (150, 178, 96)), (0.590, (94, 150, 70)), (0.665, (56, 118, 58)),
+    (0.740, (78, 122, 60)), (0.812, (124, 130, 84)), (0.878, (162, 152, 126)),
+    (0.948, (198, 196, 190)), (0.978, (232, 238, 242)), (1.000, (253, 254, 255)),
 ]
-xs = np.array([s[0] for s in stops])
-cols = np.array([s[1] for s in stops], dtype=float)
-grade = np.linspace(0.0, 1.0, 256)
+xs = np.array([s[0] for s in stops], dtype=np.float32)
+cols = np.array([s[1] for s in stops], dtype=np.float32)
+grade = np.linspace(0.0, 1.0, 1024, dtype=np.float32)
 terrain = np.stack([np.interp(grade, xs, cols[:, k]) for k in range(3)], axis=1)
 
-height = unit(fbm(4, 6))
-height = np.clip(0.5 + (height - height.mean())*1.55, 0.0, 1.0)
-height = np.clip(height + (unit(fbm(16, 3)) - 0.5)*0.035, 0.0, 1.0)
+continent = unit(fbm(3, 5))
+coast = unit(fbm(10, 7))
+height = np.clip(0.5 + (continent*0.74 + coast*0.26 - 0.5)*1.92, 0.0, 1.0)
 
-surface = terrain[(height*255).astype(int)]
-arid = unit(fbm(6, 3))
-surface = np.where((height > SEA)[..., None], surface*(0.90 + 0.22*arid[..., None]), surface)
+land = np.clip((height - SEA)/0.055, 0.0, 1.0)
+ranges = np.clip((unit(fbm(5, 3)) - 0.40)/0.34, 0.0, 1.0)
+height = np.clip(height + ridged(9, 5)*land*ranges*0.25, 0.0, 1.0)
+height = np.clip(height + (unit(fbm(40, 3)) - 0.5)*0.022*land, 0.0, 1.0)
 
-cloud = np.clip((unit(fbm(3, 6)) - 0.56)/0.22, 0.0, 1.0)**0.90
-ocean = np.clip((SEA - height)/0.05, 0.0, 1.0)
+surface = terrain[np.clip(height*1023, 0, 1023).astype(np.int64)]
+
+moist = unit(fbm(6, 4))
+arid = np.clip((0.36 - moist)/0.26, 0.0, 1.0)**1.25
+surface[..., 0] += (198.0 - surface[..., 0])*(arid*0.40*land)
+surface[..., 1] += (178.0 - surface[..., 1])*(arid*0.34*land)
+surface[..., 2] += (116.0 - surface[..., 2])*(arid*0.44*land)
+lush = np.clip((moist - 0.54)/0.30, 0.0, 1.0)
+surface[..., 0] += (44.0 - surface[..., 0])*(lush*0.26*land)
+surface[..., 1] += (104.0 - surface[..., 1])*(lush*0.22*land)
+surface[..., 2] += (48.0 - surface[..., 2])*(lush*0.26*land)
+
+LIGHT = np.array([0.62, -0.46, 0.64], dtype=np.float32)
+LIGHT /= np.linalg.norm(LIGHT)
+gy, gx = np.gradient(height.astype(np.float32))
+relief = 190.0
+nz = 1.0/np.sqrt(gx*gx*relief*relief + gy*gy*relief*relief + 1.0)
+shade = np.clip((-gx*relief*LIGHT[0] - gy*relief*LIGHT[1] + LIGHT[2])*nz, 0.0, 1.0)
+shade = 0.74 + 0.52*shade**1.15
+surface *= np.where(land > 0.0, shade, 1.0)[..., None]
+
+deep = np.clip((SEA - height)/0.34, 0.0, 1.0)
+surface[..., 2] += (150.0 - surface[..., 2])*((1.0 - land)*deep*0.16)
+surface = np.clip(surface, 0.0, 255.0)
+
+cloudbase = unit(fbm(4, 7))
+cloud = np.clip((cloudbase - 0.545)/0.185, 0.0, 1.0)**0.85
+cloud *= np.clip((unit(fbm(14, 4)) - 0.20)/0.55, 0.0, 1.0)**0.45
+ocean = np.clip((SEA - height)/0.045, 0.0, 1.0)
 
 np.save(wd + "/tex_surface.npy", surface.astype(np.float32))
 np.save(wd + "/tex_extra.npy", np.stack([cloud, ocean], axis=-1).astype(np.float32))
@@ -152,11 +249,12 @@ W, H, HZ = int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
 PCY, PRX, PRY = float(sys.argv[6]), float(sys.argv[7]), float(sys.argv[8])
 SUNX = float(sys.argv[9])
 
-TW = TH = 1024
 TILE = 24.0
 FOCAL = W*0.45
 VSTRETCH = 1.8
-HAZE = np.array([214.0, 238.0, 252.0], dtype=np.float32)
+LODBIAS = 1.55
+HAZE = np.array([216.0, 239.0, 252.0], dtype=np.float32)
+SUNLIT = np.array([255.0, 243.0, 214.0], dtype=np.float32)
 
 
 def mips(img, levels):
@@ -169,8 +267,9 @@ def mips(img, levels):
     return out
 
 
-SURF = mips(np.load(wd + "/tex_surface.npy"), 5)
-EXTRA = mips(np.load(wd + "/tex_extra.npy"), 5)
+SURF = mips(np.load(wd + "/tex_surface.npy"), 6)
+EXTRA = mips(np.load(wd + "/tex_extra.npy"), 6)
+TH, TW = SURF[0].shape[:2]
 
 
 def fetch(stack, level, u, v):
@@ -194,12 +293,14 @@ def fetch(stack, level, u, v):
 
 
 def sample(stack, u, v, lod):
-    w1 = np.clip(lod/2.0, 0.0, 1.0).astype(np.float32)[..., None]
-    w2 = np.clip((lod - 2.0)/2.0, 0.0, 1.0).astype(np.float32)[..., None]
-    fine = fetch(stack, 0, u, v)
-    mid = fetch(stack, 2, u, v)
-    coarse = fetch(stack, 4, u, v)
-    return (fine*(1 - w1) + mid*w1)*(1 - w2) + coarse*w2
+    lod = np.clip(lod, 0.0, len(stack) - 1.0)
+    acc = np.zeros(u.shape + (stack[0].shape[2],), dtype=np.float32)
+    for level in range(len(stack)):
+        wgt = np.clip(1.0 - np.abs(lod - level), 0.0, 1.0).astype(np.float32)
+        if not wgt.any():
+            continue
+        acc += fetch(stack, level, u, v)*wgt[..., None]
+    return acc
 
 
 Y0 = HZ - 2
@@ -212,23 +313,28 @@ depth = FOCAL/t
 lateral = (xx - W/2)/t
 u = lateral/TILE
 v = depth/(TILE*VSTRETCH)
-lod = np.log2(np.maximum((TW/TILE)*np.sqrt(FOCAL/VSTRETCH)/t**1.5, 1.0))
+lod = np.maximum(np.log2(np.maximum((TW/TILE)*np.sqrt(FOCAL/VSTRETCH)/t**1.5, 1.0)) - LODBIAS, 0.0)
 
 col = sample(SURF, u, v, lod)
-cover = sample(EXTRA, u/1.25, v/1.6, lod)[..., 0]
-cover *= np.clip(1.0 - lod/6.0, 0.0, 1.0)
-ocean = sample(EXTRA, u, v, lod)[..., 1]
+extra = sample(EXTRA, u, v, lod)
+ocean = extra[..., 1]
+cover = sample(EXTRA, u/1.25, v/1.6, np.maximum(lod - 0.4, 0.0))[..., 0]
+cover *= np.clip(1.0 - lod/6.5, 0.0, 1.0)
+shadow = sample(EXTRA, u/1.25 - 0.004, v/1.6 - 0.002, np.maximum(lod, 1.0))[..., 0]
+col *= (1.0 - 0.20*np.clip(shadow - cover*0.45, 0.0, 1.0))[..., None]
 
-glint = np.exp(-((xx - SUNX)/(W*0.020 + t*0.42))**2)
-glint *= np.clip((t - 20.0)/110.0, 0.0, 1.0)*np.clip(1.0 - lod/7.0, 0.0, 1.0)*ocean
-col += (np.array([255.0, 250.0, 226.0], dtype=np.float32) - col)*(glint*0.72)[..., None]
-col += (np.float32(255.0) - col)*(cover*0.62)[..., None]
-col *= (0.96 + 0.10*np.exp(-((xx - SUNX)/(W*0.55))**2))[..., None]
+glint = np.exp(-((xx - SUNX)/(W*0.016 + t*0.36))**2)
+glint *= np.clip((t - 16.0)/90.0, 0.0, 1.0)*np.clip(1.0 - lod/7.5, 0.0, 1.0)*ocean
+sparkle = np.clip(extra[..., 0]*1.6 - 0.35, 0.0, 1.0)
+col += (SUNLIT - col)*(glint*(0.58 + 0.40*sparkle))[..., None]
+col += (np.float32(255.0) - col)*(cover*0.58)[..., None]
+col *= (0.95 + 0.12*np.exp(-((xx - SUNX)/(W*0.52))**2))[..., None]
 
 grey = col.mean(axis=-1, keepdims=True)
-col = np.clip(grey + (col - grey)*1.14, 0, 255)
-haze = np.clip((205.0 - t)/205.0, 0.0, 1.0)**1.05
-col += (HAZE - col)*haze[..., None]
+col = np.clip(grey + (col - grey)*1.16, 0, 255)
+haze = np.clip(np.exp(-t/np.float32(68.0)), 0.0, 1.0)**0.95
+tint = HAZE + (SUNLIT - HAZE)*np.clip(np.exp(-((xx - SUNX)/(W*0.30))**2), 0.0, 1.0)[..., None]
+col += (tint - col)*haze[..., None]
 
 out = np.zeros((H, W, 4), dtype=np.uint8)
 out[Y0:, :, :3] = np.clip(col, 0, 255).astype(np.uint8)
@@ -244,14 +350,14 @@ convert -size ${W}x${H} xc:none -fill none -stroke '#9ed3f4' -strokewidth $((16*
     -blur 0x$((26*S)) -background black -alpha remove -alpha off "$w/limbglow.png"
 
 python3 "$w/earth.py" "$w" "$w/ground.png" "$W" "$H" "$HORIZON" \
-    "$PLANET_CY" "$PLANET_RX" "$PLANET_RY" "$(python3 -c "print(int($W*0.800))")"
+    "$PLANET_CY" "$PLANET_RX" "$PLANET_RY" "$SUNX"
 
 convert "$w/sky.png" \
     "$w/ground.png" -compose over -composite \
     "$w/limbglow.png" -compose screen -composite \
     "$w/limb.png" -compose screen -composite "$w/bg.png"
 
-SX=$(python3 -c "print(int($W*0.800))"); SY=$(python3 -c "print(int($H*0.360))")
+SX=$SUNX; SY=$SUNY
 convert -size ${W}x${H} xc:none -fill '#ffc65a' \
     -draw "ellipse ${SX},${SY} $((44*S)),$((44*S)) 0,360" -blur 0x$((34*S)) "$w/halo.png"
 convert -size ${W}x${H} xc:none -fill '#fff3d2' \
@@ -320,7 +426,8 @@ import sys, math, random
 
 W, H, S = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
 T = float(sys.argv[4]); wd = sys.argv[5]; idx = int(sys.argv[6])
-SX, SY = W*0.800, H*0.360
+SX, SY = float(sys.argv[7]), float(sys.argv[8])
+PX, PY = float(sys.argv[9]), float(sys.argv[10])
 TAU = 2*math.pi
 SKY = (170, 208, 238)
 out = []
@@ -489,6 +596,26 @@ for ang in (0, 90, 180, 270):
 ell("#fff2c8", SX, SY, S*9.2*pulse, S*9.2*pulse)
 ell("#ffffff", SX, SY, S*5.4*pulse, S*5.4*pulse)
 
+twinkle = 0.86 + 0.14*math.sin(TAU*T + 1.9) + 0.05*math.sin(TAU*3*T + 0.4)
+
+def polar_spike(ang, ln, hwid, col):
+    a = math.radians(ang)
+    tip = (PX + math.cos(a)*ln, PY + math.sin(a)*ln)
+    px, py = math.cos(a + math.pi/2)*hwid, math.sin(a + math.pi/2)*hwid
+    poly(col, [tip, (PX + px, PY + py), (PX - px, PY - py)])
+
+for rad, col, a in [(0.086, (140, 186, 255), 0.15), (0.048, (186, 216, 255), 0.20),
+                    (0.024, (226, 240, 255), 0.28)]:
+    ell(rgba(col, a*twinkle), PX, PY, H*rad, H*rad)
+for ang in (0, 90, 180, 270):
+    polar_spike(ang, H*0.132*twinkle, S*2.0, "#cfe3ff")
+for ang in (45, 135, 225, 315):
+    polar_spike(ang, H*0.036*twinkle, S*1.5, "#a9c8f2")
+for ang in (0, 90, 180, 270):
+    polar_spike(ang, H*0.084*twinkle, S*1.0, "#ffffff")
+ell("#e8f2ff", PX, PY, S*4.0*twinkle, S*4.0*twinkle)
+ell("#ffffff", PX, PY, S*2.2*twinkle, S*2.2*twinkle)
+
 open("%s/glow_%03d.mvg" % (wd, idx), "w").write(" ".join(out))
 open("%s/clouds_%03d.mvg" % (wd, idx), "w").write(" ".join(clouds))
 PY
@@ -499,7 +626,8 @@ render_frame() {
     n=$(printf '%03d' "$i")
     out="$w/frame_${n}.png"
     halo=$(python3 -c "import math;print('%.3f'%(0.80+0.20*math.sin(2*math.pi*$t)))")
-    python3 "$w/anim.py" "$W" "$H" "$S" "$t" "$w" "$i"
+    python3 "$w/anim.py" "$W" "$H" "$S" "$t" "$w" "$i" \
+        "$SUNX" "$SUNY" "$POLARX" "$POLARY"
     convert -size ${W}x${H} xc:black -draw "@$w/glow_${n}.mvg" "$w/glow_${n}.png"
     convert "$w/bg.png" -draw "@$w/clouds_${n}.mvg" \
         \( "$w/sunhalo.png" -evaluate multiply "$halo" \) \
