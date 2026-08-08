@@ -168,8 +168,21 @@ fixtures are exercised and how behaviour can be scripted:
     --url="file:///tmp/page.html" --eval="document.title"
 ```
 
-Useful flags: `--dump=png:PATH` / `--dump=layout:-` / `--dump=text:-`,
-`--eval=EXPR`, `--viewport=W`, `--viewport-height=H`, `--settle-ms=N`.
+Useful flags: `--dump=png:PATH` / `--dump=layout` / `--dump=text` /
+`--dump=dom`, `--eval=EXPR`, `--viewport=W`, `--viewport-height=H`,
+`--settle-ms=N`.
+
+Two dump modes write PDF and differ in how much they know about paper.
+`--dump=pdf:PATH` writes the page as one long unpaginated sheet, the same
+output as *Save Page as PDF…*. `--dump=print:PATH` runs the print path
+instead — `@media print` matching, `@page` sizing, and the break
+properties cutting the document into sheets — so it is how pagination is
+checked without a printer attached:
+
+```sh
+./builddir/src/gtk/northstar --headless \
+    --dump="print:/tmp/paged.pdf" data/render-tests/print-pagination.html
+```
 
 Running as `root` is refused for safety; set `NS_ALLOW_ROOT=1` only in a
 throwaway container. `NS_NO_SANDBOX=1` / `NS_NO_SECCOMP=1` disable the

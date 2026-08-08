@@ -26,7 +26,7 @@ filter in both GUI and headless/tooling modes · no JIT.
 See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 
 **Minimalism:** one window, one page, one process. The engine is a
-compact body of C — about 159,000 lines of original C (excluding the
+compact body of C — about 160,000 lines of original C (excluding the
 vendored WAMR, Wuffs and audio decoders, and the generated image-data
 tables) — small enough for one person to read and audit end-to-end.
 
@@ -46,7 +46,7 @@ libavif when available, and SVG in the engine).
 ## Browser features
 
 - **HTML** parsed to a DOM by lexbor; **CSS** by the engine's own
-  cascade — flex, grid, transforms, gradients, `@keyframes`.
+  cascade — flex, grid, transforms, gradients, `@keyframes`, scroll snap.
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL).
@@ -75,14 +75,20 @@ libavif when available, and SVG in the engine).
   patents have expired, so it costs no dependency and no licence; it is
   also not a format the modern web serves, so this is video support for
   local and self-hosted clips rather than for streaming sites.
+- **Printing** — `Ctrl+P` lays the page out for paper and hands the sheets
+  to the operating system's own print dialog through `GtkPrintOperation`:
+  CUPS on Linux, the Win32 dialog on Windows, the Cocoa panel on macOS.
+  `@media print` matches, `@page` sets the sheet size and margins, and
+  `break-before` / `break-after` / `break-inside` decide where a sheet
+  ends.
 - **MathML** — a minimalist presentation-MathML renderer.
 - **Spell checking** — optional, via the Enchant library.
 - **WebAssembly** — the JavaScript API over a vendored WAMR interpreter.
 - **Single window / single process** — the browser shows one page in one
   window, and the page engine runs in the shell process (no per-tab
   renderer processes).
-- **UI** — bookmarks, find-in-page, save-to-PDF, JS console, settings,
-  headless mode.
+- **UI** — bookmarks, find-in-page, printing, save-to-PDF, JS console,
+  settings, headless mode.
 
 ## Build and run
 

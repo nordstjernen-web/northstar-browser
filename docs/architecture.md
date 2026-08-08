@@ -62,7 +62,7 @@ and headless drivers share the same path).
 | 5. Style | `css.c`, `css_syntax.c`, `css_media.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_media.c` the Media Queries Level 4 parser and evaluator. `anim.c` runs transitions and `@keyframes`; `font.c` loads `@font-face` web fonts. |
 | 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. Text is itemized, shaped and broken into lines by ns-pango. `mathml.c` lays out presentation MathML. Anonymous table boxes are generated around any run of table-internal siblings. |
 | 7. Paint | `paint.c`, `image.c`, `texture.c` | Builds and rasterises the Cairo display list. `image.c` decodes images on demand into the `texture.c` pixel abstraction. |
-| 8. Present | `src/gtk/procview.c`, `headless.c` | GUI blits the surface into the GTK widget; headless dumps it to PNG or a text/layout tree. |
+| 8. Present | `src/gtk/procview.c`, `headless.c`, `print.c` | GUI blits the surface into the GTK widget; headless dumps it to PNG or a text/layout tree; printing paginates the same box tree onto sheets. |
 
 Most computed values stay as parsed `ns_css_value`s, but `display` is
 resolved once per element into an `ns_display` — the CSS Display Level 3
@@ -173,6 +173,44 @@ its prefix.
 MPEG-1 is not a format the modern web serves. This is video for local and
 self-hosted clips; streaming sites need adaptive streaming over Media
 Source Extensions and a modern codec, neither of which this edition has.
+
+## Printing
+
+`print.c` paginates a laid-out page onto sheets. No printing code is
+written per platform and no dependency is added: the sheets go to
+`GtkPrintOperation`, which is CUPS on Linux, the Win32 printer dialog on
+Windows and the Cocoa panel on macOS.
+
+Paper is not the viewport, so the page is laid out again for it.
+`ns_libnorthstar_print` (`libnorthstar.c`) turns `@media print` on, sets
+the viewport to a sheet's content box — A4 at 96 dpi with half-inch
+margins to begin with — and relayouts. Only then can `@page` be read,
+because the rule arrives through the cascade that relayout just ran; if
+it names a different size the viewport changes and the page is laid out
+a second time. Afterwards the media type, the viewport and the layout
+are all restored, so the page a reader is looking at does not reflow
+under them.
+
+Where the sheets are cut is decided by one walk of the box tree
+(`collect_breaks`). It gathers two things: the offsets where
+`break-before` or `break-after` force a cut — with the legacy
+`page-break-*` spellings mapping onto them and `always` becoming `page` —
+and the spans that must not be split, which are every leaf box, every
+line of a paragraph (the extent divided by the computed `line-height`),
+and anything asking for `break-inside: avoid`. A sheet then ends at the
+first forced break inside it if there is one; otherwise the cut starts at
+the bottom of the sheet and `pull_above_spans` walks it up above any span
+it would have straddled, repeating until it stops moving. A span taller
+than a sheet is dropped rather than being allowed to push the cut past
+the top, which is what keeps an oversized box from stalling pagination.
+
+`ns_print_draw_page` clips to the sheet's content box, translates by the
+sheet's top offset and replays the same `ns_paint` the screen uses, so
+paper and screen cannot drift apart. `--dump=print:FILE` renders that
+pagination to a multi-page PDF with no printer attached, which is how
+`data/render-tests/print-pagination.html` is checked. It is distinct from
+`--dump=pdf:FILE` and the *Save Page as PDF…* menu item, which write the
+page as one long unpaginated sheet.
 
 ## Security-relevant modules
 

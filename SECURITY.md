@@ -102,17 +102,25 @@ and `ns_security_seccomp_init()`. No renderer or media executable needs
 `fork`/`execve`, so the browser process can use the same no-`execve`
 syscall allow-list as headless/tooling mode.
 
-- **Landlock (filesystem) — applied in every mode.** Read-only access to
-  system libraries (`/usr`, `/lib`, `/lib64`), `/etc`, the CA bundle, font
-  caches, `/dev/urandom`, and the X11 / Wayland sockets. Read+write access
-  to the per-user XDG config, data, and cache directories under
-  `~/.config/northstar`, `~/.local/share/northstar`,
-  `~/.cache/northstar`. The rest of `$HOME` — `~/.ssh`, `~/.aws`,
-  `~/.netrc`, other browsers' state, shell history — is **not**
-  reachable. No directory the process can write to is also executable, so
-  a bug cannot drop a payload and then map it executable from a writable
-  path. `PR_SET_NO_NEW_PRIVS` is set here too, so a setuid binary cannot
-  be used to regain privileges after a compromise.
+- **Landlock (filesystem) — applied in every mode.** Read+execute on the
+  system library and binary trees (`/usr`, `/usr/local`, `/lib`,
+  `/lib64`, and the directory the running executable sits in). Read-only
+  on `/etc`, the CA bundle, the fontconfig cache, `/proc`, `/sys`,
+  `/run`, `/dev/shm`, `/dev/dri`, the X11 and Wayland sockets, the
+  Xauthority directory, `/dev/urandom`, the user's font and theme
+  directories (`~/.fonts`, `~/.fontconfig`, `~/.icons`, `~/.themes`),
+  and the XDG config, data and cache directories themselves.
+  Read+write is narrower: the per-user runtime directory and the
+  browser's own state under `~/.config/northstar`,
+  `~/.local/share/northstar` and `~/.cache/northstar`, plus the download
+  directory, which must resolve inside `$HOME`. `/dev/snd` is added when
+  audio is built in, and `/dev/videoN` when a page has been granted the
+  camera. The rest of `$HOME` — `~/.ssh`, `~/.aws`, `~/.netrc`, other
+  browsers' state, shell history — is **not** reachable. No directory the
+  process can write to is also executable, so a bug cannot drop a payload
+  and then map it executable from a writable path. `PR_SET_NO_NEW_PRIVS`
+  is set here too, so a setuid binary cannot be used to regain privileges
+  after a compromise.
 - **seccomp-bpf (syscalls) — applied in every Linux mode.** Default-deny
   allow-list: the filter is built with
   `SCMP_ACT_ERRNO(EPERM)` as the default action and then permits only the

@@ -166,6 +166,17 @@ unimplemented. These are `.tentative.html` tests for features still
 being specified; they account for roughly 550 subtests in
 `css/css-values` and are deliberately not a priority.
 
+### Scroll snap does not reach the document scroller
+
+`scroll-snap-type` works on a scroll container — a box with its own
+overflow — and `ns_box_scroll_snap` is reached from the wheel handler and
+from the `scrollTop`/`scrollLeft` setters. The document scroller is not
+one of those boxes: it belongs to the window, so the property has no
+effect on `html` or `body`, which is where a page most often puts it.
+`scroll-padding` on the container and `scroll-margin` on an item are
+honoured wherever snapping happens at all. Closing this means giving the
+document scroller a box to snap against, not extending the snap code.
+
 ### `html/semantics/document-metadata`
 
 The low score here is dominated by files that time out rather than fail
