@@ -71,6 +71,28 @@ css_syntax_name_end(const char *input, gsize length, gsize offset)
 }
 
 static gboolean
+css_syntax_valid_escape(const char *input, gsize length, gsize offset)
+{
+    return offset + 1 < length && input[offset] == '\\' &&
+           input[offset + 1] != '\n' && input[offset + 1] != '\r' &&
+           input[offset + 1] != '\f';
+}
+
+static gboolean
+css_syntax_starts_ident(const char *input, gsize length, gsize offset)
+{
+    if (offset >= length) return FALSE;
+    char a = input[offset];
+    if (css_syntax_name_start((guchar)a)) return TRUE;
+    if (a == '\\') return css_syntax_valid_escape(input, length, offset);
+    if (a != '-') return FALSE;
+    if (offset + 1 >= length) return FALSE;
+    char b = input[offset + 1];
+    return css_syntax_name_start((guchar)b) || b == '-' ||
+           css_syntax_valid_escape(input, length, offset + 1);
+}
+
+static gboolean
 css_syntax_starts_number(const char *input, gsize length, gsize offset)
 {
     if (offset >= length) return FALSE;
@@ -191,9 +213,7 @@ css_syntax_consume_numeric(ns_css_syntax_parser *parser)
     if (end < parser->length && parser->input[end] == '%') {
         type = NS_CSS_COMPONENT_PERCENTAGE;
         end++;
-    } else if (end < parser->length &&
-               (css_syntax_name_start((guchar)parser->input[end]) ||
-                parser->input[end] == '-' || parser->input[end] == '\\')) {
+    } else if (css_syntax_starts_ident(parser->input, parser->length, end)) {
         type = NS_CSS_COMPONENT_DIMENSION;
         end = css_syntax_name_end(parser->input, parser->length, end);
     }
@@ -253,15 +273,16 @@ css_syntax_consume(ns_css_syntax_parser *parser)
     if (css_syntax_starts_number(parser->input, parser->length,
                                  parser->offset))
         return css_syntax_consume_numeric(parser);
-    if (c == '@' && parser->offset + 1 < parser->length &&
-        (css_syntax_name_start((guchar)parser->input[parser->offset + 1]) ||
-         parser->input[parser->offset + 1] == '-' ||
-         parser->input[parser->offset + 1] == '\\'))
+    if (c == '@' &&
+        css_syntax_starts_ident(parser->input, parser->length,
+                                parser->offset + 1))
         return css_syntax_consume_ident(parser, TRUE, FALSE);
     if (c == '#' && parser->offset + 1 < parser->length &&
-        css_syntax_name((guchar)parser->input[parser->offset + 1]))
+        (css_syntax_name((guchar)parser->input[parser->offset + 1]) ||
+         css_syntax_valid_escape(parser->input, parser->length,
+                                 parser->offset + 1)))
         return css_syntax_consume_ident(parser, FALSE, TRUE);
-    if (css_syntax_name_start((guchar)c) || c == '-' || c == '\\')
+    if (css_syntax_starts_ident(parser->input, parser->length, parser->offset))
         return css_syntax_consume_ident(parser, FALSE, FALSE);
     parser->offset++;
     ns_css_component_type type = c == ':' ? NS_CSS_COMPONENT_COLON
