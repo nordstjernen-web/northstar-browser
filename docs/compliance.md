@@ -90,6 +90,32 @@ deserved. Re-run the areas below before quoting any of this as current.
 | `html/semantics/scripting-1` | 1304 / 1980 | 65.9% |
 | `css/css-flexbox` | 1437 / 3535 | 40.7% |
 
+### Re-measured for the registered-custom-property work
+
+Measured at `41c3030` on 2026-08-09, 6 s per-test timeout, against a
+**sparse** WPT checkout of the CSS areas served over a plain static HTTP
+server. Its file set is smaller than the one the table above used, so
+these denominators are not comparable with those rows — only with each
+other, and with the same run against `5916e0b`, the commit before this
+work, given in the *before* column.
+
+| Area | Before | After | Pass rate |
+| --- | --- | --- | --- |
+| `css/cssom` | 3245 / 3484 | 3245 / 3484 | 93.1% |
+| `css/selectors` | — | 4078 / 4413 | 92.4% |
+| `css/css-cascade` | 744 / 911 | 744 / 911 | 81.7% |
+| `css/css-properties-values-api` | 64 / 809 | 590 / 1039 | 56.8% |
+| `css/css-counter-styles` | 50 / 118 | 67 / 118 | 56.8% |
+| `css/css-values` | 683 / 1947 | 689 / 1960 | 35.2% |
+| `css/css-color` | 22 / 108 | 22 / 108 | 20.4% |
+
+`css/css-properties-values-api` is where nearly all of the movement is:
+`@property` honours its `syntax` descriptor, `CSS.registerProperty`
+exists, and a registered property computes its value. Its denominator
+grew because files that used to stop at the first missing API now reach
+subtests they never got to. The two areas that read as unchanged were
+checked file by file rather than in aggregate — no file in either moved.
+
 Read `html/semantics/scripting-1` with its denominator in view: roughly
 a quarter of its 474 files load modules or iframes over the network and
 time out under load, so the total swings by tens of subtests between
