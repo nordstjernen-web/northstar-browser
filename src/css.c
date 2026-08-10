@@ -2390,6 +2390,31 @@ parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
     return ok;
 }
 
+static gboolean
+parse_light_dark_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
+                      int depth)
+{
+    if (g_ascii_strncasecmp(s, "light-dark(", 11) != 0) return FALSE;
+    const char *p = strchr(s, '(');
+    if (!p) return FALSE;
+    p++;
+    const char *end = s + strlen(s);
+    const char *body_end = match_close_paren(p, end);
+    if (!body_end) return FALSE;
+    char *parts[2] = {0};
+    int n = calc_split_args(p, body_end, parts, G_N_ELEMENTS(parts));
+    if (n != 2) {
+        for (int i = 0; i < n; i++) g_free(parts[i]);
+        return FALSE;
+    }
+    const char *choice = (ns_css_get_color_scheme() == NS_CSS_COLOR_SCHEME_DARK)
+        ? parts[1] : parts[0];
+    gboolean ok = parse_color_depth(choice, r, g, b, a, depth + 1);
+    g_free(parts[0]);
+    g_free(parts[1]);
+    return ok;
+}
+
 typedef struct {
     double v;
     char unit[8];
@@ -2545,6 +2570,7 @@ parse_color_depth(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
     if (parse_oklab_func(s, r, g, b, a)) return TRUE;
     if (parse_color_function(s, r, g, b, a)) return TRUE;
     if (parse_color_mix_func(s, r, g, b, a, depth)) return TRUE;
+    if (parse_light_dark_func(s, r, g, b, a, depth)) return TRUE;
     if (s[0] == '#') {
         gsize n = strlen(s + 1);
         if (n == 3 || n == 4) {
@@ -2891,6 +2917,16 @@ parse_pseudo_keyword(const char *name, gsize n,
         { "open",          NS_CSS_PC_OPEN },
         { "popover-open",  NS_CSS_PC_POPOVER_OPEN },
         { "modal",         NS_CSS_PC_MODAL },
+        { "user-valid",    NS_CSS_PC_USER_VALID },
+        { "user-invalid",  NS_CSS_PC_USER_INVALID },
+        { "autofill",      NS_CSS_PC_AUTOFILL },
+        { "-webkit-autofill", NS_CSS_PC_AUTOFILL },
+        { "playing",       NS_CSS_PC_PLAYING },
+        { "paused",        NS_CSS_PC_PAUSED },
+        { "muted",         NS_CSS_PC_MUTED },
+        { "seeking",       NS_CSS_PC_SEEKING },
+        { "buffering",     NS_CSS_PC_BUFFERING },
+        { "stalled",       NS_CSS_PC_STALLED },
     };
     for (gsize i = 0; i < G_N_ELEMENTS(table); i++) {
         gsize klen = strlen(table[i].k);
@@ -16054,6 +16090,58 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 }
                 break;
             }
+            case NS_CSS_PC_USER_VALID:
+                if (!ns_css_node_will_validate(el) || !ns_css_control_is_valid(el) ||
+                    !ns_element_get_attr(el, "data-nd-vdirty"))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_USER_INVALID:
+                if (!ns_css_node_will_validate(el) || ns_css_control_is_valid(el) ||
+                    !ns_element_get_attr(el, "data-nd-vdirty"))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_AUTOFILL:
+                if (!ns_element_get_attr(el, "autofill") &&
+                    !ns_element_get_attr(el, "data-nd-autofill"))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_PLAYING:
+                if ((!ns_node_is_element_named(el, "video") &&
+                     !ns_node_is_element_named(el, "audio")) ||
+                    !ns_element_get_attr(el, "data-nd-playing"))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_PAUSED:
+                if ((!ns_node_is_element_named(el, "video") &&
+                     !ns_node_is_element_named(el, "audio")) ||
+                    ns_element_get_attr(el, "data-nd-playing"))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_MUTED:
+                if ((!ns_node_is_element_named(el, "video") &&
+                     !ns_node_is_element_named(el, "audio")) ||
+                    (!ns_element_get_attr(el, "muted") &&
+                     !ns_element_get_attr(el, "data-nd-muted")))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_SEEKING:
+                if ((!ns_node_is_element_named(el, "video") &&
+                     !ns_node_is_element_named(el, "audio")) ||
+                    !ns_element_get_attr(el, "data-nd-seeking"))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_BUFFERING:
+                if ((!ns_node_is_element_named(el, "video") &&
+                     !ns_node_is_element_named(el, "audio")) ||
+                    !ns_element_get_attr(el, "data-nd-buffering"))
+                    return FALSE;
+                break;
+            case NS_CSS_PC_STALLED:
+                if ((!ns_node_is_element_named(el, "video") &&
+                     !ns_node_is_element_named(el, "audio")) ||
+                    !ns_element_get_attr(el, "data-nd-stalled"))
+                    return FALSE;
+                break;
             }
         }
     }
