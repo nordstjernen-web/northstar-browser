@@ -82,6 +82,8 @@ char *ns_browser_take_pending_camera(ns_browser *browser);
 void ns_browser_resolve_camera(ns_browser *browser, const char *origin,
                                int allow);
 char *ns_browser_take_pending_download(ns_browser *browser);
+int   ns_browser_has_pending_clipboard(ns_browser *browser);
+char *ns_browser_take_pending_clipboard(ns_browser *browser);
 
 int ns_browser_tick(ns_browser *browser, int budget_ms);
 int ns_browser_animating(ns_browser *browser);

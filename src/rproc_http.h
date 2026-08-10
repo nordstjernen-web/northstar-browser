@@ -47,6 +47,7 @@ typedef struct {
     char                *camera;
     char                *download;
     char                *audio;
+    int                  clipboard;
 } ns_rproc_http_frame;
 
 ns_rproc_http *ns_rproc_http_spawn_shm(const char *renderer_path,
@@ -94,6 +95,7 @@ char *ns_rproc_http_link_cursor_at(ns_rproc_http *r, int x, int y,
                                    char **out_cursor);
 char *ns_rproc_http_click(ns_rproc_http *r, int x, int y, int mods);
 char *ns_rproc_http_select(ns_rproc_http *r, int kind, int x, int y);
+char *ns_rproc_http_clipboard(ns_rproc_http *r);
 char *ns_rproc_http_key(ns_rproc_http *r, int kind, const char *key,
                         const char *code, int keycode, int mods);
 char *ns_rproc_http_key_full(ns_rproc_http *r, int kind, const char *key,
