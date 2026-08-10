@@ -531,6 +531,10 @@ typedef enum ns_css_unit {
     NS_CSS_UNIT_CH,
     NS_CSS_UNIT_CAP,
     NS_CSS_UNIT_IC,
+    NS_CSS_UNIT_REX,
+    NS_CSS_UNIT_RCH,
+    NS_CSS_UNIT_RCAP,
+    NS_CSS_UNIT_RIC,
 } ns_css_unit;
 
 void     ns_css_set_viewport(double vw_px, double vh_px);

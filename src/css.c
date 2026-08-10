@@ -936,6 +936,17 @@ ns_css_dimension_px(const ns_css_value *v, double font_size, double basis)
         return v->u.length.v * font_size * 0.7;
     case NS_CSS_UNIT_IC:
         return v->u.length.v * font_size;
+    case NS_CSS_UNIT_LH:
+        return v->u.length.v * font_size * 1.5;
+    case NS_CSS_UNIT_RLH:
+        return v->u.length.v * 24.0;
+    case NS_CSS_UNIT_REX:
+    case NS_CSS_UNIT_RCH:
+        return v->u.length.v * 8.0;
+    case NS_CSS_UNIT_RCAP:
+        return v->u.length.v * 11.2;
+    case NS_CSS_UNIT_RIC:
+        return v->u.length.v * 16.0;
     default:
         return 0;
     }
@@ -3600,10 +3611,14 @@ parse_length(const char *text, double *out_v, ns_css_unit *out_unit)
         *out_unit = NS_CSS_UNIT_PX;
         return TRUE;
     }
-    if (g_ascii_strcasecmp(end, "ex")  == 0) { *out_unit = NS_CSS_UNIT_EX;  return TRUE; }
-    if (g_ascii_strcasecmp(end, "ch")  == 0) { *out_unit = NS_CSS_UNIT_CH;  return TRUE; }
-    if (g_ascii_strcasecmp(end, "cap") == 0) { *out_unit = NS_CSS_UNIT_CAP; return TRUE; }
-    if (g_ascii_strcasecmp(end, "ic")  == 0) { *out_unit = NS_CSS_UNIT_IC;  return TRUE; }
+    if (g_ascii_strcasecmp(end, "ex")   == 0) { *out_unit = NS_CSS_UNIT_EX;   return TRUE; }
+    if (g_ascii_strcasecmp(end, "ch")   == 0) { *out_unit = NS_CSS_UNIT_CH;   return TRUE; }
+    if (g_ascii_strcasecmp(end, "cap")  == 0) { *out_unit = NS_CSS_UNIT_CAP;  return TRUE; }
+    if (g_ascii_strcasecmp(end, "ic")   == 0) { *out_unit = NS_CSS_UNIT_IC;   return TRUE; }
+    if (g_ascii_strcasecmp(end, "rex")  == 0) { *out_unit = NS_CSS_UNIT_REX;  return TRUE; }
+    if (g_ascii_strcasecmp(end, "rch")  == 0) { *out_unit = NS_CSS_UNIT_RCH;  return TRUE; }
+    if (g_ascii_strcasecmp(end, "rcap") == 0) { *out_unit = NS_CSS_UNIT_RCAP; return TRUE; }
+    if (g_ascii_strcasecmp(end, "ric")  == 0) { *out_unit = NS_CSS_UNIT_RIC;  return TRUE; }
     if (g_ascii_strcasecmp(end, "lh") == 0) {
         *out_unit = NS_CSS_UNIT_LH;
         return TRUE;
@@ -4421,6 +4436,10 @@ ns_css_unit_suffix(int unit)
     case NS_CSS_UNIT_CH:      return "ch";
     case NS_CSS_UNIT_CAP:     return "cap";
     case NS_CSS_UNIT_IC:      return "ic";
+    case NS_CSS_UNIT_REX:     return "rex";
+    case NS_CSS_UNIT_RCH:     return "rch";
+    case NS_CSS_UNIT_RCAP:    return "rcap";
+    case NS_CSS_UNIT_RIC:     return "ric";
     default:                  return "px";
     }
 }
@@ -19115,7 +19134,11 @@ resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
     case NS_CSS_UNIT_EX:
     case NS_CSS_UNIT_CH:
     case NS_CSS_UNIT_CAP:
-    case NS_CSS_UNIT_IC: {
+    case NS_CSS_UNIT_IC:
+    case NS_CSS_UNIT_REX:
+    case NS_CSS_UNIT_RCH:
+    case NS_CSS_UNIT_RCAP:
+    case NS_CSS_UNIT_RIC: {
         const char *pf =
             parent_style && parent_style->values[NS_CSS_FONT_FAMILY] &&
             parent_style->values[NS_CSS_FONT_FAMILY]->kind == NS_CSS_V_KEYWORD
