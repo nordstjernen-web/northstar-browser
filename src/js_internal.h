@@ -287,6 +287,8 @@ struct ns_js {
         int         set;
     } qcache[16];
     int           qcache_next;
+    GPtrArray    *current_dispatch_path;
+    gboolean      current_dispatch_window;
 };
 
 static inline ns_js *
