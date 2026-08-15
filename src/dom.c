@@ -1809,6 +1809,17 @@ ns_node_find_by_id(const ns_node *root, const char *id)
             g_hash_table_remove(root->id_index, id);
         return found;
     }
+    const ns_node *doc = ns_node_root(root);
+    if (doc && doc != root && doc->id_index) {
+        if (doc->id_counts && !g_hash_table_contains(doc->id_counts, id))
+            return NULL;
+        ns_node *hit = g_hash_table_lookup(doc->id_index, id);
+        if (hit) {
+            const char *hid = ns_element_get_attr(hit, "id");
+            if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
+                return hit;
+        }
+    }
     return ns_node_find_by_id_depth(root, id, 0);
 }
 
