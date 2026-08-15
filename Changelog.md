@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* Optimized DOM textContent and innerText get/set paths with zero-allocation
+  string returns for empty and single text child nodes.
+* Optimized DOMTokenList (classList) add, remove, and toggle with single-token
+  fast paths avoiding token array and parser allocations.
+* Accelerated DOM hierarchy validation in pre-insert checks and ancestor-or-self
+  queries with O(1) leaf child checks and bounded traversals.
 * Optimized DOM attribute operations (getAttribute, setAttribute, hasAttribute,
   toggleAttribute, removeAttribute) with zero-allocation lowercase ASCII fast paths
   and single-pass string conversion.
