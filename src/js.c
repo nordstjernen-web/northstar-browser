@@ -1614,10 +1614,20 @@ ns_style_mutation_text(const ns_style_back *back)
 static char *
 camel_to_kebab(const char *s)
 {
+    if (!s) return NULL;
     if (!strcmp(s, "cssFloat")) return g_strdup("float");
     if (s[0] == '-' && s[1] == '-') return g_strdup(s);
+    gboolean has_upper = FALSE;
+    for (const char *p = s; *p; p++) {
+        if (*p >= 'A' && *p <= 'Z') {
+            has_upper = TRUE;
+            break;
+        }
+    }
+    if (!has_upper && !g_str_has_prefix(s, "webkit"))
+        return g_strdup(s);
     GString *out = g_string_new(NULL);
-    if (g_str_has_prefix(s, "webkit") && g_ascii_isupper(s[6]))
+    if (g_str_has_prefix(s, "webkit") && g_ascii_isupper((guchar)s[6]))
         g_string_append_c(out, '-');
     for (const char *p = s; *p; p++) {
         if (*p >= 'A' && *p <= 'Z') {
@@ -2611,7 +2621,13 @@ ns_storage_set_prop(JSContext *ctx, JSValueConst obj, JSAtom prop,
         ns_throw_quota_exceeded(ctx);
         return -1;
     }
-    char *oldv = g_strdup(g_hash_table_lookup(store, name));
+    char *existing = g_hash_table_lookup(store, name);
+    if (existing && strcmp(existing, vstr) == 0) {
+        JS_FreeCString(ctx, vstr);
+        JS_FreeCString(ctx, name);
+        return TRUE;
+    }
+    char *oldv = g_strdup(existing);
     gboolean changed = !oldv || strcmp(oldv, vstr) != 0;
     g_hash_table_replace(store, g_strdup(name), g_strdup(vstr));
     ns_storage_maybe_dirty(ctx, store);
@@ -12771,8 +12787,28 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc < 1) return JS_UNDEFINED;
-    return ns_sc_clone_with_transfer_ports(ctx, argv[0], NULL);
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "structuredClone requires at least 1 argument");
+    GPtrArray *transfer_ports = NULL;
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        JSValue trans = JS_GetPropertyStr(ctx, argv[1], "transfer");
+        if (JS_IsArray(trans)) {
+            uint32_t len = ns_js_array_length(ctx, trans);
+            for (uint32_t i = 0; i < len; i++) {
+                JSValue item = JS_GetPropertyUint32(ctx, trans, i);
+                if (JS_IsObject(item)) {
+                    void *ptr = JS_VALUE_GET_PTR(item);
+                    if (!transfer_ports) transfer_ports = g_ptr_array_new();
+                    g_ptr_array_add(transfer_ports, ptr);
+                }
+                JS_FreeValue(ctx, item);
+            }
+        }
+        JS_FreeValue(ctx, trans);
+    }
+    JSValue res = ns_sc_clone_with_transfer_ports(ctx, argv[0], transfer_ports);
+    if (transfer_ports) g_ptr_array_free(transfer_ports, TRUE);
+    return res;
 }
 
 static gboolean
@@ -12898,6 +12934,20 @@ ns_css_escape(JSContext *ctx, JSValueConst this_val,
     size_t slen = 0;
     const char *s = JS_ToCStringLen(ctx, &slen, argv[0]);
     if (!s) return JS_EXCEPTION;
+    gboolean is_simple = slen > 0 && (g_ascii_isalpha((guchar)s[0]) || s[0] == '_');
+    if (is_simple) {
+        for (size_t i = 1; i < slen; i++) {
+            unsigned char c = (unsigned char)s[i];
+            if (!(g_ascii_isalnum(c) || c == '_' || c == '-')) {
+                is_simple = FALSE;
+                break;
+            }
+        }
+        if (is_simple) {
+            JS_FreeCString(ctx, s);
+            return JS_DupValue(ctx, argv[0]);
+        }
+    }
     GString *out = g_string_new(NULL);
     gboolean first_is_dash = slen > 0 && s[0] == '-';
     gsize cp = 0;
@@ -36865,16 +36915,11 @@ ns_dataset_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
     if (!attr) return 0;
     const char *value = NULL;
     for (const ns_attr *a = n->attrs; a; a = a->next) {
-        char *mapped = ns_dataset_attr_to_prop(a->name);
-        if (mapped) {
-            char *mapped_attr = ns_dataset_prop_to_attr(ctx, mapped, FALSE);
-            gboolean match = mapped_attr && strcmp(mapped_attr, attr) == 0;
-            g_free(mapped_attr);
-            g_free(mapped);
-            if (match) {
-                value = a->value ? a->value : "";
-                break;
-            }
+        if (a->name && strcmp(a->name, attr) == 0 &&
+            !ns_attr_name_is_internal(a->name) &&
+            !ns_data_tail_has_upper(a->name + 5)) {
+            value = a->value ? a->value : "";
+            break;
         }
     }
     g_free(attr);
@@ -37388,7 +37433,13 @@ ns_element_showModal(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     ns_node *el = ns_unwrap_element_mut(this_val);
     if (!el) return JS_UNDEFINED;
+    if (ns_element_get_attr(el, "open"))
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "The element already has an 'open' attribute, and therefore cannot be opened as a modal dialog.");
     ns_js *_j = js_from_ctx(ctx);
+    if (_j && _j->current_doc && ns_node_root(el) != ns_node_root(_j->current_doc))
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "The element is not connected to a document.");
     if (_j && !_j->active_modal) _j->focus_before_modal = _j->focused_node;
     ns_element_set_attr(el, "open", "");
     ns_css_mark_attr_dirty(el, "open", NULL);
@@ -47004,10 +47055,13 @@ static gboolean
 ns_valid_element_local_name(const char *s)
 {
     if (!s || !*s) return FALSE;
+    if (g_ascii_isalpha((guchar)s[0])) {
+        const char *end = s + strlen(s);
+        return ns_name_no_forbidden(s, end);
+    }
     const char *end = s + strlen(s);
     gunichar first = g_utf8_get_char_validated(s, end - s);
     if (first == (gunichar)-1 || first == (gunichar)-2) return FALSE;
-    if (g_ascii_isalpha(first)) return ns_name_no_forbidden(s, end);
     if (first != ':' && first != '_' && first < 0x80) return FALSE;
     for (const char *p = g_utf8_next_char(s); p < end;
          p = g_utf8_next_char(p)) {
@@ -47167,7 +47221,19 @@ ns_document_createElement(JSContext *ctx, JSValueConst this_val,
     }
     gboolean is_xml = ns_doc_wrapper_is_xml(ctx, this_val);
     gboolean html_ns = !is_xml || ns_doc_wrapper_is_xhtml(ctx, this_val);
-    char *stored = is_xml ? g_strdup(name) : g_ascii_strdown(name, -1);
+    char *stored = NULL;
+    if (is_xml) {
+        stored = g_strdup(name);
+    } else {
+        gboolean already_lower = TRUE;
+        for (const char *p = name; *p; p++) {
+            if (g_ascii_isupper((guchar)*p)) {
+                already_lower = FALSE;
+                break;
+            }
+        }
+        stored = already_lower ? g_strdup(name) : g_ascii_strdown(name, -1);
+    }
     JS_FreeCString(ctx, name);
     ns_node *el = ns_node_new_element(stored);
     el->flags |= NS_NODE_NOT_PARSER_INSERTED;

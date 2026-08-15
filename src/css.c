@@ -17237,6 +17237,23 @@ ns_inline_style_set(const char *style, const char *prop, const char *raw_value)
     if (!prop) return g_strdup(style ? style : "");
     char *value = raw_value && *raw_value
         ? css_value_closed_at_eof(raw_value) : NULL;
+    if (!style || !*style) {
+        if (!value || !*value) {
+            g_free(value);
+            return g_strdup("");
+        }
+        const int *qids = inline_quad_ids(prop);
+        if (qids) {
+            char *qexp = inline_quad_expanded(prop, value);
+            g_free(value);
+            return qexp ? qexp : g_strdup("");
+        }
+        if (g_ascii_strcasecmp(prop, "all") != 0 && inline_logical_group(ns_css_prop_id(prop)) == 0) {
+            char *res = g_strdup_printf("%s: %s", prop, value);
+            g_free(value);
+            return res;
+        }
+    }
     GString *out = g_string_new(NULL);
     gboolean found = FALSE;
     gboolean set_all = g_ascii_strcasecmp(prop, "all") == 0;
@@ -17407,13 +17424,15 @@ match_complex_chain(const ns_css_selector *sel, int idx, const ns_node *cur)
                match_complex_chain(sel, idx - 1, s);
     }
     if (comb == NS_CSS_COMB_SIBLING) {
-        for (const ns_node *s = cur->prev_sibling; s; s = s->prev_sibling)
+        int depth = 0;
+        for (const ns_node *s = cur->prev_sibling; s && depth++ < NS_DOM_MAX_DEPTH; s = s->prev_sibling)
             if (s->kind == NS_NODE_ELEMENT && match_simple(prev, s) &&
                 match_complex_chain(sel, idx - 1, s))
                 return TRUE;
         return FALSE;
     }
-    for (const ns_node *p = cur->parent; p; p = p->parent) {
+    int depth = 0;
+    for (const ns_node *p = cur->parent; p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent) {
         if (p->kind == NS_NODE_DOCUMENT) break;
         if (match_simple(prev, p) && match_complex_chain(sel, idx - 1, p))
             return TRUE;
