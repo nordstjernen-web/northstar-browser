@@ -1809,7 +1809,9 @@ ns_node_find_by_id(const ns_node *root, const char *id)
             g_hash_table_remove(root->id_index, id);
         return found;
     }
-    const ns_node *doc = ns_node_root(root);
+    const ns_node *doc = root;
+    while (doc && doc->parent && doc->kind != NS_NODE_DOCUMENT)
+        doc = doc->parent;
     if (doc && doc != root && doc->id_index) {
         if (doc->id_counts && !g_hash_table_contains(doc->id_counts, id))
             return NULL;
