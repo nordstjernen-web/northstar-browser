@@ -2548,8 +2548,7 @@ emit_datalist_suggestions(collector_ctx *ctx, const ns_node *input)
 {
     const char *list_id = ns_element_get_attr(input, "list");
     if (!list_id || !*list_id) return;
-    const ns_node *root = input;
-    while (root->parent) root = root->parent;
+    const ns_node *root = ns_node_root(input);
     const ns_node *dl = find_datalist_by_id(root, list_id, 0);
     if (!dl) return;
 
@@ -11490,18 +11489,19 @@ node_precedes(const ns_node *a, const ns_node *b)
         if (ra && rb) return ra < rb;
     }
     int da = 0, db = 0;
-    for (const ns_node *p = a; p; p = p->parent) da++;
-    for (const ns_node *p = b; p; p = p->parent) db++;
+    for (const ns_node *p = a; p && da < 1000; p = p->parent) da++;
+    for (const ns_node *p = b; p && db < 1000; p = p->parent) db++;
     const ns_node *pa = a, *pb = b;
-    while (da > db + 1) { pa = pa->parent; da--; }
-    while (db > da + 1) { pb = pb->parent; db--; }
-    if (da > db) { if (pa->parent == pb) return FALSE; pa = pa->parent; da--; }
-    else if (db > da) { if (pb->parent == pa) return TRUE; pb = pb->parent; db--; }
-    while (pa->parent != pb->parent) {
+    while (da > db + 1 && pa) { pa = pa->parent; da--; }
+    while (db > da + 1 && pb) { pb = pb->parent; db--; }
+    if (da > db && pa) { if (pa->parent == pb) return FALSE; pa = pa->parent; da--; }
+    else if (db > da && pb) { if (pb->parent == pa) return TRUE; pb = pb->parent; db--; }
+    int g = 0;
+    while (pa && pb && pa->parent != pb->parent && g++ < 1000) {
         pa = pa->parent;
         pb = pb->parent;
-        if (!pa || !pb) return FALSE;
     }
+    if (!pa || !pb || !pa->parent) return FALSE;
     for (const ns_node *s = pa->next_sibling; s; s = s->next_sibling)
         if (s == pb) return TRUE;
     return FALSE;
@@ -12003,8 +12003,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     }
     if (static_y_count > 0) {
         const ns_node *order_root =
-            g_array_index(g_abs_pending, ns_abs_entry, 0).dom;
-        while (order_root->parent) order_root = order_root->parent;
+            ns_node_root(g_array_index(g_abs_pending, ns_abs_entry, 0).dom);
         node_order_build(order_root);
     }
     GHashTable *box_map = g_hash_table_new(g_direct_hash, g_direct_equal);

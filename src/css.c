@@ -15289,8 +15289,7 @@ ns_css_node_language(const ns_node *el)
         if (la && !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
             return la->value ? la->value : "";
     }
-    const ns_node *root = el;
-    while (root && root->parent) root = root->parent;
+    const ns_node *root = ns_node_root(el);
     if (!g_pragma_valid || g_pragma_doc != root) {
         const char *found = NULL;
         if (root) ns_css_pragma_language_scan(root, &found, 0);

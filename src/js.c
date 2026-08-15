@@ -34354,8 +34354,8 @@ ns_element_getRootNode(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
-    while (n->parent) n = n->parent;
-    return ns_make_element(ctx, n);
+    const ns_node *root = ns_node_root(n);
+    return ns_make_element(ctx, (ns_node *)root);
 }
 
 
@@ -42082,14 +42082,14 @@ ns_range_cloneRange(JSContext *ctx, JSValueConst this_val,
 }
 
 typedef struct {
-    ns_node *start, *end;
-    int      soff, eoff;
-    GString *buf;
-    int      state;
+    const ns_node *start, *end;
+    int            soff, eoff;
+    GString       *buf;
+    int            state;
 } ns_range_text_ctx;
 
 static void
-ns_range_text_walk(ns_node *n, ns_range_text_ctx *c, int depth)
+ns_range_text_walk(const ns_node *n, ns_range_text_ctx *c, int depth)
 {
     if (!n || c->state == 2 || depth >= 512) return;
 
@@ -42127,7 +42127,7 @@ ns_range_text_walk(ns_node *n, ns_range_text_ctx *c, int depth)
     gboolean is_start_el = (n == c->start);
     gboolean is_end_el   = (n == c->end);
     int idx = 0;
-    for (ns_node *ch = n->first_child; ch; ch = ch->next_sibling, idx++) {
+    for (const ns_node *ch = n->first_child; ch; ch = ch->next_sibling, idx++) {
         if (is_start_el && c->state == 0 && idx == c->soff) c->state = 1;
         if (is_end_el && idx == c->eoff) { c->state = 2; return; }
         ns_range_text_walk(ch, c, depth + 1);
@@ -42169,8 +42169,7 @@ ns_range_toString_impl(JSContext *ctx, JSValueConst this_val,
         return JS_NewStringLen(ctx, p, (size_t)(q - p));
     }
 
-    ns_node *root = start;
-    while (root->parent) root = root->parent;
+    const ns_node *root = ns_node_root(start);
 
     ns_range_text_ctx c = { start, end, (int)soff, (int)eoff, g_string_new(NULL), 0 };
     ns_range_text_walk(root, &c, 0);
