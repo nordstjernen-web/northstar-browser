@@ -46176,10 +46176,11 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     };
     for (gsize i = 0; i < G_N_ELEMENTS(scroll_getters); i++) {
         JSAtom a = JS_NewAtom(ctx, scroll_getters[i].name);
-        JS_DefinePropertyGetSet(ctx, global, a,
-            JS_NewCFunction(ctx, scroll_getters[i].fn,
-                            scroll_getters[i].name, 0),
-            JS_UNDEFINED, JS_PROP_CONFIGURABLE);
+        JSValue g = JS_NewCFunction2(ctx, (JSCFunction *)(void *)scroll_getters[i].fn,
+                                     scroll_getters[i].name, 0, JS_CFUNC_getter, 0);
+        JSValue s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_element_noop_set,
+                                     scroll_getters[i].name, 1, JS_CFUNC_setter, 0);
+        JS_DefinePropertyGetSet(ctx, global, a, g, s, JS_PROP_CONFIGURABLE);
         JS_FreeAtom(ctx, a);
     }
     ns_js_sync_window_metrics(js);
@@ -46718,10 +46719,12 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     {
         JSAtom window_atom = JS_NewAtom(ctx, "window");
-        JS_DefinePropertyGetSet(ctx, global, window_atom,
-            JS_NewCFunction2(ctx, ns_window_get_window, "get window", 0,
-                             JS_CFUNC_generic, 0),
-            JS_UNDEFINED, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JSValue win_g = JS_NewCFunction2(ctx, ns_window_get_window, "get window", 0,
+                                         JS_CFUNC_generic, 0);
+        JSValue win_s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_element_noop_set,
+                                         "set window", 1, JS_CFUNC_setter, 0);
+        JS_DefinePropertyGetSet(ctx, global, window_atom, win_g, win_s,
+                                JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
         JS_FreeAtom(ctx, window_atom);
     }
     JS_SetPropertyStr(ctx, global, "self",   JS_DupValue(ctx, global));
@@ -46739,16 +46742,20 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     }
     {
         JSAtom frames_atom = JS_NewAtom(ctx, "frames");
-        JS_DefinePropertyGetSet(ctx, global, frames_atom,
-            JS_NewCFunction2(ctx, ns_window_get_frames, "get frames", 0,
-                             JS_CFUNC_generic, 0),
-            JS_UNDEFINED, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JSValue fr_g = JS_NewCFunction2(ctx, ns_window_get_frames, "get frames", 0,
+                                        JS_CFUNC_generic, 0);
+        JSValue fr_s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_element_noop_set,
+                                        "set frames", 1, JS_CFUNC_setter, 0);
+        JS_DefinePropertyGetSet(ctx, global, frames_atom, fr_g, fr_s,
+                                JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
         JS_FreeAtom(ctx, frames_atom);
         JSAtom length_atom = JS_NewAtom(ctx, "length");
-        JS_DefinePropertyGetSet(ctx, global, length_atom,
-            JS_NewCFunction2(ctx, ns_window_get_length, "get length", 0,
-                             JS_CFUNC_generic, 0),
-            JS_UNDEFINED, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JSValue len_g = JS_NewCFunction2(ctx, ns_window_get_length, "get length", 0,
+                                         JS_CFUNC_generic, 0);
+        JSValue len_s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_element_noop_set,
+                                         "set length", 1, JS_CFUNC_setter, 0);
+        JS_DefinePropertyGetSet(ctx, global, length_atom, len_g, len_s,
+                                JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
         JS_FreeAtom(ctx, length_atom);
     }
 
