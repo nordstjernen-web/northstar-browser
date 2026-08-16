@@ -36433,8 +36433,7 @@ ns_live_define_own_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
             }
             JS_FreeCString(ctx, name);
             if (reject) {
-                if ((flags & JS_PROP_THROW) ||
-                    ((flags & JS_PROP_THROW_STRICT) && JS_IsStrictMode(ctx))) {
+                if (flags & (JS_PROP_THROW | JS_PROP_THROW_STRICT)) {
                     JS_ThrowTypeError(ctx, "Cannot define property on this object");
                     return -1;
                 }
@@ -36457,8 +36456,7 @@ ns_live_set_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
         if (name) {
             if (ns_live_is_array_index(name)) {
                 JS_FreeCString(ctx, name);
-                if ((flags & JS_PROP_THROW) ||
-                    ((flags & JS_PROP_THROW_STRICT) && JS_IsStrictMode(ctx))) {
+                if (flags & (JS_PROP_THROW | JS_PROP_THROW_STRICT)) {
                     JS_ThrowTypeError(ctx, "Index properties cannot be set on this object");
                     return -1;
                 }
