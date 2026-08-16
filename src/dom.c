@@ -1823,28 +1823,31 @@ ns_node_find_by_id(const ns_node *root, const char *id)
             if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
                 return hit;
         }
-        if (!hit && root->id_counts &&
-            !g_hash_table_contains(root->id_counts, id))
-            return NULL;
         ns_node *found = ns_node_find_by_id_depth(root, id, 0);
-        if (found)
+        if (found) {
             g_hash_table_replace(root->id_index, g_strdup(id), found);
-        else
+            ns_doc_id_index_count((ns_node *)root, id, 1);
+        } else {
             g_hash_table_remove(root->id_index, id);
+        }
         return found;
     }
     const ns_node *doc = root;
     while (doc && doc->parent && doc->kind != NS_NODE_DOCUMENT)
         doc = doc->parent;
     if (doc && doc != root && doc->id_index) {
-        if (doc->id_counts && !g_hash_table_contains(doc->id_counts, id))
-            return NULL;
         ns_node *hit = g_hash_table_lookup(doc->id_index, id);
         if (hit) {
             const char *hid = ns_element_get_attr(hit, "id");
             if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
                 return hit;
         }
+        ns_node *found = ns_node_find_by_id_depth(root, id, 0);
+        if (found) {
+            g_hash_table_replace(doc->id_index, g_strdup(id), found);
+            ns_doc_id_index_count((ns_node *)doc, id, 1);
+        }
+        return found;
     }
     return ns_node_find_by_id_depth(root, id, 0);
 }
