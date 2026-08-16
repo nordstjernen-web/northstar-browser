@@ -1975,45 +1975,15 @@ ns_tlist_add(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     const char *attr;
     ns_node *n = ns_tlist_node(this_val, &attr);
     if (!n) return JS_UNDEFINED;
-    if (argc == 1) {
-        const char *t = JS_ToCString(ctx, argv[0]);
-        if (!t) return JS_EXCEPTION;
-        if (ns_tlist_validate(ctx, t) < 0) {
-            JS_FreeCString(ctx, t);
-            return JS_EXCEPTION;
-        }
-        const char *cls = ns_element_get_attr(n, attr);
-        if (!cls || !*cls) {
-            ns_js_set_attr_recorded(js_from_ctx(ctx), n, attr, t);
-            JS_FreeCString(ctx, t);
-            return JS_UNDEFINED;
-        }
-        if (class_attr_contains(cls, t, strlen(t), NULL, NULL)) {
-            JS_FreeCString(ctx, t);
-            return JS_UNDEFINED;
-        }
-        GPtrArray *set = ns_tlist_set_parse(cls);
-        if (ns_tlist_set_index(set, t) < 0) {
-            g_ptr_array_add(set, g_strdup(t));
-            ns_tlist_set_update(ctx, n, attr, set);
-        }
-        g_ptr_array_free(set, TRUE);
-        JS_FreeCString(ctx, t);
-        return JS_UNDEFINED;
-    }
     GPtrArray *toks = ns_tlist_collect_tokens(ctx, argc, argv);
     if (!toks) return JS_EXCEPTION;
     GPtrArray *set = ns_tlist_set_parse(ns_element_get_attr(n, attr));
-    gboolean changed = FALSE;
     for (guint i = 0; i < toks->len; i++) {
         const char *t = g_ptr_array_index(toks, i);
-        if (ns_tlist_set_index(set, t) < 0) {
+        if (ns_tlist_set_index(set, t) < 0)
             g_ptr_array_add(set, g_strdup(t));
-            changed = TRUE;
-        }
     }
-    if (changed)
-        ns_tlist_set_update(ctx, n, attr, set);
+    ns_tlist_set_update(ctx, n, attr, set);
     g_ptr_array_free(set, TRUE);
     g_ptr_array_free(toks, TRUE);
     return JS_UNDEFINED;
@@ -2025,41 +1995,16 @@ ns_tlist_remove(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
     const char *attr;
     ns_node *n = ns_tlist_node(this_val, &attr);
     if (!n) return JS_UNDEFINED;
-    if (argc == 1) {
-        const char *t = JS_ToCString(ctx, argv[0]);
-        if (!t) return JS_EXCEPTION;
-        if (ns_tlist_validate(ctx, t) < 0) {
-            JS_FreeCString(ctx, t);
-            return JS_EXCEPTION;
-        }
-        const char *cls = ns_element_get_attr(n, attr);
-        if (!cls || !*cls || !class_attr_contains(cls, t, strlen(t), NULL, NULL)) {
-            JS_FreeCString(ctx, t);
-            return JS_UNDEFINED;
-        }
-        GPtrArray *set = ns_tlist_set_parse(cls);
-        int idx = ns_tlist_set_index(set, t);
-        if (idx >= 0) {
-            g_ptr_array_remove_index(set, idx);
-            ns_tlist_set_update(ctx, n, attr, set);
-        }
-        g_ptr_array_free(set, TRUE);
-        JS_FreeCString(ctx, t);
-        return JS_UNDEFINED;
-    }
     GPtrArray *toks = ns_tlist_collect_tokens(ctx, argc, argv);
     if (!toks) return JS_EXCEPTION;
     GPtrArray *set = ns_tlist_set_parse(ns_element_get_attr(n, attr));
-    gboolean changed = FALSE;
     for (guint i = 0; i < toks->len; i++) {
-        int idx = ns_tlist_set_index(set, g_ptr_array_index(toks, i));
-        if (idx >= 0) {
+        const char *t = g_ptr_array_index(toks, i);
+        int idx = ns_tlist_set_index(set, t);
+        if (idx >= 0)
             g_ptr_array_remove_index(set, idx);
-            changed = TRUE;
-        }
     }
-    if (changed)
-        ns_tlist_set_update(ctx, n, attr, set);
+    ns_tlist_set_update(ctx, n, attr, set);
     g_ptr_array_free(set, TRUE);
     g_ptr_array_free(toks, TRUE);
     return JS_UNDEFINED;
@@ -5229,13 +5174,15 @@ ns_element_get_textContent(JSContext *ctx, JSValueConst this_val)
         n->kind == NS_NODE_DOCTYPE)
         return JS_NULL;
     if (n->kind == NS_NODE_TEXT || n->kind == NS_NODE_COMMENT)
-        return JS_NewString(ctx, n->text ? n->text : "");
+        return JS_NewStringLen(ctx, n->text ? n->text : "", (size_t)n->text_len);
     if (!n->first_child)
         return JS_NewString(ctx, "");
     if (n->first_child == n->last_child && n->first_child->kind == NS_NODE_TEXT)
-        return JS_NewString(ctx, n->first_child->text ? n->first_child->text : "");
-    char *t = ns_node_collect_all_text(n);
-    JSValue v = JS_NewString(ctx, t ? t : "");
+        return JS_NewStringLen(ctx, n->first_child->text ? n->first_child->text : "",
+                               (size_t)n->first_child->text_len);
+    size_t tlen = 0;
+    char *t = ns_node_collect_all_text_len(n, &tlen);
+    JSValue v = JS_NewStringLen(ctx, t ? t : "", tlen);
     g_free(t);
     return v;
 }
@@ -5985,7 +5932,7 @@ ns_element_get_nodeValue(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_NULL;
     if (n->kind == NS_NODE_TEXT || n->kind == NS_NODE_COMMENT)
-        return JS_NewString(ctx, n->text ? n->text : "");
+        return JS_NewStringLen(ctx, n->text ? n->text : "", (size_t)n->text_len);
     return JS_NULL;
 }
 
@@ -6000,7 +5947,7 @@ ns_element_get_wholeText(JSContext *ctx, JSValueConst this_val)
     GString *s = g_string_new(NULL);
     for (const ns_node *c = start; c && c->kind == NS_NODE_TEXT;
          c = c->next_sibling)
-        g_string_append(s, c->text ? c->text : "");
+        g_string_append_len(s, c->text ? c->text : "", (gssize)c->text_len);
     JSValue v = JS_NewStringLen(ctx, s->str, s->len);
     g_string_free(s, TRUE);
     return v;
@@ -6012,9 +5959,10 @@ ns_text_replaceWholeText(JSContext *ctx, JSValueConst this_val,
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || n->kind != NS_NODE_TEXT) return JS_NULL;
+    size_t clen = 0;
     const char *content = argc > 0 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])
-        ? JS_ToCString(ctx, argv[0]) : NULL;
-    gboolean empty = !content || !*content;
+        ? JS_ToCStringLen(ctx, &clen, argv[0]) : NULL;
+    gboolean empty = !content || clen == 0;
     ns_node *parent = n->parent;
     ns_node *start = n;
     while (start->prev_sibling && start->prev_sibling->kind == NS_NODE_TEXT)
@@ -6025,8 +5973,8 @@ ns_text_replaceWholeText(JSContext *ctx, JSValueConst this_val,
     while (c && c->kind == NS_NODE_TEXT) {
         ns_node *next = c->next_sibling;
         if (!empty && c == n) {
-            char *old_copy = c->text ? g_strdup(c->text) : g_strdup("");
-            ns_node_replace_text_owned(c, g_strdup(content));
+            char *old_copy = c->text ? g_memdup2(c->text, c->text_len + 1) : g_strdup("");
+            ns_node_replace_text_len_owned(c, g_memdup2(content, clen + 1), (guint32)clen);
             if (js) ns_js_record_character_data(js, c, old_copy);
             g_free(old_copy);
             result = c;
@@ -6051,12 +5999,13 @@ ns_element_set_nodeValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n) return JS_UNDEFINED;
     if (n->kind != NS_NODE_TEXT && n->kind != NS_NODE_COMMENT) return JS_UNDEFINED;
-    gboolean free_s = !JS_IsNull(val) && !JS_IsUndefined(val);
-    const char *s = free_s ? JS_ToCString(ctx, val) : "";
+    gboolean is_null = JS_IsNull(val);
+    size_t len = 0;
+    const char *s = is_null ? "" : JS_ToCStringLen(ctx, &len, val);
     if (s) {
-        char *old_copy = n->text ? g_strdup(n->text) : g_strdup("");
-        ns_node_replace_text_owned(n, g_strdup(s));
-        if (free_s) JS_FreeCString(ctx, s);
+        char *old_copy = n->text ? g_memdup2(n->text, n->text_len + 1) : g_strdup("");
+        ns_node_replace_text_len_owned(n, is_null ? g_strdup("") : g_memdup2(s, len + 1), (guint32)len);
+        if (!is_null) JS_FreeCString(ctx, s);
         ns_js *_j = js_from_ctx(ctx);
         if (_j) {
             _j->mutated = TRUE;
@@ -6921,14 +6870,15 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
                !(n->kind == NS_NODE_DOCUMENT && (n->flags & NS_NODE_FRAGMENT))))
         return JS_UNDEFINED;
     gboolean free_s = !JS_IsNull(val) && !JS_IsUndefined(val);
-    const char *s = free_s ? JS_ToCString(ctx, val) : "";
+    size_t len = 0;
+    const char *s = free_s ? JS_ToCStringLen(ctx, &len, val) : "";
     if (!s) return JS_UNDEFINED;
-    if (!*s && !n->first_child) {
+    if (len == 0 && !n->first_child) {
         if (free_s) JS_FreeCString(ctx, s);
         return JS_UNDEFINED;
     }
     ns_js *_j = js_from_ctx(ctx);
-    ns_node *added = *s ? ns_node_new_text(g_strdup(s)) : NULL;
+    ns_node *added = len > 0 ? ns_node_new_text_len(g_memdup2(s, len + 1), (guint32)len) : NULL;
     ns_element_replace_all_recorded(_j, n, added);
     if (free_s) JS_FreeCString(ctx, s);
     if (_j) _j->mutated = TRUE;
@@ -7295,7 +7245,11 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
                 return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
                     "Document may not have Text nodes as direct children");
             }
-            if (child->kind == NS_NODE_DOCUMENT && !child->parent) {
+            if (child->kind == NS_NODE_DOCUMENT && !(child->flags & NS_NODE_FRAGMENT)) {
+                return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                    "Document may not be inserted as a child");
+            }
+            if (child->kind == NS_NODE_DOCUMENT && (child->flags & NS_NODE_FRAGMENT)) {
                 for (const ns_node *fc = child->first_child; fc; fc = fc->next_sibling) {
                     if (fc->kind == NS_NODE_TEXT) {
                         return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
@@ -7337,7 +7291,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         ns_node *child = ns_unwrap_element_mut(argv[i]);
         if (child) {
             if (ns_node_ancestor_or_self(self, child)) continue;
-            if (child->kind == NS_NODE_DOCUMENT && !child->parent) {
+            if (child->kind == NS_NODE_DOCUMENT && (child->flags & NS_NODE_FRAGMENT)) {
                 if (_j) ns_js_record_fragment_emptied(_j, child);
                 ns_node *c = child->first_child;
                 while (c) {
@@ -31291,9 +31245,23 @@ ns_element_getElementsByClassName(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
+ns_is_valid_ident_start(const char *s)
+{
+    if (!s || !*s) return FALSE;
+    unsigned char c = (unsigned char)*s;
+    if (g_ascii_isalpha(c) || c == '_' || c >= 0x80) return TRUE;
+    if (c == '-' && s[1]) {
+        unsigned char c2 = (unsigned char)s[1];
+        if (g_ascii_isalpha(c2) || c2 == '_' || c2 == '-' || c2 >= 0x80)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 ns_is_simple_class_selector(const char *sel)
 {
-    if (!sel || sel[0] != '.' || sel[1] == '\0') return FALSE;
+    if (!sel || sel[0] != '.' || !ns_is_valid_ident_start(sel + 1)) return FALSE;
     for (const char *p = sel + 1; *p; p++) {
         unsigned char c = (unsigned char)*p;
         if (c <= ' ' || c == '.' || c == '#' || c == ':' || c == '[' ||
@@ -31319,7 +31287,7 @@ ns_is_simple_tag_selector(const char *sel)
 static gboolean
 ns_is_simple_id_selector(const char *sel)
 {
-    if (!sel || sel[0] != '#' || sel[1] == '\0') return FALSE;
+    if (!sel || sel[0] != '#' || !ns_is_valid_ident_start(sel + 1)) return FALSE;
     for (const char *p = sel + 1; *p; p++) {
         unsigned char c = (unsigned char)*p;
         if (c <= ' ' || c == '.' || c == '#' || c == ':' || c == '[' ||
@@ -31339,6 +31307,44 @@ ns_selector_is_scope(const char *sel)
     const char *rest = sel + 6;
     while (*rest == ' ' || *rest == '\t') rest++;
     return *rest == '\0' || *rest == ',';
+}
+
+static char *
+ns_element_target_fragment(JSContext *ctx, const ns_node *el)
+{
+    if (!ctx || !el) return NULL;
+    const ns_node *doc = NULL;
+    for (const ns_node *p = el; p; p = p->parent) {
+        if (p->kind == NS_NODE_DOCUMENT && !(p->flags & NS_NODE_FRAGMENT)) {
+            doc = p;
+            break;
+        }
+    }
+    if (doc) {
+        JSValue dw = ns_make_element(ctx, doc);
+        if (JS_IsObject(dw)) {
+            JSValue uv = JS_GetPropertyStr(ctx, dw, "URL");
+            if (JS_IsString(uv)) {
+                const char *s = JS_ToCString(ctx, uv);
+                if (s) {
+                    const char *hash = strchr(s, '#');
+                    char *res = (hash && hash[1]) ? g_strdup(hash + 1) : NULL;
+                    JS_FreeCString(ctx, s);
+                    JS_FreeValue(ctx, uv);
+                    JS_FreeValue(ctx, dw);
+                    return res;
+                }
+            }
+            JS_FreeValue(ctx, uv);
+        }
+        JS_FreeValue(ctx, dw);
+    }
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->current_url) {
+        const char *hash = strchr(js->current_url, '#');
+        if (hash && hash[1]) return g_strdup(hash + 1);
+    }
+    return NULL;
 }
 
 static JSValue
@@ -31382,10 +31388,14 @@ ns_element_matches(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, sel);
     const ns_node *prev_scope = ns_css_set_match_scope(el);
     ns_js *js = js_from_ctx(ctx);
+    char *cur_frag = ns_element_target_fragment(ctx, el);
+    ns_css_set_target_fragment(cur_frag);
     const ns_node *prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
     gboolean m = ns_matches_any_selector(sels, el);
     ns_css_set_focus_node(prev_focus);
     ns_css_set_match_scope(prev_scope);
+    ns_css_set_target_fragment(NULL);
+    g_free(cur_frag);
     g_ptr_array_free(sels, TRUE);
     return m ? JS_TRUE : JS_FALSE;
 }
@@ -31449,6 +31459,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, sel);
     const ns_node *prev_scope = ns_css_set_match_scope(el);
     ns_js *js = js_from_ctx(ctx);
+    char *cur_frag = ns_element_target_fragment(ctx, el);
+    ns_css_set_target_fragment(cur_frag);
     const ns_node *prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
     const ns_node *cur = el;
     int depth = 0;
@@ -31456,6 +31468,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
         if (ns_matches_any_selector(sels, cur)) {
             ns_css_set_focus_node(prev_focus);
             ns_css_set_match_scope(prev_scope);
+            ns_css_set_target_fragment(NULL);
+            g_free(cur_frag);
             g_ptr_array_free(sels, TRUE);
             return ns_make_element(ctx, cur);
         }
@@ -31463,6 +31477,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     }
     ns_css_set_focus_node(prev_focus);
     ns_css_set_match_scope(prev_scope);
+    ns_css_set_target_fragment(NULL);
+    g_free(cur_frag);
     g_ptr_array_free(sels, TRUE);
     return JS_NULL;
 }
@@ -31509,7 +31525,10 @@ static guint
 ns_attr_count(const ns_attr *a)
 {
     guint n = 0;
-    for (; a; a = a->next) n++;
+    for (; a; a = a->next) {
+        if (!a->name || ns_attr_name_is_internal(a->name)) continue;
+        n++;
+    }
     return n;
 }
 
@@ -31518,6 +31537,7 @@ ns_node_attrs_equal(const ns_node *a, const ns_node *b)
 {
     if (ns_attr_count(a->attrs) != ns_attr_count(b->attrs)) return FALSE;
     for (const ns_attr *p = a->attrs; p; p = p->next) {
+        if (!p->name || ns_attr_name_is_internal(p->name)) continue;
         const char *bv = NULL;
         if (!ns_attr_lookup_equal_value(b->attrs, p, &bv)) return FALSE;
         const char *av = p->value ? p->value : "";
@@ -31527,15 +31547,74 @@ ns_node_attrs_equal(const ns_node *a, const ns_node *b)
     return TRUE;
 }
 
+static const char *
+ns_node_namespace_uri(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return NULL;
+    const char *stored = ns_element_get_attr(n, "data-nd-ns-uri");
+    if (stored) return stored;
+    if (n->flags & NS_NODE_SVG_NS)
+        return "http://www.w3.org/2000/svg";
+    if ((n->flags & NS_NODE_FOREIGN_NS) || (n->flags & NS_NODE_XML_DOC))
+        return NULL;
+    return "http://www.w3.org/1999/xhtml";
+}
+
+static const char *
+ns_node_prefix(const ns_node *n, char *buf, size_t buf_sz)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return NULL;
+    const char *stored = ns_element_get_attr(n, "data-nd-ns-prefix");
+    if (stored) return stored;
+    if (n->name) {
+        const char *colon = strchr(n->name, ':');
+        if (colon) {
+            size_t len = (size_t)(colon - n->name);
+            if (len < buf_sz) {
+                memcpy(buf, n->name, len);
+                buf[len] = '\0';
+                return buf;
+            }
+        }
+    }
+    return NULL;
+}
+
+static const char *
+ns_node_local_name(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return NULL;
+    if (n->name) {
+        const char *colon = strchr(n->name, ':');
+        if (colon) return colon + 1;
+        return n->name;
+    }
+    return NULL;
+}
+
 static gboolean
 ns_node_equal(const ns_node *a, const ns_node *b, int depth)
 {
     if (a == b) return TRUE;
     if (!a || !b || depth >= 512) return FALSE;
     if (a->kind != b->kind) return FALSE;
-    if (a->kind != NS_NODE_DOCUMENT && a->kind != NS_NODE_FRAGMENT) {
-        if ((a->name == NULL) != (b->name == NULL)) return FALSE;
-        if (a->name && b->name && strcmp(a->name, b->name) != 0) return FALSE;
+    if (a->kind == NS_NODE_ELEMENT) {
+        if (g_strcmp0(ns_node_namespace_uri(a), ns_node_namespace_uri(b)) != 0)
+            return FALSE;
+        char buf_a[64], buf_b[64];
+        const char *pfx_a = ns_node_prefix(a, buf_a, sizeof(buf_a));
+        const char *pfx_b = ns_node_prefix(b, buf_b, sizeof(buf_b));
+        if (g_strcmp0(pfx_a, pfx_b) != 0)
+            return FALSE;
+        if (g_strcmp0(ns_node_local_name(a), ns_node_local_name(b)) != 0)
+            return FALSE;
+    } else if (a->kind == NS_NODE_COMMENT) {
+        if ((a->flags & NS_NODE_PI) != (b->flags & NS_NODE_PI))
+            return FALSE;
+        if ((a->flags & NS_NODE_PI) && g_strcmp0(a->name, b->name) != 0)
+            return FALSE;
+    } else if (a->kind == NS_NODE_DOCTYPE) {
+        if (g_strcmp0(a->name, b->name) != 0) return FALSE;
     }
     if ((a->text == NULL) != (b->text == NULL)) return FALSE;
     if (a->text && b->text && strcmp(a->text, b->text) != 0) return FALSE;
@@ -45474,6 +45553,9 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     js->proto_cdata       = cdata_proto;
     js->proto_doctype     = doctype_proto;
     js->proto_docfrag     = docfrag_proto;
+    JSValue unknownelem_proto = ns_proto_of(ctx, global, "HTMLUnknownElement");
+    if (JS_IsObject(unknownelem_proto)) JS_SetPrototype(ctx, unknownelem_proto, htmlelem_proto);
+    js->proto_htmlunknownelement = unknownelem_proto;
 
     {
         static const JSCFunctionListEntry track_accessors[] = {
@@ -47921,6 +48003,7 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
         JS_DefinePropertyValueStr(ctx, wrapper, "readyState",
                                   JS_NewString(ctx, "complete"),
                                   JS_PROP_C_W_E);
+        ns_adopt_owner_walk(ctx, wrapper, doc, 0);
     }
     g_free(title);
     return wrapper;
@@ -50765,6 +50848,7 @@ ns_js_free(ns_js *js)
         JS_FreeValue(js->ctx, js->proto_doctype);
         JS_FreeValue(js->ctx, js->proto_docfrag);
         JS_FreeValue(js->ctx, js->proto_document);
+        JS_FreeValue(js->ctx, js->proto_htmlunknownelement);
         if (js->per_tag_protos) {
             GHashTableIter it;
             gpointer k, v;
