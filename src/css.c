@@ -15538,15 +15538,15 @@ ns_css_control_value_dup(const ns_node *el)
 {
     if (!el || !el->name) return g_strdup("");
     if (strcmp(el->name, "textarea") == 0)
-        return ns_node_collect_text(el);
+        return g_strdup(ns_input_used_value(el) ? ns_input_used_value(el) : "");
     if (strcmp(el->name, "select") == 0) {
         const ns_node *opt = ns_element_get_attr(el, "multiple")
             ? ns_select_first_selected_option(el)
             : ns_select_chosen_option(el);
         return opt ? ns_option_value_dup(opt) : g_strdup("");
     }
-    return g_strdup(ns_element_get_attr(el, "value") ?
-                    ns_element_get_attr(el, "value") : "");
+    const char *v = ns_input_used_value(el);
+    return g_strdup(v ? v : "");
 }
 
 static gboolean
@@ -15600,6 +15600,54 @@ ns_css_control_is_valid(const ns_node *el)
     }
     g_free(owned);
     return valid;
+}
+
+static gboolean
+ns_css_fieldset_is_valid(const ns_node *fieldset, int depth)
+{
+    if (!fieldset || depth >= 256) return TRUE;
+    for (const ns_node *c = fieldset->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        if (ns_css_node_will_validate(c) && !ns_css_control_is_valid(c))
+            return FALSE;
+        if (!ns_css_fieldset_is_valid(c, depth + 1))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_css_form_is_valid_walk(const ns_node *root, const ns_node *form,
+                          const char *form_id, int depth)
+{
+    if (!root || depth >= 512) return TRUE;
+    if (root->kind == NS_NODE_ELEMENT && ns_css_node_will_validate(root)) {
+        const char *fattr = ns_element_get_attr(root, "form");
+        gboolean belongs = FALSE;
+        if (fattr && form_id && strcmp(fattr, form_id) == 0) {
+            belongs = TRUE;
+        } else if (!fattr) {
+            for (const ns_node *p = root->parent; p; p = p->parent) {
+                if (p == form) { belongs = TRUE; break; }
+            }
+        }
+        if (belongs && !ns_css_control_is_valid(root))
+            return FALSE;
+    }
+    for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+        if (!ns_css_form_is_valid_walk(c, form, form_id, depth + 1))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_css_form_is_valid(const ns_node *form)
+{
+    if (!form || form->kind != NS_NODE_ELEMENT) return TRUE;
+    const char *form_id = ns_element_get_attr(form, "id");
+    const ns_node *doc_root = ns_node_root(form);
+    return ns_css_form_is_valid_walk(doc_root, form, form_id, 0);
 }
 
 static gboolean
@@ -15812,7 +15860,17 @@ static gboolean
 match_simple(const ns_css_simple *sel, const ns_node *el)
 {
     if (sel->never_match) return FALSE;
-    if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
+    if (!el) return FALSE;
+    if (el->kind != NS_NODE_ELEMENT) {
+        if (el == g_css_match_scope &&
+            (el->kind == NS_NODE_DOCUMENT || (el->flags & NS_NODE_FRAGMENT))) {
+            return has_simple_scope_pseudo(sel) &&
+                   !sel->type && !sel->id &&
+                   sel->classes->len == 0 && sel->attrs->len == 0 &&
+                   sel->pseudos->len == 1;
+        }
+        return FALSE;
+    }
     const char *element_namespace =
         ns_element_get_attr(el, "data-nd-ns-uri");
     if (!element_namespace || !*element_namespace) {
@@ -15950,7 +16008,15 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 break;
             case NS_CSS_PC_SCOPE:
                 if (g_css_match_scope) {
-                    if (el != g_css_match_scope) return FALSE;
+                    if (g_css_match_scope->kind == NS_NODE_ELEMENT) {
+                        if (el != g_css_match_scope) return FALSE;
+                    } else if (g_css_match_scope->kind == NS_NODE_DOCUMENT &&
+                               !(g_css_match_scope->flags & NS_NODE_FRAGMENT)) {
+                        if (el->parent != g_css_match_scope || el->kind != NS_NODE_ELEMENT)
+                            return FALSE;
+                    } else if (el != g_css_match_scope) {
+                        return FALSE;
+                    }
                 } else if (el->parent && el->parent->kind == NS_NODE_ELEMENT) {
                     return FALSE;
                 }
@@ -15980,14 +16046,24 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                     return FALSE;
                 break;
             case NS_CSS_PC_VALID:
-                if (!ns_css_node_will_validate(el) ||
-                    !ns_css_control_is_valid(el))
+                if (el->name && strcmp(el->name, "form") == 0) {
+                    if (!ns_css_form_is_valid(el)) return FALSE;
+                } else if (el->name && strcmp(el->name, "fieldset") == 0) {
+                    if (!ns_css_fieldset_is_valid(el, 0)) return FALSE;
+                } else if (!ns_css_node_will_validate(el) ||
+                    !ns_css_control_is_valid(el)) {
                     return FALSE;
+                }
                 break;
             case NS_CSS_PC_INVALID:
-                if (!ns_css_node_will_validate(el) ||
-                    ns_css_control_is_valid(el))
+                if (el->name && strcmp(el->name, "form") == 0) {
+                    if (ns_css_form_is_valid(el)) return FALSE;
+                } else if (el->name && strcmp(el->name, "fieldset") == 0) {
+                    if (ns_css_fieldset_is_valid(el, 0)) return FALSE;
+                } else if (!ns_css_node_will_validate(el) ||
+                    ns_css_control_is_valid(el)) {
                     return FALSE;
+                }
                 break;
             case NS_CSS_PC_IN_RANGE: {
                 gboolean under = FALSE, over = FALSE;
