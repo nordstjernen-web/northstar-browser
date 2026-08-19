@@ -117,6 +117,7 @@ This repo is driven by Claude in long uninterrupted sessions.
   every push to `main` and every PR targeting `main`, plus manual
   `workflow_dispatch`. Local Linux is still the primary correctness
   gate before pushing; CI provides cross-platform sanity coverage.
+- Make good descriptive commit messages always.
 
 ## Build / verify locally
 
