@@ -2,4 +2,4 @@
 url = https://github.com/quickjs-ng/quickjs.git
 revision = v0.16.2
 depth = 1
-diff_files = quickjs-ng-windows-link.patch, quickjs-ng-sort-identical.patch
+diff_files = quickjs-ng-windows-link.patch
