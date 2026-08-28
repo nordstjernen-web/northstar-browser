@@ -565,6 +565,7 @@ ns_node_set_editable_value(ns_node *n, const char *value)
         char *normalized = ns_textarea_normalized_value_dup(value);
         ns_element_set_attr(n, "data-nd-value", normalized);
         ns_element_set_attr(n, "data-nd-vdirty", "1");
+        ns_element_set_attr(n, "data-nd-user-edited", "1");
         g_free(normalized);
     } else if (ns_node_is_contenteditable_host(n)) {
         ns_node *doc = (ns_node *)ns_node_root(n);
@@ -582,6 +583,7 @@ ns_node_set_editable_value(ns_node *n, const char *value)
         ns_node_append_child(n, ns_node_new_text(g_strdup(value ? value : "")));
     } else if (ns_input_value_is_dirty_mode(n)) {
         ns_element_set_attr(n, "data-nd-value", value ? value : "");
+        ns_element_set_attr(n, "data-nd-user-edited", "1");
     } else {
         ns_element_set_attr(n, "value", value ? value : "");
     }
@@ -1383,10 +1385,18 @@ ns_node_find_first_element(const ns_node *root, const char *tag)
 
 static gboolean ns_node_contains(const ns_node *ancestor, const ns_node *node);
 
+static gboolean
+ns_node_is_shadow_root_marked(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_ELEMENT &&
+           ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
+}
+
 static ns_node *
 ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
 {
     if (!root || !id || depth >= NS_DOM_MAX_DEPTH) return NULL;
+    if (depth > 0 && ns_node_is_shadow_root_marked(root)) return NULL;
     if (root->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(root, "id");
         if (eid && strcmp(eid, id) == 0) return (ns_node *)root;
@@ -1440,6 +1450,7 @@ ns_doc_id_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
     if (n != doc && ns_node_is_embedded_document(n)) return;
+    if (n != doc && ns_node_is_shadow_root_marked(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(n, "id");
         if (eid && *eid) ns_doc_id_index_register(doc, eid, n);
@@ -1468,6 +1479,7 @@ ns_doc_id_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
     if (n != doc && ns_node_is_embedded_document(n)) return;
+    if (n != doc && ns_node_is_shadow_root_marked(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(n, "id");
         if (eid && *eid) ns_doc_id_index_unregister(doc, eid, n);
@@ -1476,10 +1488,19 @@ ns_doc_id_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
         ns_doc_id_index_remove_subtree(doc, c, depth + 1);
 }
 
+static gboolean
+ns_node_inside_shadow_root(const ns_node *n, const ns_node *stop)
+{
+    for (const ns_node *p = n ? n->parent : NULL; p && p != stop; p = p->parent)
+        if (ns_node_is_shadow_root_marked(p)) return TRUE;
+    return FALSE;
+}
+
 void
 ns_doc_id_index_subtree_added(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->id_index || !root) return;
+    if (ns_node_inside_shadow_root(root, doc)) return;
     ns_doc_id_index_add_subtree(doc, root, 0);
 }
 
@@ -1487,6 +1508,7 @@ void
 ns_doc_id_index_subtree_removed(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->id_index || !root) return;
+    if (ns_node_inside_shadow_root(root, doc)) return;
     ns_doc_id_index_remove_subtree(doc, root, 0);
 }
 
@@ -1812,22 +1834,32 @@ ns_doc_tag_index_lookup(const ns_node *doc, const char *tag)
     return arr;
 }
 
+static gboolean
+ns_node_id_hit_usable(const ns_node *root, const ns_node *doc,
+                      const ns_node *hit, const char *id)
+{
+    if (!hit) return FALSE;
+    if (doc->id_counts &&
+        GPOINTER_TO_UINT(g_hash_table_lookup(doc->id_counts, id)) > 1)
+        return FALSE;
+    const char *hid = ns_element_get_attr(hit, "id");
+    if (!hid || strcmp(hid, id) != 0) return FALSE;
+    if (!ns_node_contains(root, hit)) return FALSE;
+    return !ns_node_inside_shadow_root(hit, root);
+}
+
 ns_node *
 ns_node_find_by_id(const ns_node *root, const char *id)
 {
     if (!root || !id || !*id) return NULL;
     if (root->id_index) {
         ns_node *hit = g_hash_table_lookup(root->id_index, id);
-        if (hit) {
-            const char *hid = ns_element_get_attr(hit, "id");
-            if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
-                return hit;
-        }
+        if (ns_node_id_hit_usable(root, root, hit, id))
+            return hit;
         ns_node *found = ns_node_find_by_id_depth(root, id, 0);
         if (found) {
             g_hash_table_replace(root->id_index, g_strdup(id), found);
-            ns_doc_id_index_count((ns_node *)root, id, 1);
-        } else {
+        } else if (hit) {
             g_hash_table_remove(root->id_index, id);
         }
         return found;
@@ -1837,16 +1869,11 @@ ns_node_find_by_id(const ns_node *root, const char *id)
         doc = doc->parent;
     if (doc && doc != root && doc->id_index) {
         ns_node *hit = g_hash_table_lookup(doc->id_index, id);
-        if (hit) {
-            const char *hid = ns_element_get_attr(hit, "id");
-            if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
-                return hit;
-        }
+        if (ns_node_id_hit_usable(root, doc, hit, id))
+            return hit;
         ns_node *found = ns_node_find_by_id_depth(root, id, 0);
-        if (found) {
+        if (found)
             g_hash_table_replace(doc->id_index, g_strdup(id), found);
-            ns_doc_id_index_count((ns_node *)doc, id, 1);
-        }
         return found;
     }
     return ns_node_find_by_id_depth(root, id, 0);
@@ -2074,6 +2101,7 @@ ns_form_reset_control(ns_node *n)
         }
         ns_element_remove_attr(n, "data-nd-value");
         ns_element_remove_attr(n, "data-nd-vdirty");
+        ns_element_remove_attr(n, "data-nd-user-edited");
     } else if (strcmp(n->name, "select") == 0) {
         ns_element_remove_attr(n, "data-nd-noselect");
         for (ns_node *o = n->first_child; o; o = o->next_sibling) {
