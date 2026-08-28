@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* JavaScript can be turned off: an "Enable JavaScript" toggle in
+  Settings parses pages with scripting disabled (so noscript content
+  renders) and skips script execution entirely — the user decides what
+  runs, in the old Mozilla tradition.
+* about:mozilla shows the maroon page every browser of this lineage
+  owes its readers, and about:config opens the settings page.
+* The status bar reads "Done" for a moment when a page finishes
+  loading, as it always did.
 * Fixed a use-after-free of the session URL: timer, event-dispatch and
   requestAnimationFrame callbacks saved the current URL pointer and restored
   it unconditionally after the callback, so a handler that navigated (a

@@ -58,6 +58,7 @@ typedef struct ns_config {
     gboolean speculative_preload;
     gboolean async_image_decode;
     gboolean images_enabled;
+    gboolean javascript_enabled;
     gboolean camera_enabled;
     gboolean microphone_enabled;
     gboolean local_storage_enabled;

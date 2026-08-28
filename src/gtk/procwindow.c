@@ -803,9 +803,14 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         gtk_widget_set_sensitive(pw->back, ns_proc_view_can_back(v));
         gtk_widget_set_sensitive(pw->forward, ns_proc_view_can_forward(v));
         break;
-    case NS_PROC_EVT_LOADING:
-        set_loading_ui(pw, text && *text == '1');
+    case NS_PROC_EVT_LOADING: {
+        gboolean was_loading = gtk_widget_get_visible(pw->spinner);
+        gboolean loading = text && *text == '1';
+        set_loading_ui(pw, loading);
+        if (was_loading && !loading)
+            pw_set_status(pw, ns_i18n("Done"));
         break;
+    }
     case NS_PROC_EVT_ZOOM:
         update_zoom_indicator(pw, v);
         break;

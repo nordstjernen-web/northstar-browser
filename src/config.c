@@ -154,6 +154,7 @@ static const cfg_field cfg_fields[] = {
     FB(speculative_preload,   TRUE),
     FB(async_image_decode,    TRUE),
     FB(images_enabled,        TRUE),
+    FB(javascript_enabled,    TRUE),
     FB(camera_enabled,        FALSE),
     FB(microphone_enabled,    FALSE),
     FB(local_storage_enabled, TRUE),

@@ -1036,8 +1036,10 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_selection_cmd_cb(b->js, browser_js_selection_cmd, b);
         ns_js_add_csp_header(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
-        ns_js_run_scripts_in_doc(b->js, doc, base, b->doc_charset,
-                                 content_type);
+        const ns_config *run_cfg = ns_config_get();
+        if (!run_cfg || run_cfg->javascript_enabled)
+            ns_js_run_scripts_in_doc(b->js, doc, base, b->doc_charset,
+                                     content_type);
     }
     g_free(csp_header);
 
@@ -1199,9 +1201,15 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
                                              resp->content_type,
                                              &doc_charset);
     char *doc_content_type = ns_html_mime_essence(resp->content_type);
-    ns_node *doc = ns_html_parse_document(
-        decoded ? decoded : "", decoded ? (gssize)strlen(decoded) : 0,
-        doc_content_type);
+    const ns_config *parse_cfg = ns_config_get();
+    gboolean scripting_on = !parse_cfg || parse_cfg->javascript_enabled;
+    ns_node *doc = !scripting_on && !ns_html_mime_is_xml(doc_content_type)
+        ? ns_html_parse_with_scripting(
+              decoded ? decoded : "",
+              decoded ? (gssize)strlen(decoded) : 0, FALSE)
+        : ns_html_parse_document(
+              decoded ? decoded : "",
+              decoded ? (gssize)strlen(decoded) : 0, doc_content_type);
     g_free(decoded);
     int sec = resp->security;
     if (sec == NS_SEC_NONE) {
