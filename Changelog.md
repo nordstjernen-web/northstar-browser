@@ -41,6 +41,33 @@ Significant changes in each release:
   unsafe prefixes.
 * WPT css/css-flexbox: 1465 -> 1997 of 3670 subtests on a 2026-09
   checkout of the horizontal-writing-mode suites.
+* An absolutely positioned box whose containing block is a grid
+  container takes that block from its grid-column and grid-row lines,
+  as css-grid-1 §9 requires: a line inside the explicit grid resolves to
+  the edge of the adjacent track, a line outside it, an unknown name or
+  a span resolves to the padding edge after the start/end swap, and
+  offsets, percentages and shrink-to-fit sizes resolve against that
+  area. A shrink-to-fit abspos box no longer squeezes below its
+  min-content width when the area is narrower than its content.
+* align-content: stretch on a grid container distributes free block
+  space only to rows whose max track size is auto; fixed-length rows
+  kept their length.
+* An absolutely positioned element with an inline-level display that
+  follows inline content takes its static position from the line it
+  would have occupied, after the preceding text, instead of the top of
+  the block.
+* document.fonts.ready waits for the web fonts the page needs: it
+  flushes style so pending @font-face loads are requested, resolves
+  once the loader is idle and marks the document for relayout;
+  fonts.status reports loading meanwhile.
+* Alignment properties keep their full specified keyword: safe and
+  unsafe prefixes, legacy left/center/right, first baseline (computed
+  as baseline) and last baseline parse and serialize, and the
+  place-self, place-items and place-content shorthands split two-word
+  values and serialize a repeated value once.
+* offsetTop/offsetLeft flush pending layout before locating the offset
+  parent, so a first read during parsing no longer returns viewport
+  coordinates.
 * JavaScript can be turned off: an "Enable JavaScript" toggle in
   Settings parses pages with scripting disabled (so noscript content
   renders) and skips script execution entirely — the user decides what
