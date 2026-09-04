@@ -499,9 +499,23 @@ Significant changes in each release:
 * A canvas element's width and height attributes map to aspect-ratio, as
   the HTML rendering section says, instead of to the width and height
   properties, so a stylesheet can size a canvas in one axis and get the
-  other from its bitmap ratio. Replaced elements resolve min-width and
-  max-width: fit-content, min-content and max-content from that ratio,
-  and clamping one axis no longer rescales an axis the author specified.
+  other from its bitmap ratio. aspect-ratio keeps its numerator and
+  denominator (auto 16 / 9 parses, serialises and computes as written,
+  16 9 and 16px / 9px are rejected); a plain ratio overrides a replaced
+  element's natural ratio while auto <ratio> only fills in for one.
+  Replaced elements resolve min-width and max-width: fit-content,
+  min-content and max-content from their ratio, and clamping one axis no
+  longer rescales an axis the author specified.
+* An absolutely positioned box with both insets set honours justify-self
+  and align-self: start, end and center size it to its content and place
+  it inside the inset-reduced containing block, normal stretches a
+  non-replaced box and fits a replaced one, and stretch fills the area.
+* attr() substitutions that land inside url(), src(), image() or
+  image-set(), or that carry a url() of their own, make a non-custom
+  declaration invalid, as css-values-5 requires for attribute-derived
+  URLs.
+* Fixed a read past the end of a linked stylesheet's bytes while
+  scanning it for viewport media queries.
 * Serialisation fixes for the specified style: counter-reset,
   counter-increment and counter-set escape their counter names and keep
   calc() integers as authored; list-style keeps the position when the
