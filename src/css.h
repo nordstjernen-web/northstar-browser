@@ -278,6 +278,7 @@ typedef enum ns_css_prop {
     NS_CSS_ANIMATION_TIMELINE,
     NS_CSS_ANIMATION_RANGE_START,
     NS_CSS_ANIMATION_RANGE_END,
+    NS_CSS_ANIMATION_COMPOSITION,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -392,6 +393,7 @@ char *ns_css_animation_shorthand_canonical(const char *text, gboolean is_animati
 char *ns_css_ident_serialize(const char *name);
 char *ns_css_animation_range_serialize(const char *start_list, const char *end_list);
 char *ns_css_timing_serialize(const ns_css_timing *t);
+const char *ns_css_initial_value_text(const char *name);
 gboolean ns_css_timing_parse(const char *text, ns_css_timing *out);
 
 typedef enum ns_css_transform_op_kind {
@@ -1067,6 +1069,7 @@ typedef struct ns_style {
 } ns_style;
 
 void   ns_style_free(ns_style *s);
+const ns_style *ns_css_style_before_change(const void *node);
 double ns_css_clamped_dimension_px(const ns_style *s,
                                    ns_css_prop value_prop,
                                    ns_css_prop min_prop,

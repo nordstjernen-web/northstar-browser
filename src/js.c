@@ -14195,237 +14195,7 @@ ns_computed_prop_defaults_to_color(const char *name)
 static const char *
 ns_computed_initial_value(const char *name)
 {
-    static const struct { const char *name; const char *value; } initials[] = {
-        { "padding-top",                "0px" },
-        { "padding-right",              "0px" },
-        { "padding-bottom",             "0px" },
-        { "padding-left",               "0px" },
-        { "margin-top",                 "0px" },
-        { "margin-right",               "0px" },
-        { "margin-bottom",              "0px" },
-        { "margin-left",                "0px" },
-        { "border-top-width",           "0px" },
-        { "border-right-width",         "0px" },
-        { "border-bottom-width",        "0px" },
-        { "border-left-width",          "0px" },
-        { "top",                        "auto" },
-        { "right",                      "auto" },
-        { "bottom",                     "auto" },
-        { "left",                       "auto" },
-        { "width",                      "auto" },
-        { "height",                     "auto" },
-        { "box-sizing",                 "content-box" },
-        { "display",                    "inline" },
-        { "position",                   "static" },
-        { "opacity",                    "1" },
-        { "transform",                  "none" },
-        { "filter",                     "none" },
-        { "background-image",           "none" },
-        { "box-shadow",                 "none" },
-        { "text-decoration-line",       "none" },
-        { "text-transform",             "none" },
-        { "float",                      "none" },
-        { "clear",                      "none" },
-        { "visibility",                 "visible" },
-        { "white-space",                "normal" },
-        { "hyphens",                    "manual" },
-        { "overflow",                   "visible" },
-        { "overflow-x",                 "visible" },
-        { "overflow-y",                 "visible" },
-        { "cursor",                     "auto" },
-        { "z-index",                    "auto" },
-        { "pointer-events",             "auto" },
-        { "flex-direction",             "row" },
-        { "font-weight",                "400" },
-        { "font-stretch",               "normal" },
-        { "font-kerning",               "auto" },
-        { "font-variant-ligatures",     "normal" },
-        { "font-feature-settings",      "normal" },
-        { "font-variation-settings",    "normal" },
-        { "letter-spacing",             "normal" },
-        { "word-spacing",               "normal" },
-        { "text-align",                 "start" },
-        { "list-style-type",            "disc" },
-        { "vertical-align",             "baseline" },
-        { "table-layout",               "auto" },
-        { "border-collapse",            "separate" },
-        { "background-color",           "rgba(0, 0, 0, 0)" },
-        { "border-top-style",           "none" },
-        { "border-right-style",         "none" },
-        { "border-bottom-style",        "none" },
-        { "border-left-style",          "none" },
-        { "accent-color",               "auto" },
-        { "border-spacing",             "0px 0px" },
-        { "caption-side",               "top" },
-        { "caret-color",                "auto" },
-        { "clip-rule",                  "nonzero" },
-        { "dominant-baseline",          "auto" },
-        { "fill",                       "rgb(0, 0, 0)" },
-        { "fill-opacity",               "1" },
-        { "fill-rule",                  "nonzero" },
-        { "font-style",                 "normal" },
-        { "image-rendering",            "auto" },
-        { "list-style-image",           "none" },
-        { "list-style-position",        "outside" },
-        { "orphans",                    "2" },
-        { "overflow-wrap",              "normal" },
-        { "paint-order",                "normal" },
-        { "quotes",                     "auto" },
-        { "scrollbar-color",            "auto" },
-        { "shape-rendering",            "auto" },
-        { "stroke",                     "none" },
-        { "stroke-dasharray",           "none" },
-        { "stroke-dashoffset",          "0px" },
-        { "stroke-linecap",             "butt" },
-        { "stroke-linejoin",            "miter" },
-        { "stroke-miterlimit",          "4" },
-        { "stroke-opacity",             "1" },
-        { "stroke-width",               "1px" },
-        { "tab-size",                   "8" },
-        { "text-anchor",                "start" },
-        { "text-indent",                "0px" },
-        { "text-shadow",                "none" },
-        { "text-wrap-mode",             "wrap" },
-        { "widows",                     "2" },
-        { "word-break",                 "normal" },
-        { "writing-mode",               "horizontal-tb" },
-        { "align-content",              "normal" },
-        { "align-items",                "normal" },
-        { "align-self",                 "auto" },
-        { "animation-play-state",       "running" },
-        { "appearance",                 "none" },
-        { "aspect-ratio",               "auto" },
-        { "background-clip",            "border-box" },
-        { "background-origin",          "padding-box" },
-        { "background-position-x",      "0%" },
-        { "background-position-y",      "0%" },
-        { "background-repeat",          "repeat" },
-        { "background-size",            "auto" },
-        { "border-bottom-left-radius",  "0px" },
-        { "border-bottom-right-radius", "0px" },
-        { "border-top-left-radius",     "0px" },
-        { "border-top-right-radius",    "0px" },
-        { "border-end-end-radius",      "0px" },
-        { "border-end-start-radius",    "0px" },
-        { "border-start-end-radius",    "0px" },
-        { "border-start-start-radius",  "0px" },
-        { "clip",                       "auto" },
-        { "clip-path",                  "none" },
-        { "column-count",               "auto" },
-        { "column-gap",                 "normal" },
-        { "column-span",                "none" },
-        { "column-width",               "auto" },
-        { "break-before",               "auto" },
-        { "break-after",                "auto" },
-        { "break-inside",               "auto" },
-        { "scroll-snap-type",           "none" },
-        { "scroll-snap-align",          "none none" },
-        { "scroll-snap-stop",           "normal" },
-        { "scroll-padding-top",         "auto" },
-        { "scroll-padding-right",       "auto" },
-        { "scroll-padding-bottom",      "auto" },
-        { "scroll-padding-left",        "auto" },
-        { "scroll-margin-top",          "0px" },
-        { "scroll-margin-right",        "0px" },
-        { "scroll-margin-bottom",       "0px" },
-        { "scroll-margin-left",         "0px" },
-        { "container-name",             "none" },
-        { "container-type",             "normal" },
-        { "content",                    "normal" },
-        { "content-visibility",         "visible" },
-        { "counter-increment",          "none" },
-        { "counter-reset",              "none" },
-        { "cx",                         "0px" },
-        { "cy",                         "0px" },
-        { "x",                          "0px" },
-        { "y",                          "0px" },
-        { "r",                          "0px" },
-        { "rx",                         "auto" },
-        { "ry",                         "auto" },
-        { "flex-basis",                 "auto" },
-        { "flex-grow",                  "0" },
-        { "flex-shrink",                "1" },
-        { "flex-wrap",                  "nowrap" },
-        { "grid-auto-columns",          "auto" },
-        { "grid-auto-flow",             "row" },
-        { "grid-auto-rows",             "auto" },
-        { "grid-column-end",            "auto" },
-        { "grid-column-start",          "auto" },
-        { "grid-row-end",               "auto" },
-        { "grid-row-start",             "auto" },
-        { "grid-template-areas",        "none" },
-        { "grid-template-columns",      "none" },
-        { "grid-template-rows",         "none" },
-        { "justify-content",            "normal" },
-        { "justify-items",              "normal" },
-        { "justify-self",               "auto" },
-        { "mask-image",                 "none" },
-        { "max-block-size",             "none" },
-        { "max-height",                 "none" },
-        { "max-inline-size",            "none" },
-        { "max-width",                  "none" },
-        { "min-block-size",             "auto" },
-        { "min-height",                 "auto" },
-        { "min-inline-size",            "auto" },
-        { "min-width",                  "auto" },
-        { "mix-blend-mode",             "normal" },
-        { "object-fit",                 "fill" },
-        { "object-position",            "50% 50%" },
-        { "object-position-x",          "50%" },
-        { "object-position-y",          "50%" },
-        { "background-position",        "0% 0%" },
-        { "order",                      "0" },
-        { "outline-offset",             "0px" },
-        { "outline-style",              "none" },
-        { "outline-width",              "0px" },
-        { "perspective",                "none" },
-        { "perspective-origin",         "50% 50%" },
-        { "row-gap",                    "normal" },
-        { "scrollbar-width",            "auto" },
-        { "stop-color",                 "rgb(0, 0, 0)" },
-        { "stop-opacity",               "1" },
-        { "text-decoration-style",      "solid" },
-        { "text-overflow",              "clip" },
-        { "transform-origin",           "50% 50%" },
-        { "transform-style",            "flat" },
-        { "unicode-bidi",               "normal" },
-        { "user-select",                "auto" },
-        { "vector-effect",              "none" },
-        { "line-height",                "normal" },
-        { "direction",                  "ltr" },
-        { "text-orientation",           "mixed" },
-        { "animation-delay",            "0s" },
-        { "animation-duration",         "0s" },
-        { "transition-delay",           "0s" },
-        { "transition-duration",        "0s" },
-        { "backface-visibility",        "visible" },
-        { "column-rule-style",          "none" },
-        { "column-rule-width",          "0px" },
-        { "line-clamp",                 "none" },
-        { "text-decoration",            "none" },
-        { "font-variant",               "normal" },
-        { "border-radius",              "0px" },
-        { "gap",                        "normal" },
-        { "color",                      "rgb(26, 26, 26)" },
-        { "font-family",                "serif" },
-        { "font-size",                  "16px" },
-        { "text-wrap-style",            "auto" },
-        { "text-decoration-thickness",  "auto" },
-        { "text-underline-offset",      "auto" },
-        { "text-underline-position",    "auto" },
-        { "font-optical-sizing",        "auto" },
-        { "isolation",                  "auto" },
-        { "resize",                     "none" },
-        { "empty-cells",                "show" },
-        { "border-image-source",        "none" },
-        { "will-change",                "auto" },
-        { "touch-action",               "auto" },
-        { "scroll-behavior",            "auto" },
-    };
-    if (!name) return NULL;
-    for (gsize i = 0; i < G_N_ELEMENTS(initials); i++)
-        if (strcmp(name, initials[i].name) == 0) return initials[i].value;
-    return NULL;
+    return ns_css_initial_value_text(name);
 }
 
 static char *
@@ -15909,6 +15679,99 @@ ns_anim_control_native(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, op);
     if (ok) js->mutated = TRUE;
     return JS_NewBool(ctx, ok);
+}
+
+typedef struct {
+    JSContext  *ctx;
+    JSValue     arr;
+    guint       n;
+    const char *run_easing;
+} ns_anim_kf_ctx;
+
+static void
+ns_anim_keyframe_visit(double offset, const char *easing, const GArray *decls,
+                       gpointer user)
+{
+    ns_anim_kf_ctx *kc = user;
+    JSValue run_easing = JS_NewString(kc->ctx, kc->run_easing ? kc->run_easing : "ease");
+    JSContext *ctx = kc->ctx;
+    JSValue frame = JS_NewObject(ctx);
+    JSValue props = JS_NewObject(ctx);
+    const char *composite = "auto";
+    int n_props = 0;
+    if (decls)
+        for (guint i = 0; i < decls->len; i++) {
+            const ns_css_decl *d = &g_array_index(decls, ns_css_decl, i);
+            const char *name = ns_css_prop_name(d->prop);
+            if (!name || !d->value) continue;
+            if (d->prop == NS_CSS_ANIMATION_COMPOSITION &&
+                d->value->kind == NS_CSS_V_KEYWORD && d->value->u.keyword) {
+                composite = d->value->u.keyword;
+                continue;
+            }
+            if (g_str_has_prefix(name, "animation") || g_str_has_prefix(name, "transition"))
+                continue;
+            char *text = ns_css_value_serialize(d->value);
+            if (text && *text) {
+                JS_SetPropertyStr(ctx, props, name, JS_NewString(ctx, text));
+                n_props++;
+            }
+            g_free(text);
+        }
+    JS_SetPropertyStr(ctx, frame, "offset", JS_NewFloat64(ctx, offset));
+    JS_SetPropertyStr(ctx, frame, "easing", JS_NewString(ctx, easing ? easing : "linear"));
+    JS_SetPropertyStr(ctx, frame, "composite", JS_NewString(ctx, composite));
+    JS_SetPropertyStr(ctx, frame, "count", JS_NewInt32(ctx, n_props));
+    JS_SetPropertyStr(ctx, frame, "props", props);
+    JS_SetPropertyStr(ctx, frame, "runEasing", run_easing);
+    JS_SetPropertyUint32(ctx, kc->arr, kc->n++, frame);
+}
+
+static JSValue
+ns_anim_base_value_native(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->anim || argc < 2) return JS_NULL;
+    const ns_node *node = ns_unwrap_element(argv[0]);
+    const char *name = JS_ToCString(ctx, argv[1]);
+    if (!node || !name) {
+        if (name) JS_FreeCString(ctx, name);
+        return JS_NULL;
+    }
+    int prop = ns_css_prop_id(name);
+    JS_FreeCString(ctx, name);
+    if (prop < 0) return JS_NULL;
+    ns_js_flush_style(js);
+    const ns_css_value *v = ns_anim_base_value(js->anim, node, prop);
+    if (!v) {
+        const char *init = ns_css_initial_value_text(ns_css_prop_name(prop));
+        return init ? JS_NewString(ctx, init) : JS_NULL;
+    }
+    char *text = ns_css_value_serialize(v);
+    JSValue r = JS_NewString(ctx, text ? text : "");
+    g_free(text);
+    return r;
+}
+
+static JSValue
+ns_anim_keyframes_native(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    JSValue arr = JS_NewArray(ctx);
+    if (!js || !js->anim || argc < 2) return arr;
+    const ns_node *node = ns_unwrap_element(argv[0]);
+    int prop = ns_anim_prop_arg(ctx, argv[1]);
+    if (!node || prop >= 0 || prop == -2) return arr;
+    ns_js_flush_style(js);
+    ns_anim_info info;
+    gboolean have = ns_anim_info_for(js->anim, node, prop, &info);
+    ns_anim_kf_ctx kc = { ctx, arr, 0, have ? info.easing : NULL };
+    ns_anim_keyframes_visit(js->anim, node, prop, ns_anim_keyframe_visit, &kc);
+    return arr;
 }
 
 static JSValue
@@ -25836,6 +25699,8 @@ ns_window_request_idle_callback(JSContext *ctx, JSValueConst this_val,
     return JS_NewInt32(ctx, t->id);
 }
 
+static gboolean ns_js_run_animation_frame_internal(ns_js *js);
+
 static gboolean
 ns_raf_tick_timer(gpointer data)
 {
@@ -25851,7 +25716,11 @@ ns_raf_tick_timer(gpointer data)
         js->raf_tick_source = 0;
         return G_SOURCE_REMOVE;
     }
-    ns_js_run_animation_frame(js);
+    if (js->raf_host_driven) {
+        js->raf_tick_source = 0;
+        return G_SOURCE_REMOVE;
+    }
+    ns_js_run_animation_frame_internal(js);
     if (js->raf_pending && js->raf_pending->len > 0)
         return G_SOURCE_CONTINUE;
     js->raf_tick_source = 0;
@@ -25861,7 +25730,8 @@ ns_raf_tick_timer(gpointer data)
 static void
 ns_raf_schedule_tick(ns_js *js)
 {
-    if (!js || !js->ctx || js->worker_host || js->raf_tick_source) return;
+    if (!js || !js->ctx || js->worker_host || js->raf_tick_source ||
+        js->raf_host_driven) return;
     js->raf_tick_source = g_timeout_add(16, ns_raf_tick_timer, js);
 }
 
@@ -27932,6 +27802,14 @@ ns_js_flush_scrollend(ns_js *js)
 
 gboolean
 ns_js_run_animation_frame(ns_js *js)
+{
+    if (!js) return FALSE;
+    js->raf_host_us = g_get_monotonic_time();
+    return ns_js_run_animation_frame_internal(js);
+}
+
+static gboolean
+ns_js_run_animation_frame_internal(ns_js *js)
 {
     if (!js || js->halted || js->in_pump) return FALSE;
     ns_js_flush_scrollend(js);
@@ -33528,7 +33406,9 @@ ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
 void
 ns_js_set_anim(ns_js *js, struct ns_anim *anim)
 {
-    if (js) js->anim = anim;
+    if (!js) return;
+    js->anim = anim;
+    js->raf_host_driven = TRUE;
 }
 
 void
@@ -47668,6 +47548,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JS_NewCFunction(ctx, ns_anim_control_native, "__ns_anim_control", 3), 0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_anim_animate",
         JS_NewCFunction(ctx, ns_anim_animate_native, "__ns_anim_animate", 3), 0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_keyframes",
+        JS_NewCFunction(ctx, ns_anim_keyframes_native, "__ns_anim_keyframes", 2), 0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_base_value",
+        JS_NewCFunction(ctx, ns_anim_base_value_native, "__ns_anim_base_value", 2), 0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_container_query_canonical",
         JS_NewCFunction(ctx, ns_container_query_canonical,
                         "__ns_container_query_canonical", 1),
