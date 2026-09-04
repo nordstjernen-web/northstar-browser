@@ -414,6 +414,116 @@ Significant changes in each release:
   all inside boxes, and the ordinary layout pages resolve to no snap at all
   and scroll exactly as before.
 
+* Transitions and animations run on every property and show in style.
+  The animation engine keeps one run per animation-name entry, so an
+  element plays several @keyframes animations at once; iteration counts
+  are fractional; a missing or empty @keyframes rule behaves as the spec
+  says and a rule added after load is picked up on the next cascade; a
+  @keyframes rule that omits its 0% or 100% frame interpolates from the
+  element's underlying value, with transform: none as the identity; and
+  the timing function applies per keyframe interval. Transitions start
+  from a property that had no cascaded value (its initial value) and
+  from the previous computed style when the transition and the change
+  land in the same flush, interpolate keyword-stored numbers and lengths
+  such as font-weight and vertical-align, clip rectangles and
+  space-separated pairs such as two-value border radii, are cancelled
+  when the property leaves transition-property or the element (or an
+  ancestor) becomes display: none, shorten by the eased progress when
+  reversed, and a child whose value is inherited from a transitioning
+  ancestor follows the ancestor's animated value instead of starting its
+  own transition.
+* The animation and transition longhands are real properties:
+  animation-name, animation-timing-function, animation-iteration-count,
+  animation-direction, animation-fill-mode, animation-play-state,
+  animation-composition, transition-property, transition-timing-function
+  and transition-behavior (allow-discrete lets any property transition
+  discretely), plus animation-timeline, animation-range,
+  animation-range-start and animation-range-end as parse-only
+  scroll-driven-animation properties. The shorthands expand into the
+  longhands in the cascade and in the inline style object, so
+  e.style.animation sets and clears the longhands and reads back the
+  shortest serialisation; the shorthand grammar is strict (a bare number
+  is an iteration count, a time never lacks its unit, a negative
+  duration, a second timing function or a second name rejects the
+  declaration, a transition without a property means all);
+  animation-duration accepts auto; keyframe names given as strings are
+  unescaped and serialised as identifiers; and the CSSOM rejects
+  @keyframes rules named none, default, a CSS-wide keyword or a number.
+  getComputedStyle serialises every longhand and both shorthands from the
+  effective lists.
+* A Web Animations surface backs the engine: Element.animate() drives the
+  same keyframe runs from script (array and property-indexed keyframes,
+  offsets, camelCase names, duration/delay/iterations/direction/fill/
+  easing options) and its Animation reaches finish and cancel through
+  the promises and events; element.getAnimations() and
+  document.getAnimations() return CSSTransition, CSSAnimation and
+  script Animation objects in spec order with currentTime, startTime,
+  playState, play, pause, finish, cancel and reverse-safe seeking;
+  AnimationEffect.getTiming and getComputedTiming follow the phase rules
+  for fill, direction, iterations and zero durations;
+  KeyframeEffect.getKeyframes returns the computed keyframes of a CSS
+  animation with per-keyframe easing and composite; play() and pause()
+  take precedence over an unchanged animation-play-state; and
+  AnimationEvent and TransitionEvent have real constructors. A run
+  starts on the first animation frame and the timeline is frozen
+  between frames, so what a script sets is what it reads back, and the
+  requestAnimationFrame timer no longer fires alongside the host frame
+  loop.
+* Animation and transition events follow the Web Animations phase model:
+  animationstart, animationend, animationiteration, transitionstart and
+  transitionend are emitted when the effect crosses between the before,
+  active and after phases in either direction, including after finish()
+  and seeks, with the elapsed times the spec assigns, and cancel events
+  carry the active time.
+* attr() substitutes at cascade time on every property, per css-values-5:
+  attr(name) and attr(name string) quote the attribute, raw-string keeps
+  it as is, a unit name (px, %, em, deg, s ...) appends that unit to a
+  number, type(*) takes the attribute as a token stream and
+  type(<syntax>) checks it against a registered-property syntax; a missing
+  attribute or a value that fails the type falls back to the second
+  argument or makes the declaration invalid at computed-value time; and
+  attr() with a bad grammar is rejected at parse time. Elements that use
+  attr() are excluded from style sharing and from the incremental restyle
+  cache, so an attribute change re-substitutes.
+* stretch, -webkit-fill-available and -moz-available are real sizing
+  keywords: width fills the containing block's content box minus margins
+  for block boxes, inline-blocks, floats, replaced elements, flex items
+  (as the flex base size) and grid items, and absolutely positioned boxes
+  fill from their static position or their insets to the padding edge;
+  height, min-height and max-height stretch against a definite containing
+  block and stay indefinite against an auto-height parent (also in quirks
+  mode), and box-sizing does not change the stretched border box.
+* Grid items with horizontal margins were laid out against the grid area
+  minus their margins and then had the margins subtracted again, so every
+  margined grid item was too narrow by its margin sum.
+* A canvas element's width and height attributes map to aspect-ratio, as
+  the HTML rendering section says, instead of to the width and height
+  properties, so a stylesheet can size a canvas in one axis and get the
+  other from its bitmap ratio. Replaced elements resolve min-width and
+  max-width: fit-content, min-content and max-content from that ratio,
+  and clamping one axis no longer rescales an axis the author specified.
+* Serialisation fixes for the specified style: counter-reset,
+  counter-increment and counter-set escape their counter names and keep
+  calc() integers as authored; list-style keeps the position when the
+  type is a counter style named inside or outside, and its longhands read
+  from a list-style shorthand serialise the image the way the
+  list-style-image property does; gradient colour stops serialise hex and
+  legacy rgb()/hsl() colours as rgb() and keep named colours and modern
+  colour functions as written; overflow expands in the inline style, a
+  visible/scroll pair computes to auto, and overflow-clip-margin,
+  counter-set and list-style are reflected by getComputedStyle.
+* Transitions and animations: a transition created in a later frame gets
+  a later start time and reads as pending until its first frame; steps()
+  rounds its floor at the interval boundary; one animationiteration event
+  fires per seek across several iterations; animation, transition,
+  container, direction and unicode-bidi properties are never animated.
+* Nested style rules are exposed through the CSSOM: CSSStyleRule inherits
+  from CSSGroupingRule with cssRules, insertRule and deleteRule,
+  selectorText on a nested rule is relative to its parent (a selector
+  without & or one starting with a combinator serialises with a leading
+  "& ") and is settable, cssText prints the nested rules, and "&" followed
+  directly by a type selector is rejected as the spec requires.
+
 1.0.7:
 ======
 * The `about:start` splash carries the release number and a better sky and
