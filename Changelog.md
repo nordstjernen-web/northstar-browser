@@ -78,6 +78,20 @@ Significant changes in each release:
   positioned child of a grid container with auto offsets takes its
   static position from its grid area, aligned by justify-self and
   align-self.
+* getComputedStyle on a grid container returns the used track sizes for
+  grid-template-columns and grid-template-rows, with explicit line names
+  in place, as CSSOM requires.
+* Track lists resolve em against the element's own font size and calc()
+  percentages against the track axis; an auto track grows to its
+  max-content contribution before fr tracks share the remainder, fr rows
+  fill a definite container height, over-constrained minmax() rows
+  shrink toward their minimum, percentage rows in an indefinite-height
+  grid re-resolve against the final height, and an auto column measures
+  its content with real text metrics.
+* The grid track-list parser rejects negative sizes, stray commas,
+  consecutive or trailing-only line-name lists, reserved words as line
+  names, a second auto-repeat and non-fixed tracks beside one, and
+  supports line names inside repeat().
 * JavaScript can be turned off: an "Enable JavaScript" toggle in
   Settings parses pages with scripting disabled (so noscript content
   renders) and skips script execution entirely — the user decides what
