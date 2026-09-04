@@ -92,6 +92,68 @@ Significant changes in each release:
   consecutive or trailing-only line-name lists, reserved words as line
   names, a second auto-repeat and non-fixed tracks beside one, and
   supports line names inside repeat().
+* Fixed a hang in the CSS parser on an at-rule inside a declaration
+  list (div { @foo {} color: green }), in stylesheets and inline styles
+  alike; the at-rule is skipped as CSS Syntax requires.
+* font-family values are canonicalized: quoted strings and ident
+  sequences are told apart, ident-like strings are unquoted, generic
+  families are lowercased and reserved single idents are rejected. The
+  font shorthand is validated against its full grammar before any
+  longhand is written, resets the longhands it does not mention, accepts
+  math functions for the size and line-height, expands the system font
+  keywords, and rolls back entirely on an invalid family;
+  getComputedStyle().font is composed from the longhands.
+* "prop in element.style" is true only for supported properties, and a
+  longhand written after a later shorthand that covers it lands after
+  the shorthand so it wins.
+* Grid items honour justify-self and align-self self-start, self-end,
+  start, end, left and right with the grid's and the item's direction,
+  minmax(auto, X) tracks take their intrinsic minimum, min-width and
+  max-width keywords (min-content, max-content, fit-content) resolve on
+  grid items, an explicit-width item under justify-self normal is
+  start-aligned in its area (right edge in rtl) and "safe" alignment
+  falls back to start when the item overflows, and aspect-ratio sizes
+  replaced elements.
+* Gradients are parsed against the CSS Images 4 grammar: to-side and
+  corner directions (the corner angle follows the box), radial shapes,
+  size keywords and explicit radii, conic from-angles, positions in all
+  forms, colour interpolation methods ("in oklch longer hue"), two-
+  position colour stops and interpolation hints. Invalid preludes,
+  empty arguments and stray hints are rejected. Specified and computed
+  values serialize canonically, ellipse gradients paint as ellipses and
+  closest/farthest side and corner sizes are honoured.
+* background-position and object-position validate the position
+  grammar (3-value syntax only for background-position) and serialize
+  horizontal-first with a single keyword expanded to its pair.
+* scrollWidth and scrollHeight extend the in-flow content's margin
+  boxes by the container's end padding instead of every descendant's
+  border box, so negative margins and margins that collapse through
+  the container report no phantom overflow; in rtl and in the flipped
+  cross axis of wrap-reverse the region is measured from the far edge.
+  Block children in rtl containers that over-constrain the line keep
+  their right margin and overflow to the left.
+* getComputedStyle exposes -webkit- prefixed aliases through their
+  camelCase names (webkitAppearance).
+* The content property is validated against its grammar (strings,
+  quotes, images, attr(), counter()/counters() with symbols(), an
+  alt-text list after a slash) and serializes canonically: double-quoted
+  strings, decimal counter styles omitted, the symbolic system dropped.
+* Container queries evaluate the full condition grammar: not/and/or
+  with nesting, size features in plain, boolean and range form
+  (double-sided ranges and math functions included), aspect-ratio and
+  orientation, unknown features that make the enclosing condition
+  false, comma-separated condition lists, name-only rules and vertical
+  writing-mode containers. Invalid preludes are dropped from the engine
+  and the CSSOM, conditionText serializes canonically, container-name
+  and the container shorthand validate their values, and
+  CSSContainerRule exposes containerName, containerQuery and
+  conditions. In headless mode a style flush after a mutation performs
+  the container-aware relayout so getComputedStyle sees query results.
+* image-set() and -webkit-image-set() are validated option by option
+  (images, x/dppx/dpi/dpcm resolutions or math functions resolving to a
+  resolution, type()) and serialize canonically in specified and
+  computed style; unicode-range descriptors are validated per CSS
+  Syntax 3 and serialize as uppercase U+XXXX or U+XXXX-YYYY.
 * JavaScript can be turned off: an "Enable JavaScript" toggle in
   Settings parses pages with scripting disabled (so noscript content
   renders) and skips script execution entirely — the user decides what
