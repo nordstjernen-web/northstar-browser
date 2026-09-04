@@ -1161,6 +1161,7 @@ void ns_css_set_doc_base(const char *base_url);
 void ns_css_set_doc_language(const char *lang);
 
 const char *ns_style_keyword(const ns_style *s, ns_css_prop p);
+const char *ns_css_alignment_base(const char *keyword);
 
 int ns_css_used_column_count(const ns_style *s, double avail_w,
                              double *out_gap);
