@@ -458,7 +458,7 @@ browser_flush_style(gpointer user_data)
     }
     ns_css_set_viewport((double)b->vw, b->vh);
     ns_css_set_doc_language(b->doc_language);
-    b->styles = ns_engine_compute_cascade(b->doc, b->base_url, b->css_cache);
+    b->styles = ns_engine_compute_cascade(b->doc, b->base_url, b->css_cache, b->anim);
     if (b->anim)
         ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
     ns_js_set_style_table(b->js, b->styles);
@@ -1016,7 +1016,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
     b->css_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                          (GDestroyNotify)g_bytes_unref);
     b->images = ns_image_cache_new();
-    b->styles = ns_engine_compute_cascade(doc, base, b->css_cache);
+    b->styles = ns_engine_compute_cascade(doc, base, b->css_cache, NULL);
 
     b->anim = ns_anim_new();
     ns_engine_load_keyframes(b->anim, doc, base, b->css_cache);

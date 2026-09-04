@@ -636,7 +636,7 @@ headless_flush_style(gpointer ud)
         g_hash_table_destroy(*c->styles);
         *c->styles = NULL;
     }
-    *c->styles = ns_engine_compute_cascade(c->doc, c->base, c->css_cache);
+    *c->styles = ns_engine_compute_cascade(c->doc, c->base, c->css_cache, c->anim);
     if (c->anim)
         ns_engine_anim_observe(c->anim, *c->styles, g_get_monotonic_time());
     ns_js_set_style_table(c->js, *c->styles);
@@ -1864,7 +1864,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     GHashTable *css_cache =
         g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                               (GDestroyNotify)g_bytes_unref);
-    GHashTable *styles = ns_engine_compute_cascade(doc, page_url, css_cache);
+    GHashTable *styles = ns_engine_compute_cascade(doc, page_url, css_cache, NULL);
 
     ns_anim *anim = ns_anim_new();
     ns_engine_load_keyframes(anim, doc, page_url, css_cache);
