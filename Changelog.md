@@ -68,6 +68,16 @@ Significant changes in each release:
 * offsetTop/offsetLeft flush pending layout before locating the offset
   parent, so a first read during parsing no longer returns viewport
   coordinates.
+* Grid containers with direction: rtl lay their columns out from the
+  right, and grid-placed absolutely positioned boxes mirror with them.
+* repeat(auto-fit, ...) collapses the repeated tracks that no in-flow
+  item occupies, so a card grid with fewer cards than columns stretches
+  the remaining fr tracks as browsers do.
+* A grid item's percentage height resolves against its grid area when
+  the rows it spans have definite track sizes, and an absolutely
+  positioned child of a grid container with auto offsets takes its
+  static position from its grid area, aligned by justify-self and
+  align-self.
 * JavaScript can be turned off: an "Enable JavaScript" toggle in
   Settings parses pages with scripting disabled (so noscript content
   renders) and skips script execution entirely — the user decides what
