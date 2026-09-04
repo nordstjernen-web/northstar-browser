@@ -201,6 +201,66 @@ were: getComputedStyle does not reflect running transitions and
 `document.getAnimations()` returns nothing, which is the gap most of
 their subtests test for.
 
+### Re-measured for the third pass of 1.0.8
+
+Measured at `7afa634` (with the {}-block declaration fix that followed
+it) on 2026-09-04, 6 s per-test timeout, the same sparse checkout and
+static server as the table above, over the same 37 `css/` areas. The
+*before* column is the run at `18df2bb` from the second pass. Three
+timing-sensitive files that reported no subtests under load
+(`css/css-animations/parsing/animation-computed.html`,
+`css/css-transitions/parsing/transition-computed.html` and
+`css/cssom-view/scroll-behavior-smooth-positions.html`) were re-run
+alone and folded in. Every area moved except `css/selectors`,
+`css/css-text`, `css/css-inline`, `css/css-break`, `css/css-display`,
+`css/css-counter-styles`, `css/css-content`, `css/css-scoping` and
+`css/css-box`. Across all 5097 files the total went from 42482 to 46653
+of 68725 subtests.
+
+| Area | Before | After | Pass rate |
+| --- | --- | --- | --- |
+| `css/css-transitions` | 149 / 2491 | 2282 / 2504 | 91.1% |
+| `css/css-animations` | 191 / 955 | 803 / 976 | 82.3% |
+| `css/css-sizing` | 745 / 2444 | 1320 / 2444 | 54.0% |
+| `css/css-align` | 3025 / 4534 | 3247 / 4534 | 71.6% |
+| `css/css-values` | 3599 / 6037 | 3739 / 6061 | 61.7% |
+| `css/css-lists` | 136 / 274 | 256 / 274 | 93.4% |
+| `css/css-overflow` | 300 / 972 | 365 / 972 | 37.6% |
+| `css/css-nesting` | 20 / 117 | 84 / 117 | 71.8% |
+| `css/css-easing` | 32 / 156 | 84 / 156 | 53.8% |
+| `css/css-position` | 267 / 474 | 297 / 474 | 62.7% |
+| `css/css-cascade` | 759 / 934 | 789 / 956 | 82.5% |
+| `css/cssom` | 3243 / 3541 | 3264 / 3541 | 92.2% |
+| `css/css-grid` | 6246 / 11001 | 6265 / 11001 | 56.9% |
+| `css/css-variables` | 348 / 520 | 366 / 550 | 66.5% |
+| `css/css-flexbox` | 2206 / 3917 | 2220 / 3917 | 56.7% |
+| `css/css-fonts` | 3596 / 4978 | 3608 / 4980 | 72.4% |
+| `css/css-pseudo` | 239 / 717 | 250 / 717 | 34.9% |
+| `css/css-conditional` | 2179 / 2718 | 2187 / 2718 | 80.5% |
+| `css/css-logical` | 867 / 1170 | 873 / 1170 | 74.6% |
+| `css/css-ui` | 517 / 898 | 522 / 898 | 58.1% |
+| `css/css-syntax` | 272 / 429 | 277 / 429 | 64.6% |
+| `css/css-tables` | 328 / 784 | 331 / 787 | 42.1% |
+| `css/css-multicol` | 140 / 344 | 143 / 344 | 41.6% |
+| `css/css-transforms` | 307 / 705 | 308 / 705 | 43.7% |
+| `css/css-images` | 3106 / 3210 | 3107 / 3210 | 96.8% |
+| `css/css-contain` | 106 / 352 | 107 / 352 | 30.4% |
+| `css/css-backgrounds` | 556 / 1055 | 557 / 1055 | 52.8% |
+| `css/cssom-view` | 896 / 2116 | 895 / 2116 | 42.3% |
+
+`css/css-transitions` and `css/css-animations` are the rewritten
+animation engine: getComputedStyle now reflects running transitions and
+animations, `getAnimations()` returns CSSTransition, CSSAnimation and
+script Animation objects, and the phase-based events fire with spec
+elapsed times. `css/css-sizing`, `css/css-align` and `css/css-position`
+are the `stretch` sizing keyword, the aspect-ratio numerator/denominator
+representation and the inset-abspos self-alignment; `css/css-values` is
+attr() substitution; `css/css-lists` the counter and list-style
+serialisation; `css/css-nesting` the nested-rule CSSOM; and
+`css/css-easing` the per-keyframe timing functions. What remains in
+`css/css-animations` is mostly scroll-driven timelines and
+`animation-composition: add/accumulate`, which parse but do not run.
+
 ## Known gaps
 
 ### Vertical writing modes

@@ -537,6 +537,16 @@ Significant changes in each release:
   without & or one starting with a combinator serialises with a leading
   "& ") and is settable, cssText prints the nested rules, and "&" followed
   directly by a type selector is rejected as the spec requires.
+* A declaration whose value is a single {}-block (color: {var(--x)}) is
+  a declaration, not a nested rule, in the CSSOM parser, and a custom
+  property keeps a {}-block anywhere in its value.
+* WPT, third pass of 1.0.8 (same 37 css/ areas, 6 s timeout): 42482 ->
+  46653 of 68725 subtests. css/css-transitions 149 -> 2282 of 2504,
+  css/css-animations 191 -> 803 of 976, css/css-sizing 745 -> 1320 of
+  2444, css/css-align 3025 -> 3247, css/css-values 3599 -> 3739,
+  css/css-lists 136 -> 256 of 274, css/css-overflow 300 -> 365,
+  css/css-nesting 20 -> 84 of 117, css/css-easing 32 -> 84 of 156,
+  css/css-position 267 -> 297; the full table is in docs/compliance.md.
 
 1.0.7:
 ======
