@@ -600,6 +600,23 @@ headless_flush_layout(gpointer ud)
     headless_relayout(c);
 }
 
+static gboolean
+headless_styles_have_containers(GHashTable *styles)
+{
+    if (!styles) return FALSE;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, styles);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        const ns_style *st = val;
+        const ns_css_value *ct = st ? st->values[NS_CSS_CONTAINER_TYPE] : NULL;
+        if (ct && ct->kind == NS_CSS_V_KEYWORD && ct->u.keyword &&
+            strcmp(ct->u.keyword, "normal") != 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
 static void
 headless_flush_style(gpointer ud)
 {
@@ -622,6 +639,10 @@ headless_flush_style(gpointer ud)
     *c->styles = ns_engine_compute_cascade(c->doc, c->base, c->css_cache);
     ns_js_set_style_table(c->js, *c->styles);
     g_headless_styles_stale = FALSE;
+    if (headless_styles_have_containers(*c->styles)) {
+        g_headless_layout_dirty = TRUE;
+        headless_relayout(c);
+    }
 }
 
 typedef struct {
