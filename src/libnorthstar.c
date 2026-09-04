@@ -459,6 +459,8 @@ browser_flush_style(gpointer user_data)
     ns_css_set_viewport((double)b->vw, b->vh);
     ns_css_set_doc_language(b->doc_language);
     b->styles = ns_engine_compute_cascade(b->doc, b->base_url, b->css_cache);
+    if (b->anim)
+        ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
     ns_js_set_style_table(b->js, b->styles);
     b->cascade_dirty = FALSE;
 }
@@ -644,7 +646,10 @@ settle_tick_cb(gpointer user_data)
     ns_browser *b = ctx->b;
     gint64 now = g_get_monotonic_time();
     if (b->images) ns_image_cache_tick(b->images, now);
-    if (b->anim) ns_anim_tick(b->anim, now);
+    if (b->anim && ns_anim_tick(b->anim, now)) {
+        b->cascade_dirty = TRUE;
+        if (ns_anim_needs_layout(b->anim)) b->dirty = TRUE;
+    }
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
     if (b->js) ns_js_run_animation_frame(b->js);
     if (b->dirty || (b->js && ns_js_consume_mutated(b->js))) {
@@ -1024,6 +1029,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
     if (b->js) {
         ns_js_set_style_table(b->js, b->styles);
         ns_js_set_image_cache(b->js, b->images);
+        ns_js_set_anim(b->js, b->anim);
         ns_js_set_form_submit_cb(b->js, browser_js_form_submit, b);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_style_flush_cb(b->js, browser_flush_style, b);
@@ -1494,6 +1500,8 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (browser->anim && ns_anim_tick(browser->anim, now)) {
             changed = TRUE;
             other_changed = TRUE;
+            browser->cascade_dirty = TRUE;
+            if (ns_anim_needs_layout(browser->anim)) browser->dirty = TRUE;
         }
         if (browser->anim && browser->js)
             ns_js_dispatch_anim_events(browser->js, browser->anim);
