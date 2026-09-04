@@ -14924,6 +14924,7 @@ ns_computed_prop_needs_layout(const char *name)
         "width", "height", "top", "right", "bottom", "left",
         "block-size", "inline-size", "transform", "transform-origin",
         "perspective-origin", "line-height",
+        "grid-template-columns", "grid-template-rows",
     };
     for (gsize i = 0; i < G_N_ELEMENTS(geometry); i++)
         if (strcmp(name, geometry[i]) == 0) return TRUE;
@@ -15006,6 +15007,13 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     int resolved_id = ns_css_resolve_prop(property_id, computed);
     const char *resolved_name = resolved_id != property_id
         ? ns_css_prop_name(resolved_id) : name;
+
+    if (lbox && (strcmp(resolved_name, "grid-template-columns") == 0 ||
+                 strcmp(resolved_name, "grid-template-rows") == 0)) {
+        char *tracks = ns_layout_grid_resolved_tracks(
+            lbox, strcmp(resolved_name, "grid-template-columns") == 0);
+        if (tracks) return tracks;
+    }
 
     if (strcmp(resolved_name, "width") == 0 ||
         strcmp(resolved_name, "height") == 0) {
