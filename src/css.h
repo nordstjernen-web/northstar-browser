@@ -274,6 +274,10 @@ typedef enum ns_css_prop {
     NS_CSS_ANIMATION_FILL_MODE,
     NS_CSS_TRANSITION_PROPERTY,
     NS_CSS_TRANSITION_TIMING_FUNCTION,
+    NS_CSS_TRANSITION_BEHAVIOR,
+    NS_CSS_ANIMATION_TIMELINE,
+    NS_CSS_ANIMATION_RANGE_START,
+    NS_CSS_ANIMATION_RANGE_END,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -326,6 +330,7 @@ typedef struct ns_css_timing {
     ns_css_timing_kind kind;
     int                steps;
     ns_css_step_pos    step_pos;
+    gboolean           jump_keyword;
     double             cb[4];
 } ns_css_timing;
 
@@ -364,6 +369,8 @@ typedef struct ns_css_anim_entry {
     ns_css_anim_direction direction;
     ns_css_anim_fill      fill;
     gboolean      paused;
+    gboolean      duration_auto;
+    gboolean      allow_discrete;
 } ns_css_anim_entry;
 
 #define NS_CSS_ANIM_ENTRIES_MAX 8
@@ -377,6 +384,13 @@ struct ns_style;
 void  ns_css_anim_effective(const struct ns_style *s, gboolean is_animation,
                             ns_css_anim_list *out);
 void  ns_css_anim_list_clear(ns_css_anim_list *list);
+void  ns_css_anim_lists(const struct ns_style *s, gboolean is_animation,
+                        ns_css_anim_list *out, gboolean *out_mismatch);
+char *ns_css_anim_shorthand_serialize(const ns_css_anim_list *list,
+                                      gboolean is_animation);
+char *ns_css_animation_shorthand_canonical(const char *text, gboolean is_animation);
+char *ns_css_ident_serialize(const char *name);
+char *ns_css_animation_range_serialize(const char *start_list, const char *end_list);
 char *ns_css_timing_serialize(const ns_css_timing *t);
 gboolean ns_css_timing_parse(const char *text, ns_css_timing *out);
 
