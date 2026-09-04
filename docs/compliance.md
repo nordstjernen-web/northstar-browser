@@ -128,9 +128,52 @@ the most consequential for real pages. `css/css-color` is nearly as low,
 but almost all of its failures are the one structural gap under *Known
 gaps* rather than scattered bugs.
 
+### Re-measured for the flex, grid and alignment work in 1.0.8
+
+Measured at `43a5d0a` on 2026-09-04, 6 s per-test timeout, against a
+sparse upstream WPT checkout of the same day served over a plain static
+HTTP server with `fonts/` (Ahem) and `css/support/` present. The
+*before* column is the same checkout run at `ddd5e96`, the commit before
+this work, but without the font and support directories, so part of the
+movement in every row is tests that finally load Ahem or their support
+stylesheet; `css/css-flexbox` was re-run at `ddd5e96` with those
+directories in place and moved from 1465 to 1997 on the layout changes
+alone.
+
+| Area | Before | After | Pass rate |
+| --- | --- | --- | --- |
+| `css/css-display` | 33 / 45 | 326 / 376 | 86.7% |
+| `css/css-box` | 34 / 128 | 273 / 407 | 67.1% |
+| `css/css-align` | 1598 / 3881 | 3026 / 4534 | 66.7% |
+| `css/css-position` | 97 / 274 | 267 / 474 | 56.3% |
+| `css/css-flexbox` | 1465 / 3670 | 2197 / 3917 | 56.1% |
+| `css/css-grid` | 852 / 9371 | 5162 / 11001 | 46.9% |
+| `css/css-overflow` | 138 / 614 | 299 / 972 | 30.8% |
+| `css/css-sizing` | 474 / 2091 | 665 / 2444 | 27.2% |
+
+`css/css-grid` is where most of the movement is: absolutely positioned
+boxes placed by grid lines, `auto-fit` track collapsing, rtl columns
+and grid-area percentage heights, plus `document.fonts.ready` now
+waiting for Ahem so `checkLayout` measures the intended font.
+`css/css-sizing` and `css/css-overflow` stay low for the structural
+reason below: most of their remaining files are vertical writing modes
+or the `stretch` sizing keyword.
+
 ## Known gaps
 
-### Flex layout is still the weakest area, but much less so
+### Vertical writing modes
+
+Layout is horizontal-only: `writing-mode: vertical-rl`, `vertical-lr`
+and the `sideways-*` values are parsed but every layout algorithm treats
+the inline axis as x. This is now the single largest source of failures
+in every layout area — `abspos/position-absolute-013` in flexbox alone
+is 216 subtests, half of `css/css-sizing/stretch` is orthogonal-flow
+combinations, and the `*-vertWM-*`, `*-wmvert-*` and `orthogonal-*`
+files in flexbox and grid fail as groups. Fixing it means threading a
+logical-to-physical mapping through box geometry, not patching any one
+algorithm.
+
+### Flex layout
 
 `css/css-flexbox` was re-measured after the `offsetLeft`/`offsetTop` and
 flex static-position work described in `Changelog.md`: **1437 of 3535
@@ -150,19 +193,24 @@ items correctly, `align-items: baseline` aligns baselines,
 absolutely-positioned child takes its static position from the
 container's `justify-content` and its own `align-self`.
 
-What remains, in the order it costs subtests:
+Since 1.0.8 the main-size step is the spec's resolve-flexible-lengths
+loop shared by row, wrapping-row and column containers, column
+containers wrap and honour `align-content`, negative free space
+overflows in the right direction, and the automatic minimum size is
+`min(content, specified)`. What remains, in the order it costs subtests:
 
-- **Vertical writing modes.** Flex layout is horizontal-only: `row` is
-  always the x axis. `abspos/position-absolute-013` alone is 216 of the
-  remaining failures and is almost entirely `vertical-rl`/`vertical-lr`.
-- **`flex-direction: column` with `flex-wrap: wrap`.** `layout_flex_column`
-  ignores wrapping altogether, so the `align-content-vert-*` files fail
-  as a group.
-- **Negative free space.** `negative-overflow-*` overflows the container
-  in the wrong direction.
-- Percentage resolution against an indefinite container, nested flex
-  containers, and the intrinsic-size contribution of a flex container to
-  its parent.
+- **Vertical writing modes**, as above.
+- **Baseline alignment across nested containers.** `align-items:
+  baseline` works for a single line of items; the
+  `alignment/flex-align-baseline-*` files, which synthesize baselines
+  from nested flex, grid and multicol items and from `last baseline`,
+  fail as a group.
+- **Intrinsic sizes.** The min-content and max-content contribution of
+  a flex container to its parent (`intrinsic-size/*`,
+  `flex-container-min-content-*`) still comes from the block estimate
+  rather than the flex algorithm.
+- Replaced elements as flex items (`image-as-flexitem-size-*`) do not
+  transfer their aspect ratio through the main-size clamp.
 
 ### Computed values keep no colour space
 
