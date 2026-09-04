@@ -159,6 +159,48 @@ waiting for Ahem so `checkLayout` measures the intended font.
 reason below: most of their remaining files are vertical writing modes
 or the `stretch` sizing keyword.
 
+### Re-measured for the second pass of 1.0.8
+
+Measured at `18df2bb` on 2026-09-04, 6 s per-test timeout, the same
+sparse checkout and static server as the table above, over every
+`css/` area the engine is measured on. The *before* column is the run
+at `41fd6c1` (the merge of the first pass) for the layout areas and at
+the start of this pass for the rest; every row below moved, and the
+areas not listed (`css/selectors`, `css/css-transitions`, `css/css-transforms`, `css/css-tables`, `css/css-position`, `css/css-multicol`, `css/css-logical`, `css/css-inline`, `css/css-easing`, `css/css-display`, `css/css-counter-styles`, `css/css-contain`, `css/css-break`, `css/css-box`, `css/css-animations`, `css/css-align`, `css/css-cascade`, `css/cssom`) did not.
+Across all 5096 files the total went from 35890 to 42482 of 68610
+subtests.
+
+| Area | Before | After | Pass rate |
+| --- | --- | --- | --- |
+| `css/css-images` | 784 / 3210 | 3106 / 3210 | 96.8% |
+| `css/css-fonts` | 2188 / 4978 | 3596 / 4978 | 72.2% |
+| `css/css-conditional` | 1031 / 2718 | 2179 / 2718 | 80.2% |
+| `css/css-grid` | 5162 / 11001 | 6246 / 11001 | 56.8% |
+| `css/cssom-view` | 646 / 2116 | 896 / 2116 | 42.3% |
+| `css/css-content` | 96 / 211 | 201 / 211 | 95.3% |
+| `css/css-syntax` | 172 / 419 | 272 / 429 | 63.4% |
+| `css/css-sizing` | 665 / 2444 | 745 / 2444 | 30.5% |
+| `css/css-backgrounds` | 496 / 1055 | 556 / 1055 | 52.7% |
+| `css/css-values` | 3571 / 6037 | 3599 / 6037 | 59.6% |
+| `css/css-ui` | 503 / 898 | 517 / 898 | 57.6% |
+| `css/css-flexbox` | 2197 / 3917 | 2206 / 3917 | 56.3% |
+| `css/css-nesting` | 14 / 74 | 20 / 117 | 17.1% |
+| `css/css-pseudo` | 235 / 717 | 239 / 717 | 33.3% |
+| `css/css-variables` | 346 / 520 | 348 / 520 | 66.9% |
+| `css/css-text` | 1703 / 3010 | 1705 / 3010 | 56.6% |
+| `css/css-lists` | 134 / 274 | 136 / 274 | 49.6% |
+| `css/css-overflow` | 299 / 972 | 300 / 972 | 30.9% |
+
+`css/css-images` is the gradient and image-set work, `css/css-fonts`
+the font shorthand and font-family canonicalization, and
+`css/css-conditional` the container query evaluator. `css/css-grid`
+picked up the resolved track sizes, em and calc() tracks, fr rows and
+self-alignment; `css/cssom-view` the scrollable-overflow rules. The
+`css/css-transitions` and `css/css-animations` rows stay where they
+were: getComputedStyle does not reflect running transitions and
+`document.getAnimations()` returns nothing, which is the gap most of
+their subtests test for.
+
 ## Known gaps
 
 ### Vertical writing modes
