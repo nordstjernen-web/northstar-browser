@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* Raw pointers into page-owned ArrayBuffers are no longer held across a
+  call back into JavaScript. putImageData, AnalyserNode's byte getters and
+  the AudioBufferSourceNode renderer read the page's properties first and
+  fetch the backing bytes last, so a getter that transfers or resizes the
+  buffer meanwhile cannot leave the engine writing through a freed
+  pointer (the type-confusion class behind CVE-2026-85046). WebAssembly
+  externref boxes release their JavaScript value through the runtime
+  rather than the context they were created in.
 * Flex layout resolves flexible lengths the way css-flexbox-1 §9.7
   describes: one implementation shared by row, wrapping-row and column
   containers distributes free space with the item freezing loop, so flex
