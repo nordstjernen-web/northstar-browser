@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* docs/cve-2026-85046.md records why the actively exploited V8 JIT type
+  confusion CVE-2026-85046 does not apply to Northstar: the engine is the
+  quickjs-ng interpreter with no optimizing compiler, no per-array
+  elements kind, no write barriers, and a generic Array.prototype.sort
+  that stores back through the checked property path.
 * Raw pointers into page-owned ArrayBuffers are no longer held across a
   call back into JavaScript. putImageData, AnalyserNode's byte getters and
   the AudioBufferSourceNode renderer read the page's properties first and
