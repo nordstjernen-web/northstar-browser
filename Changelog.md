@@ -14,6 +14,23 @@ Significant changes in each release:
   real width; cells and captions now measure like blocks (widest child)
   instead of summing their children. WPT css/css-tables: 330 -> 334 of
   787 on a 2026-09 checkout.
+* position: fixed elements stay anchored to the viewport while the page
+  scrolls. Layout placed them against the initial containing block and
+  nothing translated them by the scroll offset, so a fixed header, cookie
+  bar or modal overlay scrolled away with the document. The paint walk
+  now offsets a fixed box by the viewport origin (and culls its subtree
+  against the offset bounds), hit-testing applies the same offset so
+  clicks land on the fixed element, and mouse events carry
+  viewport-relative clientX/clientY with document coordinates in
+  pageX/pageY.
+* position: sticky boxes are hit-tested where they are painted: clicking
+  a stuck header or navigation bar used to fall through to whatever
+  lay beneath it. One shared ns_box_sticky_offset serves paint, hit
+  testing and getBoundingClientRect; it resolves percentage and calc()
+  insets against the scrollport, and measures a sticky box inside an
+  overflow container against that container's padding box rather than
+  the cairo clip, so a partly scrolled-out scroller no longer drags its
+  sticky children to the viewport edge.
 * Fixed a use-after-free in the MutationObserver delivery loop: the job
   queued raw observer pointers, so a callback that disconnected and
   dropped a later observer left the loop reading and calling through
