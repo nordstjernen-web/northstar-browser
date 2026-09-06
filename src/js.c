@@ -23741,6 +23741,10 @@ ns_mut_scrub_node(ns_js *js, ns_node *n)
     }
     if (js->signaled_slots)
         g_ptr_array_remove_fast(js->signaled_slots, n);
+    if (js->draining_slots)
+        for (guint si = 0; si < js->draining_slots->len; si++)
+            if (g_ptr_array_index(js->draining_slots, si) == n)
+                g_ptr_array_index(js->draining_slots, si) = NULL;
     if (js->mutation_observers) {
         for (guint oi = 0; oi < js->mutation_observers->len; oi++) {
             ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, oi);
@@ -23827,17 +23831,21 @@ ns_mut_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_UNDEFINED;
     js->mutation_drain_scheduled = FALSE;
-    GPtrArray *pending_observers = g_ptr_array_new();
+    GArray *pending_observers = g_array_new(FALSE, FALSE, sizeof(JSValue));
     if (js->mutation_observers)
         for (guint oi = 0; oi < js->mutation_observers->len; oi++) {
             ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, oi);
-            if (o && !o->disconnected && o->records && o->records->len > 0)
-                g_ptr_array_add(pending_observers, o);
+            if (o && !o->disconnected && o->records && o->records->len > 0) {
+                JSValue held = JS_DupValue(ctx, o->wrapper);
+                g_array_append_val(pending_observers, held);
+            }
         }
     GPtrArray *pending_slots = js->signaled_slots;
     js->signaled_slots = NULL;
+    js->draining_slots = pending_slots;
     for (guint oi = 0; oi < pending_observers->len; oi++) {
-        ns_mut_observer *o = g_ptr_array_index(pending_observers, oi);
+        JSValue wrapper = g_array_index(pending_observers, JSValue, oi);
+        ns_mut_observer *o = ns_unwrap_mut_observer(wrapper);
         if (!o || o->disconnected || !o->records || o->records->len == 0) continue;
         GPtrArray *recs = o->records;
         o->records = g_ptr_array_new_with_free_func(ns_mut_record_free);
@@ -23866,7 +23874,9 @@ ns_mut_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
         JS_FreeValue(ctx, arr);
         JS_FreeValue(ctx, (JSValue)call_args[1]);
     }
-    g_ptr_array_free(pending_observers, TRUE);
+    for (guint oi = 0; oi < pending_observers->len; oi++)
+        JS_FreeValue(ctx, g_array_index(pending_observers, JSValue, oi));
+    g_array_free(pending_observers, TRUE);
     if (pending_slots) {
         for (guint i = 0; i < pending_slots->len; i++) {
             ns_node *slot = g_ptr_array_index(pending_slots, i);
@@ -23877,6 +23887,7 @@ ns_mut_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
             JS_SetPropertyStr(ctx, event, "composed", JS_FALSE);
             ns_js_dispatch_built_event(js, slot, "slotchange", event, NULL);
         }
+        js->draining_slots = NULL;
         g_ptr_array_free(pending_slots, TRUE);
     }
     return JS_UNDEFINED;

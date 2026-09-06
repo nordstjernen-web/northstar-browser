@@ -204,6 +204,7 @@ struct ns_js {
     GHashTable   *slot_assignments;
     GHashTable   *slot_roots;
     GPtrArray    *signaled_slots;
+    GPtrArray    *draining_slots;
     GPtrArray    *intersection_observers;
     GPtrArray    *media_query_lists;
     GPtrArray    *resize_observers;
