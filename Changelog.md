@@ -4,6 +4,26 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* A table's max-content and min-content widths are measured column by
+  column, as css-tables-3 §4.4 requires: each column takes the widest
+  cell it holds (or the cell's specified width, floored at its
+  min-content), the columns are summed once with the border spacing, and
+  captions widen the result. They used to be the sum of every row, so a
+  table nested in a cell, a floated infobox with multi-paragraph cells,
+  and a table inside a flex or grid item reported several times their
+  real width; cells and captions now measure like blocks (widest child)
+  instead of summing their children. WPT css/css-tables: 330 -> 334 of
+  787 on a 2026-09 checkout.
+* Fixed a use-after-free in the MutationObserver delivery loop: the job
+  queued raw observer pointers, so a callback that disconnected and
+  dropped a later observer left the loop reading and calling through
+  freed memory. The queue now holds a reference on each observer's
+  wrapper for the duration of the drain, and slots waiting for a
+  slotchange event are scrubbed when their node is destroyed by an
+  earlier listener rather than dispatched to a dangling node.
+* OfflineAudioContext.startRendering() bounds the graph walk to 4096
+  node renders; a page that wired a node into its own inputs several
+  times over could make the recursion exponential and hang the browser.
 * docs/cve-2026-85046.md records why the actively exploited V8 JIT type
   confusion CVE-2026-85046 does not apply to Northstar: the engine is the
   quickjs-ng interpreter with no optimizing compiler, no per-array
