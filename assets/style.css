@@ -259,8 +259,6 @@
   }
   .footer .badges { margin-bottom: 8px; line-height: 0; }
   .footer .badges img { display: inline-block; border: 0; }
-  .footer .counter { margin-bottom: 6px; }
-  .footer .counter img { display: inline-block; height: 20px; width: auto; }
 
   /* ===== RESPONSIVE ===== */
   @media (max-width: 767px) {
