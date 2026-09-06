@@ -113,6 +113,16 @@ This repo is driven by Claude in long uninterrupted sessions.
   `meson compile -C builddir` locally before pushing. Smoke-launch
   the browser (in the background, then kill it) on material changes
   — that's the per-change correctness gate, not CI.
+- **Windows specifics.** The meson toolchain lives in MSYS2, whose
+  login shell starts in `$HOME`, so pass absolute paths:
+  `C:/msys64/usr/bin/bash.exe -lc "meson compile -C /c/dev/northstar-browser-gpl/builddir"`.
+  `git` is not on the MSYS2 PATH — run it from Git Bash or PowerShell.
+  A running `northstar.exe` locks the link target and the build fails
+  with "Permission denied", so `taskkill /IM northstar.exe /F` before
+  every rebuild. Smoke-launch with
+  `Start-Process .\builddir\src\gtk\northstar.exe <url>` and kill it
+  again afterwards. Never wait on user input: `.claude/settings.json`
+  allow-lists both the Bash and PowerShell tools.
 - **CI is enabled.** The Linux (Ubuntu gcc), musl (Alpine), macOS and Windows workflows run on
   every push to `main` and every PR targeting `main`, plus manual
   `workflow_dispatch`. Local Linux is still the primary correctness
