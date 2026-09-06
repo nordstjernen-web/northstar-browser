@@ -126,6 +126,13 @@
     margin: 26px 0 8px 0;
     font-weight: bold;
   }
+  .content h3 {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 15px;
+    color: #003366;
+    margin: 18px 0 6px 0;
+    font-weight: bold;
+  }
   .content p { margin: 0 0 10px 0; }
   .content .lead {
     font-family: Arial, Helvetica, sans-serif;
@@ -200,6 +207,18 @@
   }
 
   code { font-family: "Courier New", monospace; background: #f4f4f4; padding: 0 2px; }
+  pre {
+    font-family: "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    background: #f4f4f4;
+    border: 1px solid #bfc7d6;
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin: 0 0 14px 0;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
 
   .langs { font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 2; }
   .langs a { white-space: nowrap; }
