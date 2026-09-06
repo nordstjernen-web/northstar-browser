@@ -82,7 +82,6 @@ Thumbs.db
 # Local dev artifacts (Windows/MSYS2 box)
 /.tmp/
 /.ccache/
-/scripts/_msys_*
 
 # Local Claude settings (allow .claude/settings.json if you want shared)
 .claude/settings.local.json

@@ -114,8 +114,10 @@ This repo is driven by Claude in long uninterrupted sessions.
   the browser (in the background, then kill it) on material changes
   — that's the per-change correctness gate, not CI.
 - **Windows specifics.** The meson toolchain lives in MSYS2, whose
-  login shell starts in `$HOME`, so pass absolute paths:
-  `C:/msys64/usr/bin/bash.exe -lc "meson compile -C /c/dev/northstar-browser-gpl/builddir"`.
+  login shell starts in `$HOME` outside the MINGW64 environment, so
+  build through the wrapper, which exports `MSYSTEM`, `USERPROFILE`,
+  `TMPDIR` and the compiler and regenerates cleanly:
+  `C:/msys64/usr/bin/bash.exe -lc "bash /c/dev/northstar-browser-gpl/scripts/_msys_build.sh"`.
   `git` is not on the MSYS2 PATH — run it from Git Bash or PowerShell.
   A running `northstar.exe` locks the link target and the build fails
   with "Permission denied", so `taskkill /IM northstar.exe /F` before
