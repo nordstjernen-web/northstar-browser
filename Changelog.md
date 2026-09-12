@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* When several options of a single-choice `<select>` carry the
+  `selected` attribute, the last one wins, as the HTML selectedness
+  setting algorithm requires; the first used to win, so `<option
+  selected>` appended after another selected option (by the parser,
+  `appendChild` or `innerHTML`) did not become the value.
 * `HTMLOptionsCollection` exposes `selectedIndex`, and every event the
   engine dispatches carries a `composed` flag (true for the UI event
   types, false otherwise) instead of leaving the property undefined on a
