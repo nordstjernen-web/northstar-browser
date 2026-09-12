@@ -261,6 +261,42 @@ serialisation; `css/css-nesting` the nested-rule CSSOM; and
 `css/css-animations` is mostly scroll-driven timelines and
 `animation-composition: add/accumulate`, which parse but do not run.
 
+### Re-measured for the fourth pass of 1.0.8
+
+Measured at `51157ce` on 2026-09-12, 6 s per-test timeout, against a
+sparse upstream WPT checkout of the same day (`f7887b5`) served over a
+plain static HTTP server with `fonts/` and `css/support/` present. The
+*before* column is the same checkout run at `24d9668`, the commit before
+this pass. This pass is the background, border, border-image, shadow and
+transform grammar work: the `background` shorthand parsed per layer
+with all eight longhands, `border-image` implemented, `box-shadow`
+canonicalised, `transform` validated function by function, and the
+inline-style CSSOM rebuilding `border`, `background`, `border-radius`
+and `border-image` from their longhands. The `css/css-cascade` before
+column comes from an earlier run of the same checkout; its two
+`@font-face` layer files vary between runs of the same binary and the
+row should be read as unchanged.
+
+| Area | Before | After | Pass rate |
+| --- | --- | --- | --- |
+| `css/css-backgrounds` | 574 / 1093 | 1029 / 1093 | 94.1% |
+| `css/css-transforms` | 308 / 705 | 464 / 705 | 65.8% |
+| `css/cssom` | 3440 / 3824 | 3466 / 3824 | 90.6% |
+| `css/css-values` | 3742 / 6058 | 3743 / 6058 | 61.8% |
+| `css/css-ui` | 522 / 898 | 525 / 898 | 58.5% |
+| `css/css-cascade` | 792 / 964 | 806 / 978 | 82.4% |
+| `css/selectors` | 5245 / 5766 | 5245 / 5766 | 91.0% |
+| `css/css-text` | 1649 / 3027 | 1649 / 3027 | 54.5% |
+| `html/semantics/forms` | 3605 / 4302 | 3606 / 4302 | 83.8% |
+
+What remains in `css/css-backgrounds` is `background-clip: text` and
+`border-area` painting, `calc()` with `em` inside `border-image-width`
+and the corner radii, and the `background: none` colour serialisation
+that Chrome and the specification disagree on. `css/css-transforms` is
+now mostly the rendering and interpolation files
+(`animation/transform-interpolation-*`, the 3D point-mapping tests),
+not parsing.
+
 ## Known gaps
 
 ### Vertical writing modes
