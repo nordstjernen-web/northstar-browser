@@ -4,6 +4,29 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* The CSSOM keeps the keyword a shorthand was written with: after
+  `border-color: red yellow` or `border: thin dotted blue`,
+  `style.borderTopColor` reads `red` and `style.borderTopWidth` reads
+  `thin` rather than `rgb(255, 0, 0)` and `1px`, and a multi-layer value
+  such as `background-image: url(a), url(b)` serialises every layer
+  instead of the first. Setting or removing a property now follows the
+  CSSOM algorithm for overlapping declarations: a shorthand replaces the
+  longhands and shorthands it covers, and clearing one longhand of a
+  stored shorthand expands only that shorthand, so `style.length` goes
+  back to zero once every longhand of `border-color` is removed and
+  `style.border` no longer leaves an earlier `border-width` behind. WPT
+  css/css-backgrounds parsing/border-*-shorthand: 27 -> 89 of 96.
+* `box-shadow` and `text-shadow` serialise their specified value in
+  canonical order (colour, offsets, blur, spread, `inset`) with `0`
+  written as `0px`, and reject the invalid forms the grammar excludes:
+  a lone length, a fifth length, two colours, `inset` twice, a negative
+  blur, a percentage, or a colour splitting the lengths. The parser now
+  keeps a `calc()` or `em` length until the computed style resolves it
+  against the element's font size, and a shadow without a colour takes
+  `currentcolor` from the computed `color` instead of a fixed
+  half-opaque black. `rgb(0, 255, 0)` and other colours with spaces
+  inside the parentheses were split into separate tokens and lost. WPT
+  css/css-backgrounds parsing/box-shadow-*: 25 -> 82 of 82.
 * lexbor is v3.0.1, up from v3.0.0. The release fixes the URL parser's
   buffer growth: a component longer than its stack buffer was copied into
   fresh heap storage without the bytes already written, and the list of
