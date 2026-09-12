@@ -14186,7 +14186,7 @@ ns_computed_prop_defaults_to_color(const char *name)
         "border-bottom-color", "border-left-color",
         "outline-color", "text-decoration-color", "column-rule-color",
         "text-emphasis-color", "-webkit-text-fill-color",
-        "-webkit-text-stroke-color",
+        "-webkit-text-stroke-color", "caret-color",
     };
     if (!name) return FALSE;
     for (gsize i = 0; i < G_N_ELEMENTS(from_color); i++)
@@ -14947,6 +14947,15 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (strcmp(name, "border-radius") == 0 ||
         strcmp(name, "-webkit-border-radius") == 0)
         return ns_computed_radius_shorthand(ctx, n);
+    if (strcmp(name, "outline") == 0) {
+        char *w = ns_computed_lookup(ctx, n, "outline-width");
+        char *st = ns_computed_lookup(ctx, n, "outline-style");
+        char *c = ns_computed_lookup(ctx, n, "outline-color");
+        char *out = w && st && c ? g_strdup_printf("%s %s %s", w, st, c)
+                                 : g_strdup("");
+        g_free(w); g_free(st); g_free(c);
+        return out;
+    }
     if (strcmp(name, "border") == 0) {
         static const char *const parts[3] = { "width", "style", "color" };
         char *values[3] = { NULL };
@@ -15019,6 +15028,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     const ns_style *computed = (js && js->style_table)
         ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (!computed && lbox) computed = lbox->style;
+    if (strcmp(name, "-webkit-appearance") == 0) name = "appearance";
     int property_id = ns_css_prop_id(name);
     int resolved_id = ns_css_resolve_prop(property_id, computed);
     const char *resolved_name = resolved_id != property_id

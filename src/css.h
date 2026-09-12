@@ -172,6 +172,8 @@ typedef enum ns_css_prop {
     NS_CSS_CONTAINER_TYPE,
     NS_CSS_CONTAINER_NAME,
     NS_CSS_CARET_COLOR,
+    NS_CSS_CARET_SHAPE,
+    NS_CSS_RESIZE,
     NS_CSS_TAB_SIZE,
     NS_CSS_JUSTIFY_ITEMS,
     NS_CSS_JUSTIFY_SELF,
@@ -1249,6 +1251,8 @@ char *ns_css_font_family_canonical(const char *text);
 char *ns_css_font_shorthand_canonical(const char *text);
 char *ns_css_image_value_canonical(const char *text);
 char *ns_css_background_position_join(const char *xs, const char *ys);
+char *ns_css_outline_shorthand_serialize(const char *color, const char *style,
+                                         const char *width);
 char *ns_css_border_image_shorthand_serialize(const char *source, const char *slice,
                                               const char *width, const char *outset,
                                               const char *repeat);

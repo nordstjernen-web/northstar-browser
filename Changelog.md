@@ -4,6 +4,23 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* css-ui parsing: the `outline` shorthand accepts `thin`/`medium`/
+  `thick`, `0`, `calc()` widths and `auto` style, rejects a second width,
+  style or colour, and reads back in canonical `color style width` order
+  omitting initial parts; `outline-style: auto` is valid. `caret-color`
+  takes `auto` and the two-value `[auto | <color>]{1,2}` form and
+  computes `auto` to the current colour; `caret-shape` (`auto`, `bar`,
+  `block`, `underscore`) and `resize` (`none`, `both`, `horizontal`,
+  `vertical`, `block`, `inline`) are properties; `cursor` validates its
+  image list (a `url()` or gradient with an optional numeric hotspot,
+  ending in a keyword) instead of accepting any text with a parenthesis;
+  `appearance` accepts `meter` and `progress-bar`; `-webkit-appearance`
+  is a legacy alias of `appearance` in the CSSOM, computed style and
+  `cssText`, including the `WebkitAppearance` camel-case form; and
+  `getComputedStyle().outline` is built from the computed longhands. A
+  `calc()` value that reaches the CSSOM through a shorthand keeps its
+  specified text (`outline: calc(2em + 3ex)` reads back unchanged). WPT
+  css/css-ui: 525 -> 745 of 898.
 * When several options of a single-choice `<select>` carry the
   `selected` attribute, the last one wins, as the HTML selectedness
   setting algorithm requires; the first used to win, so `<option
