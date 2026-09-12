@@ -4,6 +4,23 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* `transform` is validated function by function against css-transforms:
+  each function checks its argument count and types, so `translate(1px,
+  2px, 3px)`, `scale(6, 7, 8)`, `skewX(0, 0)` and `translateX(3%) none`
+  are rejected, and the specified value serialises canonically --
+  percentages in `scale()` become numbers, `rotate(0)` reads
+  `rotate(0deg)`, `0` lengths read `0px`, and function names other than
+  the `translate` family are lowercased. The `scale`, `rotate` and
+  `translate` properties get the same treatment: `scale: 100% 100%` reads
+  `1`, `translate: 100px 0px` reads `100px`, `rotate: 400grad x` and
+  `rotate: 0.5 0 0 400grad` are accepted and read `x 400grad`, and a
+  negative axis vector folds its sign into the angle. `transform-origin`
+  and `perspective-origin` follow the position grammar (`top center`
+  reads `center top`, `1px left` and `top bottom` are rejected,
+  `perspective-origin` takes the edge-offset form `right 20px bottom
+  30px`), `perspective: 1000` without a unit is rejected, and
+  `transform-box` is a property. WPT css/css-transforms/parsing: 190 ->
+  318 of 336.
 * `border-image` is implemented. The five longhands (`border-image-source`,
   `-slice`, `-width`, `-outset`, `-repeat`) parse and validate against the
   css-backgrounds grammar, the shorthand splits `source || slice [ / width
