@@ -108,6 +108,11 @@ typedef enum ns_css_prop {
     NS_CSS_BACKGROUND_CLIP,
     NS_CSS_BACKGROUND_ORIGIN,
     NS_CSS_BACKGROUND_ATTACHMENT,
+    NS_CSS_BORDER_IMAGE_SOURCE,
+    NS_CSS_BORDER_IMAGE_SLICE,
+    NS_CSS_BORDER_IMAGE_WIDTH,
+    NS_CSS_BORDER_IMAGE_OUTSET,
+    NS_CSS_BORDER_IMAGE_REPEAT,
     NS_CSS_SCROLLBAR_WIDTH,
     NS_CSS_SCROLLBAR_COLOR,
     NS_CSS_IMAGE_RENDERING,
@@ -1243,6 +1248,9 @@ char *ns_css_font_family_canonical(const char *text);
 char *ns_css_font_shorthand_canonical(const char *text);
 char *ns_css_image_value_canonical(const char *text);
 char *ns_css_background_position_join(const char *xs, const char *ys);
+char *ns_css_border_image_shorthand_serialize(const char *source, const char *slice,
+                                              const char *width, const char *outset,
+                                              const char *repeat);
 char *ns_css_background_shorthand_serialize(const char *image, const char *position,
                                             const char *size, const char *repeat,
                                             const char *attachment,

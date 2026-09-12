@@ -907,6 +907,226 @@ bg_layer_origin_area(const ns_box *b, int li,
 }
 
 static void
+border_image_quad(const char *text, double font_px, double box_w, double box_h,
+                  const double border_px[4], const double slice_px[4],
+                  gboolean number_is_multiple, double out[4])
+{
+    char **tokens = g_strsplit(text ? text : "", " ", 6);
+    char *vals[4] = { NULL };
+    int n = 0;
+    for (char **t = tokens; *t && n < 4; t++) {
+        if (!**t || g_ascii_strcasecmp(*t, "fill") == 0) continue;
+        vals[n++] = *t;
+    }
+    const char *q[4] = {
+        n >= 1 ? vals[0] : "1",
+        n >= 2 ? vals[1] : (n >= 1 ? vals[0] : "1"),
+        n >= 3 ? vals[2] : (n >= 1 ? vals[0] : "1"),
+        n >= 4 ? vals[3] : (n >= 2 ? vals[1] : (n >= 1 ? vals[0] : "1")),
+    };
+    for (int i = 0; i < 4; i++) {
+        double basis = (i == 0 || i == 2) ? box_h : box_w;
+        double num = 0;
+        char *end = NULL;
+        if (g_ascii_strcasecmp(q[i], "auto") == 0) {
+            out[i] = slice_px ? slice_px[i] : border_px[i];
+            continue;
+        }
+        num = g_ascii_strtod(q[i], &end);
+        if (!end || end == q[i]) { out[i] = border_px[i]; continue; }
+        if (*end == '%') out[i] = num * basis / 100.0;
+        else if (g_ascii_strcasecmp(end, "px") == 0) out[i] = num;
+        else if (g_ascii_strcasecmp(end, "em") == 0 ||
+                 g_ascii_strcasecmp(end, "rem") == 0) out[i] = num * font_px;
+        else if (!*end) out[i] = number_is_multiple ? num * border_px[i] : num;
+        else out[i] = border_px[i];
+        if (out[i] < 0) out[i] = 0;
+    }
+    g_strfreev(tokens);
+}
+
+static void
+border_image_slices(const char *text, double iw, double ih, double out[4],
+                    gboolean *fill)
+{
+    *fill = text && strstr(text, "fill") != NULL;
+    char **tokens = g_strsplit(text ? text : "", " ", 6);
+    char *vals[4] = { NULL };
+    int n = 0;
+    for (char **t = tokens; *t && n < 4; t++) {
+        if (!**t || g_ascii_strcasecmp(*t, "fill") == 0) continue;
+        vals[n++] = *t;
+    }
+    const char *q[4] = {
+        n >= 1 ? vals[0] : "100%",
+        n >= 2 ? vals[1] : (n >= 1 ? vals[0] : "100%"),
+        n >= 3 ? vals[2] : (n >= 1 ? vals[0] : "100%"),
+        n >= 4 ? vals[3] : (n >= 2 ? vals[1] : (n >= 1 ? vals[0] : "100%")),
+    };
+    for (int i = 0; i < 4; i++) {
+        double basis = (i == 0 || i == 2) ? ih : iw;
+        char *end = NULL;
+        double num = g_ascii_strtod(q[i], &end);
+        if (!end || end == q[i]) num = basis;
+        else if (*end == '%') num = num * basis / 100.0;
+        out[i] = CLAMP(num, 0, basis);
+    }
+    if (out[0] + out[2] > ih) { out[0] = ih * out[0] / (out[0] + out[2]); out[2] = ih - out[0]; }
+    if (out[3] + out[1] > iw) { out[3] = iw * out[3] / (out[3] + out[1]); out[1] = iw - out[3]; }
+    g_strfreev(tokens);
+}
+
+static void
+border_image_draw_piece(cairo_t *cr, cairo_surface_t *surf,
+                        double sx, double sy, double sw, double sh,
+                        double dx, double dy, double dw, double dh,
+                        const char *repeat_x, const char *repeat_y)
+{
+    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
+    double scale_x = dw / sw, scale_y = dh / sh;
+    gboolean tile_x = repeat_x && strcmp(repeat_x, "stretch") != 0;
+    gboolean tile_y = repeat_y && strcmp(repeat_y, "stretch") != 0;
+    if (tile_x) {
+        scale_x = scale_y;
+        if (strcmp(repeat_x, "round") == 0) {
+            double count = MAX(1, floor(dw / (sw * scale_x) + 0.5));
+            scale_x = dw / (sw * count);
+        }
+    }
+    if (tile_y) {
+        scale_y = tile_x ? scale_x : scale_x;
+        if (strcmp(repeat_y, "round") == 0) {
+            double count = MAX(1, floor(dh / (sh * scale_y) + 0.5));
+            scale_y = dh / (sh * count);
+        }
+    }
+    cairo_save(cr);
+    cairo_rectangle(cr, dx, dy, dw, dh);
+    cairo_clip(cr);
+    cairo_pattern_t *pat = cairo_pattern_create_for_surface(surf);
+    cairo_pattern_set_extend(pat, (tile_x || tile_y) ? CAIRO_EXTEND_REPEAT
+                                                     : CAIRO_EXTEND_PAD);
+    cairo_matrix_t m;
+    double off_x = tile_x ? (dw - floor(dw / (sw * scale_x)) * sw * scale_x) / 2.0 : 0;
+    double off_y = tile_y ? (dh - floor(dh / (sh * scale_y)) * sh * scale_y) / 2.0 : 0;
+    if (tile_x && strcmp(repeat_x, "round") == 0) off_x = 0;
+    if (tile_y && strcmp(repeat_y, "round") == 0) off_y = 0;
+    if (tile_x || tile_y) {
+        cairo_surface_t *piece = cairo_surface_create_similar_image(
+            surf, CAIRO_FORMAT_ARGB32, MAX(1, (int)ceil(sw)), MAX(1, (int)ceil(sh)));
+        cairo_t *pc = cairo_create(piece);
+        cairo_set_source_surface(pc, surf, -sx, -sy);
+        cairo_paint(pc);
+        cairo_destroy(pc);
+        cairo_pattern_destroy(pat);
+        pat = cairo_pattern_create_for_surface(piece);
+        cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
+        cairo_matrix_init_scale(&m, 1.0 / scale_x, 1.0 / scale_y);
+        cairo_matrix_translate(&m, -(dx + off_x), -(dy + off_y));
+        cairo_pattern_set_matrix(pat, &m);
+        cairo_set_source(cr, pat);
+        cairo_paint(cr);
+        cairo_pattern_destroy(pat);
+        cairo_surface_destroy(piece);
+    } else {
+        cairo_matrix_init_scale(&m, 1.0 / scale_x, 1.0 / scale_y);
+        cairo_matrix_translate(&m, -dx, -dy);
+        cairo_matrix_translate(&m, sx * scale_x, sy * scale_y);
+        cairo_pattern_set_matrix(pat, &m);
+        cairo_set_source(cr, pat);
+        cairo_paint(cr);
+        cairo_pattern_destroy(pat);
+    }
+    cairo_restore(cr);
+}
+
+static gboolean
+paint_border_image(cairo_t *cr, const ns_box *b,
+                   double bx, double by, double bw, double bh)
+{
+    const ns_style *s = b->style;
+    const ns_css_value *src = s ? s->values[NS_CSS_BORDER_IMAGE_SOURCE] : NULL;
+    if (!src || (src->kind != NS_CSS_V_GRADIENT && src->kind != NS_CSS_V_URL))
+        return FALSE;
+    const ns_css_value *fs = s->values[NS_CSS_FONT_SIZE];
+    double font_px = fs && fs->kind == NS_CSS_V_LENGTH ? fs->u.length.v : 16;
+    double border_px[4] = { b->border.top, b->border.right,
+                            b->border.bottom, b->border.left };
+    const ns_css_value *ov = s->values[NS_CSS_BORDER_IMAGE_OUTSET];
+    double outset[4] = { 0, 0, 0, 0 };
+    if (ov && ov->kind == NS_CSS_V_KEYWORD)
+        border_image_quad(ov->u.keyword, font_px, bw, bh, border_px, NULL,
+                          TRUE, outset);
+    else
+        for (int i = 0; i < 4; i++) outset[i] = 0;
+    double ax = bx - outset[3], ay = by - outset[0];
+    double aw = bw + outset[3] + outset[1], ah = bh + outset[0] + outset[2];
+    if (aw <= 0 || ah <= 0) return FALSE;
+    cairo_surface_t *surf = NULL;
+    gboolean own = FALSE;
+    double iw, ih;
+    if (src->kind == NS_CSS_V_URL) {
+        ns_image *img = b->media ? b->media->border_image : NULL;
+        if (!img || !img->loaded || !img->texture) return FALSE;
+        surf = texture_surface_cached(img->texture, NULL);
+        if (!surf) return FALSE;
+        iw = ns_texture_get_width(img->texture);
+        ih = ns_texture_get_height(img->texture);
+    } else {
+        iw = ceil(aw);
+        ih = ceil(ah);
+        surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int)iw, (int)ih);
+        cairo_t *gc = cairo_create(surf);
+        corner_radii none;
+        memset(&none, 0, sizeof none);
+        paint_bg_gradient_core(gc, &src->u.gradient, 0, 0, iw, ih,
+                               0, 0, iw, ih, none);
+        cairo_destroy(gc);
+        own = TRUE;
+    }
+    if (iw <= 0 || ih <= 0) {
+        if (own) cairo_surface_destroy(surf);
+        return FALSE;
+    }
+    const ns_css_value *sv = s->values[NS_CSS_BORDER_IMAGE_SLICE];
+    double slice[4];
+    gboolean fill = FALSE;
+    border_image_slices(sv && sv->kind == NS_CSS_V_KEYWORD ? sv->u.keyword : "100%",
+                        iw, ih, slice, &fill);
+    const ns_css_value *wv = s->values[NS_CSS_BORDER_IMAGE_WIDTH];
+    double width[4];
+    border_image_quad(wv && wv->kind == NS_CSS_V_KEYWORD ? wv->u.keyword : "1",
+                      font_px, aw, ah, border_px, slice, TRUE, width);
+    double wsum = width[3] + width[1], hsum = width[0] + width[2];
+    if (wsum > aw && wsum > 0) { width[3] *= aw / wsum; width[1] *= aw / wsum; }
+    if (hsum > ah && hsum > 0) { width[0] *= ah / hsum; width[2] *= ah / hsum; }
+    const ns_css_value *rv = s->values[NS_CSS_BORDER_IMAGE_REPEAT];
+    char **rep = g_strsplit(rv && rv->kind == NS_CSS_V_KEYWORD ? rv->u.keyword
+                                                                : "stretch", " ", 3);
+    const char *rep_x = rep[0] && *rep[0] ? rep[0] : "stretch";
+    const char *rep_y = rep[0] && rep[1] && *rep[1] ? rep[1] : rep_x;
+    double st = slice[0], sr = slice[1], sb = slice[2], sl = slice[3];
+    double wt = width[0], wr = width[1], wb = width[2], wl = width[3];
+    double mid_sw = iw - sl - sr, mid_sh = ih - st - sb;
+    double mid_dw = aw - wl - wr, mid_dh = ah - wt - wb;
+    cairo_save(cr);
+    border_image_draw_piece(cr, surf, 0, 0, sl, st, ax, ay, wl, wt, "stretch", "stretch");
+    border_image_draw_piece(cr, surf, iw - sr, 0, sr, st, ax + aw - wr, ay, wr, wt, "stretch", "stretch");
+    border_image_draw_piece(cr, surf, 0, ih - sb, sl, sb, ax, ay + ah - wb, wl, wb, "stretch", "stretch");
+    border_image_draw_piece(cr, surf, iw - sr, ih - sb, sr, sb, ax + aw - wr, ay + ah - wb, wr, wb, "stretch", "stretch");
+    border_image_draw_piece(cr, surf, sl, 0, mid_sw, st, ax + wl, ay, mid_dw, wt, rep_x, "stretch");
+    border_image_draw_piece(cr, surf, sl, ih - sb, mid_sw, sb, ax + wl, ay + ah - wb, mid_dw, wb, rep_x, "stretch");
+    border_image_draw_piece(cr, surf, 0, st, sl, mid_sh, ax, ay + wt, wl, mid_dh, "stretch", rep_y);
+    border_image_draw_piece(cr, surf, iw - sr, st, sr, mid_sh, ax + aw - wr, ay + wt, wr, mid_dh, "stretch", rep_y);
+    if (fill)
+        border_image_draw_piece(cr, surf, sl, st, mid_sw, mid_sh, ax + wl, ay + wt, mid_dw, mid_dh, rep_x, rep_y);
+    cairo_restore(cr);
+    g_strfreev(rep);
+    if (own) cairo_surface_destroy(surf);
+    return TRUE;
+}
+
+static void
 paint_block(cairo_t *cr, const ns_box *b)
 {
     double border_x = b->x + b->margin.left;
@@ -1069,6 +1289,9 @@ paint_block(cairo_t *cr, const ns_box *b)
         }
     }
 
+    if (s && paint_border_image(cr, b, border_x, border_y, border_w, border_h)) {
+        return;
+    }
     if (s) {
         double uniform_bw = 0;
         rgba uniform_color = {0};

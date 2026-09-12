@@ -879,6 +879,8 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
             g_ptr_array_add(srcs, box->media->bg_image_src);
         if (box->media->marker_image_src)
             g_ptr_array_add(srcs, box->media->marker_image_src);
+        if (box->media->border_image_src)
+            g_ptr_array_add(srcs, box->media->border_image_src);
         if (box->media->video_src)
             g_ptr_array_add(srcs, box->media->video_src);
         const char *box_base = engine_node_frame_base(box->dom, base_url);

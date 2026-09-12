@@ -4,6 +4,39 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* `border-image` is implemented. The five longhands (`border-image-source`,
+  `-slice`, `-width`, `-outset`, `-repeat`) parse and validate against the
+  css-backgrounds grammar, the shorthand splits `source || slice [ / width
+  | / width? / outset ] || repeat` and resets what it leaves out, and
+  `border` resets all five as the specification requires. Paint draws the
+  nine-slice border from a `url()` image, which the loader now fetches like
+  a background image, or from a gradient rendered to the border area, with
+  `stretch`, `repeat`, `round` and `space` edges, `fill` for the middle and
+  `outset` enlarging the area; `border-image: linear-gradient(...) 1`, the
+  common gradient-border idiom, now shows a gradient frame.
+* `-webkit-border-radius` and the `-webkit-border-*-radius` corners are
+  aliases of the unprefixed properties, `border-radius` rejects a fifth
+  value, a negative radius or a second slash, a corner rejects a third
+  value, and the shorthand's specified value collapses each half as a
+  quad (`1px 1px 1px 2% / 1px 2% 1px 2%` reads `1px 1px 1px 2% / 1px 2%`).
+  `em` and `rem` corner radii written as `h / v` pairs resolve against the
+  font size in the computed style.
+* The CSSOM rebuilds `style.border`, `style.borderTop` and the other
+  sides, `style.borderRadius` and `style.borderImage` from their
+  longhands, so `border: 1px solid #fff` reads back
+  `1px solid rgb(255, 255, 255)` and `border-top: 2px` after `border:
+  1px` reads `2px 1px 1px` through `border-width`. `cssText` prefers the
+  `border` shorthand when its seventeen longhands agree, then the
+  `border-width`/`-style`/`-color` quads, then a side, then
+  `border-image` and `border-radius`, following the CSSOM
+  serialization order; `style.length` counts every longhand a `border`
+  shorthand sets. The `border` shorthand rejects `auto`, a second width
+  or a negative length, and a shorthand that carries `var()` is kept
+  whole rather than expanded into guessed longhands. `getComputedStyle`
+  resolves `border` and the side shorthands from their computed
+  longhands instead of echoing the specified text.
+* `background-position-x`/`-y` accept `x-start`, `x-end`, `y-start`,
+  `y-end` and an edge with an offset (`right 10px`, `top -20%`).
 * A colour in the specified style serialises the way CSS Color 4
   requires: a keyword keeps its spelling in lowercase (`ActiveText` reads
   back `activetext`), and a legacy `#hex`, `rgb()`, `hsl()` or `hwb()`

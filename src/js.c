@@ -14944,8 +14944,43 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (strcmp(name, "inset") == 0)
         return ns_computed_box_shorthand(ctx, n, "top", "right",
                                          "bottom", "left");
-    if (strcmp(name, "border-radius") == 0)
+    if (strcmp(name, "border-radius") == 0 ||
+        strcmp(name, "-webkit-border-radius") == 0)
         return ns_computed_radius_shorthand(ctx, n);
+    if (strcmp(name, "border") == 0) {
+        static const char *const parts[3] = { "width", "style", "color" };
+        char *values[3] = { NULL };
+        gboolean ok = TRUE;
+        for (int k = 0; k < 3 && ok; k++) {
+            static const char *const sides[4] = { "top", "right", "bottom", "left" };
+            for (int i = 0; i < 4; i++) {
+                char *name_i = g_strdup_printf("border-%s-%s", sides[i], parts[k]);
+                char *v = ns_computed_lookup(ctx, n, name_i);
+                g_free(name_i);
+                if (!v || (values[k] && strcmp(v, values[k]) != 0)) ok = FALSE;
+                if (i == 0) values[k] = v;
+                else g_free(v);
+            }
+        }
+        char *out = ok ? g_strdup_printf("%s %s %s", values[0], values[1],
+                                         values[2]) : g_strdup("");
+        for (int k = 0; k < 3; k++) g_free(values[k]);
+        return out;
+    }
+    if (strcmp(name, "border-top") == 0 || strcmp(name, "border-right") == 0 ||
+        strcmp(name, "border-bottom") == 0 || strcmp(name, "border-left") == 0) {
+        char *w = g_strdup_printf("%s-width", name);
+        char *st = g_strdup_printf("%s-style", name);
+        char *c = g_strdup_printf("%s-color", name);
+        char *vw = ns_computed_lookup(ctx, n, w);
+        char *vs = ns_computed_lookup(ctx, n, st);
+        char *vc = ns_computed_lookup(ctx, n, c);
+        char *out = vw && vs && vc
+            ? g_strdup_printf("%s %s %s", vw, vs, vc) : g_strdup("");
+        g_free(w); g_free(st); g_free(c);
+        g_free(vw); g_free(vs); g_free(vc);
+        return out;
+    }
     if (strcmp(name, "object-position") == 0 ||
         strcmp(name, "background-position") == 0) {
         gboolean is_bg = name[0] == 'b';
