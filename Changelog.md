@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* lexbor is v3.0.1, up from v3.0.0. The release fixes the URL parser's
+  buffer growth: a component longer than its stack buffer was copied into
+  fresh heap storage without the bytes already written, and the list of
+  search parameters kept a stale tail pointer, so a long path, query or
+  host could lose its prefix on the way through lxb_url_parse. IDNA
+  ASCII conversion had the same missing copy, an unfinished :contains()
+  selector leaked and could be freed twice, and the multi-byte decoders
+  returned a short-buffer status rather than writing past the end of a
+  full output buffer. quickjs-ng stays at v0.16.2; the documentation now
+  says so.
 * A table's max-content and min-content widths are measured column by
   column, as css-tables-3 §4.4 requires: each column takes the widest
   cell it holds (or the cell's specified width, floored at its

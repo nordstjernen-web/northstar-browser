@@ -241,7 +241,7 @@ liblexbor = dependency('lexbor', version: '>=3.0.0', required: false)
 if liblexbor.found()
   lexbor_version = liblexbor.version()
 else
-  lexbor_version = '3.0.0'
+  lexbor_version = '3.0.1'
 endif
 add_project_arguments('-DNS_LEXBOR_VERSION="' + lexbor_version + '"',
                       language: 'c')

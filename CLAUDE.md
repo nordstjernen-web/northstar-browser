@@ -144,7 +144,7 @@ meson compile -C builddir
 The JavaScript engine is
 [quickjs-ng](https://github.com/quickjs-ng/quickjs), consumed as an
 **upstream meson subproject** pinned to a release
-(`subprojects/quickjs-ng.wrap`, currently v0.16.1) — no in-tree fork.
+(`subprojects/quickjs-ng.wrap`, currently v0.16.2) — no in-tree fork.
 `meson setup` fetches it and exposes it as the `libquickjs`
 dependency. The browser includes only the public `<quickjs.h>`. A
 few browser-side entry points that stock quickjs-ng does not expose —
@@ -206,7 +206,7 @@ The GTK shell still uses the system Pango for its own widgets (the
 The single HTML→DOM backend is
 [lexbor](https://github.com/lexbor/lexbor), consumed as an **upstream
 meson CMake subproject** pinned to a release
-(`subprojects/lexbor.wrap`, currently v3.0.0) — no in-tree fork.
+(`subprojects/lexbor.wrap`, currently v3.0.1) — no in-tree fork.
 `meson setup` builds only its static library (`lexbor_static`, with
 warnings suppressed as third-party code) via meson's CMake module and
 exposes it as the `liblexbor` dependency. The browser uses the
