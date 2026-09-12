@@ -4,6 +4,34 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* A colour in the specified style serialises the way CSS Color 4
+  requires: a keyword keeps its spelling in lowercase (`ActiveText` reads
+  back `activetext`), and a legacy `#hex`, `rgb()`, `hsl()` or `hwb()`
+  value reads back as `rgb()`/`rgba()`. The deprecated CSS2 system
+  colours (`Menu`, `ButtonShadow`, `ThreeDFace`, `WindowFrame` and the
+  rest) map to their CSS Color 4 replacements instead of being invalid.
+  A comma-separated layer list with one invalid layer is now rejected as a
+  whole, as the grammar requires, rather than keeping the valid layers.
+* The `background` shorthand is parsed layer by layer against the
+  css-backgrounds grammar. Every comma-separated layer sets all eight
+  longhands -- image, position, size after the slash, repeat, attachment,
+  origin and clip, with the colour on the final layer -- and a longhand the
+  layer leaves out resets to its initial value, so `background: red` no
+  longer keeps an earlier `background-image`. The old parser read one
+  layer, dropped the origin, clip and attachment keywords and did not know
+  `background-attachment` at all; that property now exists, and
+  `background-clip`, `background-origin` and `background-attachment` take
+  a comma-separated list like the other layered longhands. Paint resolves
+  origin and clip per layer, clips the colour by the last layer's clip,
+  and positions a `background-attachment: fixed` layer against the
+  viewport. `background-position` keeps the keywords it was written with
+  (`left top`, `center center`) in the specified style, `background-repeat`
+  rejects a third keyword, and `background-clip` accepts `text`,
+  `border-area` and `border-area text`. `style.background` and
+  `cssText` rebuild the shorthand from the longhands in canonical order,
+  omitting initial values, and `style.length` counts the nine longhands
+  a shorthand sets. WPT css/css-backgrounds parsing/background-*: 168 ->
+  330 of 350 subtests.
 * The CSSOM keeps the keyword a shorthand was written with: after
   `border-color: red yellow` or `border: thin dotted blue`,
   `style.borderTopColor` reads `red` and `style.borderTopWidth` reads

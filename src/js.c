@@ -14953,8 +14953,10 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             is_bg ? "background-position-x" : "object-position-x");
         char *y = ns_computed_lookup(ctx, n,
             is_bg ? "background-position-y" : "object-position-y");
-        char *out = g_strdup_printf("%s %s", x && *x ? x : "50%",
-                                             y && *y ? y : "50%");
+        char *out = ns_css_background_position_join(x && *x ? x : "50%",
+                                                    y && *y ? y : "50%");
+        if (!out) out = g_strdup_printf("%s %s", x && *x ? x : "50%",
+                                                 y && *y ? y : "50%");
         g_free(x);
         g_free(y);
         return out;
