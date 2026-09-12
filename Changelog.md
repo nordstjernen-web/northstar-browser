@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.8:
 ======
+* `HTMLOptionsCollection` exposes `selectedIndex`, and every event the
+  engine dispatches carries a `composed` flag (true for the UI event
+  types, false otherwise) instead of leaving the property undefined on a
+  `change` event.
 * `transform` is validated function by function against css-transforms:
   each function checks its argument count and types, so `translate(1px,
   2px, 3px)`, `scale(6, 7, 8)`, `skewX(0, 0)` and `translateX(3%) none`
