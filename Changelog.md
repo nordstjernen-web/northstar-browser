@@ -2,6 +2,9 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.9:
+======
+
 1.0.8:
 ======
 * When several options of a single-choice `<select>` carry the
