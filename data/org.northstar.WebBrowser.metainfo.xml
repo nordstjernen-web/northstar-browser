@@ -59,6 +59,20 @@
   </branding>
 
   <releases>
+    <release version="1.0.8" date="2026-09-16">
+      <description>
+        <p>Animation, layout and forms release.</p>
+        <ul>
+          <li>Transitions and animations run on every property, backed by a Web Animations surface: Element.animate(), getAnimations(), and the animation and transition events follow the phase model.</li>
+          <li>border-image is implemented, and transform, the individual transform properties, gradients, background layers and box-shadow are validated and serialised the way their specifications say.</li>
+          <li>Flex layout resolves flexible lengths per css-flexbox-1 §9.7, column containers wrap, and grid items honour self-alignment, rtl track order and repeat(auto-fit).</li>
+          <li>Form constraint validation, stepUp/stepDown, showPicker() and label association follow the HTML specification; the last selected option of a select wins.</li>
+          <li>Selection highlights, copies and reports the text it is actually on, and double- and triple-click select a word or a block.</li>
+          <li>JavaScript can be turned off from the menu, view-source: shows a page's markup, and window.open no longer opens pop-ups without a click.</li>
+          <li>Fixed a use-after-free in MutationObserver delivery and another in the session URL, a hang in the CSS parser, and a read past the end of a linked stylesheet.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.7" date="2026-08-08">
       <description>
         <p>Printing, layout and framed-document release.</p>
