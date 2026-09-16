@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.9:
 ======
+* The `about:start` splash is painted. The generator lays the same
+  scene -- sky, earth, clouds, the flying pig, the sun and the pole
+  star -- down in three tiers of oriented brush strokes that follow the
+  image's contours, with impasto relief, a canvas tooth, a warm umber
+  glaze in the shadows, a gilt frame and the sun and star kept luminous.
+  The strokes are fixed across the 36 frames so the animation reads as a
+  living painting rather than a flicker. It carries the 1.0.9 number.
 
 1.0.8:
 ======

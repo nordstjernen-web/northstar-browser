@@ -553,11 +553,11 @@ def edge(i, tl, br):
     out.append("fill %s stroke none polygon %d,%d %d,%d %d,%d %d,%d %d,%d %d,%d" % (
         br, W-o, o, W-o, H-o, o, H-o, o+S, H-o-S, W-o-S, H-o-S, W-o-S, o+S))
 band(0, "#000000")
-edge(1, "#f4f4f4", "#5a5a5a")
-band(2, "#c6c6c6")
-band(3, "#c6c6c6")
-band(4, "#c6c6c6")
-edge(5, "#5a5a5a", "#f4f4f4")
+edge(1, "#f8ecb4", "#6b4a12")
+band(2, "#d4b25a")
+band(3, "#c9a340")
+band(4, "#d4b25a")
+edge(5, "#6b4a12", "#f8ecb4")
 band(7, "#000000")
 sys.stdout.write(" ".join(out))
 PY
@@ -761,11 +761,236 @@ open("%s/glow_%03d.mvg" % (wd, idx), "w").write(" ".join(out))
 open("%s/clouds_%03d.mvg" % (wd, idx), "w").write(" ".join(clouds))
 PY
 
-render_frame() {
-    local i=$1 t n out halo
+cat > "$w/blur.py" <<'PY'
+import numpy as np
+
+
+def box1(a, r, axis):
+    pad = [(0, 0)]*a.ndim
+    pad[axis] = (r, r)
+    p = np.pad(a, pad, mode="edge")
+    zero = [(0, 0)]*a.ndim
+    zero[axis] = (1, 0)
+    c = np.pad(np.cumsum(p, axis=axis, dtype=np.float64), zero)
+    n = 2*r + 1
+    hi = [slice(None)]*a.ndim
+    lo = [slice(None)]*a.ndim
+    hi[axis] = slice(n, None)
+    lo[axis] = slice(0, -n)
+    return ((c[tuple(hi)] - c[tuple(lo)])/n).astype(np.float32)
+
+
+def box(a, r):
+    if r < 1:
+        return a
+    return box1(box1(a, r, 0), r, 1)
+
+
+def gauss(a, sigma):
+    r = max(int(round(sigma*0.58)), 1)
+    return box(box(box(a, r), r), r)
+
+
+def vnoise(rng, h, w, g):
+    grid = rng.random((g + 1, g + 1)).astype(np.float32)
+    ys = np.arange(h, dtype=np.float32)*g/h
+    xs = np.arange(w, dtype=np.float32)*g/w
+    y0 = np.floor(ys).astype(np.int64)
+    x0 = np.floor(xs).astype(np.int64)
+    fy = (ys - y0)[:, None]
+    fx = (xs - x0)[None, :]
+    fy = fy*fy*(3 - 2*fy)
+    fx = fx*fx*(3 - 2*fx)
+    a = grid[np.ix_(y0, x0)]
+    b = grid[np.ix_(y0, x0 + 1)]
+    c = grid[np.ix_(y0 + 1, x0)]
+    d = grid[np.ix_(y0 + 1, x0 + 1)]
+    return (a*(1 - fx) + b*fx)*(1 - fy) + (c*(1 - fx) + d*fx)*fy
+PY
+
+cat > "$w/dabs.py" <<'PY'
+import math
+import sys
+import numpy as np
+from PIL import Image
+from blur import gauss, vnoise
+
+wd, ref, S, HZ = sys.argv[1], sys.argv[2], float(sys.argv[3]), int(sys.argv[4])
+img = np.asarray(Image.open(ref).convert("RGB")).astype(np.float32)
+H, W = img.shape[:2]
+rng = np.random.default_rng(1874)
+
+gray = img[..., 0]*0.299 + img[..., 1]*0.587 + img[..., 2]*0.114
+g = gauss(gray, 2.4*S)
+gx = np.gradient(g, axis=1)
+gy = np.gradient(g, axis=0)
+jxx = gauss(gx*gx, 5.0*S)
+jyy = gauss(gy*gy, 5.0*S)
+jxy = gauss(gx*gy, 5.0*S)
+edge_dir = np.stack([jxx - jyy, 2.0*jxy], axis=-1)
+edge_mag = np.sqrt(edge_dir[..., 0]**2 + edge_dir[..., 1]**2)
+edge_dir /= (edge_mag[..., None] + 1e-6)
+weight = np.clip(edge_mag/(np.percentile(edge_mag, 92) + 1e-6), 0.0, 1.0)
+
+sky = (np.arange(H, dtype=np.float32) < HZ)[:, None]
+flow = (vnoise(rng, H, W, 3) - 0.5)*2.2 + (vnoise(rng, H, W, 9) - 0.5)*0.6
+base = np.where(sky, -0.30 + flow, flow*0.30)
+flow_dir = np.stack([np.cos(2.0*base), np.sin(2.0*base)], axis=-1)
+grad_dir = -edge_dir
+mixed = grad_dir*weight[..., None] + flow_dir*(1.0 - weight)[..., None]
+angle = 0.5*np.arctan2(mixed[..., 1], mixed[..., 0])
+
+fine = np.abs(gauss(img, 1.0*S) - gauss(img, 4.0*S)).sum(axis=-1)
+mid = np.abs(gauss(img, 2.5*S) - gauss(img, 9.0*S)).sum(axis=-1)
+fine = gauss(fine, 6.0*S)*4.0
+mid = gauss(mid, 8.0*S)*3.0
+
+TIERS = [
+    (26.0*S, 9.5*S, 5.6*S, None, 1.00),
+    (14.0*S, 5.2*S, 3.4*S, mid, 0.26),
+    (7.0*S, 2.7*S, 2.0*S, fine, 0.03),
+]
+xs, ys, tier, bucket, variant, jitter, opacity, height = [], [], [], [], [], [], [], []
+for t, (length, width, spacing, detail, random_fill) in enumerate(TIERS):
+    ny = int(H/spacing) + 2
+    nx = int(W/spacing) + 2
+    gy_, gx_ = np.mgrid[0:ny, 0:nx].astype(np.float32)
+    px = (gx_ - 0.5 + rng.random((ny, nx)))*spacing
+    py = (gy_ - 0.5 + rng.random((ny, nx)))*spacing
+    px = np.clip(px, 0, W - 1).ravel()
+    py = np.clip(py, 0, H - 1).ravel()
+    ix = px.astype(np.int64)
+    iy = py.astype(np.int64)
+    keep = rng.random(px.shape) < random_fill
+    if detail is not None:
+        keep |= detail[iy, ix] > (22.0 if t == 1 else 30.0)
+    ix, iy = ix[keep], iy[keep]
+    n = ix.size
+    order = rng.permutation(n)
+    ix, iy = ix[order], iy[order]
+    a = angle[iy, ix] + rng.normal(0.0, 0.16, n)
+    xs.append(ix)
+    ys.append(iy)
+    tier.append(np.full(n, t, dtype=np.int64))
+    bucket.append((np.round(a/math.pi*36.0).astype(np.int64)) % 36)
+    variant.append(rng.integers(0, 3, n))
+    j = rng.normal(0.0, 8.0, (n, 3)).astype(np.float32)
+    accent = rng.random(n) < 0.14
+    warm = rng.random(n) < 0.5
+    j[accent & warm] += np.array([16.0, 4.0, -14.0], dtype=np.float32)
+    j[accent & ~warm] += np.array([-12.0, -2.0, 16.0], dtype=np.float32)
+    jitter.append(j)
+    opacity.append(rng.uniform(0.72, 0.96, n).astype(np.float32))
+    height.append(rng.uniform(0.35, 1.0, n).astype(np.float32))
+
+np.savez(wd + "/dabs.npz",
+         x=np.concatenate(xs), y=np.concatenate(ys), tier=np.concatenate(tier),
+         bucket=np.concatenate(bucket), variant=np.concatenate(variant),
+         jitter=np.concatenate(jitter), opacity=np.concatenate(opacity),
+         height=np.concatenate(height),
+         sizes=np.array([[t[0], t[1]] for t in TIERS], dtype=np.float32))
+print("dabs: %s" % ", ".join(str(x.size) for x in xs))
+PY
+
+cat > "$w/paint.py" <<'PY'
+import math
+import sys
+import numpy as np
+from PIL import Image
+from blur import gauss, vnoise
+
+wd, src, dst, S = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+SUNX, SUNY, POLARX, POLARY = [float(v) for v in sys.argv[5:9]]
+img = np.asarray(Image.open(src).convert("RGB")).astype(np.float32)
+H, W = img.shape[:2]
+d = np.load(wd + "/dabs.npz")
+sizes = d["sizes"]
+
+GROUND = np.array([92.0, 66.0, 44.0], dtype=np.float32)
+canvas = gauss(img, 7.0*S)*0.88 + GROUND*0.12
+relief = np.zeros((H, W), dtype=np.float32)
+refs = [gauss(img, 4.0*S), gauss(img, 1.8*S), gauss(img, 0.7*S)]
+
+
+def stamp(length, width, angle, phase):
+    n = int(math.ceil(length*1.15)) | 1
+    c = n//2
+    yy, xx = np.mgrid[-c:c + 1, -c:c + 1].astype(np.float32)
+    ca, sa = math.cos(angle), math.sin(angle)
+    u = xx*ca + yy*sa
+    v = -xx*sa + yy*ca
+    r = (u/(length*0.5))**2 + (v/(width*0.5))**2
+    a = np.clip((1.0 - r)/0.42, 0.0, 1.0)
+    a *= 0.70 + 0.30*(0.5 + 0.5*np.sin(v*(2.0*math.pi/(width*0.30)) + phase))
+    a *= 0.90 + 0.10*np.cos(u*(2.0*math.pi/(length*0.9)) + phase*0.7)
+    return a.astype(np.float32)
+
+
+stamps = [[[stamp(sizes[t][0], sizes[t][1], b*math.pi/36.0, k*2.1)
+            for k in range(3)] for b in range(36)] for t in range(3)]
+
+xs, ys = d["x"], d["y"]
+tiers, buckets, variants = d["tier"], d["bucket"], d["variant"]
+jit, opac, hgt = d["jitter"], d["opacity"], d["height"]
+for i in range(xs.size):
+    t = int(tiers[i])
+    st = stamps[t][int(buckets[i])][int(variants[i])]
+    n = st.shape[0]
+    c = n//2
+    x, y = int(xs[i]), int(ys[i])
+    y0, x0 = y - c, x - c
+    y1, x1 = y0 + n, x0 + n
+    sy0, sx0 = max(-y0, 0), max(-x0, 0)
+    sy1, sx1 = n - max(y1 - H, 0), n - max(x1 - W, 0)
+    y0, x0 = max(y0, 0), max(x0, 0)
+    y1, x1 = min(y1, H), min(x1, W)
+    a = st[sy0:sy1, sx0:sx1]*opac[i]
+    col = np.round((refs[t][y, x] + jit[i])/12.0)*12.0
+    tile = canvas[y0:y1, x0:x1]
+    tile += (col - tile)*a[..., None]
+    rt = relief[y0:y1, x0:x1]
+    rt += (hgt[i] - rt)*a
+
+rel = gauss(relief, 1.6*S)
+ry = np.gradient(rel, axis=0)
+rx = np.gradient(rel, axis=1)
+light = 1.0 + np.clip((-0.62*rx - 0.78*ry)*2.0*S, -0.12, 0.12)
+canvas *= light[..., None]
+
+yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+lum = img.mean(axis=-1)
+highlight = np.clip((lum - gauss(lum, 7.0*S) - 10.0)/36.0, 0.0, 1.0)
+highlight = gauss(highlight, 0.7*S)*np.clip((lum - 150.0)/60.0, 0.0, 1.0)
+sun = np.exp(-(((xx - SUNX)**2 + (yy - SUNY)**2)/(0.19*H)**2)**1.6)
+star = np.exp(-(((xx - POLARX)**2 + (yy - POLARY)**2)/(0.11*H)**2)**1.6)
+lit = np.clip(highlight*0.85 + (sun + star)*0.90, 0.0, 0.92)
+canvas += (gauss(img, 0.5*S) - canvas)*lit[..., None]
+
+grey = canvas.mean(axis=-1, keepdims=True)
+canvas = grey + (canvas - grey)*1.16
+weave = np.sin(xx*(2.0*math.pi/(3.3*S)))*np.sin(yy*(2.0*math.pi/(3.3*S)))
+rng = np.random.default_rng(1503)
+tooth = vnoise(rng, H, W, 240) - 0.5
+canvas *= (1.0 + 0.016*weave + 0.024*tooth)[..., None]
+
+lum = canvas.mean(axis=-1)
+shadow = np.clip((140.0 - lum)/140.0, 0.0, 1.0)**1.3
+umber = np.array([1.0, 0.90, 0.76], dtype=np.float32)
+canvas *= 1.0 + (umber - 1.0)*(shadow*0.32)[..., None]
+canvas = canvas*np.array([0.985, 0.975, 0.945], dtype=np.float32) + np.array([7.0, 4.0, 0.0], dtype=np.float32)
+x = np.clip(canvas/255.0, 0.0, 1.0)
+x = 0.5 + (x - 0.5)*1.10 + 0.06*np.sin(2.0*math.pi*x)*(x - 0.5)
+ex = (xx - W*0.5)/(W*0.5)
+ey = (yy - H*0.5)/(H*0.5)
+vignette = 1.0 - 0.21*np.clip(ex*ex + ey*ey*0.8, 0.0, 1.0)**1.6
+x = np.clip(x*vignette[..., None], 0.0, 1.0)
+Image.fromarray((x*255.0 + 0.5).astype(np.uint8), "RGB").save(dst)
+PY
+
+render_composite() {
+    local i=$1 t n halo
     t=$(python3 -c "print(f'{$i/$FRAMES:.6f}')")
     n=$(printf '%03d' "$i")
-    out="$w/frame_${n}.png"
     halo=$(python3 -c "import math;print('%.3f'%(0.80+0.20*math.sin(2*math.pi*$t)))")
     python3 "$w/anim.py" "$W" "$H" "$S" "$t" "$w" "$i" \
         "$SUNX" "$SUNY" "$POLARX" "$POLARY"
@@ -773,15 +998,28 @@ render_frame() {
     convert "$w/bg.png" -draw "@$w/clouds_${n}.mvg" \
         \( "$w/sunhalo.png" -evaluate multiply "$halo" \) \
         -compose screen -composite \
-        "$w/glow_${n}.png" -compose screen -composite \
+        "$w/glow_${n}.png" -compose screen -composite "$w/scene_${n}.png"
+    rm -f "$w/glow_${n}.png"
+}
+
+render_frame() {
+    local i=$1 n out
+    n=$(printf '%03d' "$i")
+    out="$w/frame_${n}.png"
+    [ -f "$w/scene_${n}.png" ] || render_composite "$i"
+    python3 "$w/paint.py" "$w" "$w/scene_${n}.png" "$w/painted_${n}.png" "$S" \
+        "$SUNX" "$SUNY" "$POLARX" "$POLARY"
+    convert "$w/painted_${n}.png" \
         "$w/textlayer.png" -compose over -composite \
         -draw "@$w/frame.mvg" \
         -filter Lanczos -resize 940x320 \
         -ordered-dither o8x8,"$LEVELS" -strip "$out"
-    rm -f "$w/glow_${n}.png"
+    rm -f "$w/scene_${n}.png" "$w/painted_${n}.png"
 }
 
 echo "rendering $FRAMES frames for $ver ..."
+render_composite 0
+python3 "$w/dabs.py" "$w" "$w/scene_000.png" "$S" "$HORIZON"
 maxjobs=$(nproc 2>/dev/null || echo 4)
 for ((i=0; i<FRAMES; i++)); do
     render_frame "$i" &
