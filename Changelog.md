@@ -16,18 +16,27 @@ Significant changes in each release:
   `document.fullscreenEnabled` is false, instead of resolving as if the
   page had been granted full screen; page scripts cannot put the window
   into full screen in this edition and are no longer told otherwise.
+* The address bar suggests as you type. A list drops down under the
+  field with matching bookmarks, history entries ranked by visit count
+  and recency, and a "Search for …" row that comes first when the text
+  looks like a query and last when it looks like an address. Up and Down
+  walk the list and fill the field with the highlighted address, Enter
+  or a click opens it, and Escape or leaving the field closes the list.
+  The history store gains a substring search over URLs and titles for
+  this.
 * The navigation toolbar is laid out like Mozilla 1.0 and Netscape
   Communicator. It sits on a bright silver-blue face with a white top
-  highlight and a dark bottom groove, starts with a ridged grippy, and
-  shows Back, Forward, Reload, Stop, Home, Print and Bookmarks as
-  icon-over-label buttons; they are flat until hovered, raise on hover
-  and sink when pressed, and Stop stays in place greyed out while nothing
-  is loading. A "Location:" label leads into the sunken location field
-  with its page proxy icon, followed by a raised "Go" button, a groove
-  separator, the Bookmarks button, the hamburger menu button with a
-  "Menu" label under its icon, and the dark throbber frame. The menu
-  keeps every window action with its shortcut, including Quit. A new faceted printer icon joins the icon
-  set.
+  highlight and a dark bottom groove and shows Back, Forward, Reload,
+  Stop, Home, Print, Downloads and Bookmarks as icon-over-label buttons;
+  they are flat until hovered, raise on hover and sink when pressed, and
+  Stop stays in place greyed out while nothing is loading. The sunken
+  location field with its page proxy icon takes the full width between
+  the groove separators; the "Location:" label, the "Go" button and the
+  toolbar grippy are gone, since Enter already goes and nothing was
+  dragged. A Downloads button opens the downloads window from the
+  toolbar. A new faceted printer icon and a downloads-tray icon join the
+  icon set. The hamburger menu button carries a "Menu" label under its
+  icon and keeps every window action with its shortcut, including Quit.
 * The `about:start` splash is redrawn as a flat, sunny xkcd-style comic:
   black ink on white paper with only a few flat colours -- a yellow sun
   with wobbling rays, blue wave lines, a tan-planked ark and a red-banded
