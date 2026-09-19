@@ -11358,6 +11358,16 @@ height_keyword_stretches(const ns_css_value *v)
             strcmp(v->u.keyword, "-moz-available") == 0);
 }
 
+static double
+block_child_gap(ns_box *parent, double parent_specified_top,
+                gboolean at_top, double child_top, double prev_bottom)
+{
+    double gap = collapsed_margin(child_top, prev_bottom);
+    if (!at_top) return gap;
+    parent->margin.top = collapsed_margin(parent_specified_top, gap);
+    return parent->margin.top - parent_specified_top;
+}
+
 static const char *
 legacy_block_align(const ns_box *c, const ns_style *inherited)
 {
@@ -11545,9 +11555,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     double inner_y = box->y + box->margin.top  + box->border.top  + box->padding.top;
     double cursor_y = inner_y;
     double prev_margin_bottom = 0;
+    double specified_margin_top = box->margin.top;
     gboolean collapse_top_with_parent =
         box->padding.top == 0 && box->border.top == 0 &&
-        !box_establishes_bfc(box);
+        box->parent && !box_is_doc_root(box) && !box_establishes_bfc(box);
     gboolean collapse_bottom_with_parent =
         box->padding.bottom == 0 && box->border.bottom == 0;
     const ns_style *child_inherited = box->style ? box->style : inherited_style;
@@ -11732,9 +11743,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             edges_from_style(c->style, cw,
                              &c->margin, &c->padding, &c->border);
             double mt = c->margin.top;
-            double gap = collapsed_margin(mt, prev_margin_bottom);
-            if (collapse_top_with_parent && cursor_y == inner_y)
-                gap = collapsed_margin(box->margin.top, gap) - box->margin.top;
+            gboolean at_top = collapse_top_with_parent && cursor_y == inner_y;
+            double gap = block_child_gap(box, specified_margin_top, at_top,
+                                         mt, prev_margin_bottom);
             cursor_y += gap;
             if (clr) {
                 double y_after_clear = floats_clear_y(floats, cursor_y, clr);
@@ -11752,6 +11763,14 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             c->x = inner_x + left_off;
             c->y = cursor_y - mt;
             layout_box(c, cw_avail, child_inherited);
+            if (c->margin.top != mt) {
+                double grown = block_child_gap(box, specified_margin_top, at_top,
+                                               c->margin.top, prev_margin_bottom);
+                shift_box_tree(c, 0, grown - gap + mt - c->margin.top);
+                cursor_y += grown - gap;
+                gap = grown;
+                mt = c->margin.top;
+            }
             if (keyword_is(box->style ? box->style->values[NS_CSS_DIRECTION]
                                       : NULL, "rtl") &&
                 !style_is_absolute_or_fixed(c->style)) {
@@ -11775,7 +11794,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             inline_line_top = -1;
         } else {
-            cursor_y += prev_margin_bottom;
+            gboolean at_top = collapse_top_with_parent && cursor_y == inner_y;
+            cursor_y += block_child_gap(box, specified_margin_top, at_top,
+                                        prev_margin_bottom, 0);
             prev_margin_bottom = 0;
             double left_off = 0, right_off = 0;
             floats_offsets_at(floats, cursor_y, inner_x, inner_x + cw,
@@ -11824,6 +11845,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 shift_box_tree(c, inner_x + (cw - outer) - c->x, 0);
         }
     }
+    inner_y += box->margin.top - specified_margin_top;
     if (collapse_bottom_with_parent) {
         box->margin.bottom = collapsed_margin(box->margin.bottom,
                                               prev_margin_bottom);
