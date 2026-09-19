@@ -38911,6 +38911,14 @@ ns_js_form_validation_allows_submit(JSContext *ctx, const ns_node *form,
     return FALSE;
 }
 
+gboolean
+ns_js_form_submission_allowed(ns_js *js, const ns_node *form,
+                              const ns_node *submitter)
+{
+    if (!js || !js->ctx || !form) return TRUE;
+    return ns_js_form_validation_allows_submit(js->ctx, form, submitter);
+}
+
 static JSValue
 ns_js_request_submit_form(JSContext *ctx, const ns_node *form,
                           const ns_node *submitter)

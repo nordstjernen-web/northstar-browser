@@ -2386,13 +2386,12 @@ browser_submit_form(ns_browser *b, const ns_node *clicked)
     const ns_node *form = from_form ? clicked : ns_form_owner(clicked, b->doc);
     if (!form) return;
 
-    if (!ns_element_get_attr(form, "novalidate") &&
-        !ns_element_get_attr(clicked, "formnovalidate")) {
-        const ns_node *bad = ns_form_first_invalid(form, b->doc, b->doc);
-        if (bad) {
-            if (b->js) ns_js_dispatch_event(b->js, bad, "invalid", NULL);
-            return;
-        }
+    if (b->js) {
+        if (!ns_js_form_submission_allowed(b->js, form, clicked)) return;
+    } else if (!ns_element_get_attr(form, "novalidate") &&
+               !ns_element_get_attr(clicked, "formnovalidate") &&
+               ns_form_first_invalid(form, b->doc, b->doc)) {
+        return;
     }
 
     if (b->js) {

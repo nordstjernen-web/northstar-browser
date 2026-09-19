@@ -278,7 +278,8 @@ ns_form_first_invalid_depth(const ns_node *form, const ns_node *n,
                             g_free(collected);
                             return n;
                         }
-                        if (ns_form_control_length_limits_apply(n)) {
+                        if (ns_form_control_length_limits_apply(n) &&
+                            ns_element_get_attr(n, "data-nd-user-edited")) {
                             const char *minlen = ns_element_get_attr(n, "minlength");
                             const char *maxlen = ns_element_get_attr(n, "maxlength");
                             glong vlen = (glong)g_utf8_strlen(value, -1);

@@ -857,15 +857,16 @@ headless_submit_form_from(headless_flush_ctx *fc, headless_nav_capture *nav,
     const ns_node *form = ns_form_owner(trigger, doc);
     if (!form) return;
     const ns_node *root = doc ? doc : form;
-    if (!ns_element_get_attr(form, "novalidate") &&
-        !ns_element_get_attr(trigger, "formnovalidate")) {
-        const ns_node *bad = ns_form_first_invalid(form, root, root);
-        if (bad) {
-            const char *name = ns_element_get_attr(bad, "name");
-            fprintf(stderr, "[headless] form blocked by invalid field %s\n",
-                    name && *name ? name : "(unnamed)");
+    if (fc->js) {
+        if (!ns_js_form_submission_allowed(fc->js, form, trigger)) {
+            fprintf(stderr, "[headless] form blocked by an invalid field\n");
             return;
         }
+    } else if (!ns_element_get_attr(form, "novalidate") &&
+               !ns_element_get_attr(trigger, "formnovalidate") &&
+               ns_form_first_invalid(form, root, root)) {
+        fprintf(stderr, "[headless] form blocked by an invalid field\n");
+        return;
     }
     if (fc->js) {
         gboolean prevented = FALSE;
