@@ -11358,6 +11358,29 @@ height_keyword_stretches(const ns_css_value *v)
             strcmp(v->u.keyword, "-moz-available") == 0);
 }
 
+static const char *
+legacy_block_align(const ns_box *c, const ns_style *inherited)
+{
+    const char *ta = inherited ? ns_style_keyword(inherited, NS_CSS_TEXT_ALIGN) : NULL;
+    if (!ta) return NULL;
+    if (strcmp(ta, "-webkit-center") == 0 || strcmp(ta, "-moz-center") == 0)
+        return "center";
+    if (strcmp(ta, "-webkit-right") == 0 || strcmp(ta, "-moz-right") == 0)
+        return "right";
+    if (strcmp(ta, "center") != 0 && strcmp(ta, "right") != 0) return NULL;
+    for (const ns_box *p = c->parent; p; p = p->parent) {
+        if (p->style) {
+            const char *pt = ns_style_keyword(p->style, NS_CSS_TEXT_ALIGN);
+            if (!pt || strcmp(pt, ta) != 0) return NULL;
+        }
+        if (!p->dom || p->dom->kind != NS_NODE_ELEMENT) continue;
+        if (ns_node_is_element_named(p->dom, "center")) return ta;
+        const char *al = ns_element_get_attr(p->dom, "align");
+        if (al && g_ascii_strcasecmp(al, ta) == 0) return ta;
+    }
+    return NULL;
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -11780,8 +11803,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                            c->padding.left + c->padding.right +
                            c->border.left + c->border.right +
                            c->margin.left + c->margin.right;
-            const ns_css_value *ta = child_inherited
-                ? child_inherited->values[NS_CSS_TEXT_ALIGN] : NULL;
+            const char *legacy = legacy_block_align(c, child_inherited);
             gboolean self_center = FALSE, self_right = FALSE;
             if (c->kind == NS_BOX_TABLE) {
                 const char *al = c->dom ? ns_element_get_attr(c->dom, "align") : NULL;
@@ -11793,9 +11815,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             if (keyword_is(ml, "auto") && keyword_is(mr, "auto")) self_center = TRUE;
             else if (keyword_is(ml, "auto")) self_right = TRUE;
             gboolean align_center = self_center ||
-                (!self_right && keyword_is(ta, "center"));
+                (!self_right && legacy && strcmp(legacy, "center") == 0);
             gboolean align_right = !align_center &&
-                (self_right || keyword_is(ta, "right") || keyword_is(ta, "end"));
+                (self_right || (legacy && strcmp(legacy, "right") == 0));
             if (align_center && outer < cw)
                 shift_box_tree(c, inner_x + (cw - outer) / 2.0 - c->x, 0);
             else if (align_right && outer < cw)
