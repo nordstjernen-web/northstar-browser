@@ -1324,6 +1324,39 @@ ns_net_cookies_for_js(const char *url)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+cookie_domain_matches(const char *cookie_domain, const char *host)
+{
+    const char *d = cookie_domain[0] == '.' ? cookie_domain + 1 : cookie_domain;
+    gsize dl = strlen(d), hl = strlen(host);
+    return dl > 0 &&
+           (g_ascii_strcasecmp(host, d) == 0 ||
+            (hl > dl && host[hl - dl - 1] == '.' &&
+             g_ascii_strcasecmp(host + hl - dl, d) == 0));
+}
+
+static gboolean
+jar_has_httponly_cookie(const char *jar_path, const char *host,
+                        const char *name)
+{
+    char *contents = NULL;
+    if (!g_file_get_contents(jar_path, &contents, NULL, NULL)) return FALSE;
+    gboolean found = FALSE;
+    char **lines = g_strsplit(contents, "\n", -1);
+    for (int i = 0; lines[i] && !found; i++) {
+        if (!g_str_has_prefix(lines[i], "#HttpOnly_")) continue;
+        char **f = g_strsplit(lines[i] + 10, "\t", 7);
+        int n = 0;
+        while (f[n]) n++;
+        found = n >= 7 && strcmp(f[5], name) == 0 &&
+                cookie_domain_matches(f[0], host);
+        g_strfreev(f);
+    }
+    g_strfreev(lines);
+    g_free(contents);
+    return found;
+}
+
 void
 ns_net_cookie_store_from_js(const char *url, const char *cookie)
 {
@@ -1416,11 +1449,9 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
     const char *tail;
     if (domain_attr && *domain_attr) {
         const char *d = domain_attr[0] == '.' ? domain_attr + 1 : domain_attr;
-        gsize dl = strlen(d), hl = strlen(host);
-        gboolean ok = g_ascii_strcasecmp(host, d) == 0 ||
-                      (hl > dl && host[hl - dl - 1] == '.' &&
-                       g_ascii_strcasecmp(host + hl - dl, d) == 0);
-        if (!ok || !dl) { g_free(domain_attr); g_free(path_attr); return; }
+        if (!cookie_domain_matches(d, host)) {
+            g_free(domain_attr); g_free(path_attr); return;
+        }
         g_autofree char *d_lower = g_ascii_strdown(d, -1);
         const psl_ctx_t *psl = psl_builtin();
         if (psl && psl_is_public_suffix(psl, d_lower)) {
@@ -1451,12 +1482,14 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
         return;
     }
     g_autofree char *jar_path = ns_net_cookie_js_path_for_partition(site);
+    g_autofree char *net_jar_path = ns_net_cookie_path_for_partition(site);
     g_autofree char *name_dup = g_strndup(name, name_len);
 
     char *contents = NULL;
     g_file_get_contents(jar_path, &contents, NULL, NULL);
     GString *out = g_string_new(NULL);
-    gboolean blocked_httponly = FALSE;
+    gboolean blocked_httponly =
+        jar_has_httponly_cookie(net_jar_path, host, name_dup);
     if (contents) {
         char **lines = g_strsplit(contents, "\n", -1);
         for (int i = 0; lines[i]; i++) {
