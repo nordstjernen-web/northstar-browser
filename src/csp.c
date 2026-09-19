@@ -123,34 +123,27 @@ ns_csp_merge(ns_csp *dst, ns_csp *src)
 
 
 static gboolean
-url_scheme_matches(const char *url, const char *scheme_with_colon)
+scheme_matches(const char *src_scheme, gsize n, const char *res_scheme)
 {
-    gsize n = strlen(scheme_with_colon);
-    if (n == 0) return FALSE;
-    gsize cmp_len = scheme_with_colon[n - 1] == ':' ? n - 1 : n;
-    if (g_ascii_strncasecmp(url, scheme_with_colon, cmp_len) != 0) return FALSE;
-    return url[cmp_len] == ':';
-}
-
-static gboolean
-scheme_part_matches(const char *scheme, gsize n, const char *url)
-{
-    if (g_ascii_strncasecmp(url, scheme, n) == 0 && url[n] == ':') return TRUE;
-    if (n == 4 && g_ascii_strncasecmp(scheme, "http", 4) == 0)
-        return g_ascii_strncasecmp(url, "https:", 6) == 0;
-    if (n == 2 && g_ascii_strncasecmp(scheme, "ws", 2) == 0)
-        return g_ascii_strncasecmp(url, "wss:", 4) == 0;
+    gsize rn = strlen(res_scheme);
+    if (rn > 0 && res_scheme[rn - 1] == ':') rn--;
+    if (rn == n && g_ascii_strncasecmp(src_scheme, res_scheme, n) == 0)
+        return TRUE;
+    if (n == 4 && g_ascii_strncasecmp(src_scheme, "http", 4) == 0)
+        return rn == 5 && g_ascii_strncasecmp(res_scheme, "https", 5) == 0;
+    if (n == 2 && g_ascii_strncasecmp(src_scheme, "ws", 2) == 0)
+        return rn == 3 && g_ascii_strncasecmp(res_scheme, "wss", 3) == 0;
     return FALSE;
 }
 
 static gboolean
-is_network_scheme_url(const char *url)
+is_network_scheme(const char *res_scheme)
 {
     static const char *const ok[] = {
         "http:", "https:", "ws:", "wss:", "ftp:", NULL,
     };
     for (gsize i = 0; ok[i]; i++)
-        if (url_scheme_matches(url, ok[i]))
+        if (g_ascii_strcasecmp(res_scheme, ok[i]) == 0)
             return TRUE;
     return FALSE;
 }
@@ -199,34 +192,31 @@ csp_path_matches(const char *src_path, const char *res_path)
 static gboolean
 source_matches(const char *src, const char *resource_url, const char *doc_url)
 {
-    if (!src || !*src) return FALSE;
+    if (!src || !*src || !resource_url) return FALSE;
     if (strcmp(src, "'none'") == 0) return FALSE;
-    if (strcmp(src, "*") == 0)      return is_network_scheme_url(resource_url);
-    if (strcmp(src, "'self'") == 0) return ns_url_same_origin(resource_url, doc_url);
     if (strcmp(src, "'unsafe-inline'") == 0 ||
         strcmp(src, "'unsafe-eval'") == 0   ||
         strcmp(src, "'strict-dynamic'") == 0)
         return FALSE;
 
-    if (g_ascii_strcasecmp(src, "https:") == 0 ||
-        g_ascii_strcasecmp(src, "http:")  == 0 ||
-        g_ascii_strcasecmp(src, "wss:")   == 0 ||
-        g_ascii_strcasecmp(src, "ws:")    == 0 ||
-        g_ascii_strcasecmp(src, "data:")  == 0 ||
-        g_ascii_strcasecmp(src, "blob:")  == 0)
-        return url_scheme_matches(resource_url, src);
+    g_autoptr(ns_url_parts) res = ns_url_parts_new(resource_url);
+    if (!res || !res->protocol || !*res->protocol || !res->hostname)
+        return FALSE;
+    const char *res_scheme = res->protocol;
+
+    if (strcmp(src, "*") == 0)      return is_network_scheme(res_scheme);
+    if (strcmp(src, "'self'") == 0) return ns_url_same_origin(resource_url, doc_url);
+
+    gsize src_len = strlen(src);
+    if (src[src_len - 1] == ':' && !strchr(src, '/') &&
+        strchr(src, ':') == src + src_len - 1)
+        return scheme_matches(src, src_len - 1, res_scheme);
 
     const char *scheme_sep = strstr(src, "://");
     const char *src_host_start = scheme_sep ? scheme_sep + 3 : src;
-    if (scheme_sep) {
-        gsize scheme_len = (gsize)(scheme_sep - src);
-        if (!scheme_part_matches(src, scheme_len, resource_url))
-            return FALSE;
-    }
-
-    g_autoptr(ns_url_parts) res = ns_url_parts_new(resource_url);
-    if (!res || !res->hostname) return FALSE;
-    const char *res_scheme = res->protocol ? res->protocol : "";
+    if (scheme_sep &&
+        !scheme_matches(src, (gsize)(scheme_sep - src), res_scheme))
+        return FALSE;
 
     if (!scheme_sep) {
         g_autoptr(ns_url_parts) docp = doc_url ? ns_url_parts_new(doc_url) : NULL;
@@ -239,7 +229,7 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
                 (g_ascii_strcasecmp(doc_scheme, "ws:") == 0 &&
                  g_ascii_strcasecmp(res_scheme, "wss:") == 0);
             if (!scheme_ok) return FALSE;
-        } else if (!is_network_scheme_url(resource_url)) {
+        } else if (!is_network_scheme(res_scheme)) {
             return FALSE;
         }
     }
