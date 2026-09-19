@@ -5533,15 +5533,8 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
         g_free(extension_error);
         return extension;
     }
-    if (!ns_fetch_is_navigation(top_url, extra_headers) && !navigation &&
-        ns_ext_should_block(url, top_url)) {
-        ns_response *blocked = g_new0(ns_response, 1);
-        blocked->body = g_byte_array_new();
-        blocked->final_url = g_strdup(url);
-        blocked->status = 0;
-        blocked->error = g_strdup("blocked by extension");
-        return blocked;
-    }
+    gboolean subresource = !ns_fetch_is_navigation(top_url, extra_headers) &&
+                           !navigation;
 
     const ns_config *cfg = ns_config_get();
     long max_redirs = cfg ? (long)cfg->max_redirects : (long)NS_MAX_REDIRECTS;
@@ -5558,6 +5551,13 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
     int hops = 0;
     ns_response *resp = NULL;
     for (;;) {
+        if (subresource && ns_ext_should_block(cur_url, cur_top)) {
+            resp = g_new0(ns_response, 1);
+            resp->body = g_byte_array_new();
+            resp->final_url = g_strdup(cur_url);
+            resp->error = g_strdup("blocked by extension");
+            break;
+        }
         char *location = NULL;
         resp = ns_fetch_sync_hop(cur_url, cur_top, cur_method,
                                  cur_body, cur_len, cur_ct,
@@ -5601,8 +5601,10 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             cur_len = 0;
             cur_ct = NULL;
         }
-        g_free(cur_top);
-        cur_top = NULL;
+        if (!subresource) {
+            g_free(cur_top);
+            cur_top = NULL;
+        }
         g_free(cur_url);
         cur_url = next;
         hops++;
