@@ -39855,6 +39855,44 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
     return NULL;
 }
 
+gboolean
+ns_js_urls_same_origin(const char *a, const char *b)
+{
+    if (!a || !b) return FALSE;
+    if (ns_url_is_http_or_https(a) || ns_url_is_http_or_https(b))
+        return ns_url_same_origin(a, b);
+    const char *ca = strchr(a, ':'), *cb = strchr(b, ':');
+    return ca && cb && ca - a == cb - b &&
+           g_ascii_strncasecmp(a, b, (gsize)(ca - a)) == 0;
+}
+
+static const char *
+ns_js_ctx_document_url(ns_js *js, JSContext *ctx)
+{
+    if (js->frame_contexts) {
+        GHashTableIter it;
+        gpointer frame, fctx;
+        g_hash_table_iter_init(&it, js->frame_contexts);
+        while (g_hash_table_iter_next(&it, &frame, &fctx)) {
+            if (fctx != ctx) continue;
+            const char *fu = ns_element_get_attr(frame, "data-nd-frame-url");
+            if (fu && *fu) return fu;
+        }
+    }
+    return js->current_url;
+}
+
+gboolean
+ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im)
+{
+    if (!im) return TRUE;
+    const char *url = im->final_url ? im->final_url : im->url;
+    if (!url || g_str_has_prefix(url, "data:") ||
+        g_str_has_prefix(url, "blob:"))
+        return TRUE;
+    return ns_js_urls_same_origin(url, ns_js_ctx_document_url(js, ctx));
+}
+
 static ns_image *
 ns_media_animation_for(JSContext *ctx, JSValueConst this_val)
 {
@@ -39985,6 +40023,9 @@ ns_element_toDataURL(JSContext *ctx, JSValueConst this_val,
     if (!el || !js_from_ctx(ctx)) return JS_NewString(ctx, "data:,");
     ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
     if (!st || !st->surf) return JS_NewString(ctx, "data:,");
+    if (!st->origin_clean)
+        return ns_throw_security_error(ctx,
+            "Tainted canvases may not be exported.");
     GByteArray *buf = g_byte_array_new();
     cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
         ns_canvas_png_write, buf);
@@ -40007,12 +40048,14 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1 || !JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
     const ns_node *el = ns_unwrap_element(this_val);
+    ns_canvas_state *st = el && js_from_ctx(ctx)
+        ? ns_canvas_state_for(js_from_ctx(ctx), el) : NULL;
+    if (st && !st->origin_clean)
+        return ns_throw_security_error(ctx,
+            "Tainted canvases may not be exported.");
     JSValue cb = JS_DupValue(ctx, argv[0]);
     JSValue blob = JS_NULL;
-    if (el && js_from_ctx(ctx)) {
-        ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
-        if (st) blob = ns_canvas_blob_from_surface(ctx, st->surf);
-    }
+    if (st) blob = ns_canvas_blob_from_surface(ctx, st->surf);
     JSValueConst cb_args[1] = { blob };
     JSValue r = JS_Call(ctx, cb, JS_UNDEFINED, 1, cb_args);
     if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));

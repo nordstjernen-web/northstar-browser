@@ -31,6 +31,7 @@ typedef struct ns_canvas_state {
     cairo_pattern_t *stroke_pattern;
     double shadow_r, shadow_g, shadow_b, shadow_a;
     double shadow_blur, shadow_ox, shadow_oy;
+    gboolean origin_clean;
 } ns_canvas_state;
 
 typedef struct ns_path2d {
@@ -41,6 +42,7 @@ typedef struct ns_path2d {
 typedef struct ns_image_bitmap {
     cairo_surface_t *surf;
     int w, h;
+    gboolean origin_clean;
 } ns_image_bitmap;
 
 typedef struct ns_perf_observer {
@@ -347,7 +349,10 @@ JSValue
 ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv);
 JSValue
-ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h);
+ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h,
+                     gboolean origin_clean);
+JSValue
+ns_throw_security_error(JSContext *ctx, const char *message);
 cairo_surface_t *
 ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
                                int *out_w, int *out_h);
@@ -419,7 +424,11 @@ ns_canvas_state_for(ns_js *js, const ns_node *el);
 ns_canvas_state *
 ns_ctx_state(JSContext *ctx, JSValueConst this_val);
 cairo_pattern_t *
-ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj);
+ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean);
+gboolean
+ns_js_urls_same_origin(const char *a, const char *b);
+gboolean
+ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im);
 double
 ns_ctx_global_alpha(JSContext *ctx, JSValueConst this_val);
 cairo_operator_t
@@ -541,7 +550,8 @@ JSValue
 ns_ctx_gradient_addColorStop(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv);
 cairo_surface_t *
-ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h);
+ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h,
+                        gboolean *origin_clean);
 JSValue
 ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv);

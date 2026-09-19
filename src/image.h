@@ -32,6 +32,7 @@ typedef struct ns_image_pixel_frame {
 
 struct ns_image {
     char        *url;
+    char        *final_url;
     ns_texture  *texture;
     void        *render_surface;
     int          natural_width;
