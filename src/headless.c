@@ -98,6 +98,7 @@ static void
 headless_js_mutated(gpointer user_data) { (void)user_data; g_headless_layout_dirty = TRUE; }
 
 typedef struct headless_nav_capture {
+    ns_js *js;
     char *pending_url;
     char *pending_post_body;
     gsize pending_post_len;
@@ -189,8 +190,9 @@ headless_js_form_submit(const ns_node *form, const ns_node *submitter,
     ns_form_set_submission_charset(
         (accept_charset && *accept_charset) ? accept_charset
                                             : g_headless_doc_charset);
-    ns_form_collect_inputs(form, root, root, q, &first,
-                           submitter != form ? submitter : NULL);
+    const ns_node *trigger = submitter != form ? submitter : NULL;
+    if (!cap->js || !ns_js_form_entry_list(cap->js, form, trigger, q, &first))
+        ns_form_collect_inputs(form, root, root, q, &first, trigger);
     ns_form_set_submission_charset(NULL);
     headless_nav_capture_clear_post(cap);
     g_free(cap->pending_url);
@@ -855,15 +857,16 @@ headless_submit_form_from(headless_flush_ctx *fc, headless_nav_capture *nav,
     const ns_node *form = ns_form_owner(trigger, doc);
     if (!form) return;
     const ns_node *root = doc ? doc : form;
-    if (!ns_element_get_attr(form, "novalidate") &&
-        !ns_element_get_attr(trigger, "formnovalidate")) {
-        const ns_node *bad = ns_form_first_invalid(form, root, root);
-        if (bad) {
-            const char *name = ns_element_get_attr(bad, "name");
-            fprintf(stderr, "[headless] form blocked by invalid field %s\n",
-                    name && *name ? name : "(unnamed)");
+    if (fc->js) {
+        if (!ns_js_form_submission_allowed(fc->js, form, trigger)) {
+            fprintf(stderr, "[headless] form blocked by an invalid field\n");
             return;
         }
+    } else if (!ns_element_get_attr(form, "novalidate") &&
+               !ns_element_get_attr(trigger, "formnovalidate") &&
+               ns_form_first_invalid(form, root, root)) {
+        fprintf(stderr, "[headless] form blocked by an invalid field\n");
+        return;
     }
     if (fc->js) {
         gboolean prevented = FALSE;
@@ -927,14 +930,18 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
     for (const ns_node *cur = dom; cur; cur = cur->parent)
         if (ns_node_is_editable(cur)) { editable = cur; break; }
     gboolean prevented = FALSE;
+    gboolean activated = FALSE;
     if (fc->js) {
         headless_emit_pointer_and_mouse(fc, dom, "pointerdown", "mousedown",
                                         x, y, 0, 1);
         headless_emit_pointer_and_mouse(fc, dom, "pointerup", "mouseup",
                                         x, y, 0, 0);
+        ns_js_click_state click_state = {0};
+        ns_js_click_begin(fc->js, dom, &click_state);
         ns_js_dispatch_mouse_event(fc->js, dom, "click", x, y, x, y, 0, 0,
                                    FALSE, FALSE, FALSE, FALSE, NULL,
                                    &prevented);
+        activated = ns_js_click_end(fc->js, dom, &click_state, prevented);
         ns_js_consume_mutated(fc->js);
     }
     if (editable) {
@@ -952,9 +959,7 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
         }
         return;
     }
-    if (prevented) return;
-    if (fc->js && ns_js_click_activate(fc->js, dom))
-        ns_js_consume_mutated(fc->js);
+    if (prevented || activated) return;
     for (const ns_node *cur = dom; cur; cur = cur->parent) {
         if (!ns_form_is_submit_trigger(cur)) continue;
         headless_submit_form_from(fc, nav, cur);
@@ -1017,7 +1022,7 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
             }
             return;
         }
-        if (cur->kind == NS_NODE_ELEMENT && cur->name &&
+        if (!fc->js && cur->kind == NS_NODE_ELEMENT && cur->name &&
             strcmp(cur->name, "input") == 0) {
             const char *type = ns_element_get_attr(cur, "type");
             if (type && g_ascii_strcasecmp(type, "checkbox") == 0) {
@@ -1877,6 +1882,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                           headless_js_mutated, NULL,
                           headless_js_navigate, &nav_cap,
                           &navigation_timing);
+    nav_cap.js = js;
     if (js) ns_js_set_form_submit_cb(js, headless_js_form_submit, &nav_cap);
     ns_image_cache *image_cache = ns_image_cache_new();
     ns_box *layout = NULL;

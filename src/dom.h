@@ -65,6 +65,7 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_CLICK_IN_PROGRESS (1u << 17)
 #define NS_NODE_INPUT_INDETERMINATE (1u << 18)
 #define NS_NODE_HAS_LISTENERS  (1u << 19)
+#define NS_NODE_CONSTRUCTING_ENTRIES (1u << 20)
 
 struct ns_node {
     ns_node_kind kind;
@@ -187,6 +188,10 @@ void        ns_doc_tag_index_build(ns_node *doc);
 void        ns_doc_tag_index_subtree_added(ns_node *doc, ns_node *root);
 void        ns_doc_tag_index_subtree_removed(ns_node *doc, ns_node *root);
 GPtrArray  *ns_doc_tag_index_lookup(const ns_node *doc, const char *tag);
+gboolean    ns_option_is_selected(const ns_node *option);
+void        ns_option_set_selected(ns_node *option, gboolean on);
+void        ns_select_collect_options(const ns_node *select, GPtrArray *out);
+void        ns_select_set_selected_option(ns_node *select, const ns_node *chosen);
 const ns_node *ns_select_first_selected_option(const ns_node *select);
 const ns_node *ns_select_chosen_option(const ns_node *select);
 char       *ns_option_value_dup(const ns_node *option);
@@ -260,6 +265,7 @@ const char *ns_input_used_value(const ns_node *n);
 char       *ns_textarea_default_value_dup(const ns_node *n);
 char       *ns_textarea_value_dup(const ns_node *n);
 gboolean    ns_input_is_checked(const ns_node *n);
+void        ns_num_to_str(double d, char *buf, size_t n);
 gboolean    ns_input_value_is_dirty_mode(const ns_node *n);
 void        ns_node_set_editable_value(ns_node *n, const char *value);
 void        ns_node_flatten_editable(ns_node *n);

@@ -140,16 +140,105 @@ ns_form_control_supports_required(const ns_node *control)
 }
 
 static gboolean
+ns_is_valid_floating_point_number(const char *v)
+{
+    const char *p = v;
+    if (*p == '-') p++;
+    gboolean digits = FALSE;
+    while (g_ascii_isdigit((guchar)*p)) { p++; digits = TRUE; }
+    if (*p == '.') {
+        p++;
+        if (!g_ascii_isdigit((guchar)*p)) return FALSE;
+        while (g_ascii_isdigit((guchar)*p)) p++;
+        digits = TRUE;
+    }
+    if (!digits) return FALSE;
+    if (*p == 'e' || *p == 'E') {
+        p++;
+        if (*p == '-' || *p == '+') p++;
+        if (!g_ascii_isdigit((guchar)*p)) return FALSE;
+        while (g_ascii_isdigit((guchar)*p)) p++;
+    }
+    return *p == '\0';
+}
+
+static gboolean
 ns_form_parse_finite_double(const char *v, double *out)
 {
-    if (!v || !*v) return FALSE;
-    char *end = NULL;
-    double d = g_ascii_strtod(v, &end);
-    if (!end || end == v) return FALSE;
-    while (*end == ' ' || *end == '\t') end++;
-    if (*end != '\0' || !isfinite(d)) return FALSE;
+    if (!v || !ns_is_valid_floating_point_number(v)) return FALSE;
+    double d = g_ascii_strtod(v, NULL);
+    if (!isfinite(d)) return FALSE;
     if (out) *out = d;
     return TRUE;
+}
+
+void
+ns_num_to_str(double d, char *buf, size_t n)
+{
+    if (d == 0 || !isfinite(d)) {
+        g_ascii_formatd(buf, (gint)n, "%g", d == 0 ? 0 : d);
+        return;
+    }
+    char sci[64];
+    int prec = 1;
+    for (; prec < 17; prec++) {
+        char fmt[8];
+        g_snprintf(fmt, sizeof fmt, "%%.%de", prec - 1);
+        g_ascii_formatd(sci, sizeof sci, fmt, d);
+        if (g_ascii_strtod(sci, NULL) == d) break;
+    }
+    if (prec == 17) g_ascii_formatd(sci, sizeof sci, "%.16e", d);
+    char digits[32];
+    int nd = 0;
+    const char *p = sci;
+    if (*p == '-') p++;
+    for (; *p && *p != 'e'; p++)
+        if (g_ascii_isdigit((guchar)*p)) digits[nd++] = *p;
+    int point = atoi(p + 1) + 1;
+    GString *out = g_string_new(d < 0 ? "-" : "");
+    if (point >= nd && point <= 21) {
+        g_string_append_len(out, digits, nd);
+        for (int i = nd; i < point; i++) g_string_append_c(out, '0');
+    } else if (point > 0 && point <= 21) {
+        g_string_append_len(out, digits, point);
+        g_string_append_c(out, '.');
+        g_string_append_len(out, digits + point, nd - point);
+    } else if (point > -6 && point <= 0) {
+        g_string_append(out, "0.");
+        for (int i = point; i < 0; i++) g_string_append_c(out, '0');
+        g_string_append_len(out, digits, nd);
+    } else {
+        g_string_append_c(out, digits[0]);
+        if (nd > 1) {
+            g_string_append_c(out, '.');
+            g_string_append_len(out, digits + 1, nd - 1);
+        }
+        g_string_append_printf(out, "e%s%d", point - 1 >= 0 ? "+" : "",
+                               point - 1);
+    }
+    g_strlcpy(buf, out->str, n);
+    g_string_free(out, TRUE);
+}
+
+static int
+ns_decimal_places(const char *v)
+{
+    if (!v) return 0;
+    const char *dot = strchr(v, '.');
+    int places = 0;
+    for (const char *p = dot ? dot + 1 : v; dot && g_ascii_isdigit((guchar)*p); p++)
+        places++;
+    const char *e = strpbrk(v, "eE");
+    if (e) places -= atoi(e + 1);
+    return places < 0 ? 0 : places;
+}
+
+static double
+ns_round_to_places(double v, int places)
+{
+    if (places <= 0 || places > 15) return v;
+    double scale = pow(10.0, places);
+    return round(v * scale) / scale;
 }
 
 
@@ -282,7 +371,7 @@ ns_input_number_to_value(ns_form_input_kind kind, double v, char *buf,
     case NS_FORM_INPUT_NUMBER:
     case NS_FORM_INPUT_RANGE: {
         char num[G_ASCII_DTOSTR_BUF_SIZE];
-        g_ascii_dtostr(num, sizeof num, v == 0 ? 0 : v);
+        ns_num_to_str(v == 0 ? 0 : v, num, sizeof num);
         g_string_append(out, num);
         break;
     }
@@ -391,6 +480,14 @@ ns_input_step_apply(const ns_node *input, int sign, double n, char *buf,
         value = base + floor((bound - base) / step) * step;
     if ((sign > 0 && value < before) || (sign < 0 && value > before))
         return NS_STEP_UNCHANGED;
+    if (kind == NS_FORM_INPUT_NUMBER || kind == NS_FORM_INPUT_RANGE) {
+        int places = ns_decimal_places(step_attr);
+        int value_places = ns_decimal_places(ns_input_used_value(input));
+        int min_places = ns_decimal_places(ns_element_get_attr(input, "min"));
+        if (value_places > places) places = value_places;
+        if (min_places > places) places = min_places;
+        value = ns_round_to_places(value, places);
+    }
     if (!ns_input_number_to_value(kind, value, buf, buflen))
         return NS_STEP_UNCHANGED;
     return NS_STEP_OK;
@@ -2147,28 +2244,82 @@ ns_option_value_dup(const ns_node *option)
     return ns_option_text_dup(option);
 }
 
+gboolean
+ns_option_is_selected(const ns_node *option)
+{
+    if (!option) return FALSE;
+    const char *dirty = ns_element_get_attr(option, "data-nd-selected");
+    if (dirty) return strcmp(dirty, "1") == 0;
+    return ns_element_get_attr(option, "selected") != NULL;
+}
+
+void
+ns_select_collect_options(const ns_node *select, GPtrArray *out)
+{
+    for (const ns_node *c = select ? select->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "option")) {
+            g_ptr_array_add(out, (gpointer)c);
+        } else if (ns_node_is_element_named(c, "optgroup")) {
+            for (const ns_node *o = c->first_child; o; o = o->next_sibling)
+                if (ns_node_is_element_named(o, "option"))
+                    g_ptr_array_add(out, (gpointer)o);
+        }
+    }
+}
+
 const ns_node *
 ns_select_first_selected_option(const ns_node *select)
 {
     if (!select) return NULL;
     gboolean last_wins = !ns_element_get_attr(select, "multiple");
     const ns_node *found = NULL;
-    for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected")) {
-                    if (!last_wins) return cc;
-                    found = cc;
-                }
-            }
-        } else if (ns_node_is_element_named(c, "option") &&
-                   ns_element_get_attr(c, "selected")) {
-            if (!last_wins) return c;
-            found = c;
-        }
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    for (guint i = 0; i < opts->len; i++) {
+        const ns_node *o = g_ptr_array_index(opts, i);
+        if (!ns_option_is_selected(o)) continue;
+        found = o;
+        if (!last_wins) break;
     }
+    g_ptr_array_free(opts, TRUE);
     return found;
+}
+
+static ns_node *
+ns_option_select(const ns_node *option)
+{
+    ns_node *select = option ? option->parent : NULL;
+    if (ns_node_is_element_named(select, "optgroup")) select = select->parent;
+    return ns_node_is_element_named(select, "select") ? select : NULL;
+}
+
+void
+ns_select_set_selected_option(ns_node *select, const ns_node *chosen)
+{
+    if (!select) return;
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    for (guint i = 0; i < opts->len; i++) {
+        ns_node *o = g_ptr_array_index(opts, i);
+        ns_element_set_attr(o, "data-nd-selected", o == chosen ? "1" : "0");
+    }
+    g_ptr_array_free(opts, TRUE);
+    if (chosen) ns_element_remove_attr(select, "data-nd-noselect");
+    else        ns_element_set_attr(select, "data-nd-noselect", "1");
+}
+
+void
+ns_option_set_selected(ns_node *option, gboolean on)
+{
+    if (!ns_node_is_element_named(option, "option")) return;
+    ns_node *select = ns_option_select(option);
+    if (on && select && !ns_element_get_attr(select, "multiple")) {
+        ns_select_set_selected_option(select, option);
+        return;
+    }
+    ns_element_set_attr(option, "data-nd-selected", on ? "1" : "0");
+    if (select) ns_element_remove_attr(select, "data-nd-noselect");
 }
 
 const ns_node *
@@ -2210,7 +2361,10 @@ ns_form_owner(const ns_node *control, const ns_node *doc)
     if (!control || control->kind != NS_NODE_ELEMENT) return NULL;
     if (!doc) doc = ns_node_root(control);
     const char *form_id = ns_element_get_attr(control, "form");
-    if (form_id) {
+    const ns_node *root = ns_node_root(control);
+    gboolean connected = root && root->kind == NS_NODE_DOCUMENT &&
+                         !(root->flags & NS_NODE_FRAGMENT);
+    if (form_id && connected) {
         if (*form_id) {
             const ns_node *tree_root = control;
             while (tree_root->parent &&
@@ -2249,10 +2403,12 @@ ns_form_reset_control(ns_node *n)
         ns_element_remove_attr(n, "data-nd-user-edited");
     } else if (strcmp(n->name, "select") == 0) {
         ns_element_remove_attr(n, "data-nd-noselect");
-        for (ns_node *o = n->first_child; o; o = o->next_sibling) {
-            if (ns_node_is_element_named(o, "option"))
-                ns_element_remove_attr(o, "selected");
-        }
+        GPtrArray *opts = g_ptr_array_new();
+        ns_select_collect_options(n, opts);
+        for (guint i = 0; i < opts->len; i++)
+            ns_element_remove_attr(g_ptr_array_index(opts, i),
+                                   "data-nd-selected");
+        g_ptr_array_free(opts, TRUE);
     }
 }
 

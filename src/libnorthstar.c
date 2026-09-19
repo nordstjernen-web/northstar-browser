@@ -2289,6 +2289,19 @@ ns_browser_take_post(ns_browser *browser, size_t *out_len, char **out_ct)
 }
 
 static void
+browser_collect_form_entries(ns_browser *b, const ns_node *form,
+                             const ns_node *clicked, GString *out,
+                             gboolean *first)
+{
+    const ns_node *submitter =
+        clicked && clicked != form && !ns_node_is_text_input(clicked)
+            ? clicked : NULL;
+    if (b->js && ns_js_form_entry_list(b->js, form, submitter, out, first))
+        return;
+    ns_form_collect_inputs(form, b->doc, b->doc, out, first, clicked);
+}
+
+static void
 browser_perform_form_navigation(ns_browser *b, const ns_node *form,
                                 const ns_node *clicked)
 {
@@ -2325,7 +2338,7 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     if (is_post) {
         GString *body = g_string_new(NULL);
         gboolean first = TRUE;
-        ns_form_collect_inputs(form, b->doc, b->doc, body, &first, clicked);
+        browser_collect_form_entries(b, form, clicked, body, &first);
         ns_form_set_submission_charset(NULL);
         g_free(b->pending_post_body);
         g_free(b->pending_post_ct);
@@ -2339,7 +2352,7 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
 
     GString *query = g_string_new(NULL);
     gboolean first = TRUE;
-    ns_form_collect_inputs(form, b->doc, b->doc, query, &first, clicked);
+    browser_collect_form_entries(b, form, clicked, query, &first);
     ns_form_set_submission_charset(NULL);
 
     char *frag = strchr(abs_action, '#');
@@ -2378,13 +2391,12 @@ browser_submit_form(ns_browser *b, const ns_node *clicked)
     const ns_node *form = from_form ? clicked : ns_form_owner(clicked, b->doc);
     if (!form) return;
 
-    if (!ns_element_get_attr(form, "novalidate") &&
-        !ns_element_get_attr(clicked, "formnovalidate")) {
-        const ns_node *bad = ns_form_first_invalid(form, b->doc, b->doc);
-        if (bad) {
-            if (b->js) ns_js_dispatch_event(b->js, bad, "invalid", NULL);
-            return;
-        }
+    if (b->js) {
+        if (!ns_js_form_submission_allowed(b->js, form, clicked)) return;
+    } else if (!ns_element_get_attr(form, "novalidate") &&
+               !ns_element_get_attr(clicked, "formnovalidate") &&
+               ns_form_first_invalid(form, b->doc, b->doc)) {
+        return;
     }
 
     if (b->js) {
@@ -2586,6 +2598,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     browser->selection_dragged = FALSE;
 
     gboolean prevented = FALSE;
+    ns_js_click_state click_state = {0};
     if (browser->js && node) {
         gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
         gboolean al = (mods & 4) != 0, me = (mods & 8) != 0;
@@ -2599,12 +2612,16 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
                                    (double)y - browser->cur_scroll_y,
                                    (double)x, (double)y,
                                    0, 0, sh, ct, al, me, NULL, NULL);
-        if (!drag_selected)
+        if (!drag_selected) {
+            ns_js_click_begin(browser->js, node, &click_state);
             ns_js_dispatch_mouse_event(browser->js, node, "click",
                                        (double)x - browser->cur_scroll_x,
                                        (double)y - browser->cur_scroll_y,
                                        (double)x, (double)y,
                                        0, 0, sh, ct, al, me, NULL, &prevented);
+            if (ns_js_click_end(browser->js, node, &click_state, prevented))
+                browser->dirty = TRUE;
+        }
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
     if (drag_selected) prevented = TRUE;
@@ -2613,10 +2630,6 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
         !prevented && node && browser_dropdown_click(browser, node);
 
     if (!select_consumed) {
-    if (!prevented && browser->js && node &&
-        ns_js_click_activate(browser->js, node))
-        browser->dirty = TRUE;
-
     if (!prevented && node && browser->js &&
         ns_js_activate_summary(browser->js, node)) {
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;

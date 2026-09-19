@@ -106,7 +106,22 @@ char  *ns_js_eval_source(ns_js *js, const char *src, const char *origin);
 
 gboolean ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
                               gboolean *default_prevented);
-gboolean ns_js_click_activate(ns_js *js, const ns_node *node);
+typedef struct {
+    const ns_node *control;
+    int            kind;
+    gboolean       checked;
+    gboolean       indeterminate;
+    ns_node       *checked_radio;
+} ns_js_click_state;
+void     ns_js_click_begin(ns_js *js, const ns_node *node,
+                           ns_js_click_state *state);
+gboolean ns_js_click_end(ns_js *js, const ns_node *node,
+                         const ns_js_click_state *state, gboolean prevented);
+gboolean ns_js_form_submission_allowed(ns_js *js, const ns_node *form,
+                                       const ns_node *submitter);
+gboolean ns_js_form_entry_list(ns_js *js, const ns_node *form,
+                               const ns_node *submitter, GString *query,
+                               gboolean *first);
 gboolean ns_js_select_choose_option(ns_js *js, ns_node *option);
 gboolean ns_js_select_toggle_option(ns_js *js, ns_node *option);
 gboolean ns_js_select_step(ns_js *js, ns_node *select, int dir);

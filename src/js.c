@@ -306,15 +306,10 @@ static JSValue ns_make_token_list(JSContext *ctx, JSValueConst element,
                                   const char *attr);
 static gboolean ns_node_is_disabled_form_control(const ns_node *el);
 static int ns_checkable_input_kind(const ns_node *el);
-typedef struct {
-    gboolean checked;
-    gboolean indeterminate;
-    ns_node *checked_radio;
-} ns_checkable_click_state;
 static void ns_checkable_pre_click(ns_js *js, ns_node *el, int kind,
-                                   ns_checkable_click_state *state);
+                                   ns_js_click_state *state);
 static void ns_checkable_post_click(ns_js *js, ns_node *el, int kind,
-                                    const ns_checkable_click_state *state,
+                                    const ns_js_click_state *state,
                                     gboolean prevented);
 static void ns_collect_by_name(const ns_node *root, const char *name,
                                JSContext *ctx, JSValue arr, uint32_t *idx,
@@ -3632,6 +3627,7 @@ static JSClassDef ns_window_named_class = {
 static void ns_js_start_image_load(ns_js *js, ns_node *el, const char *src);
 static void ns_js_flush_ready_images(ns_js *js);
 static const char *ns_js_node_doc_base(ns_js *js, const ns_node *el);
+static char *ns_js_node_document_base_url(ns_js *js, const ns_node *node);
 
 static ns_node *
 ns_unwrap_element_mut(JSValueConst val)
@@ -16866,10 +16862,11 @@ ns_window_option_ctor(JSContext *ctx, JSValueConst this_val,
         const char *v = JS_ToCString(ctx, argv[1]);
         if (v) { ns_element_set_attr(el, "value", v); JS_FreeCString(ctx, v); }
     }
-    if (argc >= 3 && JS_ToBool(ctx, argv[2]))
-        ns_element_set_attr(el, "defaultSelected", "");
-    if (argc >= 4 && JS_ToBool(ctx, argv[3]))
-        ns_element_set_attr(el, "selected", "");
+    gboolean default_selected = argc >= 3 && JS_ToBool(ctx, argv[2]);
+    gboolean selected = argc >= 4 && JS_ToBool(ctx, argv[3]);
+    if (default_selected) ns_element_set_attr(el, "selected", "");
+    if (selected != default_selected)
+        ns_element_set_attr(el, "data-nd-selected", selected ? "1" : "0");
     g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, el);
     return ns_make_element(ctx, el);
 }
@@ -17484,7 +17481,7 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     int kind = el && _j && strcmp(type, "click") == 0
                && !ns_node_is_disabled_form_control(el)
              ? ns_checkable_input_kind(el) : 0;
-    ns_checkable_click_state click_state = {0};
+    ns_js_click_state click_state = {0};
     if (kind)
         ns_checkable_pre_click(_j, el, kind, &click_state);
     ns_target_dispatch_with_event(ctx, this_val, type, argv[0]);
@@ -18573,28 +18570,17 @@ ns_form_data_append_select(JSContext *ctx, JSValueConst fd,
         g_free(v);
         return;
     }
-    for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
-            if (ns_element_effectively_disabled(c) ||
-                ns_element_get_attr(c, "disabled"))
-                continue;
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected") &&
-                    !ns_form_data_option_disabled(cc)) {
-                    char *v = ns_option_value_dup(cc);
-                    ns_form_data_append_pair(ctx, fd, name, v ? v : "");
-                    g_free(v);
-                }
-            }
-        } else if (ns_node_is_element_named(c, "option") &&
-                   ns_element_get_attr(c, "selected") &&
-                   !ns_form_data_option_disabled(c)) {
-            char *v = ns_option_value_dup(c);
-            ns_form_data_append_pair(ctx, fd, name, v ? v : "");
-            g_free(v);
-        }
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    for (guint i = 0; i < opts->len; i++) {
+        const ns_node *o = g_ptr_array_index(opts, i);
+        if (!ns_option_is_selected(o) || ns_form_data_option_disabled(o))
+            continue;
+        char *v = ns_option_value_dup(o);
+        ns_form_data_append_pair(ctx, fd, name, v ? v : "");
+        g_free(v);
     }
+    g_ptr_array_free(opts, TRUE);
 }
 
 static gboolean ns_node_is_submit_trigger(const ns_node *el);
@@ -18715,6 +18701,11 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
                     "FormData: the submitter is not owned by this form");
             }
         }
+        if (form->flags & NS_NODE_CONSTRUCTING_ENTRIES) {
+            JS_FreeValue(ctx, obj);
+            return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+                "FormData: the form is already constructing its entry list");
+        }
         ns_form_data_populate_from_form(ctx, obj, form, submitter);
     }
     ns_js *jsx = js_from_ctx(ctx);
@@ -18766,7 +18757,57 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, r);
     }
+    if (jsx && argc >= 1 && !JS_IsUndefined(argv[0])) {
+        ns_node *form = ns_unwrap_element_mut(argv[0]);
+        form->flags |= NS_NODE_CONSTRUCTING_ENTRIES;
+        JSValue event = ns_make_event(ctx, "formdata", form);
+        JS_SetPropertyStr(ctx, event, "bubbles", JS_TRUE);
+        JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
+        JS_SetPropertyStr(ctx, event, "formData", JS_DupValue(ctx, obj));
+        ns_js_dispatch_built_event(jsx, form, "formdata", event, NULL);
+        form->flags &= ~NS_NODE_CONSTRUCTING_ENTRIES;
+    }
     return obj;
+}
+
+gboolean
+ns_js_form_entry_list(ns_js *js, const ns_node *form, const ns_node *submitter,
+                      GString *query, gboolean *first)
+{
+    if (!js || !js->ctx || !form || js->halted) return FALSE;
+    JSContext *ctx = js->ctx;
+    JSValue args[2] = { ns_make_element(ctx, form),
+                        submitter ? ns_make_element(ctx, submitter) : JS_NULL };
+    JSValue fd = ns_window_form_data_ctor(ctx, JS_UNDEFINED, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
+    if (JS_IsException(fd)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return FALSE;
+    }
+    JSValue entries = JS_GetPropertyStr(ctx, fd, "_entries");
+    uint32_t len = ns_js_array_length(ctx, entries);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
+        JSValue name = JS_GetPropertyUint32(ctx, pair, 0);
+        JSValue value = JS_GetPropertyUint32(ctx, pair, 1);
+        if (JS_IsObject(value)) {
+            JSValue file_name = JS_GetPropertyStr(ctx, value, "name");
+            JS_FreeValue(ctx, value);
+            value = file_name;
+        }
+        const char *n = JS_ToCString(ctx, name);
+        const char *v = JS_ToCString(ctx, value);
+        ns_form_urlencoded_append_pair(query, first, n ? n : "", v ? v : "");
+        if (n) JS_FreeCString(ctx, n);
+        if (v) JS_FreeCString(ctx, v);
+        JS_FreeValue(ctx, name);
+        JS_FreeValue(ctx, value);
+        JS_FreeValue(ctx, pair);
+    }
+    JS_FreeValue(ctx, entries);
+    JS_FreeValue(ctx, fd);
+    return TRUE;
 }
 
 static JSValue
@@ -33493,7 +33534,8 @@ ns_element_img_complete(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || !n->name || strcmp(n->name, "img") != 0) return JS_TRUE;
     const char *src = ns_element_get_attr(n, "src");
-    if (!src || !*src) return JS_TRUE;
+    const char *srcset = ns_element_get_attr(n, "srcset");
+    if ((!src || !*src) && (!srcset || !*srcset)) return JS_TRUE;
     const ns_image *im = ns_image_for_element(ctx, this_val);
     if (!im) return JS_FALSE;
     return (im->loaded || im->failed) ? JS_TRUE : JS_FALSE;
@@ -33518,10 +33560,11 @@ ns_element_img_current_src(JSContext *ctx, JSValueConst this_val)
     char *chosen = ns_img_chosen_url(sel);
     if (!chosen || !*chosen) { g_free(chosen); return JS_NewString(ctx, ""); }
     ns_js *js = js_from_ctx(ctx);
-    const char *base = js ? ns_js_node_doc_base(js, n) : NULL;
+    char *base = js ? ns_js_node_document_base_url(js, n) : NULL;
     char *abs_url = base ? ns_url_resolve(base, chosen) : NULL;
     JSValue r = JS_NewString(ctx, abs_url ? abs_url : chosen);
     g_free(abs_url);
+    g_free(base);
     g_free(chosen);
     return r;
 }
@@ -34107,49 +34150,23 @@ ns_element_get_selected(JSContext *ctx, JSValueConst this_val)
 {
     (void)ctx;
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n) return JS_FALSE;
-    if (ns_element_get_attr(n, "selected")) return JS_TRUE;
     if (!ns_node_is_element_named(n, "option")) return JS_FALSE;
     const ns_node *p = n->parent;
     if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
     if (ns_node_is_element_named(p, "select") &&
-        !ns_element_get_attr(p, "multiple") &&
-        ns_select_chosen_option(p) == n)
-        return JS_TRUE;
-    return JS_FALSE;
+        !ns_element_get_attr(p, "multiple"))
+        return ns_select_chosen_option(p) == n ? JS_TRUE : JS_FALSE;
+    return ns_option_is_selected(n) ? JS_TRUE : JS_FALSE;
 }
 
 static JSValue
 ns_element_set_selected(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n) return JS_UNDEFINED;
+    if (!ns_node_is_element_named(n, "option")) return JS_UNDEFINED;
+    ns_option_set_selected(n, JS_ToBool(ctx, val) ? TRUE : FALSE);
     ns_js *_j = js_from_ctx(ctx);
-    gboolean on = JS_ToBool(ctx, val) ? TRUE : FALSE;
-    if (ns_node_is_element_named(n, "option")) {
-        ns_node *sel = n->parent;
-        if (ns_node_is_element_named(sel, "optgroup")) sel = sel->parent;
-        if (ns_node_is_element_named(sel, "select"))
-            ns_element_remove_attr(sel, "data-nd-noselect");
-    }
-    if (on && ns_node_is_element_named(n, "option")) {
-        ns_node *p = n->parent;
-        if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
-        if (ns_node_is_element_named(p, "select") &&
-            !ns_element_get_attr(p, "multiple")) {
-            for (ns_node *c = p->first_child; c; c = c->next_sibling) {
-                if (ns_node_is_element_named(c, "option")) {
-                    if (c != n) ns_element_remove_attr(c, "selected");
-                } else if (ns_node_is_element_named(c, "optgroup")) {
-                    for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                        if (ns_node_is_element_named(cc, "option") && cc != n)
-                            ns_element_remove_attr(cc, "selected");
-                }
-            }
-        }
-    }
-    if (on) ns_js_set_attr_recorded(_j, n, "selected", "");
-    else    ns_js_remove_attr_recorded(_j, n, "selected");
+    if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
@@ -34248,17 +34265,6 @@ ns_input_value_to_ms(ns_input_kind kind, const char *v, gboolean as_date, double
     }
     default:
         return FALSE;
-    }
-}
-
-static void
-ns_num_to_str(double d, char *buf, size_t n)
-{
-    for (int prec = 1; prec <= 17; prec++) {
-        char fmt[8];
-        g_snprintf(fmt, sizeof fmt, "%%.%dg", prec);
-        g_ascii_formatd(buf, (gint)n, fmt, d);
-        if (g_ascii_strtod(buf, NULL) == d) return;
     }
 }
 
@@ -36438,7 +36444,9 @@ ns_input_sanitize_value(const ns_node *el, const char *value)
             v = lo + (hi - lo) / 2;
         else if (v < lo) v = lo;
         else if (v > hi) v = hi;
-        out = g_strdup_printf("%g", v);
+        char num[64];
+        ns_num_to_str(v, num, sizeof num);
+        out = g_strdup(num);
     } else if (!strcmp(type, "color")) {
         char *trimmed = g_strstrip(g_strdup(value));
         if (ns_is_simple_color(trimmed)) {
@@ -36545,22 +36553,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
                 if (chosen) break;
             }
         }
-        for (ns_node *c = el->first_child; c; c = c->next_sibling) {
-            if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-            if (strcmp(c->name, "option") == 0)
-                ns_element_remove_attr(c, "selected");
-            else if (strcmp(c->name, "optgroup") == 0) {
-                for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                    if (ns_node_is_element_named(cc, "option"))
-                        ns_element_remove_attr(cc, "selected");
-            }
-        }
-        if (chosen) {
-            ns_element_set_attr(chosen, "selected", "");
-            ns_element_remove_attr(el, "data-nd-noselect");
-        } else {
-            ns_element_set_attr(el, "data-nd-noselect", "1");
-        }
+        ns_select_set_selected_option(el, chosen);
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
         { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
@@ -36670,22 +36663,7 @@ ns_element_set_selectedIndex(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
-    for (ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0)
-            ns_element_remove_attr(c, "selected");
-        else if (strcmp(c->name, "optgroup") == 0) {
-            for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option"))
-                    ns_element_remove_attr(cc, "selected");
-        }
-    }
-    if (chosen) {
-        ns_element_set_attr(chosen, "selected", "");
-        ns_element_remove_attr(el, "data-nd-noselect");
-    } else {
-        ns_element_set_attr(el, "data-nd-noselect", "1");
-    }
+    ns_select_set_selected_option(el, chosen);
     ns_js *_j = js_from_ctx(ctx);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
@@ -37424,6 +37402,12 @@ ns_element_anchor_part_get(JSContext *ctx, JSValueConst this_val, int magic)
         if (magic == NS_ANCHOR_HREF) {
             const char *v = n ? ns_element_get_attr(n, "href") : NULL;
             if (!v) return JS_NewString(ctx, "");
+            if (ns_node_is_element_named(n, "base")) {
+                const char *fallback = ns_js_node_doc_base(js_from_ctx(ctx), n);
+                g_autofree char *r = fallback ? ns_url_resolve(fallback, v)
+                                              : NULL;
+                return JS_NewString(ctx, r ? r : v);
+            }
             g_autofree char *r =
                 ns_element_anchor_resolved_href(n, js_from_ctx(ctx));
             return JS_NewString(ctx, r ? r : v);
@@ -37557,14 +37541,10 @@ ns_element_table_rows(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *tbl = ns_unwrap_element(this_val);
     if (tbl && tbl->name && g_ascii_strcasecmp(tbl->name, "textarea") == 0) {
-        const char *v = ns_element_get_attr(tbl, "rows");
-        int32_t n = 2;
-        if (v) {
-            char *end = NULL;
-            long parsed = strtol(v, &end, 10);
-            if (end && end != v) n = (int32_t)parsed;
-        }
-        return JS_NewInt32(ctx, n);
+        for (int i = 0; i < (int)G_N_ELEMENTS(g_int_attrs); i++)
+            if (strcmp(g_int_attrs[i].attr, "rows") == 0)
+                return ns_element_int_attr_getter(ctx, this_val, i);
+        return JS_NewInt32(ctx, 2);
     }
     if (tbl && tbl->name && g_ascii_strcasecmp(tbl->name, "frameset") == 0) {
         const char *v = ns_element_get_attr(tbl, "rows");
@@ -38035,18 +38015,14 @@ ns_element_get_selectedOptions(JSContext *ctx, JSValueConst this_val)
         if (opt) JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, opt));
         goto bind;
     }
-    for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            if (ns_element_get_attr(c, "selected"))
-                JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected"))
-                    JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, cc));
-        }
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(el, opts);
+    for (guint k = 0; k < opts->len; k++) {
+        const ns_node *o = g_ptr_array_index(opts, k);
+        if (ns_option_is_selected(o))
+            JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, o));
     }
+    g_ptr_array_free(opts, TRUE);
 bind:
     JS_DefinePropertyValueStr(ctx, arr, "item",
         JS_NewCFunction(ctx, ns_array_item,      "item",      1), 0);
@@ -38310,6 +38286,8 @@ ns_node_is_focusable(const ns_node *el)
         const char *t = ns_element_get_attr(el, "type");
         return !(t && g_ascii_strcasecmp(t, "hidden") == 0);
     }
+    if (strcmp(n, "audio") == 0 || strcmp(n, "video") == 0)
+        return ns_element_get_attr(el, "controls") != NULL;
     const char *ce = ns_element_get_attr(el, "contenteditable");
     if (ce && g_ascii_strcasecmp(ce, "false") != 0) return TRUE;
     return FALSE;
@@ -38450,6 +38428,11 @@ ns_element_focus(JSContext *ctx, JSValueConst this_val,
     if (!el || !js) return JS_UNDEFINED;
     if (ns_element_effectively_inert(el)) return JS_UNDEFINED;
     if (ns_element_effectively_disabled(el)) return JS_UNDEFINED;
+    if (ns_node_is_element_named(el, "body")) {
+        ns_js_set_focus(js, NULL);
+        return JS_UNDEFINED;
+    }
+    if (!ns_node_is_focusable(el)) return JS_UNDEFINED;
     ns_js_set_focus(js, el);
     return JS_UNDEFINED;
 }
@@ -38928,6 +38911,14 @@ ns_js_form_validation_allows_submit(JSContext *ctx, const ns_node *form,
     return FALSE;
 }
 
+gboolean
+ns_js_form_submission_allowed(ns_js *js, const ns_node *form,
+                              const ns_node *submitter)
+{
+    if (!js || !js->ctx || !form) return TRUE;
+    return ns_js_form_validation_allows_submit(js->ctx, form, submitter);
+}
+
 static JSValue
 ns_js_request_submit_form(JSContext *ctx, const ns_node *form,
                           const ns_node *submitter)
@@ -39103,7 +39094,7 @@ ns_checkable_input_kind(const ns_node *el)
 
 static void
 ns_checkable_pre_click(ns_js *js, ns_node *el, int kind,
-                       ns_checkable_click_state *state)
+                       ns_js_click_state *state)
 {
     state->checked = ns_input_is_checked(el);
     state->indeterminate = ns_input_is_indeterminate(el);
@@ -39120,7 +39111,7 @@ ns_checkable_pre_click(ns_js *js, ns_node *el, int kind,
 
 static void
 ns_checkable_post_click(ns_js *js, ns_node *el, int kind,
-                        const ns_checkable_click_state *state,
+                        const ns_js_click_state *state,
                         gboolean prevented)
 {
     if (prevented) {
@@ -39207,13 +39198,7 @@ ns_js_activate_label(ns_js *js, const ns_node *label, const ns_node *target)
 {
     for (const ns_node *cur = target; cur && cur != label; cur = cur->parent)
         if (ns_node_is_interactive_content(cur)) return;
-    const ns_node *control = NULL;
-    const char *forv = ns_element_get_attr(label, "for");
-    if (forv && *forv && js->current_doc) {
-        const ns_node *t = ns_node_find_by_id(js->current_doc, forv);
-        if (ns_js_node_is_labelable(t)) control = t;
-    }
-    if (!control) control = ns_js_first_labelable_descendant(label, 0);
+    const ns_node *control = ns_label_associated_control(label);
     if (!control || control == target) return;
     if (ns_node_is_disabled_form_control(control)) return;
     ns_js_activate_element(js, control);
@@ -39318,7 +39303,7 @@ ns_js_click_with_activation(ns_js *js, const ns_node *el)
     if (act && act != el && ns_element_effectively_inert(act))
         act = NULL;
     int kind = act ? ns_checkable_input_kind(act) : 0;
-    ns_checkable_click_state click_state = {0};
+    ns_js_click_state click_state = {0};
     if (kind)
         ns_checkable_pre_click(js, (ns_node *)act, kind, &click_state);
     gboolean prevented = FALSE;
@@ -39360,42 +39345,40 @@ ns_js_activate_element(ns_js *js, const ns_node *el)
     ns_js_click_with_activation(js, el);
 }
 
+void
+ns_js_click_begin(ns_js *js, const ns_node *node, ns_js_click_state *state)
+{
+    memset(state, 0, sizeof *state);
+    if (!js || !node) return;
+    const ns_node *act = ns_click_activation_target(node);
+    if (!ns_node_is_element_named(act, "input")) return;
+    if (ns_node_is_disabled_form_control(act) ||
+        ns_element_effectively_inert(act))
+        return;
+    int kind = ns_checkable_input_kind(act);
+    if (!kind) return;
+    state->control = act;
+    state->kind = kind;
+    ns_checkable_pre_click(js, (ns_node *)act, kind, state);
+}
+
 gboolean
-ns_js_click_activate(ns_js *js, const ns_node *node)
+ns_js_click_end(ns_js *js, const ns_node *node, const ns_js_click_state *state,
+                gboolean prevented)
 {
     if (!js || !node) return FALSE;
-    const ns_node *control = NULL;
-    for (const ns_node *cur = node; cur && !control; cur = cur->parent) {
-        if (ns_node_is_element_named(cur, "label")) {
-            const char *forv = ns_element_get_attr(cur, "for");
-            if (forv && *forv && js->current_doc) {
-                const ns_node *t = ns_node_find_by_id(js->current_doc, forv);
-                if (ns_js_node_is_labelable(t)) control = t;
-            }
-            if (!control)
-                control = ns_js_first_labelable_descendant(cur, 0);
-            break;
-        }
-        if (ns_node_is_element_named(cur, "input")) control = cur;
+    if (state->control) {
+        ns_checkable_post_click(js, (ns_node *)state->control, state->kind,
+                                state, prevented);
+        js->mutated = TRUE;
+        return TRUE;
     }
-    if (!control || !ns_node_is_element_named(control, "input")) return FALSE;
-    if (ns_node_is_disabled_form_control(control)) return FALSE;
-    if (ns_element_effectively_inert(control)) return FALSE;
-    const char *type = ns_element_get_attr(control, "type");
-    if (!type) return FALSE;
-    if (g_ascii_strcasecmp(type, "checkbox") == 0) {
-        ns_node *mut = (ns_node *)control;
-        ns_js_set_checkedness(js, mut, !ns_input_is_checked(mut));
-    } else if (g_ascii_strcasecmp(type, "radio") == 0) {
-        ns_js_clear_radio_group(js, control);
-        ns_js_set_checkedness(js, (ns_node *)control, TRUE);
-    } else {
+    if (prevented) return FALSE;
+    const ns_node *act = ns_click_activation_target(node);
+    if (!ns_node_is_element_named(act, "label") ||
+        ns_element_effectively_inert(act))
         return FALSE;
-    }
-    gboolean p = FALSE;
-    ns_js_dispatch_event(js, control, "input",  &p);
-    ns_js_dispatch_event(js, control, "change", &p);
-    js->mutated = TRUE;
+    ns_js_activate_label(js, act, node);
     return TRUE;
 }
 
@@ -39408,17 +39391,7 @@ ns_js_select_choose_option(ns_js *js, ns_node *option)
         select = select->parent;
     if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
     if (ns_node_is_disabled_form_control(option)) return FALSE;
-    for (ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0)
-            ns_element_remove_attr(c, "selected");
-        else if (strcmp(c->name, "optgroup") == 0)
-            for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option"))
-                    ns_element_remove_attr(cc, "selected");
-    }
-    ns_element_set_attr(option, "selected", "");
-    ns_element_remove_attr(select, "data-nd-noselect");
+    ns_select_set_selected_option(select, option);
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
@@ -39435,11 +39408,7 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
         select = select->parent;
     if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
     if (ns_node_is_disabled_form_control(option)) return FALSE;
-    if (ns_element_get_attr(option, "selected"))
-        ns_element_remove_attr(option, "selected");
-    else
-        ns_element_set_attr(option, "selected", "");
-    ns_element_remove_attr(select, "data-nd-noselect");
+    ns_option_set_selected(option, !ns_option_is_selected(option));
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
@@ -39447,27 +39416,12 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
     return TRUE;
 }
 
-static void
-ns_select_collect_options(ns_node *select, GPtrArray *out)
-{
-    for (ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            g_ptr_array_add(out, c);
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (ns_node *o = c->first_child; o; o = o->next_sibling)
-                if (ns_node_is_element_named(o, "option"))
-                    g_ptr_array_add(out, o);
-        }
-    }
-}
-
 static int
 ns_select_current_index(ns_node *select, GPtrArray *opts)
 {
     int cur = -1;
     for (guint i = 0; i < opts->len; i++)
-        if (ns_element_get_attr(g_ptr_array_index(opts, i), "selected"))
+        if (ns_option_is_selected(g_ptr_array_index(opts, i)))
             cur = (int)i;
     if (cur < 0) {
         const ns_node *chosen = ns_select_chosen_option(select);
@@ -39686,13 +39640,14 @@ ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth)
         ns_js_image_load *r = (src && *src && js->js_image_loads)
             ? g_hash_table_lookup(js->js_image_loads, root) : NULL;
         if (r && r->requested_url) {
-            const char *base = ns_js_node_doc_base(js, root);
+            char *base = ns_js_node_document_base_url(js, root);
             char *abs = base ? ns_url_resolve(base, src) : NULL;
             if (abs && strcmp(abs, r->requested_url) != 0) {
                 root->flags &= ~NS_NODE_IMG_LOAD_FIRED;
                 ns_js_start_image_load(js, root, src);
             }
             g_free(abs);
+            g_free(base);
         }
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
@@ -39813,7 +39768,7 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
         g_hash_table_remove(js->js_image_loads, el);
         return;
     }
-    const char *base = ns_js_node_doc_base(js, el);
+    g_autofree char *base = ns_js_node_document_base_url(js, el);
     char *abs_url = base ? ns_url_resolve(base, src) : g_strdup(src);
     if (!abs_url) {
         g_hash_table_remove(js->js_image_loads, el);
@@ -39843,7 +39798,7 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
     if (js->image_cache && el->name && strcmp(el->name, "img") == 0) {
         const char *src = ns_element_get_attr(el, "src");
         if (src && *src) {
-            const char *base = ns_js_node_doc_base(js, el);
+            g_autofree char *base = ns_js_node_document_base_url(js, el);
             char *abs_url = base ? ns_url_resolve(base, src) : g_strdup(src);
             if (abs_url) {
                 ns_image *im = ns_image_cache_peek(js->image_cache, abs_url);
@@ -40098,7 +40053,7 @@ ns_element_dispatchEvent(JSContext *ctx, JSValueConst this_val,
         }
     }
     int kind = act ? ns_checkable_input_kind(act) : 0;
-    ns_checkable_click_state click_state = {0};
+    ns_js_click_state click_state = {0};
     if (kind)
         ns_checkable_pre_click(_j, (ns_node *)act, kind, &click_state);
     gboolean prevented = FALSE;
@@ -40891,21 +40846,22 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
         if (JS_IsNumber(argv[1])) {
             int32_t idx = 0;
             JS_ToInt32(ctx, &idx, argv[1]);
-            int32_t i = 0;
-            for (ns_node *c = sel->first_child; c; c = c->next_sibling) {
-                if (c->kind == NS_NODE_ELEMENT && c->name &&
-                    g_ascii_strcasecmp(c->name, "option") == 0) {
-                    if (i == idx) { before = c; break; }
-                    i++;
-                }
-            }
+            GPtrArray *opts = g_ptr_array_new();
+            ns_select_collect_options(sel, opts);
+            if (idx >= 0 && (guint)idx < opts->len)
+                before = g_ptr_array_index(opts, idx);
+            g_ptr_array_free(opts, TRUE);
         } else {
             before = ns_unwrap_element_mut(argv[1]);
+            if (!before || before == sel || !ns_js_node_contains(sel, before))
+                return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+                    "HTMLSelectElement.add: before is not a descendant "
+                    "of the select");
         }
     }
     if (opt->parent) ns_node_remove(opt);
-    if (before && before->parent == sel)
-        ns_element_insert_before_single(_j, sel, opt, before);
+    if (before && before->parent)
+        ns_element_insert_before_single(_j, before->parent, opt, before);
     else
         ns_node_append_child(sel, opt);
     if (_j) _j->mutated = TRUE;
