@@ -1,3 +1,5 @@
 # Northstar UI translations — Indonesian / Bahasa Indonesia
 # Format: one English-source=translation pair per line; '#' starts a comment.
 Northstar=Bintang Utara
+%s is now full screen. Press Esc to exit.=%s kini dalam layar penuh. Tekan Esc untuk keluar.
+You are now in full screen. Press Esc to exit.=Anda kini dalam layar penuh. Tekan Esc untuk keluar.

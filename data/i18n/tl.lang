@@ -1,3 +1,5 @@
 # Northstar UI translations — Tagalog / Filipino
 # Format: one English-source=translation pair per line; '#' starts a comment.
 Northstar=Hilagang Tala
+%s is now full screen. Press Esc to exit.=Ang %s ay nasa buong screen na ngayon. Pindutin ang Esc para lumabas.
+You are now in full screen. Press Esc to exit.=Nasa buong screen ka na ngayon. Pindutin ang Esc para lumabas.

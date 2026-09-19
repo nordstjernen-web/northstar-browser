@@ -4,6 +4,18 @@ Significant changes in each release:
 
 1.0.9:
 ======
+* Entering full screen now shows a notice. When the window goes full
+  screen -- through the View menu, the shortcut or any other path -- a
+  dark banner at the top of the page reads "<host> is now full screen.
+  Press Esc to exit." for five seconds, and disappears again the moment
+  the window leaves full screen. Without the banner a page could pass off
+  its own drawing of an address bar and a sign-in form as the browser's
+  chrome once the real toolbar was hidden (reported by Muhammad Wishal as
+  fullscreen address-bar spoofing). `Element.requestFullscreen()` also
+  now rejects with a `TypeError`, as the Fullscreen API specifies when
+  `document.fullscreenEnabled` is false, instead of resolving as if the
+  page had been granted full screen; page scripts cannot put the window
+  into full screen in this edition and are no longer told otherwise.
 * The `about:start` splash is an xkcd-style comic in black ink on
   white, drawn with perspective: the animal pairs queue along a road that
   converges toward a horizon of distant hills, each pair smaller and

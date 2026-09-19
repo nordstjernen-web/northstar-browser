@@ -1,3 +1,5 @@
 # Northstar UI translations — Romanian / Română
 # Format: one English-source=translation pair per line; '#' starts a comment.
 Northstar=Steaua Polară
+%s is now full screen. Press Esc to exit.=%s este acum pe tot ecranul. Apăsați Esc pentru a ieși.
+You are now in full screen. Press Esc to exit.=Sunteți acum pe tot ecranul. Apăsați Esc pentru a ieși.

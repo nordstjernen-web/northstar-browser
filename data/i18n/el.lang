@@ -1,3 +1,5 @@
 # Northstar UI translations — Greek / Ελληνικά
 # Format: one English-source=translation pair per line; '#' starts a comment.
 Northstar=Πολικός Αστέρας
+%s is now full screen. Press Esc to exit.=Το %s είναι τώρα σε πλήρη οθόνη. Πατήστε Esc για έξοδο.
+You are now in full screen. Press Esc to exit.=Βρίσκεστε τώρα σε πλήρη οθόνη. Πατήστε Esc για έξοδο.

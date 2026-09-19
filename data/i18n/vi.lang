@@ -1,3 +1,5 @@
 # Northstar UI translations — Vietnamese / Tiếng Việt
 # Format: one English-source=translation pair per line; '#' starts a comment.
 Northstar=Sao Bắc Cực
+%s is now full screen. Press Esc to exit.=%s hiện đang ở chế độ toàn màn hình. Nhấn Esc để thoát.
+You are now in full screen. Press Esc to exit.=Bạn đang ở chế độ toàn màn hình. Nhấn Esc để thoát.

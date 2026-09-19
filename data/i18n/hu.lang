@@ -1,3 +1,5 @@
 # Northstar UI translations — Hungarian / Magyar
 # Format: one English-source=translation pair per line; '#' starts a comment.
 Northstar=Sarkcsillag
+%s is now full screen. Press Esc to exit.=%s most teljes képernyős. Kilépéshez nyomja meg az Esc billentyűt.
+You are now in full screen. Press Esc to exit.=Most teljes képernyős módban van. Kilépéshez nyomja meg az Esc billentyűt.

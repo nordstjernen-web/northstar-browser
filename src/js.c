@@ -9378,6 +9378,15 @@ ns_clipboard_reject_not_allowed(JSContext *ctx, JSValueConst this_val,
         "Read permission denied");
 }
 
+static JSValue
+ns_element_requestFullscreen(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_promise_reject_dom(ctx, "TypeError",
+        "Fullscreen is not enabled in this document");
+}
+
 static gboolean
 ns_protocol_scheme_valid(const char *scheme)
 {
@@ -42644,7 +42653,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("hasAttributeNS",          2, ns_element_hasAttributeNS),
     JS_CFUNC_DEF("setAttributeNS",          3, ns_element_setAttributeNS),
     JS_CFUNC_DEF("removeAttributeNS",       2, ns_element_removeAttributeNS),
-    JS_CFUNC_DEF("requestFullscreen",       0, ns_returns_resolved_undefined),
+    JS_CFUNC_DEF("requestFullscreen",       0, ns_element_requestFullscreen),
     JS_CFUNC_DEF("getAnimations",           0, ns_event_empty_array),
     JS_CFUNC_DEF("animate",                 2, ns_element_animate),
     JS_CFUNC_DEF("getRootNode",             1, ns_element_getRootNode),
