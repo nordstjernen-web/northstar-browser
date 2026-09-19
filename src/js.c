@@ -33529,7 +33529,8 @@ ns_element_img_complete(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || !n->name || strcmp(n->name, "img") != 0) return JS_TRUE;
     const char *src = ns_element_get_attr(n, "src");
-    if (!src || !*src) return JS_TRUE;
+    const char *srcset = ns_element_get_attr(n, "srcset");
+    if ((!src || !*src) && (!srcset || !*srcset)) return JS_TRUE;
     const ns_image *im = ns_image_for_element(ctx, this_val);
     if (!im) return JS_FALSE;
     return (im->loaded || im->failed) ? JS_TRUE : JS_FALSE;
