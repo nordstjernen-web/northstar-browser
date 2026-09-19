@@ -11,6 +11,10 @@ Significant changes in each release:
   glaze in the shadows, a gilt frame and the sun and star kept luminous.
   The strokes are fixed across the 36 frames so the animation reads as a
   living painting rather than a flicker. It carries the 1.0.9 number.
+* `<textarea rows>` and `cols` are parsed as bounded non-negative
+  integers (1 to 1000, defaulting to 2 and 20), so an attribute like
+  `rows="2000000000"` no longer makes layout build billions of
+  placeholder lines and exhaust memory.
 
 1.0.8:
 ======

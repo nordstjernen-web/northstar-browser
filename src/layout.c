@@ -1924,15 +1924,11 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
     }
     if (dom && dom->name && strcmp(dom->name, "textarea") == 0) {
         if (bw <= 0) {
-            const char *cols = ns_element_get_attr(dom, "cols");
-            int c = cols ? atoi(cols) : 20;
-            if (c <= 0) c = 20;
+            int c = ns_parse_int(ns_element_get_attr(dom, "cols"), 20, 1, 1000);
             bw = c * (fs * 0.5) + 8.0;
         }
         if (bh <= 0) {
-            const char *rows = ns_element_get_attr(dom, "rows");
-            int r = rows ? atoi(rows) : 2;
-            if (r <= 0) r = 2;
+            int r = ns_parse_int(ns_element_get_attr(dom, "rows"), 2, 1, 1000);
             double line_h = fs * 1.3;
             bh = r * line_h + 6.0;
         }
@@ -3223,9 +3219,8 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 is_placeholder = TRUE;
                 caret_pos = 0;
             } else if (ta_sized) {
-                const char *rows_attr = ns_element_get_attr(n, "rows");
-                int row_lines = rows_attr ? atoi(rows_attr) : 2;
-                if (row_lines < 1) row_lines = 1;
+                int row_lines = ns_parse_int(ns_element_get_attr(n, "rows"),
+                                             2, 1, 1000);
                 for (int r = 0; r < row_lines; r++) {
                     if (r) g_string_append(ctx->out, "\xe2\x80\xa8");
                     g_string_append(ctx->out, "\xc2\xa0");
