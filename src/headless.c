@@ -927,14 +927,18 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
     for (const ns_node *cur = dom; cur; cur = cur->parent)
         if (ns_node_is_editable(cur)) { editable = cur; break; }
     gboolean prevented = FALSE;
+    gboolean activated = FALSE;
     if (fc->js) {
         headless_emit_pointer_and_mouse(fc, dom, "pointerdown", "mousedown",
                                         x, y, 0, 1);
         headless_emit_pointer_and_mouse(fc, dom, "pointerup", "mouseup",
                                         x, y, 0, 0);
+        ns_js_click_state click_state = {0};
+        ns_js_click_begin(fc->js, dom, &click_state);
         ns_js_dispatch_mouse_event(fc->js, dom, "click", x, y, x, y, 0, 0,
                                    FALSE, FALSE, FALSE, FALSE, NULL,
                                    &prevented);
+        activated = ns_js_click_end(fc->js, dom, &click_state, prevented);
         ns_js_consume_mutated(fc->js);
     }
     if (editable) {
@@ -952,9 +956,7 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
         }
         return;
     }
-    if (prevented) return;
-    if (fc->js && ns_js_click_activate(fc->js, dom))
-        ns_js_consume_mutated(fc->js);
+    if (prevented || activated) return;
     for (const ns_node *cur = dom; cur; cur = cur->parent) {
         if (!ns_form_is_submit_trigger(cur)) continue;
         headless_submit_form_from(fc, nav, cur);
@@ -1017,7 +1019,7 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
             }
             return;
         }
-        if (cur->kind == NS_NODE_ELEMENT && cur->name &&
+        if (!fc->js && cur->kind == NS_NODE_ELEMENT && cur->name &&
             strcmp(cur->name, "input") == 0) {
             const char *type = ns_element_get_attr(cur, "type");
             if (type && g_ascii_strcasecmp(type, "checkbox") == 0) {

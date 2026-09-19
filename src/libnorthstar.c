@@ -2581,6 +2581,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     browser->selection_dragged = FALSE;
 
     gboolean prevented = FALSE;
+    ns_js_click_state click_state = {0};
     if (browser->js && node) {
         gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
         gboolean al = (mods & 4) != 0, me = (mods & 8) != 0;
@@ -2594,12 +2595,16 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
                                    (double)y - browser->cur_scroll_y,
                                    (double)x, (double)y,
                                    0, 0, sh, ct, al, me, NULL, NULL);
-        if (!drag_selected)
+        if (!drag_selected) {
+            ns_js_click_begin(browser->js, node, &click_state);
             ns_js_dispatch_mouse_event(browser->js, node, "click",
                                        (double)x - browser->cur_scroll_x,
                                        (double)y - browser->cur_scroll_y,
                                        (double)x, (double)y,
                                        0, 0, sh, ct, al, me, NULL, &prevented);
+            if (ns_js_click_end(browser->js, node, &click_state, prevented))
+                browser->dirty = TRUE;
+        }
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
     if (drag_selected) prevented = TRUE;
@@ -2608,10 +2613,6 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
         !prevented && node && browser_dropdown_click(browser, node);
 
     if (!select_consumed) {
-    if (!prevented && browser->js && node &&
-        ns_js_click_activate(browser->js, node))
-        browser->dirty = TRUE;
-
     if (!prevented && node && browser->js &&
         ns_js_activate_summary(browser->js, node)) {
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;

@@ -306,15 +306,10 @@ static JSValue ns_make_token_list(JSContext *ctx, JSValueConst element,
                                   const char *attr);
 static gboolean ns_node_is_disabled_form_control(const ns_node *el);
 static int ns_checkable_input_kind(const ns_node *el);
-typedef struct {
-    gboolean checked;
-    gboolean indeterminate;
-    ns_node *checked_radio;
-} ns_checkable_click_state;
 static void ns_checkable_pre_click(ns_js *js, ns_node *el, int kind,
-                                   ns_checkable_click_state *state);
+                                   ns_js_click_state *state);
 static void ns_checkable_post_click(ns_js *js, ns_node *el, int kind,
-                                    const ns_checkable_click_state *state,
+                                    const ns_js_click_state *state,
                                     gboolean prevented);
 static void ns_collect_by_name(const ns_node *root, const char *name,
                                JSContext *ctx, JSValue arr, uint32_t *idx,
@@ -17480,7 +17475,7 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     int kind = el && _j && strcmp(type, "click") == 0
                && !ns_node_is_disabled_form_control(el)
              ? ns_checkable_input_kind(el) : 0;
-    ns_checkable_click_state click_state = {0};
+    ns_js_click_state click_state = {0};
     if (kind)
         ns_checkable_pre_click(_j, el, kind, &click_state);
     ns_target_dispatch_with_event(ctx, this_val, type, argv[0]);
@@ -39028,7 +39023,7 @@ ns_checkable_input_kind(const ns_node *el)
 
 static void
 ns_checkable_pre_click(ns_js *js, ns_node *el, int kind,
-                       ns_checkable_click_state *state)
+                       ns_js_click_state *state)
 {
     state->checked = ns_input_is_checked(el);
     state->indeterminate = ns_input_is_indeterminate(el);
@@ -39045,7 +39040,7 @@ ns_checkable_pre_click(ns_js *js, ns_node *el, int kind,
 
 static void
 ns_checkable_post_click(ns_js *js, ns_node *el, int kind,
-                        const ns_checkable_click_state *state,
+                        const ns_js_click_state *state,
                         gboolean prevented)
 {
     if (prevented) {
@@ -39241,7 +39236,7 @@ ns_js_click_with_activation(ns_js *js, const ns_node *el)
     if (act && act != el && ns_element_effectively_inert(act))
         act = NULL;
     int kind = act ? ns_checkable_input_kind(act) : 0;
-    ns_checkable_click_state click_state = {0};
+    ns_js_click_state click_state = {0};
     if (kind)
         ns_checkable_pre_click(js, (ns_node *)act, kind, &click_state);
     gboolean prevented = FALSE;
@@ -39283,42 +39278,40 @@ ns_js_activate_element(ns_js *js, const ns_node *el)
     ns_js_click_with_activation(js, el);
 }
 
+void
+ns_js_click_begin(ns_js *js, const ns_node *node, ns_js_click_state *state)
+{
+    memset(state, 0, sizeof *state);
+    if (!js || !node) return;
+    const ns_node *act = ns_click_activation_target(node);
+    if (!ns_node_is_element_named(act, "input")) return;
+    if (ns_node_is_disabled_form_control(act) ||
+        ns_element_effectively_inert(act))
+        return;
+    int kind = ns_checkable_input_kind(act);
+    if (!kind) return;
+    state->control = act;
+    state->kind = kind;
+    ns_checkable_pre_click(js, (ns_node *)act, kind, state);
+}
+
 gboolean
-ns_js_click_activate(ns_js *js, const ns_node *node)
+ns_js_click_end(ns_js *js, const ns_node *node, const ns_js_click_state *state,
+                gboolean prevented)
 {
     if (!js || !node) return FALSE;
-    const ns_node *control = NULL;
-    for (const ns_node *cur = node; cur && !control; cur = cur->parent) {
-        if (ns_node_is_element_named(cur, "label")) {
-            const char *forv = ns_element_get_attr(cur, "for");
-            if (forv && *forv && js->current_doc) {
-                const ns_node *t = ns_node_find_by_id(js->current_doc, forv);
-                if (ns_js_node_is_labelable(t)) control = t;
-            }
-            if (!control)
-                control = ns_js_first_labelable_descendant(cur, 0);
-            break;
-        }
-        if (ns_node_is_element_named(cur, "input")) control = cur;
+    if (state->control) {
+        ns_checkable_post_click(js, (ns_node *)state->control, state->kind,
+                                state, prevented);
+        js->mutated = TRUE;
+        return TRUE;
     }
-    if (!control || !ns_node_is_element_named(control, "input")) return FALSE;
-    if (ns_node_is_disabled_form_control(control)) return FALSE;
-    if (ns_element_effectively_inert(control)) return FALSE;
-    const char *type = ns_element_get_attr(control, "type");
-    if (!type) return FALSE;
-    if (g_ascii_strcasecmp(type, "checkbox") == 0) {
-        ns_node *mut = (ns_node *)control;
-        ns_js_set_checkedness(js, mut, !ns_input_is_checked(mut));
-    } else if (g_ascii_strcasecmp(type, "radio") == 0) {
-        ns_js_clear_radio_group(js, control);
-        ns_js_set_checkedness(js, (ns_node *)control, TRUE);
-    } else {
+    if (prevented) return FALSE;
+    const ns_node *act = ns_click_activation_target(node);
+    if (!ns_node_is_element_named(act, "label") ||
+        ns_element_effectively_inert(act))
         return FALSE;
-    }
-    gboolean p = FALSE;
-    ns_js_dispatch_event(js, control, "input",  &p);
-    ns_js_dispatch_event(js, control, "change", &p);
-    js->mutated = TRUE;
+    ns_js_activate_label(js, act, node);
     return TRUE;
 }
 
@@ -39992,7 +39985,7 @@ ns_element_dispatchEvent(JSContext *ctx, JSValueConst this_val,
         }
     }
     int kind = act ? ns_checkable_input_kind(act) : 0;
-    ns_checkable_click_state click_state = {0};
+    ns_js_click_state click_state = {0};
     if (kind)
         ns_checkable_pre_click(_j, (ns_node *)act, kind, &click_state);
     gboolean prevented = FALSE;
