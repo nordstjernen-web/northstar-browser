@@ -217,35 +217,27 @@ install_status_css(void)
         "  min-width: 26px;"
         "  padding: 0;"
         "}"
-        "menubar.ns-menubar {"
-        "  background-color: #f4f6f9;"
-        "  color: #000000;"
-        "  padding: 1px 2px 0 2px;"
-        "  min-height: 22px;"
-        "  border-top: 1px solid #ffffff;"
-        "  border-bottom: 1px solid #9aa5b8;"
-        "}"
-        "menubar.ns-menubar > item {"
-        "  padding: 2px 7px;"
-        "  margin: 0;"
+        ".ns-toolbar menubutton > button {"
+        "  min-height: 34px;"
+        "  min-width: 30px;"
+        "  padding: 2px 5px;"
         "  border-radius: 0;"
-        "  border: 1px solid transparent;"
-        "  color: #000000;"
-        "  font-size: 12px;"
         "}"
-        "menubar.ns-menubar > item:hover {"
-        "  border-top-color: #ffffff;"
-        "  border-left-color: #ffffff;"
-        "  border-right-color: #9aa5b8;"
-        "  border-bottom-color: #9aa5b8;"
+        ".ns-toolbar menubutton > button:hover {"
+        "  border-top: 1px solid #ffffff;"
+        "  border-left: 1px solid #ffffff;"
+        "  border-right: 1px solid #6b778c;"
+        "  border-bottom: 1px solid #6b778c;"
+        "  box-shadow: inset -1px -1px 0 #9aa5b8;"
+        "  background-color: #e6eaf1;"
         "}"
-        "menubar.ns-menubar > item.active, menubar.ns-menubar > item:active {"
-        "  background-color: #2f5aa8;"
-        "  color: #ffffff;"
-        "  border-top-color: #9aa5b8;"
-        "  border-left-color: #9aa5b8;"
-        "  border-right-color: #ffffff;"
-        "  border-bottom-color: #ffffff;"
+        ".ns-toolbar menubutton > button:active, .ns-toolbar menubutton > button:checked {"
+        "  border-top: 1px solid #6b778c;"
+        "  border-left: 1px solid #6b778c;"
+        "  border-right: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #ffffff;"
+        "  box-shadow: inset 1px 1px 0 #9aa5b8;"
+        "  background-color: #d3d9e3;"
         "}"
         ".ns-toolbar {"
         "  background-image: linear-gradient(to bottom, #fdfdfe 0%, #f1f3f7 45%, #e2e6ee 100%);"
@@ -1984,87 +1976,64 @@ menu_append_accel(GMenu *menu, const char *label, const char *action,
 }
 
 static void
-menubar_append_submenu(GMenu *bar, const char *label, GMenu *first,
-                       GMenu *second)
+menu_append_section(GMenu *menu, GMenu *section)
 {
-    GMenu *submenu = g_menu_new();
-    g_menu_append_section(submenu, NULL, G_MENU_MODEL(first));
-    g_object_unref(first);
-    if (second) {
-        g_menu_append_section(submenu, NULL, G_MENU_MODEL(second));
-        g_object_unref(second);
-    }
-    g_menu_append_submenu(bar, label, G_MENU_MODEL(submenu));
-    g_object_unref(submenu);
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+    g_object_unref(section);
 }
 
 static GMenuModel *
-build_menubar_model(void)
+build_app_menu_model(void)
 {
-    GMenu *bar = g_menu_new();
+    GMenu *menu = g_menu_new();
 
-    GMenu *file_a = g_menu_new();
-    menu_append_accel(file_a, ns_i18n("New Window"), "win.new-window",
+    GMenu *window = g_menu_new();
+    menu_append_accel(window, ns_i18n("New Window"), "win.new-window",
                       "<Ctrl>n");
-    menu_append_accel(file_a, ns_i18n("Print…"), "win.print", "<Ctrl>p");
-    menu_append_accel(file_a, ns_i18n("Save Page as PDF…"), "win.save-pdf",
-                      "<Ctrl><Shift>p");
-    menu_append_accel(file_a, ns_i18n("Save Page as Image…"),
-                      "win.save-image", NULL);
-    GMenu *file_b = g_menu_new();
-    menu_append_accel(file_b, ns_i18n("Quit"), "win.quit", "<Ctrl>q");
-    menubar_append_submenu(bar, ns_i18n("File"), file_a, file_b);
+    menu_append_section(menu, window);
 
-    GMenu *edit_a = g_menu_new();
-    menu_append_accel(edit_a, ns_i18n("Find in Page"), "win.find",
-                      "<Ctrl>f");
-    GMenu *edit_b = g_menu_new();
-    menu_append_accel(edit_b, ns_i18n("Settings"), "win.settings",
-                      "<Ctrl>comma");
-    menubar_append_submenu(bar, ns_i18n("Edit"), edit_a, edit_b);
-
-    GMenu *view_a = g_menu_new();
-    menu_append_accel(view_a, ns_i18n("Zoom In"), "win.zoom-in",
-                      "<Ctrl>plus");
-    menu_append_accel(view_a, ns_i18n("Zoom Out"), "win.zoom-out",
+    GMenu *view = g_menu_new();
+    menu_append_accel(view, ns_i18n("Zoom In"), "win.zoom-in", "<Ctrl>plus");
+    menu_append_accel(view, ns_i18n("Zoom Out"), "win.zoom-out",
                       "<Ctrl>minus");
-    menu_append_accel(view_a, ns_i18n("Reset Zoom"), "win.zoom-reset",
+    menu_append_accel(view, ns_i18n("Reset Zoom"), "win.zoom-reset",
                       "<Ctrl>0");
-    GMenu *view_b = g_menu_new();
-    menu_append_accel(view_b, ns_i18n("Full Screen"), "win.fullscreen",
-                      "F11");
-    menu_append_accel(view_b, ns_i18n("Page Source"), "win.view-source",
-                      "<Ctrl>u");
-    menubar_append_submenu(bar, ns_i18n("View"), view_a, view_b);
+    menu_append_accel(view, ns_i18n("Full Screen"), "win.fullscreen", "F11");
+    menu_append_accel(view, ns_i18n("Find in Page"), "win.find", "<Ctrl>f");
+    menu_append_section(menu, view);
 
-    GMenu *go_a = g_menu_new();
-    menu_append_accel(go_a, ns_i18n("Back"), "win.back", "<Alt>Left");
-    menu_append_accel(go_a, ns_i18n("Forward"), "win.forward", "<Alt>Right");
-    menu_append_accel(go_a, ns_i18n("Reload"), "win.reload", "<Ctrl>r");
-    menu_append_accel(go_a, ns_i18n("Home"), "win.home", "<Alt>Home");
-    GMenu *go_b = g_menu_new();
-    menu_append_accel(go_b, ns_i18n("History"), "win.history", "<Ctrl>h");
-    menubar_append_submenu(bar, ns_i18n("Go"), go_a, go_b);
-
-    GMenu *bookmarks_a = g_menu_new();
-    menu_append_accel(bookmarks_a, ns_i18n("Bookmark This Page"),
+    GMenu *page = g_menu_new();
+    menu_append_accel(page, ns_i18n("Bookmark This Page"),
                       "win.bookmark-page", "<Ctrl>d");
-    menubar_append_submenu(bar, ns_i18n("Bookmarks"), bookmarks_a, NULL);
+    menu_append_accel(page, ns_i18n("History"), "win.history", "<Ctrl>h");
+    menu_append_accel(page, ns_i18n("Downloads"), "win.downloads", "<Ctrl>j");
+    menu_append_accel(page, ns_i18n("Print…"), "win.print", "<Ctrl>p");
+    menu_append_accel(page, ns_i18n("Save Page as PDF…"), "win.save-pdf",
+                      "<Ctrl><Shift>p");
+    menu_append_accel(page, ns_i18n("Save Page as Image…"),
+                      "win.save-image", NULL);
+    menu_append_section(menu, page);
 
-    GMenu *tools_a = g_menu_new();
-    menu_append_accel(tools_a, ns_i18n("Downloads"), "win.downloads",
-                      "<Ctrl>j");
-    menu_append_accel(tools_a, ns_i18n("JavaScript Console"), "win.console",
+    GMenu *tools = g_menu_new();
+    menu_append_accel(tools, ns_i18n("Page Source"), "win.view-source",
+                      "<Ctrl>u");
+    menu_append_accel(tools, ns_i18n("JavaScript Console"), "win.console",
                       "<Ctrl><Shift>j");
-    menu_append_accel(tools_a, ns_i18n("Task Manager"), "win.task-manager",
+    menu_append_accel(tools, ns_i18n("Task Manager"), "win.task-manager",
                       "<Shift>Escape");
-    menubar_append_submenu(bar, ns_i18n("Tools"), tools_a, NULL);
+    menu_append_accel(tools, ns_i18n("Settings"), "win.settings",
+                      "<Ctrl>comma");
+    menu_append_section(menu, tools);
 
-    GMenu *help_a = g_menu_new();
-    g_menu_append(help_a, ns_i18n("About Northstar"), "win.about");
-    menubar_append_submenu(bar, ns_i18n("Help"), help_a, NULL);
+    GMenu *about = g_menu_new();
+    g_menu_append(about, ns_i18n("About Northstar"), "win.about");
+    menu_append_section(menu, about);
 
-    return G_MENU_MODEL(bar);
+    GMenu *quit = g_menu_new();
+    menu_append_accel(quit, ns_i18n("Quit"), "win.quit", "<Ctrl>q");
+    menu_append_section(menu, quit);
+
+    return G_MENU_MODEL(menu);
 }
 
 static ProcWindow *
@@ -2191,10 +2160,17 @@ proc_window_new(GtkApplication *app, const char *home_url,
                                           G_CALLBACK(on_bookmarks_clicked), pw);
     toolbar_button_icon_size(pw->bookmarks_button, 20);
 
-    GMenuModel *menubar_model = build_menubar_model();
-    GtkWidget *menubar = gtk_popover_menu_bar_new_from_model(menubar_model);
-    gtk_widget_add_css_class(menubar, "ns-menubar");
-    g_object_unref(menubar_model);
+    GMenuModel *appmenu = build_app_menu_model();
+    GtkWidget *menu_button = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
+                                  "open-menu-symbolic");
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button), appmenu);
+    ns_popover_menu_fit(GTK_WIDGET(gtk_menu_button_get_popover(
+                            GTK_MENU_BUTTON(menu_button))));
+    gtk_widget_set_tooltip_text(menu_button, ns_i18n("Menu"));
+    set_accessible_label(menu_button, ns_i18n("Menu"));
+    gtk_widget_set_valign(menu_button, GTK_ALIGN_CENTER);
+    g_object_unref(appmenu);
 
     GtkWidget *logo = gtk_image_new_from_icon_name("northstar");
     gtk_image_set_pixel_size(GTK_IMAGE(logo), 22);
@@ -2221,8 +2197,8 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), sep2);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
+    gtk_box_append(GTK_BOX(toolbar), menu_button);
     gtk_box_append(GTK_BOX(toolbar), logo_button);
-    gtk_box_append(GTK_BOX(vbox), menubar);
     gtk_box_append(GTK_BOX(vbox), toolbar);
 
     GtkWidget *page = ns_proc_view_widget(pw->view);

@@ -16,18 +16,18 @@ Significant changes in each release:
   `document.fullscreenEnabled` is false, instead of resolving as if the
   page had been granted full screen; page scripts cannot put the window
   into full screen in this edition and are no longer told otherwise.
-* The browser chrome is laid out like Mozilla 1.0 and Netscape
-  Communicator. A classic menubar (File, Edit, View, Go, Bookmarks,
-  Tools, Help) replaces the hamburger menu and carries every window action
-  with its shortcut. Below it, the navigation toolbar sits on a bright
-  silver-blue face with a white top highlight and a dark bottom groove,
-  starts with a ridged grippy, and shows Back, Forward, Reload, Stop, Home,
-  Print and Bookmarks as large buttons with the faceted 3D icon above a
-  text label; they are flat until hovered, raise on hover and sink when
-  pressed, and Stop stays in place greyed out while nothing is loading. A
-  "Location:" label leads into the sunken location field with its page
-  proxy icon, followed by a raised "Go" button, a groove separator and the
-  dark throbber frame. A new faceted printer icon joins the icon set.
+* The navigation toolbar is laid out like Mozilla 1.0 and Netscape
+  Communicator. It sits on a bright silver-blue face with a white top
+  highlight and a dark bottom groove, starts with a ridged grippy, and
+  shows Back, Forward, Reload, Stop, Home, Print and Bookmarks as
+  icon-over-label buttons; they are flat until hovered, raise on hover
+  and sink when pressed, and Stop stays in place greyed out while nothing
+  is loading. A "Location:" label leads into the sunken location field
+  with its page proxy icon, followed by a raised "Go" button, a groove
+  separator, the Bookmarks button, the hamburger menu and the dark
+  throbber frame. The hamburger menu keeps every window action with its
+  shortcut, including Quit. A new faceted printer icon joins the icon
+  set.
 * The `about:start` splash is redrawn as a flat, sunny xkcd-style comic:
   black ink on white paper with only a few flat colours -- a yellow sun
   with wobbling rays, blue wave lines, a tan-planked ark and a red-banded
@@ -44,8 +44,7 @@ Significant changes in each release:
   times supersampling. `scripts/gen-splash.py` prefers its explicit font
   paths over `fc-match`, so the lettering stays comic on Windows. The
   README screenshot is updated with a full browser window capture,
-  showing the classic menubar and navigation toolbar above the sunny
-  about:start comic.
+  showing the navigation toolbar above the sunny about:start comic.
 * The navigation toolbar is shorter. The icon-over-label buttons drop
   from 44 to 34 pixels with 20-pixel icons and a smaller label, the
   location field, Go button and throbber shrink to match, and the
