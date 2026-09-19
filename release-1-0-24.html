@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nordstjernen Browser 1.0.24 released!</title>
+<meta name="description" content="Nordstjernen Browser 1.0.24 released - flexbox and grid layout rebuilt against the specifications, the page itself scroll-snaps, printing works in the default process-per-tab mode, text selection that behaves, registered custom properties, a JavaScript off switch, view-source, popup blocking, and a new painted about:start splash. An independent web browser written from scratch in C. No telemetry, no JIT.">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen-browser">
+      <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
+    </a>
+    <div class="brand">
+      <a href="."><img class="logo" src="assets/nordstjernen.svg" alt="*"></a>
+      <span class="title"><a href=".">nordstjernen.org</a></span>
+    </div>
+    <div class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</div>
+  </div>
+
+  <nav class="nav" aria-label="Primary">
+    <a href="index.html#about">About</a>
+    <a href="index.html#news">News</a>
+    <a href="screenshots.html">Screenshots</a>
+    <a href="download.html">Download</a>
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser">GitHub</a>
+    <input type="checkbox" id="nav-more" class="nav-more-toggle">
+    <label class="nav-more-btn" for="nav-more">More <span aria-hidden="true">&#9662;</span></label>
+    <div class="nav-sec">
+      <a href="index.html#specs">Specifications</a>
+      <a href="northstar-browser/">Northstar</a>
+      <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">Releases</a>
+      <a href="https://discord.gg/4W959nW5vF">Discord</a>
+    </div>
+  </nav>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>Nordstjernen Browser 1.0.24 released!</h1>
+        <p>Today, 16 September 2026, we are pleased to announce the release of <b>Nordstjernen 1.0.24</b>. This is a layout release: flexbox resolves flexible lengths the way the specification describes and column containers wrap, absolutely positioned boxes inside grids take their containing block from the grid lines, and the Web Platform Tests for flexbox went from 1465 to 1997 of 3670 subtests. Around it are the things a reader notices day to day &mdash; the page itself scroll-snaps, <code>Ctrl+P</code> prints in the default process-per-tab mode, text selection highlights the text it is actually on and copies the way the page reads, and the <code>about:start</code> splash is painted anew. Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, macOS and Linux, with builds for Android, iOS, FreeBSD, NetBSD and the JVM. Nordstjernen is built in Norway.</p>
+
+        <p>Nordstjernen Browser version 1.0.24 is available now as a source release. <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.24">Read the full release notes here</a>, or <a href="#download">jump straight to the downloads</a>.</p>
+
+        <p>It ships alongside <a href="northstar-release-1-0-8.html">Northstar 1.0.8</a>, the GPL-licensed single-process edition of the same engine.</p>
+
+        <p>&laquo; <a href="index.html">Back to nordstjernen.org</a></p>
+
+        <div class="shot">
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="985" height="758" alt="Nordstjernen 1.0.24's about:start start page — the Nordstjernen Navigator splash, painted in an impressionist hand inside a gilded frame, above a search box"></a>
+          <div class="cap">Nordstjernen 1.0.24&rsquo;s <code>about:start</code> page &mdash; the same night scene over the earth, painted in an impressionist hand with a gilded frame. <a href="screenshots.html">more screenshots &raquo;</a></div>
+        </div>
+
+        <h2>what&rsquo;s new in 1.0.24</h2>
+        <ul class="news">
+          <li><b>A painted splash.</b> <code>about:start</code> wears a new splash: the same night scene, painted in an impressionist hand with a gilded frame. It is rendered by <code>scripts/build-splash-art.py</code> from the version in <code>meson.build</code>, so a release regenerates the artwork with two scripts and no image editor.</li>
+          <li><b>Flexbox resolves flexible lengths the way css-flexbox-1 &sect;9.7 describes.</b> One implementation shared by row, wrapping-row and column containers distributes free space with the item freezing loop, so flex factors below one scale the free space, <code>flex-shrink</code> is weighted by the flex base size, and min/max violations are frozen and re-distributed. The automatic minimum size of a flex item is the smaller of its content size and its specified size, so <code>width: 200px</code> in a 100px container shrinks as browsers do. Column flex containers wrap: <code>flex-wrap: wrap</code> and <code>wrap-reverse</code> break items into lines against the definite main size, <code>align-content</code> places the lines, <code>rtl</code> mirrors the cross axis, <code>column-reverse</code> packs from the main end, auto margins absorb free space, and an indefinite-height column sizes itself from its items so <code>flex: 1</code> items no longer collapse. Negative free space overflows in the right direction, and the static position of an absolutely positioned flex child honours the writing-mode-relative keywords. On a September checkout of the horizontal-writing-mode suites, WPT <code>css/css-flexbox</code> goes from 1465 to 1997 of 3670 subtests.</li>
+          <li><b>Grid catches up.</b> An absolutely positioned box whose containing block is a grid container takes that block from its <code>grid-column</code> and <code>grid-row</code> lines, as css-grid-1 &sect;9 requires. Grid containers with <code>direction: rtl</code> lay their columns out from the right; <code>repeat(auto-fit, &hellip;)</code> collapses the tracks no item occupies, so a card grid with fewer cards than columns stretches the remaining <code>fr</code> tracks; a grid item&rsquo;s percentage height resolves against its grid area; <code>align-content: stretch</code> grows only auto rows; and <code>getComputedStyle</code> returns the used track sizes for <code>grid-template-columns</code> and <code>grid-template-rows</code>, with explicit line names in place, as CSSOM requires. Track lists resolve <code>em</code> against the element&rsquo;s own font size, an auto track grows to its max-content contribution before <code>fr</code> tracks share the remainder, and the track-list parser rejects what the grammar excludes.</li>
+          <li><b>Alignment keywords, in full.</b> <code>align-items</code>, <code>align-self</code>, <code>align-content</code>, <code>justify-content</code>, <code>justify-items</code> and <code>justify-self</code> parse <code>first baseline</code>, <code>last baseline</code> and the <code>safe</code> and <code>unsafe</code> prefixes, keep their full specified keyword, and the <code>place-*</code> shorthands split two-word values and serialize a repeated value once. An absolutely positioned inline-level element that follows inline content takes its static position from the line it would have occupied, <code>scrollWidth</code> and <code>scrollHeight</code> include the end padding, and <code>offsetTop</code>/<code>offsetLeft</code> flush pending layout before locating the offset parent.</li>
+          <li><b>The page itself snaps.</b> <code>scroll-snap-type</code> worked on scroll containers only, which left out the arrangement almost every page that asks for snapping actually uses: full-height sections down the document, with the property on <code>html</code> or <code>body</code>. The document scroller is the one scroller that is not a box, so the solver now takes a snapport rather than deriving one, the renderer resolves the proposed offset against the root element&rsquo;s <code>scroll-snap-type</code> and returns the snapped one to the shell on the render response. Every source of document scrolling therefore snaps &mdash; the wheel, the scrollbar, the keyboard &mdash; in process-per-tab and <code>--single-process</code> alike, and <code>scroll-padding</code> on the root insets the viewport snapport.</li>
+          <li><b><code>Ctrl+P</code> prints in the default process-per-tab mode.</b> Printing paginated in the renderer and drew onto cairo recording surfaces, which cross no process boundary, so every window not started with <code>--single-process</code> &mdash; which is every window, by default &mdash; answered <i>Nothing to print</i>. The renderer now rasterises each finished sheet into the runtime directory the way the page export already hands a file across, and the shell loads the sheets back and feeds them to the same <code>GtkPrintOperation</code>. Single-process printing still hands the recording surfaces over untouched, so it keeps printing vectors.</li>
+          <li><b>Text selection that behaves.</b> The selection highlight was painted as one flat pass over the finished page, in document coordinates, so inside a scrolling box it landed where the text would have been unscrolled and ignored transforms and clips. It is now drawn where the text is drawn, from a range table computed once per frame, and goes down before the glyphs, which is what lets <code>::selection</code> carry an opaque background. <code>user-select</code> and <code>::selection</code> are read from where the style is, so <code>user-select: none</code> text no longer copies and a page&rsquo;s selection colours appear. Copied text reads like the page: line breaks where block boundaries are, <code>&lt;br&gt;</code> as a newline, and no more one-word-per-line paragraphs. Double-click selects a word and triple-click the block, with word edges from the shaper rather than an ASCII rule, and shift-click extends the selection. A page can see and set the selection it is showing: <code>getSelection()</code> describes the real one, <code>execCommand</code> performs <code>copy</code>, <code>cut</code>, <code>selectAll</code> and <code>unselect</code>, and <code>clipboard.writeText</code> reaches the system clipboard. Reading the clipboard stays refused.</li>
+          <li><b>Registered custom properties.</b> <code>@property</code> was parsed for <code>inherits</code> and <code>initial-value</code> and nothing else; the <code>syntax</code> descriptor was read past, and <code>CSS.registerProperty</code> was absent. Both now go through one grammar that parses a <code>&lt;syntax&gt;</code> string and matches a value against it, arithmetic included, so <code>calc(7in - 12px)</code> is a <code>&lt;length&gt;</code> and <code>calc(5px + 10%)</code> is not. A registered property computes its value &mdash; a <code>&lt;length&gt;</code> arrives in pixels, an <code>&lt;angle&gt;</code> in degrees, a <code>&lt;color&gt;</code> as <code>rgb()</code> &mdash; and a registration from script restyles the page. The CSSOM grew <code>CSSPropertyRule</code>, <code>@counter-style</code> rejects the names it may not take, and the tokenizer decides what starts an identifier the way CSS Syntax does, so the subtraction in <code>calc(7in - 12px)</code> is an operator rather than a name.</li>
+          <li><b>Viewport units inside a frame measure that frame.</b> <code>vw</code>, <code>vh</code>, <code>vmin</code>, <code>vmax</code> and their small, large and dynamic spellings resolved against the top-level window wherever they appeared, so a 200&times;100 iframe laid its <code>100vw</code> box out at the width of the whole browser. The cascade swaps in the frame&rsquo;s own viewport while it walks a nested document, the way media-query evaluation already did. <code>document.fonts.ready</code> waits for the web fonts the page needs and <code>fonts.status</code> reports <code>loading</code> meanwhile.</li>
+          <li><b>The user decides what runs.</b> An <i>Enable JavaScript</i> toggle in Settings (and <code>NS_NO_JAVASCRIPT=1</code>) parses pages with scripting disabled, so <code>noscript</code> content renders, and skips script execution entirely &mdash; in the old Mozilla tradition. Popup blocking follows Firefox 1: <code>window.open</code> only navigates within five seconds of a real user gesture, consumes that activation, and logs blocked attempts to the console; <code>navigator.userActivation</code> reports the live state.</li>
+          <li><b>The classic browser, restored.</b> <code>view-source:</code> &mdash; <code>Ctrl+U</code> or <i>Page Source</i> in the menu &mdash; shows the current page&rsquo;s HTML with classic syntax highlighting; only chrome-initiated navigations can use the scheme. <code>Ctrl+Enter</code> in the address bar completes a bare name to <code>www.name.com</code>, <code>Shift+Enter</code> to <code>.net</code> and <code>Ctrl+Shift+Enter</code> to <code>.org</code>. <code>Ctrl+Shift+R</code> and <code>Ctrl+F5</code> reload bypassing the HTTP cache, <code>Ctrl+D</code> bookmarks the page, the status bar reads <i>Done</i> for a moment when a page finishes loading, <code>about:mozilla</code> shows the maroon page every browser of this lineage owes its readers, <code>about:config</code> opens the settings page, and <code>about:book</code> carries its Book. The heading of <code>about:nordstjernen</code> names the browser&rsquo;s version and nothing else.</li>
+          <li><b>Forms follow the specification.</b> <code>input.showPicker()</code> and <code>select.showPicker()</code> throw <code>InvalidStateError</code> on disabled or readonly controls and <code>NotAllowedError</code> without a user gesture (WPT show-picker 129/129). <code>stepUp()</code> and <code>stepDown()</code> honour the per-type default step and scale, round to the step grid, clamp to min/max, and serialize date, month, week, time and datetime-local values back to their canonical strings (WPT input-stepup 53/53, time 32/32). The color input sanitizes through the CSS colour parser, <code>label.control</code>, <code>label.form</code> and <code>.labels</code> follow the spec, and constraint validation computes <code>ValidityState</code> for disabled and readonly controls, compiles <code>pattern</code> as a <code>v</code>-flag regular expression, and fires <code>tooLong</code> and <code>tooShort</code> only after a user edit &mdash; the patternMismatch, tooLong, tooShort, typeMismatch and badInput suites now fully pass.</li>
+          <li><b>WebIDL semantics for live collections.</b> <code>HTMLCollection</code> and <code>NodeList</code> give silent sloppy-mode failures and strict-mode <code>TypeError</code>s for read-only indexed and named properties, spec-compliant descriptors, expando support, and <code>Object.keys</code> listing only indices; <code>moveBefore()</code> is <code>ParentNode</code>-only, <code>replaceChildren()</code> queues a single mutation record, <code>Node.isConnected</code> is true for any node whose root is a document, <code>HTMLDialogElement.showModal()</code> validates its state, <code>structuredClone</code> validates its arguments and transfer options, and <code>AbortSignal.abort()</code>, <code>timeout()</code> and <code>any()</code> produce standard <code>DOMException</code>s.</li>
+          <li><b>A faster DOM.</b> Event dispatch evaluates <code>composedPath()</code> lazily and skips listener arrays on nodes that have none; the standard <code>Event</code> methods are bound on <code>Event.prototype</code>; <code>document.createElement</code>, the attribute operations, <code>textContent</code>, <code>innerText</code>, <code>classList</code>, <code>dataset</code> and <code>CSS.escape</code> take zero-allocation fast paths; <code>Element.matches()</code> and <code>closest()</code> match simple class, tag and id selectors without building a selector AST; subtree <code>getElementById</code> queries use the document&rsquo;s id index and bloom filters; and setting an identical <code>localStorage</code> value neither allocates nor dispatches. <code>line-height</code> resolves every root-relative, font-relative, viewport and container-query unit.</li>
+          <li><b>Memory safety.</b> Fixed a use-after-free of the session URL: timer, event-dispatch and <code>requestAnimationFrame</code> callbacks saved the current URL pointer and restored it unconditionally afterwards, so a handler that navigated &mdash; a fragment click, <code>location.hash =</code>, <code>history.pushState</code> &mdash; left the engine reading and double-freeing a freed URL. It is now restored only when it was actually swapped for an iframe realm. Counter formatting buffers are bounded, pseudo-content resolution guarantees forward progress, tree traversals are depth-bounded and document-order comparisons are cycle-protected.</li>
+          <li><b>Smaller things.</b> The Norwegian <code>Accept-Language</code> configuration carries complete fallbacks across Bokm&aring;l, Nynorsk and generic Norwegian; the ns-pango subproject pin moves to the latest upstream commit; and the WPT harness&rsquo;s testdriver bridge grants real user activation for simulated gestures, with its hooks inert outside the harness.</li>
+        </ul>
+
+        <h2>about Nordstjernen</h2>
+        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial, 0 absent across WHATWG HTML sections 1&ndash;16 as of July 2026. Against the <a href="https://github.com/web-platform-tests/wpt">Web Platform Tests</a>, the full wpt-fast tree passes 88.4% of subtests overall &mdash; 91.7% of the HTML suite. See <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p><b>Secure.</b> Process-per-tab design &mdash; each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
+        <p><b>Minimalism.</b> The core engine is about 185,000 lines of project C and headers (plus a thin GTK 4 shell), excluding the vendored libraries and generated assets &mdash; small enough for one person to read and audit end-to-end.</p>
+        <p><b>Private.</b> Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind, and deliberately includes no AI assistant and no AI-style web APIs.</p>
+
+        <a id="news"></a>
+        <h2>news</h2>
+        <p><span class="date">16&nbsp;SEP&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.24</b> released &mdash; flexbox and grid rebuilt against the specifications, the page itself scroll-snaps, printing in process-per-tab mode, text selection that behaves, registered custom properties, a JavaScript off switch, and a painted about:start.
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.24">Release notes &raquo;</a></p>
+
+        <p><span class="date">16&nbsp;SEP&nbsp;2026</span> &middot;
+        Northstar <b>1.0.8</b> released &mdash; transitions and animations on every property with a Web Animations API, <code>border-image</code>, the <code>background</code> shorthand parsed layer by layer, <code>position: fixed</code> that stays put, and lexbor 3.0.1.
+        <a href="northstar-release-1-0-8.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.8">Release notes &raquo;</a></p>
+
+        <p><span class="date">8&nbsp;AUG&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.23</b> released &mdash; printing with <code>@page</code> and print stylesheets, correct <code>offsetLeft</code>/<code>offsetTop</code>, flexbox static positions, CSS Scroll Snap, and quickjs-ng 0.16.1.
+        <a href="release-1-0-23.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.23">Release notes &raquo;</a></p>
+
+        <p><span class="date">8&nbsp;AUG&nbsp;2026</span> &middot;
+        Northstar <b>1.0.7</b> released &mdash; printing, a rebuilt about:start sky and earth, CSS Scroll Snap, frames that talk to their parent, and quickjs-ng 0.16.1.
+        <a href="northstar-release-1-0-7.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7">Release notes &raquo;</a></p>
+
+        <p><span class="date">31&nbsp;JUL&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.22</b> released &mdash; real-site layout fixes, a rebuilt grid, faster text through ns-pango, a reworked toolbar, and a much more capable Android app.
+        <a href="release-1-0-22.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.22">Release notes &raquo;</a></p>
+
+        <p><span class="date">5&nbsp;JUN&nbsp;2026</span> &middot;
+        Nordstjernen <b>1.0.0</b> released &mdash; the first stable release.
+        <a href="release-1-0-0.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.0">Release notes &raquo;</a></p>
+
+        <a id="download"></a>
+        <h2>download</h2>
+        <p>Latest tagged release: Nordstjernen <b>1.0.24</b> &mdash; released 16 September 2026, as source.
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.24">full release notes &raquo;</a></p>
+
+        <p>Nordstjernen is also available on the
+        <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a> and
+        <a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a>.</p>
+
+        <table class="spec dl">
+          <tr>
+            <th>Source</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.24.tar.gz">1.0.24.tar.gz</a> &middot;
+                <a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.24.zip">1.0.24.zip</a></td>
+          </tr>
+          <tr>
+            <th>Windows</th>
+            <td><a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a></td>
+          </tr>
+          <tr>
+            <th>Android</th>
+            <td><a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a></td>
+          </tr>
+          <tr>
+            <th>Platform builds</th>
+            <td>The most recent prebuilt packages for Windows, macOS, Debian, Ubuntu, openSUSE, portable Linux, Alpine, FreeBSD, NetBSD and the JVM are from <a href="release-1-0-23.html#download">Nordstjernen 1.0.23</a>, on the <a href="download.html">download page</a>.</td>
+          </tr>
+          <tr>
+            <th>All releases</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">github.com/nordstjernen-web/nordstjernen-browser/releases</a></td>
+          </tr>
+        </table>
+
+  </div>
+
+  <div class="footer">
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="https://discord.gg/4W959nW5vF">Discord</a>
+  </div>
+
+</div>
+
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('a').forEach(function (link) {
+    link.addEventListener('mouseenter', function () {
+      window.status = link.getAttribute('href') || '';
+    });
+    link.addEventListener('mouseleave', function () {
+      window.status = 'nordstjernen.org';
+    });
+  });
+  window.status = 'nordstjernen.org';
+});
+</script>
+
+</body>
+</html>

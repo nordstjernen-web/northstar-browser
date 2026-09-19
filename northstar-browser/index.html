@@ -14,7 +14,7 @@
 <meta property="og:description" content="A minimalist, free-software web browser written from scratch in C. One window, one page, one process. No telemetry, no JIT.">
 <meta property="og:url" content="https://www.nordstjernen.org/northstar-browser/">
 <meta property="og:image" content="https://www.nordstjernen.org/screenshots/northstar-screenshot.png">
-<meta property="og:image:alt" content="Northstar 1.0.7's about:start start page">
+<meta property="og:image:alt" content="Northstar's about:start start page">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="../assets/nordstjernen.svg">
 <script type="application/ld+json">
@@ -24,9 +24,9 @@
   "name": "Northstar Browser",
   "applicationCategory": "BrowserApplication",
   "operatingSystem": "Linux, macOS, Windows",
-  "softwareVersion": "1.0.7",
+  "softwareVersion": "1.0.8",
   "url": "https://www.nordstjernen.org/northstar-browser/",
-  "downloadUrl": "https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7",
+  "downloadUrl": "https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.8",
   "license": "https://www.gnu.org/licenses/gpl-3.0.html",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
@@ -72,11 +72,11 @@
         <h1 id="about" style="color:#003366;">Northstar Browser</h1>
         <p class="lead">Northstar is a minimalist web browser written from scratch in C. One window, one page, one process &mdash; about 160,000 lines of original C, small enough for one person to read and audit end-to-end. It carries no upstream browser engine: no Gecko, no WebKit, no Blink. It is free software under the <b>GNU General Public License, version 3 or later</b>, and it runs on Linux, macOS and Windows.</p>
 
-        <p class="release-line">Northstar Browser version 1.0.7 released! The browser prints, the <code>about:start</code> sky and earth are rebuilt, CSS Scroll Snap lands, and frames can reach their parent again. Linux binaries too. <a href="../northstar-release-1-0-7.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7">More info here</a>.</p>
+        <p class="release-line">Northstar Browser version 1.0.8 released! Transitions and animations run on every property with a Web Animations API, <code>border-image</code> is implemented, the <code>background</code> shorthand is parsed layer by layer, <code>position: fixed</code> stays put, flexbox and grid are rebuilt against the specifications, and lexbor moves to 3.0.1. <a href="../northstar-release-1-0-8.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.8">More info here</a>.</p>
 
         <figure class="shot">
-          <a href="../screenshots/northstar-screenshot.png"><img src="../screenshots/northstar-screenshot.png" width="1024" height="768" loading="lazy" alt="Northstar 1.0.7's about:start start page — the rebuilt sky-and-earth splash above a search box"></a>
-          <figcaption class="cap">Northstar 1.0.7&rsquo;s <code>about:start</code> page &mdash; one window, one page, and a search box, under a rebuilt sky. <a href="../screenshots.html">more screenshots &raquo;</a></figcaption>
+          <a href="../screenshots/northstar-screenshot.png"><img src="../screenshots/northstar-screenshot.png" width="1024" height="768" loading="lazy" alt="Northstar's about:start start page — the sky-and-earth splash above a search box"></a>
+          <figcaption class="cap">Northstar&rsquo;s <code>about:start</code> page &mdash; one window, one page, and a search box, under the sky rebuilt in 1.0.7. <a href="../screenshots.html">more screenshots &raquo;</a></figcaption>
         </figure>
 
         <div class="features">
@@ -88,7 +88,7 @@
 
         <h2 id="features">what it does</h2>
         <ul class="news">
-          <li><b>HTML and CSS.</b> HTML is parsed to a DOM by <a href="https://github.com/lexbor/lexbor">lexbor</a>; CSS goes through the engine's own cascade &mdash; flex, grid, transforms, gradients, <code>@keyframes</code>, container queries, scroll snap, relative colour syntax and the <code>color()</code> function across nine colour spaces.</li>
+          <li><b>HTML and CSS.</b> HTML is parsed to a DOM by <a href="https://github.com/lexbor/lexbor">lexbor</a>; CSS goes through the engine's own cascade &mdash; flex, grid, transforms, transitions and <code>@keyframes</code> animations on every property (with a Web Animations API from script), gradients, <code>border-image</code>, container queries, scroll snap on scroll containers and on the page itself, relative colour syntax and the <code>color()</code> function across nine colour spaces.</li>
           <li><b>JavaScript.</b> <a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a>, a bytecode interpreter with no JIT &mdash; DOM, Shadow DOM, observer APIs, Canvas&nbsp;2D (<code>Path2D</code>, <code>ImageBitmap</code>, <code>DOMMatrix</code>) and WebCrypto (<code>crypto.subtle</code> over OpenSSL).</li>
           <li><b>Frames</b> &mdash; a framed document gets its own realm and its own Content-Security-Policy, and cross-document <code>postMessage</code> works in both directions.</li>
           <li><b>Printing</b> &mdash; <code>Ctrl+P</code> lays the page out for paper and hands the sheets to the operating system's own print dialog through <code>GtkPrintOperation</code>: CUPS on Linux, the Win32 dialog on Windows, the Cocoa panel on macOS. <code>@media print</code>, <code>@page</code> sheet sizes and margins, and the <code>break-*</code> properties all apply; <code>--dump=print:FILE</code> writes the same pagination to a multi-page PDF.</li>
@@ -112,17 +112,17 @@
         <h2 id="specs">specifications</h2>
         <div class="table-scroll">
         <table class="spec">
-          <caption class="sr-only">Technical specifications of Northstar 1.0.7</caption>
+          <caption class="sr-only">Technical specifications of Northstar 1.0.8</caption>
           <tr><th scope="row">version</th>
-              <td><b>1.0.7</b> &mdash; released 8 August 2026 &middot; <a href="../northstar-release-1-0-7.html">announcement</a></td></tr>
+              <td><b>1.0.8</b> &mdash; released 16 September 2026 &middot; <a href="../northstar-release-1-0-8.html">announcement</a></td></tr>
           <tr><th scope="row">character</th>
               <td>free-software edition of the Nordstjernen project &middot; single window, single page, single process</td></tr>
           <tr><th scope="row">language</th>
               <td>C &middot; ~160 kLOC original, excluding the vendored WAMR, Wuffs and audio decoders &middot; GTK&nbsp;4 shell &middot; fully auditable</td></tr>
           <tr><th scope="row">html / css</th>
-              <td><a href="https://github.com/lexbor/lexbor">lexbor</a> v3.0.0 (parser, WHATWG URL, selectors) &middot; the engine's own cascade and layout</td></tr>
+              <td><a href="https://github.com/lexbor/lexbor">lexbor</a> v3.0.1 (parser, WHATWG URL, selectors) &middot; the engine's own cascade and layout</td></tr>
           <tr><th scope="row">javascript</th>
-              <td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> v0.16.1 &mdash; bytecode interpreter, no JIT</td></tr>
+              <td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> v0.16.2 &mdash; bytecode interpreter, no JIT</td></tr>
           <tr><th scope="row">text</th>
               <td><a href="https://github.com/nordstjernen-web/ns-pango">ns-pango</a> &mdash; a Pango fork with a process-wide shaping cache &middot; HarfBuzz &middot; FriBidi</td></tr>
           <tr><th scope="row">webassembly</th>
@@ -148,7 +148,7 @@
           <tr><th scope="row">privacy</th>
               <td>no telemetry &middot; no update pings &middot; HSTS &middot; CSP &middot; SRI &middot; partitioned cookies and storage &middot; on-device safe browsing against a local blocklist</td></tr>
           <tr><th scope="row">standards</th>
-              <td>behaviour measured against the spec text, section by section &middot; web-platform-tests run through headless mode &middot; see <a href="https://github.com/nordstjernen-web/northstar-browser/blob/main/docs/compliance.md">docs/compliance.md</a></td></tr>
+              <td>behaviour measured against the spec text, section by section &middot; web-platform-tests run through headless mode: 46,653 of 68,725 subtests across 37 <code>css/</code> areas (September 2026) &middot; see <a href="https://github.com/nordstjernen-web/northstar-browser/blob/main/docs/compliance.md">docs/compliance.md</a></td></tr>
           <tr><th scope="row">platforms</th>
               <td>linux (primary) &middot; macos &middot; windows</td></tr>
           <tr><th scope="row">license</th>
@@ -160,25 +160,35 @@
         <p>See the <a href="../index.html#specs">side-by-side comparison of Nordstjernen and Northstar</a> on the home page.</p>
 
         <h2 id="download">download</h2>
-        <p>Latest tagged release: Northstar <b>1.0.7</b> &mdash; released 8 August 2026.
+        <p>Latest tagged release: Northstar <b>1.0.8</b> &mdash; released 16 September 2026, as source.
+        <a href="../northstar-release-1-0-8.html">read the announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.8">full release notes &raquo;</a></p>
+
+        <p>The most recent binaries are from Northstar <b>1.0.7</b> &mdash; released 8 August 2026.
+        <a href="../northstar-release-1-0-7.html">read the announcement &raquo;</a> &middot;
         <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7">full release notes &raquo;</a></p>
 
         <table class="spec dl">
-          <caption class="sr-only">Northstar 1.0.7 downloads</caption>
+          <caption class="sr-only">Northstar downloads</caption>
           <tr>
-            <th scope="row">Windows</th>
+            <th scope="row">Source (1.0.8)</th>
+            <td><a href="https://github.com/nordstjernen-web/northstar-browser/archive/refs/tags/1.0.8.tar.gz">1.0.8.tar.gz</a> &middot;
+                <a href="https://github.com/nordstjernen-web/northstar-browser/archive/refs/tags/1.0.8.zip">1.0.8.zip</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Windows (1.0.7)</th>
             <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.7/northstar-1.0.7-windows-x86_64.zip">northstar-1.0.7-windows-x86_64.zip</a> &mdash; self-contained, no installer</td>
           </tr>
           <tr>
-            <th scope="row">Linux (portable)</th>
+            <th scope="row">Linux, portable (1.0.7)</th>
             <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.7/northstar-1.0.7-linux-x86_64.zip">northstar-1.0.7-linux-x86_64.zip</a></td>
           </tr>
           <tr>
-            <th scope="row">Linux (AppImage)</th>
+            <th scope="row">Linux AppImage (1.0.7)</th>
             <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.7/northstar-1.0.7-x86_64.AppImage">northstar-1.0.7-x86_64.AppImage</a> &mdash; <code>chmod +x</code> and run</td>
           </tr>
           <tr>
-            <th scope="row">Debian / Ubuntu</th>
+            <th scope="row">Debian / Ubuntu (1.0.7)</th>
             <td><a href="https://github.com/nordstjernen-web/northstar-browser/releases/download/1.0.7/northstar_1.0.7_amd64.deb">northstar_1.0.7_amd64.deb</a></td>
           </tr>
           <tr>
@@ -186,7 +196,7 @@
             <td>build from source with meson &mdash; see <a href="#build">build and run</a> below</td>
           </tr>
           <tr>
-            <th scope="row">Source</th>
+            <th scope="row">Source (1.0.7)</th>
             <td><a href="https://github.com/nordstjernen-web/northstar-browser/archive/refs/tags/1.0.7.tar.gz">1.0.7.tar.gz</a> &middot;
                 <a href="https://github.com/nordstjernen-web/northstar-browser/archive/refs/tags/1.0.7.zip">1.0.7.zip</a></td>
           </tr>
@@ -203,7 +213,7 @@
         archive first saves repeating it on <code>northstar.exe</code> afterwards, since the
         mark is copied to every file extracted from a blocked archive.</p>
 
-        <p><a class="btn-red" href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.7">Download Northstar 1.0.7 &raquo;</a></p>
+        <p><a class="btn-red" href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.8">Download Northstar 1.0.8 &raquo;</a></p>
 
         <h2 id="build">build and run</h2>
         <p>Linux is the primary platform. On Debian or Ubuntu, install the development
@@ -243,6 +253,11 @@
 
         <h2 id="news">news</h2>
         <ul class="news">
+        <li><time class="date" datetime="2026-09-16">16&nbsp;SEP&nbsp;2026</time> &middot;
+        Northstar <b>1.0.8</b> released &mdash; transitions and animations on every property with a Web Animations API, <code>border-image</code>, the <code>background</code> shorthand parsed layer by layer, <code>position: fixed</code> that stays put, flexbox and grid rebuilt against the specifications, and lexbor 3.0.1.
+        <a href="../northstar-release-1-0-8.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.8">Release notes &raquo;</a></li>
+
         <li><time class="date" datetime="2026-09-06">6&nbsp;SEP&nbsp;2026</time> &middot;
         <b>CVE-2026-85046 and Northstar</b> &mdash; the actively exploited Chrome V8 type confusion does not apply to Northstar or Nordstjernen: no V8, no JIT, no elements kind to confuse, no write barrier to skip.
         <a href="../cve-2026-85046-northstar.html">Read the analysis &raquo;</a></li>
