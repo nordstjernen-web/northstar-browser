@@ -4,24 +4,32 @@ Significant changes in each release:
 
 1.0.9:
 ======
-* The `about:start` splash is redrawn as an xkcd-style comic in black
-  ink on white: Noah, bearded and leaning on his staff, waves the animals
-  up the gangplank two by two -- dogs, sheep, pigs, an elephant with a
-  pair of monkeys on its back, lions, cows, zebras, kangaroos, bears and
-  camels queue on the shore, turtles crawl up the ramp, ducks paddle
-  beside the hull, rabbits and mice ride the deck and roof, snakes sun
+* The `about:start` splash is an xkcd-style comic in black ink on
+  white, drawn with perspective: the animal pairs queue along a road that
+  converges toward a horizon of distant hills, each pair smaller and
+  finer-lined the further back it stands, while the ark sits in
+  three-quarter view with a visible cabin side, a hatched roof and hull,
+  and a foreshortened deck. Noah, bearded and leaning on his staff, waves
+  the animals up the gangplank two by two -- dogs, sheep, pigs, an
+  elephant with a pair of monkeys on its back, lions, cows, zebras,
+  kangaroos, bears, camels, cats, turtles, ducks, rabbits, mice and
+  penguins -- turtles crawl up the ramp, ducks paddle beside the hull,
+  rabbits ride the stern deck, cats and mice sit on the roof, snakes sun
   on the ridge, giraffes poke through the cabin roof and penguins stand
-  at the bow -- while a woman on deck holds an umbrella against the rain,
-  doves circle the clouds and a whale spouts astern. Noah's speech bubble
-  reads "Two of each. Yes, even browsers." and the title block carries
-  the 1.0.9 number above the tagline "Yet another web browser." The 24
-  frames animate the rain, waves, walking legs, hopping rabbits and
-  kangaroos, the slithering snakes, the doves' wings and Noah's wave on
-  one 256-colour palette, so the GIF stays around 500 KB.
-  `scripts/gen-splash.sh` now runs `scripts/gen-splash.py`, a numpy and
-  Pillow renderer with hand-wobbled strokes and Comic Neue lettering that
-  no longer needs ImageMagick; gifsicle remains an optional final
-  optimiser. The README screenshot shows the new page.
+  at the bow, while a woman on deck holds an umbrella against the rain
+  and doves circle the clouds. Noah's speech bubble reads "Two of each.
+  Yes, even browsers." and the title block carries the 1.0.9 number above
+  the tagline "Yet another web browser." The 32 frames at 80 ms animate
+  near and far rain drifting in gusts, the waves, the ark rocking and
+  heaving, walking legs, nodding heads, the elephant's trunk and ears,
+  hopping rabbits and kangaroos, slithering snakes, the umbrella tilting,
+  the doves flying a figure of eight, a whale surfacing to spout and a
+  lightning flash, on one 256-colour palette rendered at three times
+  supersampling; the GIF is about 750 KB. `scripts/gen-splash.sh` runs
+  `scripts/gen-splash.py`, a numpy and Pillow renderer with hand-wobbled
+  strokes seeded per element and Comic Neue lettering that needs no
+  ImageMagick; gifsicle remains an optional final optimiser. The README
+  screenshot shows the new page.
 * `<textarea rows>` and `cols` are parsed as bounded non-negative
   integers (1 to 1000, defaulting to 2 and 20), so an attribute like
   `rows="2000000000"` no longer makes layout build billions of
