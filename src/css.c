@@ -26302,6 +26302,10 @@ resolve_pending_into_matches(GArray *pending_matches,
         }
         gboolean ignored_important = FALSE;
         css_strip_important(substituted, &ignored_important);
+        if (ignored_important) {
+            g_free(substituted);
+            continue;
+        }
         char *synth = g_strdup_printf("%s: %s;}", pm->pd->pname, substituted);
         g_free(substituted);
         GArray *temp = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
