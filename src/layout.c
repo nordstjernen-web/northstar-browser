@@ -6685,10 +6685,17 @@ layout_image(ns_box *box, double parent_content_width)
     double pct_width_base = parent_content_width;
     if (flex_row_item && box->parent->content_width > 0)
         pct_width_base = box->parent->content_width;
+    gboolean border_box = box->style &&
+        keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box");
+    double horiz_extras = box->padding.left + box->padding.right +
+                          box->border.left + box->border.right;
+    double vert_extras = box->padding.top + box->padding.bottom +
+                         box->border.top + box->border.bottom;
     double w = -1, h = -1;
-    if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC))
+    if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC)) {
         w = length_resolve(wv, pct_width_base, -1);
-    else if (height_keyword_stretches(wv)) {
+        if (border_box && w >= 0) w = MAX(w - horiz_extras, 0);
+    } else if (height_keyword_stretches(wv)) {
         w = parent_content_width
           - box->margin.left - box->margin.right
           - box->padding.left - box->padding.right
@@ -6706,6 +6713,7 @@ layout_image(ns_box *box, double parent_content_width)
         } else {
             h = resolve_used_height(box, hv, parent_content_width, -1);
         }
+        if (border_box && h >= 0) h = MAX(h - vert_extras, 0);
     } else if (height_keyword_stretches(hv)) {
         double cb_h = containing_block_definite_height(box);
         if (cb_h >= 0) {
@@ -6778,6 +6786,12 @@ layout_image(ns_box *box, double parent_content_width)
     double max_h = resolve_used_height(box, mxh, parent_content_width, -1);
     double min_w = length_resolve(mnw, pct_width_base, -1);
     double min_h = resolve_used_height(box, mnh, parent_content_width, -1);
+    if (border_box) {
+        if (max_w >= 0) max_w = MAX(max_w - horiz_extras, 0);
+        if (max_h >= 0) max_h = MAX(max_h - vert_extras, 0);
+        if (min_w >= 0) min_w = MAX(min_w - horiz_extras, 0);
+        if (min_h >= 0) min_h = MAX(min_h - vert_extras, 0);
+    }
     double keyword_w = intrinsic_ratio > 0 && h_specified ? h * intrinsic_ratio : nat_w;
     if (max_w < 0 && replaced_size_keyword(mxw) && keyword_w >= 0) max_w = keyword_w;
     if (min_w < 0 && replaced_size_keyword(mnw) && keyword_w >= 0) min_w = keyword_w;
