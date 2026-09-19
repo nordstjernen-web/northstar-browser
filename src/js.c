@@ -18696,6 +18696,11 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
                     "FormData: the submitter is not owned by this form");
             }
         }
+        if (form->flags & NS_NODE_CONSTRUCTING_ENTRIES) {
+            JS_FreeValue(ctx, obj);
+            return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+                "FormData: the form is already constructing its entry list");
+        }
         ns_form_data_populate_from_form(ctx, obj, form, submitter);
     }
     ns_js *jsx = js_from_ctx(ctx);
@@ -18747,7 +18752,57 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, r);
     }
+    if (jsx && argc >= 1 && !JS_IsUndefined(argv[0])) {
+        ns_node *form = ns_unwrap_element_mut(argv[0]);
+        form->flags |= NS_NODE_CONSTRUCTING_ENTRIES;
+        JSValue event = ns_make_event(ctx, "formdata", form);
+        JS_SetPropertyStr(ctx, event, "bubbles", JS_TRUE);
+        JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
+        JS_SetPropertyStr(ctx, event, "formData", JS_DupValue(ctx, obj));
+        ns_js_dispatch_built_event(jsx, form, "formdata", event, NULL);
+        form->flags &= ~NS_NODE_CONSTRUCTING_ENTRIES;
+    }
     return obj;
+}
+
+gboolean
+ns_js_form_entry_list(ns_js *js, const ns_node *form, const ns_node *submitter,
+                      GString *query, gboolean *first)
+{
+    if (!js || !js->ctx || !form || js->halted) return FALSE;
+    JSContext *ctx = js->ctx;
+    JSValue args[2] = { ns_make_element(ctx, form),
+                        submitter ? ns_make_element(ctx, submitter) : JS_NULL };
+    JSValue fd = ns_window_form_data_ctor(ctx, JS_UNDEFINED, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
+    if (JS_IsException(fd)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return FALSE;
+    }
+    JSValue entries = JS_GetPropertyStr(ctx, fd, "_entries");
+    uint32_t len = ns_js_array_length(ctx, entries);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue pair = JS_GetPropertyUint32(ctx, entries, i);
+        JSValue name = JS_GetPropertyUint32(ctx, pair, 0);
+        JSValue value = JS_GetPropertyUint32(ctx, pair, 1);
+        if (JS_IsObject(value)) {
+            JSValue file_name = JS_GetPropertyStr(ctx, value, "name");
+            JS_FreeValue(ctx, value);
+            value = file_name;
+        }
+        const char *n = JS_ToCString(ctx, name);
+        const char *v = JS_ToCString(ctx, value);
+        ns_form_urlencoded_append_pair(query, first, n ? n : "", v ? v : "");
+        if (n) JS_FreeCString(ctx, n);
+        if (v) JS_FreeCString(ctx, v);
+        JS_FreeValue(ctx, name);
+        JS_FreeValue(ctx, value);
+        JS_FreeValue(ctx, pair);
+    }
+    JS_FreeValue(ctx, entries);
+    JS_FreeValue(ctx, fd);
+    return TRUE;
 }
 
 static JSValue

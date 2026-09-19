@@ -2284,6 +2284,19 @@ ns_browser_take_post(ns_browser *browser, size_t *out_len, char **out_ct)
 }
 
 static void
+browser_collect_form_entries(ns_browser *b, const ns_node *form,
+                             const ns_node *clicked, GString *out,
+                             gboolean *first)
+{
+    const ns_node *submitter =
+        clicked && clicked != form && !ns_node_is_text_input(clicked)
+            ? clicked : NULL;
+    if (b->js && ns_js_form_entry_list(b->js, form, submitter, out, first))
+        return;
+    ns_form_collect_inputs(form, b->doc, b->doc, out, first, clicked);
+}
+
+static void
 browser_perform_form_navigation(ns_browser *b, const ns_node *form,
                                 const ns_node *clicked)
 {
@@ -2320,7 +2333,7 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
     if (is_post) {
         GString *body = g_string_new(NULL);
         gboolean first = TRUE;
-        ns_form_collect_inputs(form, b->doc, b->doc, body, &first, clicked);
+        browser_collect_form_entries(b, form, clicked, body, &first);
         ns_form_set_submission_charset(NULL);
         g_free(b->pending_post_body);
         g_free(b->pending_post_ct);
@@ -2334,7 +2347,7 @@ browser_perform_form_navigation(ns_browser *b, const ns_node *form,
 
     GString *query = g_string_new(NULL);
     gboolean first = TRUE;
-    ns_form_collect_inputs(form, b->doc, b->doc, query, &first, clicked);
+    browser_collect_form_entries(b, form, clicked, query, &first);
     ns_form_set_submission_charset(NULL);
 
     char *frag = strchr(abs_action, '#');

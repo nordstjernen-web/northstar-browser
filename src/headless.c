@@ -98,6 +98,7 @@ static void
 headless_js_mutated(gpointer user_data) { (void)user_data; g_headless_layout_dirty = TRUE; }
 
 typedef struct headless_nav_capture {
+    ns_js *js;
     char *pending_url;
     char *pending_post_body;
     gsize pending_post_len;
@@ -189,8 +190,9 @@ headless_js_form_submit(const ns_node *form, const ns_node *submitter,
     ns_form_set_submission_charset(
         (accept_charset && *accept_charset) ? accept_charset
                                             : g_headless_doc_charset);
-    ns_form_collect_inputs(form, root, root, q, &first,
-                           submitter != form ? submitter : NULL);
+    const ns_node *trigger = submitter != form ? submitter : NULL;
+    if (!cap->js || !ns_js_form_entry_list(cap->js, form, trigger, q, &first))
+        ns_form_collect_inputs(form, root, root, q, &first, trigger);
     ns_form_set_submission_charset(NULL);
     headless_nav_capture_clear_post(cap);
     g_free(cap->pending_url);
@@ -1879,6 +1881,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                           headless_js_mutated, NULL,
                           headless_js_navigate, &nav_cap,
                           &navigation_timing);
+    nav_cap.js = js;
     if (js) ns_js_set_form_submit_cb(js, headless_js_form_submit, &nav_cap);
     ns_image_cache *image_cache = ns_image_cache_new();
     ns_box *layout = NULL;
