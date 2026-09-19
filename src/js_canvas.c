@@ -2467,7 +2467,8 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
         JS_SetPropertyStr(ctx, obj, "data",   data);
         return obj;
     }
-    if (rw > 32767 || rh > 32767)
+    if (rw > 32767 || rh > 32767 ||
+        (uint64_t)rw * (uint64_t)rh > (uint64_t)G_MAXSIZE / 4u)
         return JS_ThrowRangeError(ctx, "getImageData region too large");
     int dw = (int)rw, dh = (int)rh;
     uint8_t *out = g_try_malloc0((size_t)dw * (size_t)dh * 4u);
