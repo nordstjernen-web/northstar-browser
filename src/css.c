@@ -2401,16 +2401,15 @@ parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
     while (*space && is_ws(*space)) space++;
     gboolean ok = g_ascii_strncasecmp(space, "in", 2) == 0 &&
                   is_ws(space[2]);
-    gboolean in_oklab = FALSE;
+    gboolean in_oklab = FALSE, in_oklch = FALSE;
     if (ok) {
         space += 2;
         while (*space && is_ws(*space)) space++;
         gsize sl = 0;
         while (space[sl] && !is_ws(space[sl])) sl++;
-        in_oklab = (sl == 5 &&
-                    (g_ascii_strncasecmp(space, "oklab", 5) == 0 ||
-                     g_ascii_strncasecmp(space, "oklch", 5) == 0));
-        ok = in_oklab ||
+        in_oklab = sl == 5 && g_ascii_strncasecmp(space, "oklab", 5) == 0;
+        in_oklch = sl == 5 && g_ascii_strncasecmp(space, "oklch", 5) == 0;
+        ok = in_oklab || in_oklch ||
              (sl == 4 && g_ascii_strncasecmp(space, "srgb", 4) == 0) ||
              (sl == 11 && g_ascii_strncasecmp(space, "srgb-linear", 11) == 0) ||
              (sl == 3 && (g_ascii_strncasecmp(space, "hsl", 3) == 0 ||
@@ -2437,7 +2436,25 @@ parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
             double a1 = c1[3] / 255.0;
             double a2 = c2[3] / 255.0;
             double ao = a1 * w1 + a2 * w2;
-            if (in_oklab) {
+            if (in_oklch) {
+                double l1, aa1, bb1, l2, aa2, bb2;
+                srgb_to_oklab(c1[0], c1[1], c1[2], &l1, &aa1, &bb1);
+                srgb_to_oklab(c2[0], c2[1], c2[2], &l2, &aa2, &bb2);
+                double ch1 = hypot(aa1, bb1), ch2 = hypot(aa2, bb2);
+                double hh1 = atan2(bb1, aa1) * 180.0 / G_PI;
+                double hh2 = atan2(bb2, aa2) * 180.0 / G_PI;
+                if (ch1 < 1e-4) hh1 = hh2;
+                else if (ch2 < 1e-4) hh2 = hh1;
+                if (hh2 - hh1 > 180) hh1 += 360;
+                else if (hh1 - hh2 > 180) hh2 += 360;
+                double lo = 0, co = 0;
+                if (ao > 0) {
+                    lo = (l1 * a1 * w1 + l2 * a2 * w2) / ao;
+                    co = (ch1 * a1 * w1 + ch2 * a2 * w2) / ao;
+                }
+                double ho = (hh1 * w1 + hh2 * w2) * G_PI / 180.0;
+                oklab_to_srgb(lo, co * cos(ho), co * sin(ho), r, g, b);
+            } else if (in_oklab) {
                 double l1, aa1, bb1, l2, aa2, bb2;
                 srgb_to_oklab(c1[0], c1[1], c1[2], &l1, &aa1, &bb1);
                 srgb_to_oklab(c2[0], c2[1], c2[2], &l2, &aa2, &bb2);
@@ -2459,6 +2476,7 @@ parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
                 *g = (guint8)CLAMP((int)(gg + 0.5), 0, 255);
                 *b = (guint8)CLAMP((int)(bb + 0.5), 0, 255);
             }
+            if (h1 && h2 && sum < 100) ao *= sum / 100.0;
             *a = (guint8)CLAMP((int)(ao * 255 + 0.5), 0, 255);
         }
     }
