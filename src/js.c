@@ -40842,21 +40842,22 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
         if (JS_IsNumber(argv[1])) {
             int32_t idx = 0;
             JS_ToInt32(ctx, &idx, argv[1]);
-            int32_t i = 0;
-            for (ns_node *c = sel->first_child; c; c = c->next_sibling) {
-                if (c->kind == NS_NODE_ELEMENT && c->name &&
-                    g_ascii_strcasecmp(c->name, "option") == 0) {
-                    if (i == idx) { before = c; break; }
-                    i++;
-                }
-            }
+            GPtrArray *opts = g_ptr_array_new();
+            ns_select_collect_options(sel, opts);
+            if (idx >= 0 && (guint)idx < opts->len)
+                before = g_ptr_array_index(opts, idx);
+            g_ptr_array_free(opts, TRUE);
         } else {
             before = ns_unwrap_element_mut(argv[1]);
+            if (!before || before == sel || !ns_js_node_contains(sel, before))
+                return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+                    "HTMLSelectElement.add: before is not a descendant "
+                    "of the select");
         }
     }
     if (opt->parent) ns_node_remove(opt);
-    if (before && before->parent == sel)
-        ns_element_insert_before_single(_j, sel, opt, before);
+    if (before && before->parent)
+        ns_element_insert_before_single(_j, before->parent, opt, before);
     else
         ns_node_append_child(sel, opt);
     if (_j) _j->mutated = TRUE;
