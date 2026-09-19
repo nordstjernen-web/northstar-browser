@@ -39127,13 +39127,7 @@ ns_js_activate_label(ns_js *js, const ns_node *label, const ns_node *target)
 {
     for (const ns_node *cur = target; cur && cur != label; cur = cur->parent)
         if (ns_node_is_interactive_content(cur)) return;
-    const ns_node *control = NULL;
-    const char *forv = ns_element_get_attr(label, "for");
-    if (forv && *forv && js->current_doc) {
-        const ns_node *t = ns_node_find_by_id(js->current_doc, forv);
-        if (ns_js_node_is_labelable(t)) control = t;
-    }
-    if (!control) control = ns_js_first_labelable_descendant(label, 0);
+    const ns_node *control = ns_label_associated_control(label);
     if (!control || control == target) return;
     if (ns_node_is_disabled_form_control(control)) return;
     ns_js_activate_element(js, control);
