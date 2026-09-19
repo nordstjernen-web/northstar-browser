@@ -3131,6 +3131,22 @@ parse_one_selector(const char **pp, const char *end, int depth)
     return parse_one_selector_rel(pp, end, depth, FALSE);
 }
 
+static gboolean
+css_user_action_pseudo_at(const char *p, const char *end)
+{
+    static const char *const names[] = {
+        "hover", "active", "focus", "focus-visible", "focus-within",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++) {
+        gsize n = strlen(names[i]);
+        if ((gsize)(end - p) >= n &&
+            g_ascii_strncasecmp(p, names[i], n) == 0 &&
+            (p + n == end || !is_ident(p[n])))
+            return TRUE;
+    }
+    return FALSE;
+}
+
 static ns_css_selector *
 parse_one_selector_rel(const char **pp, const char *end, int depth,
                        gboolean relative)
@@ -3154,6 +3170,9 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
         char c = *p;
 
         if (c == ',' || c == '{') break;
+
+        if (sel->pseudo_element != NS_CSS_PE_NONE)
+            g_sel_parse_error = TRUE;
 
         if (c == '>' || c == '+' || c == '~') {
             if (relative && sel->compounds->len == 0 && !leading_comb_used)
@@ -3180,6 +3199,10 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
         while (p < end) {
             const char *tok_start = p;
             char cc = *p;
+            if (sel->pseudo_element != NS_CSS_PE_NONE &&
+                !(cc == ':' && p + 1 < end && p[1] != ':' &&
+                  css_user_action_pseudo_at(p + 1, end)))
+                g_sel_parse_error = TRUE;
             if (cc == '*' || (cc == '|' && !(p + 1 < end && p[1] == '='))) {
                 if (cc == '*') p++;
                 if (p < end && *p == '|' && !(p + 1 < end && p[1] == '=')) {
