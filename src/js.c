@@ -38284,6 +38284,8 @@ ns_node_is_focusable(const ns_node *el)
         const char *t = ns_element_get_attr(el, "type");
         return !(t && g_ascii_strcasecmp(t, "hidden") == 0);
     }
+    if (strcmp(n, "audio") == 0 || strcmp(n, "video") == 0)
+        return ns_element_get_attr(el, "controls") != NULL;
     const char *ce = ns_element_get_attr(el, "contenteditable");
     if (ce && g_ascii_strcasecmp(ce, "false") != 0) return TRUE;
     return FALSE;
@@ -38424,6 +38426,11 @@ ns_element_focus(JSContext *ctx, JSValueConst this_val,
     if (!el || !js) return JS_UNDEFINED;
     if (ns_element_effectively_inert(el)) return JS_UNDEFINED;
     if (ns_element_effectively_disabled(el)) return JS_UNDEFINED;
+    if (ns_node_is_element_named(el, "body")) {
+        ns_js_set_focus(js, NULL);
+        return JS_UNDEFINED;
+    }
+    if (!ns_node_is_focusable(el)) return JS_UNDEFINED;
     ns_js_set_focus(js, el);
     return JS_UNDEFINED;
 }
