@@ -20903,7 +20903,7 @@ static gboolean
 ns_el_is_checked(const ns_node *el)
 {
     if (ns_node_is_element_named(el, "option")) {
-        if (ns_element_get_attr(el, "selected")) return TRUE;
+        if (ns_option_is_selected(el)) return TRUE;
         const ns_node *sel = el->parent;
         if (ns_node_is_element_named(sel, "optgroup")) sel = sel->parent;
         return ns_node_is_element_named(sel, "select") &&

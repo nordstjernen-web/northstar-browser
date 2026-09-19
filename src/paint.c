@@ -2963,7 +2963,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 if (ry0 < opt_miny) opt_miny = ry0;
                 if (ry1 > opt_maxy) opt_maxy = ry1;
                 opt_count++;
-                if (ns_element_get_attr(r->dom, "selected") && opt_nsel < 64) {
+                if (ns_option_is_selected(r->dom) && opt_nsel < 64) {
                     opt_sel[opt_nsel].x0 = rx0; opt_sel[opt_nsel].y0 = ry0;
                     opt_sel[opt_nsel].x1 = rx1; opt_sel[opt_nsel].y1 = ry1;
                     opt_nsel++;

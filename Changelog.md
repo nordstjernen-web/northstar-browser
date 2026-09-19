@@ -4,13 +4,16 @@ Significant changes in each release:
 
 1.0.9:
 ======
-* The `about:start` splash is painted. The generator lays the same
-  scene -- sky, earth, clouds, the flying pig, the sun and the pole
-  star -- down in three tiers of oriented brush strokes that follow the
-  image's contours, with impasto relief, a canvas tooth, a warm umber
-  glaze in the shadows, a gilt frame and the sun and star kept luminous.
-  The strokes are fixed across the 36 frames so the animation reads as a
-  living painting rather than a flicker. It carries the 1.0.9 number.
+* The `about:start` splash is redrawn in a Firefox-inspired style: a
+  flame-coloured fox curls around a blue globe under a violet night sky,
+  a woman stands on the hill to the right holding a lantern up toward the
+  twinkling pole star, and the 1.0.9 number sits in the title. The
+  animation is 24 frames of flickering flame, swaying hair and dress,
+  pulsing lantern glow and a slowly turning globe on one 256-colour
+  palette with a static ordered dither, so the GIF stays around 420 KB.
+  `scripts/gen-splash.sh` now runs `scripts/gen-splash.py`, a numpy and
+  Pillow renderer that no longer needs ImageMagick; gifsicle remains an
+  optional final optimiser. The README screenshot shows the new page.
 * `<textarea rows>` and `cols` are parsed as bounded non-negative
   integers (1 to 1000, defaulting to 2 and 20), so an attribute like
   `rows="2000000000"` no longer makes layout build billions of
@@ -124,6 +127,99 @@ Significant changes in each release:
   `textarea.rows` reflects as a positive number with a fallback of 2; and
   the `form` attribute only selects a form owner while the control is
   connected.
+* Canvases are origin-tainted. Drawing a cross-origin `<img>` (including
+  one that redirected to another origin), a pattern made from one, an
+  ImageBitmap created from one or an already tainted canvas clears the
+  canvas's origin-clean flag, and `getImageData`, `toDataURL` and
+  `toBlob` then throw a `SecurityError` DOMException instead of leaking
+  the pixels; resizing the canvas restores the flag, and `data:`, `blob:`
+  and same-origin images stay clean. `getImageData` checks its
+  pixel-buffer size in 64-bit arithmetic before allocating.
+* Cross-origin frames no longer expose their DOM. `iframe.contentDocument`
+  and `getSVGDocument()` return `null` and `contentWindow` returns a
+  restricted window proxy (`postMessage`, the `location` setter,
+  `closed`, `length`, `window`/`self`/`frames`/`parent`/`top`/`opener`,
+  `close`/`focus`/`blur`; everything else throws `SecurityError`) when the
+  frame's origin differs from the embedding document or the frame is
+  sandboxed without `allow-same-origin`. Same-origin, `about:blank` and
+  `srcdoc` frames are unaffected.
+* `postMessage` matches `targetOrigin` exactly: the value is parsed to
+  scheme, host and port (a full URL collapses to its origin, the scheme
+  is case-folded, default ports drop) and compared for equality with the
+  target window's origin; `/` means the caller's own origin and `*`
+  still matches everything.
+* The CSS component-value parser bounds nesting at 512 levels and the
+  `@container` condition parser at 32, so a style sheet or a
+  `style.setProperty()` value made of hundreds of thousands of `(` no
+  longer overflows the stack.
+* An unterminated CSS string ends at the next newline as a bad-string
+  token, as css-syntax-3 requires, so `content:"x;` only invalidates its
+  own declaration instead of swallowing the rest of the block. `:not()`
+  and `:has()` with an empty argument are selector parse errors and drop
+  their rule; `p:not(){}` no longer matches every `p`. A pseudo-element
+  ends its compound selector: `div::before span`, `::before.x` and
+  `::before#id` are parse errors, while the user-action pseudo-classes
+  (`::before:hover`, `::after:focus-visible`) still follow it.
+* Custom properties are substituted at declaration time: with
+  `.a{--x:var(--y);--y:red} .b{--y:blue}` a `.b` inside `.a` inherits the
+  red `--x` computed on `.a`, and `getPropertyValue('--x')` returns `red`
+  rather than `var(--y)`. Registered properties are type-checked on the
+  substituted value. A `var()` cycle such as `--a:var(--b);--b:var(--a)`
+  makes every member guaranteed-invalid so fallbacks apply instead of
+  leaking the literal `var()` text once the depth cap was hit, and a
+  declaration whose substitution leaves a top-level `!important` is
+  dropped rather than kept with the keyword stripped.
+* `color-mix()` scales the result's alpha by the percentage sum when
+  both percentages are given and add up to less than 100%, and `in
+  oklch` interpolates in polar form with the hue along the shorter arc.
+* Shorthands reset the longhands they omit: `text-decoration` emits
+  line, style and colour (so `text-decoration:underline` after
+  `underline dotted red` renders solid in the current colour), `outline`
+  and `column-rule` reset to medium/none/currentcolor, `flex-flow` to
+  row/nowrap, `columns` to auto/auto and `border-block`/`border-inline`
+  reset width, style and colour on both sides. A shorthand containing a
+  token that does not parse is dropped whole -- `padding:10px auto` no
+  longer sets the top and bottom. `outline-style: auto` is accepted.
+* `-webkit-device-pixel-ratio`, `-webkit-min-device-pixel-ratio` and
+  `-webkit-max-device-pixel-ratio` are aliases of `resolution` in dppx,
+  and `@import` honours a `supports(...)` condition after its `layer()`
+  part.
+* `min()`, `max()` and `clamp()` keep `em`, `rem` and `lh` terms per
+  argument and resolve them against the element at computed-value time
+  instead of baking 16px and 19.2px at parse time, so
+  `font-size:clamp(1.6rem,4vw,2.4rem)` under `html{font-size:62.5%}`
+  clamps to 16-24px and `padding:max(1em,8px)` at 20px gives 20px.
+* Grid containers no longer cap auto-placement at 24 rows: the occupancy
+  map and row-size arrays grow with the content (up to 4096 implicit
+  rows), so long grid lists lay out one item per row instead of piling
+  everything past row 24 onto the last row.
+* Floats are placed at their margin-box top; a float with `margin-top`
+  previously landed a full margin lower than its siblings. Floats paint
+  above the backgrounds of in-flow blocks that follow them, `z-index`
+  applies to flex and grid items even when they are not positioned, and
+  positioned boxes with a negative `z-index` paint immediately after the
+  background of the stacking context that owns them.
+* A block whose first in-flow child has a top margin grows its own top
+  margin instead of keeping the collapsed margin inside its content box
+  (CSS 2.2 section 8.3.1), so a background on the parent no longer shows a
+  band above the first child and the collapse propagates through nested
+  ancestors. The root element and flow-root, flex, grid, float and
+  positioned boxes still keep their children's margins inside.
+* Table column counting and width measurement account for cells occupied
+  by a rowspan from an earlier row, a cell spanning several columns only
+  widens them when they add up to less than its own width (distributing
+  the excess proportionally), and `<col span width>` gives its width to
+  each covered column.
+* `text-align` no longer centres or right-aligns block-level tables,
+  images, video or SVG; auto margins, the table `align` attribute and the
+  legacy `<center>` / `align=` ancestry keep working. Wrapping flex
+  containers honour `margin-left:auto` / `margin-right:auto` on their
+  items, replaced elements respect `box-sizing:border-box`, and
+  `position:relative` offsets accept `calc()`, math functions and every
+  length unit.
+* The `:checked` selector on options and the listbox highlight read the
+  same selectedness the DOM uses, so an option chosen by script in a
+  `<select multiple>` matches `:checked` and paints selected.
 
 1.0.8:
 ======
