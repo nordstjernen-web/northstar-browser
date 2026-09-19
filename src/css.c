@@ -13138,11 +13138,13 @@ position_split_specified(const char *canon, char **out_x, char **out_y)
     for (int i = 0; i < n; i++) g_free(tok[i]);
 }
 
+#define NS_CSS_VAR_MAX_DEPTH 16
+
 static char *
 substitute_var_fallbacks(const char *vtext, int depth)
 {
     if (!vtext) return NULL;
-    if (depth > 16) return g_strdup(vtext);
+    if (depth > NS_CSS_VAR_MAX_DEPTH) return g_strdup("");
     GString *out = g_string_new(NULL);
     const char *p = vtext;
     const char *end = vtext + strlen(vtext);
@@ -13307,7 +13309,24 @@ typedef struct {
     gsize    out_bytes;
     guint    calls;
     gboolean overflow;
+    const char *active[NS_CSS_VAR_MAX_DEPTH + 1];
+    GHashTable *cyclic;
 } ns_var_budget;
+
+static gboolean
+var_budget_enter(ns_var_budget *b, const char *name, int depth)
+{
+    int first = -1;
+    for (int i = 0; i < depth && first < 0; i++)
+        if (b->active[i] && strcmp(b->active[i], name) == 0) first = i;
+    if (first < 0) {
+        b->active[depth] = name;
+        return TRUE;
+    }
+    for (int i = first; b->cyclic && i < depth; i++)
+        if (b->active[i]) g_hash_table_add(b->cyclic, g_strdup(b->active[i]));
+    return FALSE;
+}
 
 static gboolean
 var_budget_take(ns_var_budget *b, gsize n, gboolean *valid)
@@ -13327,7 +13346,10 @@ substitute_vars_with_valid(const char *vtext, const ns_var_map *map, int depth,
                            gboolean *valid, ns_var_budget *b)
 {
     if (!vtext) return NULL;
-    if (depth > 16) return g_strdup(vtext);
+    if (depth > NS_CSS_VAR_MAX_DEPTH) {
+        if (valid) *valid = FALSE;
+        return g_strdup("");
+    }
     if (b->overflow || ++b->calls > NS_CSS_VAR_EXPAND_CALLS) {
         b->overflow = TRUE;
         if (valid) *valid = FALSE;
@@ -13362,9 +13384,13 @@ substitute_vars_with_valid(const char *vtext, const ns_var_map *map, int depth,
             replacement = ns_var_map_lookup(map, name);
         if (replacement && *replacement &&
             !custom_prop_value_invalid(replacement)) {
-            gboolean sub_valid = TRUE;
-            char *sub = substitute_vars_with_valid(replacement, map,
-                                                   depth + 1, &sub_valid, b);
+            gboolean sub_valid = var_budget_enter(b, name, depth);
+            char *sub = NULL;
+            if (sub_valid) {
+                sub = substitute_vars_with_valid(replacement, map, depth + 1,
+                                                 &sub_valid, b);
+                b->active[depth] = NULL;
+            }
             if (sub_valid && custom_prop_value_invalid(sub)) {
                 ns_css_property_rule *pr = g_registered_props
                     ? g_hash_table_lookup(g_registered_props, name) : NULL;
@@ -13416,16 +13442,24 @@ substitute_vars_with_valid(const char *vtext, const ns_var_map *map, int depth,
 }
 
 static char *
-substitute_vars_with(const char *vtext, const ns_var_map *map, int depth)
+substitute_vars_tracked(const char *vtext, const ns_var_map *map,
+                        ns_var_budget *budget)
 {
     gboolean valid = TRUE;
-    ns_var_budget budget = { 0, 0, FALSE };
-    char *out = substitute_vars_with_valid(vtext, map, depth, &valid, &budget);
+    char *out = substitute_vars_with_valid(vtext, map, 0, &valid, budget);
     if (!valid) {
         g_free(out);
         return NULL;
     }
     return out;
+}
+
+static char *
+substitute_vars_with(const char *vtext, const ns_var_map *map, int depth)
+{
+    (void)depth;
+    ns_var_budget budget = { 0 };
+    return substitute_vars_tracked(vtext, map, &budget);
 }
 
 char *
@@ -25710,14 +25744,63 @@ var_map_apply_flat(GHashTable *vars, const ns_var_map *parent,
         var_map_restore_default(vars, parent, current->name, pr,
                                 !pr || pr->inherits);
     } else if (pr && pr->syntax && !ns_css_syntax_def_universal(pr->syntax) &&
-               !ns_css_syntax_def_matches(pr->syntax,
-                                          expanded ? expanded : value_text)) {
+               !strstr(value_text, "var(") &&
+               !ns_css_syntax_def_matches(pr->syntax, value_text)) {
         var_map_restore_default(vars, parent, current->name, pr, pr->inherits);
     } else {
         g_hash_table_replace(vars, g_strdup(current->name),
                              g_strdup(value_text));
     }
     g_free(expanded);
+}
+
+static void
+var_map_store_expanded(GHashTable *table, const ns_var_map *parent,
+                       const char *name, char *expanded)
+{
+    ns_css_property_rule *pr = g_registered_props
+        ? g_hash_table_lookup(g_registered_props, name) : NULL;
+    gboolean typed = pr && pr->syntax &&
+                     !ns_css_syntax_def_universal(pr->syntax);
+    if (expanded && (!typed ||
+                     ns_css_syntax_def_matches(pr->syntax, expanded))) {
+        g_hash_table_replace(table, g_strdup(name), expanded);
+        return;
+    }
+    g_free(expanded);
+    if (pr) var_map_restore_default(table, parent, name, pr, pr->inherits);
+    else g_hash_table_replace(table, g_strdup(name), g_strdup("initial"));
+}
+
+static void
+var_map_expand(GHashTable *table, const ns_var_map *scope_parent,
+               const ns_var_map *parent)
+{
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, table);
+    while (g_hash_table_iter_next(&it, &k, &v))
+        if (strstr(v, "var(")) g_ptr_array_add(names, g_strdup(k));
+    if (names->len == 0) {
+        g_ptr_array_free(names, TRUE);
+        return;
+    }
+    ns_var_map scope = { .ref = 1, .own = table,
+                         .parent = (ns_var_map *)scope_parent };
+    GHashTable *cyclic = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                               g_free, NULL);
+    for (guint i = 0; i < names->len; i++) {
+        const char *name = g_ptr_array_index(names, i);
+        const char *text = g_hash_table_lookup(table, name);
+        if (!text || !strstr(text, "var(")) continue;
+        ns_var_budget budget = { .cyclic = cyclic };
+        char *expanded = substitute_vars_tracked(text, &scope, &budget);
+        if (g_hash_table_contains(cyclic, name)) g_clear_pointer(&expanded, g_free);
+        var_map_store_expanded(table, parent, name, expanded);
+    }
+    g_hash_table_destroy(cyclic);
+    g_ptr_array_free(names, TRUE);
 }
 
 static double normal_line_height_px(double font_px);
@@ -25832,6 +25915,7 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
             if (!vm->name || !vm->text) continue;
             var_map_apply_unregistered(own, parent, var_matches, i);
         }
+        var_map_expand(own, parent, parent);
         return ns_var_map_new(own, ns_var_map_ref(parent));
     }
 
@@ -25893,6 +25977,7 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
         if (!vm->name || !vm->text) continue;
         var_map_apply_flat(vars, parent, var_matches, i);
     }
+    var_map_expand(vars, NULL, parent);
     ns_var_map *built = ns_var_map_new(vars, NULL);
     if (parent_has && !have_local && g_var_adjust_cache)
         g_hash_table_insert(g_var_adjust_cache, ns_var_map_ref(parent),
