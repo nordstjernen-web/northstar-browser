@@ -63,6 +63,67 @@ Significant changes in each release:
   `X-Download`, `X-Audio`) that exceed their length limit are dropped
   whole rather than truncated to a different URL or command, and a queued
   audio command is only appended when it fits.
+* Subresource redirects keep their initiator. A redirected image,
+  stylesheet, script or fetch no longer loses its top-level document
+  after the first hop; later hops keep the initiator's cookie and cache
+  partition, the same-site cookie rule and the real `Sec-Fetch-Site`,
+  `Sec-Fetch-Mode` and `Sec-Fetch-Dest` values instead of being treated as
+  a fresh navigation, and the WebExtension request-block check runs on
+  every hop.
+* The `about:settings-save` and `about:settings-clear` endpoints require
+  POST and read only the request body, a request without a top URL is
+  trusted only when it is a navigation, and web pages can no longer
+  navigate to `about:` pages other than `about:blank` and the start page.
+  Home page and search engine URLs saved from `about:settings` must be
+  http(s) (the home page may also be an `about:` page), free of control
+  characters and at most 2048 bytes, and the cookie policy must be a known
+  value.
+* `document.cookie` refuses a name that collides with an `HttpOnly`
+  cookie for the host in the site's network jar, so a server session
+  cookie is never replaced by or sent alongside a script-set value.
+* A `file:` page can still embed local images, scripts, stylesheets and
+  frames, but `fetch()` and `XMLHttpRequest` receive only an opaque
+  response for `file:` URLs, and directory listings are synthesized only
+  for navigations.
+* The Linux sandbox probes the Landlock ABI at startup, never grants
+  symlink creation, grants truncate (ABI 3+) only where writes are
+  allowed, and requests the link/rename right only on ABI 2+ so the
+  ruleset also builds on older kernels. CSP scheme-only, `*` and host
+  sources compare the parsed scheme, host and port of the resource URL
+  and fail closed on a malformed URL; numeric render-IPC headers reject
+  negative values.
+* Option selectedness no longer rewrites the `selected` attribute.
+  `option.selected`, `select.value`, `select.selectedIndex` and the
+  dropdown and listbox picking paths change an internal selectedness flag
+  (like checkbox checkedness) instead of the content attribute, so
+  `defaultSelected` keeps reflecting the markup, `form.reset()` restores
+  the default option, and `new Option(text, value, defaultSelected,
+  selected)` maps its arguments correctly.
+* Real clicks on checkboxes and radios follow the legacy-pre-activation
+  rules: a mouse click toggles the control before the `click` event,
+  reverts when the event is cancelled, and fires `input` and `change`
+  afterwards, matching `element.click()`; clicking a `<label>` dispatches
+  a synthetic `click` on its labeled control instead of toggling it
+  silently, and a label whose `for` names a missing element no longer
+  falls back to a descendant control.
+* `<base href>` applies to images loaded through `img.src`, `new Image()`
+  and srcset rescans and to `img.currentSrc`; `base.href` itself resolves
+  against the document's fallback base URL.
+* The `formdata` event fires when `new FormData(form)` is constructed and
+  on every real form submission, so listeners can append fields, and the
+  browser serializes that entry list. Real submissions validate like
+  `checkValidity()`: `minlength` and `maxlength` only block after a user
+  edit and `pattern` uses the JavaScript regex matcher.
+* `range.value`, `stepUp()` and `stepDown()` produce the shortest
+  round-trip decimal (`1234567`, `0.3`) instead of `1.23457e+06` or
+  `0.10000000000000001`, and number and range sanitization enforce the
+  HTML valid floating-point number grammar.
+* `focus()` ignores elements that are not focusable areas; `select.add(el,
+  index)` indexes across optgroups and inserts beside the reference;
+  `img.complete` stays false while a `srcset`-only image is loading;
+  `textarea.rows` reflects as a positive number with a fallback of 2; and
+  the `form` attribute only selects a form owner while the control is
+  connected.
 
 1.0.8:
 ======
