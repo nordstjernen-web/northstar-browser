@@ -313,6 +313,12 @@ ns_security_add_writable_dir(const char *dir)
 #ifndef LANDLOCK_ACCESS_FS_REFER
 #define LANDLOCK_ACCESS_FS_REFER (1ULL << 13)
 #endif
+#ifndef LANDLOCK_ACCESS_FS_TRUNCATE
+#define LANDLOCK_ACCESS_FS_TRUNCATE (1ULL << 14)
+#endif
+#ifndef LANDLOCK_CREATE_RULESET_VERSION
+#define LANDLOCK_CREATE_RULESET_VERSION (1U << 0)
+#endif
 
 static int
 landlock_create_ruleset_(const struct landlock_ruleset_attr *attr,
@@ -356,25 +362,32 @@ ns_security_sandbox_init(const char *self_exe)
 {
     if (g_getenv("NS_NO_SANDBOX")) return;
 
+    int abi = landlock_create_ruleset_(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION);
+    if (abi < 0) {
+        if (errno != ENOSYS && errno != EOPNOTSUPP)
+            g_info("landlock: version probe failed: %s", g_strerror(errno));
+        return;
+    }
     guint64 fs_read =
         LANDLOCK_ACCESS_FS_READ_FILE |
         LANDLOCK_ACCESS_FS_READ_DIR;
+    guint64 fs_write_file = LANDLOCK_ACCESS_FS_WRITE_FILE;
+    if (abi >= 3) fs_write_file |= LANDLOCK_ACCESS_FS_TRUNCATE;
     guint64 fs_write =
-        LANDLOCK_ACCESS_FS_WRITE_FILE |
+        fs_write_file |
         LANDLOCK_ACCESS_FS_MAKE_REG |
         LANDLOCK_ACCESS_FS_MAKE_DIR |
         LANDLOCK_ACCESS_FS_REMOVE_FILE |
-        LANDLOCK_ACCESS_FS_REMOVE_DIR |
-        LANDLOCK_ACCESS_FS_REFER;
+        LANDLOCK_ACCESS_FS_REMOVE_DIR;
+    if (abi >= 2) fs_write |= LANDLOCK_ACCESS_FS_REFER;
     guint64 fs_exec = LANDLOCK_ACCESS_FS_EXECUTE;
     guint64 fs_rw   = fs_read | fs_write;
-    guint64 fs_all  = fs_read | fs_write | fs_exec;
+    guint64 fs_all  = fs_read | fs_write | fs_exec | LANDLOCK_ACCESS_FS_MAKE_SYM;
 
     struct landlock_ruleset_attr attr = { .handled_access_fs = fs_all };
     int rfd = landlock_create_ruleset_(&attr, sizeof(attr), 0);
     if (rfd < 0) {
-        if (errno != ENOSYS && errno != EOPNOTSUPP)
-            g_info("landlock: create_ruleset failed: %s", g_strerror(errno));
+        g_info("landlock: create_ruleset failed: %s", g_strerror(errno));
         return;
     }
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
@@ -392,14 +405,13 @@ ns_security_sandbox_init(const char *self_exe)
         NULL,
     };
     add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE, "/dev/urandom");
-    add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE |
-                     LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/null");
+    add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE | fs_write_file, "/dev/null");
     for (gsize i = 0; system_exec_dirs[i]; i++)
         add_path_rw(rfd, fs_read | fs_exec, system_exec_dirs[i]);
     for (gsize i = 0; system_read_dirs[i]; i++)
         add_path_rw(rfd, fs_read, system_read_dirs[i]);
 
-    guint64 fs_dev = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE;
+    guint64 fs_dev = LANDLOCK_ACCESS_FS_READ_FILE | fs_write_file;
     for (int vi = 0; vi < 64; vi++) {
         char vdev[32];
         g_snprintf(vdev, sizeof vdev, "/dev/video%d", vi);
@@ -407,7 +419,7 @@ ns_security_sandbox_init(const char *self_exe)
             add_path_rw(rfd, fs_dev, vdev);
     }
     if (g_file_test("/dev/snd", G_FILE_TEST_IS_DIR))
-        add_path_rw(rfd, fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/snd");
+        add_path_rw(rfd, fs_read | fs_write_file, "/dev/snd");
 
     const char *xauth = g_getenv("XAUTHORITY");
     if (xauth && *xauth) {
