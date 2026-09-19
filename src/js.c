@@ -7908,9 +7908,6 @@ cors_allows(const char *doc_url, const char *resp_url, const char *cors_header)
     if (resp_url && (g_str_has_prefix(resp_url, "data:") ||
                      g_str_has_prefix(resp_url, "blob:") ||
                      g_str_has_prefix(resp_url, "about:"))) return TRUE;
-    if (resp_url && doc_url &&
-        g_str_has_prefix(resp_url, "file:") &&
-        g_str_has_prefix(doc_url, "file:")) return TRUE;
     if (ns_url_same_origin(doc_url, resp_url)) return TRUE;
     if (!cors_header || !*cors_header) return FALSE;
     char *trimmed = g_strdup(cors_header);
@@ -51069,13 +51066,17 @@ ns_location_toString(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
-ns_location_target_allowed(const char *s)
+ns_location_target_allowed(ns_js *js, const char *s)
 {
     if (!s || !*s) return FALSE;
     if (s[0] == '/' || s[0] == '?' || s[0] == '#') return TRUE;
     const char *colon = strchr(s, ':');
     const char *slash = strchr(s, '/');
     if (!colon || (slash && slash < colon)) return TRUE;
+    if (g_ascii_strncasecmp(s, "about:", 6) == 0)
+        return ns_about_url_is_public(s) ||
+               (js && js->current_url &&
+                g_str_has_prefix(js->current_url, "about:"));
     static const char *const allowed[] = {
         "http:", "https:", "about:", "data:", "mailto:", NULL,
     };
@@ -51114,7 +51115,7 @@ ns_location_set_href(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         return ns_throw_dom_exception(ctx, "SyntaxError", 12,
                                       "location.href: invalid URL");
     }
-    if (!ns_location_target_allowed(s)) {
+    if (!ns_location_target_allowed(js, s)) {
         ns_location_log_blocked(js, s);
         JS_FreeCString(ctx, s);
         return JS_UNDEFINED;
@@ -51136,7 +51137,7 @@ ns_location_assign(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     if (!js || !js->nav_cb || argc < 1) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, argv[0]);
     if (!s) return JS_UNDEFINED;
-    if (!ns_location_target_allowed(s)) {
+    if (!ns_location_target_allowed(js, s)) {
         ns_location_log_blocked(js, s);
         JS_FreeCString(ctx, s);
         return JS_UNDEFINED;

@@ -707,7 +707,11 @@ browser_js_mutated(gpointer user_data)
 static gboolean
 browser_allows_navigation_url(ns_browser *b, const char *url)
 {
-    if (!url || !g_str_has_prefix(url, "file:")) return TRUE;
+    if (!url) return TRUE;
+    if (g_str_has_prefix(url, "about:"))
+        return ns_about_url_is_public(url) ||
+               (b && b->base_url && g_str_has_prefix(b->base_url, "about:"));
+    if (!g_str_has_prefix(url, "file:")) return TRUE;
     return b && b->base_url && g_str_has_prefix(b->base_url, "file:");
 }
 

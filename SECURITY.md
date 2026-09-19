@@ -118,9 +118,13 @@ syscall allow-list as headless/tooling mode.
   camera. The rest of `$HOME` — `~/.ssh`, `~/.aws`, `~/.netrc`, other
   browsers' state, shell history — is **not** reachable. No directory the
   process can write to is also executable, so a bug cannot drop a payload
-  and then map it executable from a writable path. `PR_SET_NO_NEW_PRIVS`
-  is set here too, so a setuid binary cannot be used to regain privileges
-  after a compromise.
+  and then map it executable from a writable path. Symbolic-link creation
+  (`LANDLOCK_ACCESS_FS_MAKE_SYM`) is handled by the ruleset and granted
+  nowhere, and on Landlock ABI 3+ `truncate(2)` is handled and allowed
+  only where file writes are; the ABI is probed at startup so the
+  ruleset requests only rights the running kernel knows.
+  `PR_SET_NO_NEW_PRIVS` is set here too, so a setuid binary cannot be
+  used to regain privileges after a compromise.
 - **seccomp-bpf (syscalls) — applied in every Linux mode.** Default-deny
   allow-list: the filter is built with
   `SCMP_ACT_ERRNO(EPERM)` as the default action and then permits only the
@@ -251,7 +255,19 @@ cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
   comes from the Public Suffix List via libpsl. All subdomains within
   the same registrable domain share one cookie jar and one cache
   partition; everything else is isolated. Third-party cookies are
-  blocked by default.
+  blocked by default. A subresource keeps its initiating document
+  through every redirect hop, so a 302 cannot move it into the target's
+  first-party partition or relabel it as a navigation in the
+  `Sec-Fetch-*` headers.
+- `about:settings`, `about:config` and `about:history` are served only
+  to navigations and to requests made by about: pages; the settings
+  endpoints accept changes only by POST, validate the URLs they store,
+  and web content cannot navigate to any about: page other than
+  `about:blank` and the start page.
+- A `file:` document may embed local files as images, scripts,
+  stylesheets and frames, but `fetch()` and `XMLHttpRequest` receive
+  only an opaque response for a `file:` URL, and directory listings are
+  synthesized only for navigations.
 - CSP (`default-src`, `script-src`, `style-src`, `img-src`,
   `media-src`, `connect-src`, `font-src`, `frame-src`,
   `frame-ancestors`) is parsed and enforced for both inline and
@@ -406,6 +422,9 @@ The `document.cookie` setter:
   is rejected outright from non-HTTPS origins. `Domain` is range-checked
   against the document host before it widens scope; absent, the cookie
   is stored host-only. `Path` defaults to `/`.
+- Refuses a name that collides with an `HttpOnly` cookie for the
+  document host in either jar of the site partition, so script cannot
+  add a second value beside a server session cookie.
 
 ## Known gaps
 
@@ -444,7 +463,3 @@ The `document.cookie` setter:
   write can occasionally be lost to a racing flush. A shared,
   locked cookie store is the long-term fix; in practice script
   cookie writes happen between transfers, so the window is small.
-- **`HttpOnly` name collisions from JS are not rejected.** Setting
-  `document.cookie` with the same name as an existing `HttpOnly`
-  cookie adds a second entry rather than being refused; the
-  `HttpOnly` line is preserved untouched.

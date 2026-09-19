@@ -1324,6 +1324,39 @@ ns_net_cookies_for_js(const char *url)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+cookie_domain_matches(const char *cookie_domain, const char *host)
+{
+    const char *d = cookie_domain[0] == '.' ? cookie_domain + 1 : cookie_domain;
+    gsize dl = strlen(d), hl = strlen(host);
+    return dl > 0 &&
+           (g_ascii_strcasecmp(host, d) == 0 ||
+            (hl > dl && host[hl - dl - 1] == '.' &&
+             g_ascii_strcasecmp(host + hl - dl, d) == 0));
+}
+
+static gboolean
+jar_has_httponly_cookie(const char *jar_path, const char *host,
+                        const char *name)
+{
+    char *contents = NULL;
+    if (!g_file_get_contents(jar_path, &contents, NULL, NULL)) return FALSE;
+    gboolean found = FALSE;
+    char **lines = g_strsplit(contents, "\n", -1);
+    for (int i = 0; lines[i] && !found; i++) {
+        if (!g_str_has_prefix(lines[i], "#HttpOnly_")) continue;
+        char **f = g_strsplit(lines[i] + 10, "\t", 7);
+        int n = 0;
+        while (f[n]) n++;
+        found = n >= 7 && strcmp(f[5], name) == 0 &&
+                cookie_domain_matches(f[0], host);
+        g_strfreev(f);
+    }
+    g_strfreev(lines);
+    g_free(contents);
+    return found;
+}
+
 void
 ns_net_cookie_store_from_js(const char *url, const char *cookie)
 {
@@ -1416,11 +1449,9 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
     const char *tail;
     if (domain_attr && *domain_attr) {
         const char *d = domain_attr[0] == '.' ? domain_attr + 1 : domain_attr;
-        gsize dl = strlen(d), hl = strlen(host);
-        gboolean ok = g_ascii_strcasecmp(host, d) == 0 ||
-                      (hl > dl && host[hl - dl - 1] == '.' &&
-                       g_ascii_strcasecmp(host + hl - dl, d) == 0);
-        if (!ok || !dl) { g_free(domain_attr); g_free(path_attr); return; }
+        if (!cookie_domain_matches(d, host)) {
+            g_free(domain_attr); g_free(path_attr); return;
+        }
         g_autofree char *d_lower = g_ascii_strdown(d, -1);
         const psl_ctx_t *psl = psl_builtin();
         if (psl && psl_is_public_suffix(psl, d_lower)) {
@@ -1451,12 +1482,14 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
         return;
     }
     g_autofree char *jar_path = ns_net_cookie_js_path_for_partition(site);
+    g_autofree char *net_jar_path = ns_net_cookie_path_for_partition(site);
     g_autofree char *name_dup = g_strndup(name, name_len);
 
     char *contents = NULL;
     g_file_get_contents(jar_path, &contents, NULL, NULL);
     GString *out = g_string_new(NULL);
-    gboolean blocked_httponly = FALSE;
+    gboolean blocked_httponly =
+        jar_has_httponly_cookie(net_jar_path, host, name_dup);
     if (contents) {
         char **lines = g_strsplit(contents, "\n", -1);
         for (int i = 0; lines[i]; i++) {
@@ -3854,7 +3887,8 @@ ns_file_access_allowed(const char *top_url)
 }
 
 static gboolean
-synthesize_file_response(const char *url, const char *top_url, ns_response *resp)
+synthesize_file_response(const char *url, const char *top_url,
+                         gboolean navigation, ns_response *resp)
 {
     if (!url || !g_str_has_prefix(url, "file:")) return FALSE;
     if (!ns_file_access_allowed(top_url)) {
@@ -3875,6 +3909,13 @@ synthesize_file_response(const char *url, const char *top_url, ns_response *resp
     }
 
     if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
+        if (!navigation) {
+            resp->status = 0;
+            resp->error = g_strdup("directory listings are only shown to "
+                                   "navigations");
+            g_free(path);
+            return TRUE;
+        }
         g_free(resp->final_url);
         resp->final_url = file_uri_for_path(path, TRUE);
         if (!resp->final_url)
@@ -4237,16 +4278,6 @@ static const char k_about_settings_html[] =
 "load();\n"
 "</script></body></html>";
 
-static char *
-about_request_form(const char *url, const char *method,
-                   const void *body, gsize body_len)
-{
-    if (method && g_ascii_strcasecmp(method, "POST") == 0 && body && body_len)
-        return g_strndup((const char *)body, body_len);
-    const char *qs = strchr(url, '?');
-    return g_strdup(qs ? qs + 1 : "");
-}
-
 static void
 about_emit_json(ns_response *resp, char *json)
 {
@@ -4294,6 +4325,17 @@ about_settings_json(void)
     return json;
 }
 
+static gboolean
+about_settings_url_ok(const char *v, gboolean allow_about)
+{
+    if (!*v) return TRUE;
+    if (strlen(v) > 2048) return FALSE;
+    for (const char *p = v; *p; p++)
+        if ((guchar)*p < 0x20 || *p == 0x7f) return FALSE;
+    if (allow_about && g_str_has_prefix(v, "about:")) return TRUE;
+    return ns_url_is_http_or_https(v) && ns_url_is_valid_absolute(v);
+}
+
 static void
 about_settings_save(const char *form)
 {
@@ -4304,13 +4346,16 @@ about_settings_save(const char *form)
     ns_config_lock();
     ns_config *c = ns_config_mut();
     const char *v;
-    if ((v = g_hash_table_lookup(q, "home_url"))) {
+    if ((v = g_hash_table_lookup(q, "home_url")) &&
+        about_settings_url_ok(v, TRUE)) {
         g_free(c->home_url); c->home_url = g_strdup(v);
     }
-    if ((v = g_hash_table_lookup(q, "search_engine"))) {
+    if ((v = g_hash_table_lookup(q, "search_engine")) &&
+        about_settings_url_ok(v, FALSE)) {
         g_free(c->search_engine); c->search_engine = g_strdup(v);
     }
-    if ((v = g_hash_table_lookup(q, "cookie_policy")))
+    if ((v = g_hash_table_lookup(q, "cookie_policy")) &&
+        atoi(v) >= NS_COOKIE_ALWAYS && atoi(v) <= NS_COOKIE_NEVER)
         c->cookie_policy = (ns_cookie_policy)atoi(v);
     if ((v = g_hash_table_lookup(q, "do_not_track")))
         c->do_not_track = atoi(v) != 0;
@@ -4356,22 +4401,34 @@ about_start_tagline(void)
 }
 
 static gboolean
-about_request_from_chrome(const char *top_url)
+about_request_from_chrome(const char *top_url, gboolean navigation)
 {
-    return !top_url || !*top_url || g_str_has_prefix(top_url, "about:");
+    if (top_url && *top_url) return g_str_has_prefix(top_url, "about:");
+    return navigation;
+}
+
+static void
+about_emit_text(ns_response *resp, long status, const char *body)
+{
+    resp->status = status;
+    g_free(resp->content_type);
+    resp->content_type = g_strdup("text/plain; charset=utf-8");
+    g_byte_array_set_size(resp->body, 0);
+    g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
 }
 
 static gboolean
 synthesize_about_response(const char *url, const char *top_url,
-                          const char *method, const void *req_body,
-                          gsize req_body_len, ns_response *resp)
+                          gboolean navigation, const char *method,
+                          const void *req_body, gsize req_body_len,
+                          ns_response *resp)
 {
     if (!g_str_has_prefix(url, "about:")) return FALSE;
     const char *what = url + strlen("about:");
     if ((g_str_equal(what, "history") ||
          g_str_equal(what, "config") ||
          g_str_has_prefix(what, "settings")) &&
-        !about_request_from_chrome(top_url)) {
+        !about_request_from_chrome(top_url, navigation)) {
         resp->status = 403;
         resp->final_url = g_strdup(url);
         resp->content_type = g_strdup("text/plain; charset=utf-8");
@@ -4518,13 +4575,20 @@ synthesize_about_response(const char *url, const char *top_url,
                             (guint)strlen(k_about_settings_html));
     } else if (g_str_has_prefix(what, "settings-data")) {
         about_emit_json(resp, about_settings_json());
-    } else if (g_str_has_prefix(what, "settings-save")) {
-        char *form = about_request_form(url, method, req_body, req_body_len);
-        about_settings_save(form);
-        g_free(form);
-        about_emit_json(resp, g_strdup("{\"ok\":true}"));
-    } else if (g_str_has_prefix(what, "settings-clear")) {
-        about_settings_clear();
+    } else if (g_str_has_prefix(what, "settings-save") ||
+               g_str_has_prefix(what, "settings-clear")) {
+        if (!method || g_ascii_strcasecmp(method, "POST") != 0) {
+            about_emit_text(resp, 405, "settings changes require POST");
+            return TRUE;
+        }
+        if (g_str_has_prefix(what, "settings-save")) {
+            char *form = req_body && req_body_len
+                ? g_strndup((const char *)req_body, req_body_len) : NULL;
+            about_settings_save(form);
+            g_free(form);
+        } else {
+            about_settings_clear();
+        }
         about_emit_json(resp, g_strdup("{\"ok\":true}"));
     } else {
         const char *body = "<!doctype html><title>Northstar</title>";
@@ -4867,13 +4931,14 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    if (synthesize_about_response(url, top_url, method, body, body_len, resp))
+    if (synthesize_about_response(url, top_url, is_navigation, method, body,
+                                  body_len, resp))
         return resp;
     if (synthesize_view_source_response(url, top_url, cancellable, resp))
         return resp;
     if (synthesize_data_response(url, resp))
         return resp;
-    if (synthesize_file_response(url, top_url, resp))
+    if (synthesize_file_response(url, top_url, is_navigation, resp))
         return resp;
 
     char *hsts_upgraded = ns_net_hsts_upgrade(url);
@@ -5533,15 +5598,8 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
         g_free(extension_error);
         return extension;
     }
-    if (!ns_fetch_is_navigation(top_url, extra_headers) && !navigation &&
-        ns_ext_should_block(url, top_url)) {
-        ns_response *blocked = g_new0(ns_response, 1);
-        blocked->body = g_byte_array_new();
-        blocked->final_url = g_strdup(url);
-        blocked->status = 0;
-        blocked->error = g_strdup("blocked by extension");
-        return blocked;
-    }
+    gboolean subresource = !ns_fetch_is_navigation(top_url, extra_headers) &&
+                           !navigation;
 
     const ns_config *cfg = ns_config_get();
     long max_redirs = cfg ? (long)cfg->max_redirects : (long)NS_MAX_REDIRECTS;
@@ -5558,6 +5616,13 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
     int hops = 0;
     ns_response *resp = NULL;
     for (;;) {
+        if (subresource && ns_ext_should_block(cur_url, cur_top)) {
+            resp = g_new0(ns_response, 1);
+            resp->body = g_byte_array_new();
+            resp->final_url = g_strdup(cur_url);
+            resp->error = g_strdup("blocked by extension");
+            break;
+        }
         char *location = NULL;
         resp = ns_fetch_sync_hop(cur_url, cur_top, cur_method,
                                  cur_body, cur_len, cur_ct,
@@ -5601,8 +5666,10 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             cur_len = 0;
             cur_ct = NULL;
         }
-        g_free(cur_top);
-        cur_top = NULL;
+        if (!subresource) {
+            g_free(cur_top);
+            cur_top = NULL;
+        }
         g_free(cur_url);
         cur_url = next;
         hops++;

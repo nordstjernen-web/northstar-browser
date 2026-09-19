@@ -254,6 +254,7 @@ const char *ns_net_ca_bundle_path(void);
 
 gboolean ns_address_is_search(const char *s);
 char *ns_search_url_for(const char *query);
+gboolean ns_about_url_is_public(const char *url);
 char *ns_url_from_local_path(const char *path);
 
 char *ns_multipart_boundary(void);
