@@ -12232,12 +12232,22 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
         transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
     }
 
-    if (want_origin && strcmp(want_origin, "*") != 0 &&
-        strcmp(want_origin, "/") != 0) {
+    if (want_origin && strcmp(want_origin, "*") != 0) {
         g_autofree char *actual = ns_window_origin_of(ctx, target);
-        gboolean match = actual && g_str_has_prefix(want_origin, actual) &&
-            (want_origin[strlen(actual)] == '\0' ||
-             want_origin[strlen(actual)] == '/');
+        g_autofree char *wanted = NULL;
+        if (strcmp(want_origin, "/") == 0) {
+            JSValue src_win = JS_IsObject(source_override)
+                ? JS_DupValue(ctx, source_override) : JS_GetGlobalObject(caller);
+            wanted = ns_window_origin_of(ctx, src_win);
+            JS_FreeValue(ctx, src_win);
+        } else {
+            char *colon = strchr(want_origin, ':');
+            for (char *c = want_origin; colon && c < colon; c++)
+                *c = g_ascii_tolower(*c);
+            wanted = ns_url_origin_from(want_origin);
+        }
+        gboolean match = actual && wanted &&
+                         g_ascii_strcasecmp(wanted, actual) == 0;
         if (!match) {
             JS_FreeValue(ctx, transfer);
             JS_FreeValue(ctx, target);
