@@ -37350,6 +37350,12 @@ ns_element_anchor_part_get(JSContext *ctx, JSValueConst this_val, int magic)
         if (magic == NS_ANCHOR_HREF) {
             const char *v = n ? ns_element_get_attr(n, "href") : NULL;
             if (!v) return JS_NewString(ctx, "");
+            if (ns_node_is_element_named(n, "base")) {
+                const char *fallback = ns_js_node_doc_base(js_from_ctx(ctx), n);
+                g_autofree char *r = fallback ? ns_url_resolve(fallback, v)
+                                              : NULL;
+                return JS_NewString(ctx, r ? r : v);
+            }
             g_autofree char *r =
                 ns_element_anchor_resolved_href(n, js_from_ctx(ctx));
             return JS_NewString(ctx, r ? r : v);
