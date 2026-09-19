@@ -11590,6 +11590,9 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_BORDER_BOTTOM_STYLE:
     case NS_CSS_BORDER_LEFT_STYLE:
     case NS_CSS_OUTLINE_STYLE:
+        v = parse_keyword_choice(t, "auto none hidden dotted dashed solid "
+                                    "double groove ridge inset outset");
+        break;
     case NS_CSS_COLUMN_RULE_STYLE:
         v = parse_keyword_choice(t,
             "none hidden dotted dashed solid double groove ridge inset outset");
@@ -13011,10 +13014,19 @@ emit_quad(GArray *decls, ns_css_prop t, ns_css_prop r,
     const struct { ns_css_prop p; const char *v; } map[] = {
         { t, top }, { r, right }, { b, bottom }, { l, left },
     };
+    ns_css_value *parsed[4] = {0};
+    gboolean valid = n >= 1 && n <= 4;
+    for (int i = 0; valid && i < 4; i++) {
+        parsed[i] = parse_value_for(map[i].p, map[i].v);
+        if (!parsed[i]) valid = FALSE;
+    }
     for (int i = 0; i < 4; i++) {
-        ns_css_value *vv = parse_value_for(map[i].p, map[i].v);
-        if (!vv) continue;
-        ns_css_decl d = { .prop = map[i].p, .value = vv, .important = important };
+        if (!valid) {
+            ns_css_value_free(parsed[i]);
+            continue;
+        }
+        ns_css_decl d = { .prop = map[i].p, .value = parsed[i],
+                          .important = important };
         g_array_append_val(decls, d);
     }
 }
@@ -14565,6 +14577,50 @@ border_shorthand_tokens_valid(char *const tokens[], int n)
     return colors <= 1 && widths <= 1 && styles <= 1;
 }
 
+static gboolean
+emit_longhands(GArray *decls_out, const ns_css_prop *props,
+               const char *const *texts, int n, gboolean important)
+{
+    ns_css_value *values[6] = {0};
+    gboolean valid = n <= 6;
+    for (int i = 0; valid && i < n; i++) {
+        values[i] = parse_value_for(props[i], texts[i]);
+        if (!values[i]) valid = FALSE;
+    }
+    for (int i = 0; i < n; i++) {
+        if (!valid) {
+            if (values[i]) ns_css_value_free(values[i]);
+            continue;
+        }
+        ns_css_decl d = { .prop = props[i], .value = values[i],
+                          .important = important };
+        g_array_append_val(decls_out, d);
+    }
+    return valid;
+}
+
+static void
+border_shorthand_split(char *const tokens[], int n, const char **width,
+                       const char **style, const char **color)
+{
+    for (int i = 0; i < n; i++) {
+        const char *tok = tokens[i];
+        guint8 r, g, b, a;
+        double num;
+        ns_css_unit unit;
+        if (parse_color(tok, &r, &g, &b, &a) || is_color_keyword(tok))
+            *color = tok;
+        else if (parse_length(tok, &num, &unit) ||
+                 g_ascii_strncasecmp(tok, "calc(", 5) == 0 ||
+                 g_ascii_strcasecmp(tok, "thin") == 0 ||
+                 g_ascii_strcasecmp(tok, "medium") == 0 ||
+                 g_ascii_strcasecmp(tok, "thick") == 0)
+            *width = tok;
+        else
+            *style = tok;
+    }
+}
+
 static void
 border_image_emit_initials(GArray *decls_out, gboolean important)
 {
@@ -14805,22 +14861,7 @@ parse_border_shorthand(const border_side_map *side, const char *vtext,
     int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
     gboolean valid = n <= 4 && border_shorthand_tokens_valid(tokens, n);
     const char *width = "medium", *style = "none", *color = "currentcolor";
-    for (int i = 0; valid && i < n; i++) {
-        const char *tok = tokens[i];
-        guint8 r, g, b, a;
-        double num;
-        ns_css_unit unit;
-        if (parse_color(tok, &r, &g, &b, &a) || is_color_keyword(tok))
-            color = tok;
-        else if (parse_length(tok, &num, &unit) ||
-                 g_ascii_strncasecmp(tok, "calc(", 5) == 0 ||
-                 g_ascii_strcasecmp(tok, "thin") == 0 ||
-                 g_ascii_strcasecmp(tok, "medium") == 0 ||
-                 g_ascii_strcasecmp(tok, "thick") == 0)
-            width = tok;
-        else
-            style = tok;
-    }
+    if (valid) border_shorthand_split(tokens, n, &width, &style, &color);
     if (valid) {
         if (side) {
             const struct { ns_css_prop prop; const char *text; } parts[3] = {
@@ -15441,29 +15482,15 @@ parse_declaration_block(const char **pp, const char *end,
                                       : NS_CSS_BORDER_INLINE_END_STYLE;
             char *tokens[4] = {0};
             int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
-            for (int i = 0; i < n; i++) {
-                guint8 r, g, b, a;
-                double num; ns_css_unit u;
-                ns_css_prop p1, p2;
-                if (parse_color(tokens[i], &r, &g, &b, &a) ||
-                    is_color_keyword(tokens[i])) {
-                    p1 = c1; p2 = c2;
-                } else if (parse_length(tokens[i], &num, &u)) {
-                    p1 = w1; p2 = w2;
-                } else {
-                    p1 = s1; p2 = s2;
-                }
-                ns_css_value *v1 = parse_value_for(p1, tokens[i]);
-                ns_css_value *v2 = parse_value_for(p2, tokens[i]);
-                if (v1) {
-                    ns_css_decl d = { .prop = p1, .value = v1, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-                if (v2) {
-                    ns_css_decl d = { .prop = p2, .value = v2, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
+            const char *width = "medium", *style = "none",
+                       *color = "currentcolor";
+            gboolean valid = n <= 3 &&
+                             border_shorthand_tokens_valid(tokens, n);
+            if (valid) border_shorthand_split(tokens, n, &width, &style, &color);
+            const ns_css_prop props[6] = { w1, w2, s1, s2, c1, c2 };
+            const char *const texts[6] = { width, width, style, style,
+                                           color, color };
+            if (valid) emit_longhands(decls_out, props, texts, 6, important);
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
             g_free(vtext);
@@ -16060,19 +16087,19 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "columns") == 0) {
             char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
-            for (int i = 0; i < n; i++) {
+            const char *count = "auto", *width = "auto";
+            gboolean valid = n >= 1 && n <= 2;
+            for (int i = 0; valid && i < n; i++) {
                 double num; ns_css_unit u;
-                if (parse_length(tokens[i], &num, &u)) {
-                    ns_css_prop prop = (u == NS_CSS_UNIT_NUMBER)
-                        ? NS_CSS_COLUMN_COUNT : NS_CSS_COLUMN_WIDTH;
-                    ns_css_value *v = parse_value_for(prop, tokens[i]);
-                    if (v) {
-                        ns_css_decl d = { .prop = prop, .value = v,
-                                          .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                }
+                if (g_ascii_strcasecmp(tokens[i], "auto") == 0) continue;
+                if (!parse_length(tokens[i], &num, &u)) valid = FALSE;
+                else if (u == NS_CSS_UNIT_NUMBER) count = tokens[i];
+                else width = tokens[i];
             }
+            const ns_css_prop props[2] = { NS_CSS_COLUMN_COUNT,
+                                           NS_CSS_COLUMN_WIDTH };
+            const char *const texts[2] = { count, width };
+            if (valid) emit_longhands(decls_out, props, texts, 2, important);
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
             g_free(vtext);
@@ -16086,31 +16113,41 @@ parse_declaration_block(const char **pp, const char *end,
             ns_css_prop p_w = is_outline ? NS_CSS_OUTLINE_WIDTH : NS_CSS_COLUMN_RULE_WIDTH;
             ns_css_prop p_s = is_outline ? NS_CSS_OUTLINE_STYLE : NS_CSS_COLUMN_RULE_STYLE;
             ns_css_prop p_c = is_outline ? NS_CSS_OUTLINE_COLOR : NS_CSS_COLUMN_RULE_COLOR;
-            char *tokens[8] = {0};
+            char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
-            for (int i = 0; i < n; i++) {
+            const char *width = "medium", *style = "none",
+                       *color = "currentcolor";
+            int widths = 0, styles = 0, colors = 0;
+            gboolean valid = n >= 1 && n <= 3;
+            for (int i = 0; valid && i < n; i++) {
+                const char *tok = tokens[i];
                 guint8 r, g, b, a;
                 double num; ns_css_unit u;
-                if (parse_color(tokens[i], &r, &g, &b, &a)) {
-                    ns_css_value *v = parse_value_for(p_c, tokens[i]);
-                    if (v) {
-                        ns_css_decl d = { .prop = p_c, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                } else if (parse_length(tokens[i], &num, &u)) {
-                    ns_css_value *v = parse_value_for(p_w, tokens[i]);
-                    if (v) {
-                        ns_css_decl d = { .prop = p_w, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
+                if (parse_color(tok, &r, &g, &b, &a) || is_color_keyword(tok) ||
+                    (is_outline && g_ascii_strcasecmp(tok, "invert") == 0)) {
+                    color = tok;
+                    colors++;
+                } else if ((parse_length(tok, &num, &u) && num >= 0 &&
+                            u != NS_CSS_UNIT_PERCENT &&
+                            (u != NS_CSS_UNIT_NUMBER || num == 0)) ||
+                           g_ascii_strncasecmp(tok, "calc(", 5) == 0 ||
+                           word_is_one_of(tok, "thin medium thick")) {
+                    width = tok;
+                    widths++;
+                } else if (word_is_one_of(tok, "none hidden dotted dashed solid "
+                                               "double groove ridge inset "
+                                               "outset") ||
+                           (is_outline && g_ascii_strcasecmp(tok, "auto") == 0)) {
+                    style = tok;
+                    styles++;
                 } else {
-                    ns_css_value *v = parse_value_for(p_s, tokens[i]);
-                    if (v) {
-                        ns_css_decl d = { .prop = p_s, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
+                    valid = FALSE;
                 }
             }
+            valid = valid && widths <= 1 && styles <= 1 && colors <= 1;
+            const ns_css_prop props[3] = { p_w, p_s, p_c };
+            const char *const texts[3] = { width, style, color };
+            if (valid) emit_longhands(decls_out, props, texts, 3, important);
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
             g_free(vtext);
@@ -16121,60 +16158,50 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "text-decoration") == 0 ||
             strcmp(pname, "text-decoration-line") == 0) {
             gboolean line_only = strcmp(pname, "text-decoration-line") == 0;
-            char *tokens[8] = {0};
+            char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
             GString *lines = g_string_new(NULL);
-            for (int i = 0; i < n; i++) {
+            const char *style = NULL, *color = NULL;
+            gboolean valid = n >= 1;
+            for (int i = 0; valid && i < n; i++) {
                 const char *tk = tokens[i];
-                if (!tk) continue;
                 guint8 cr, cg, cb, ca;
-                if (g_ascii_strcasecmp(tk, "underline") == 0 ||
-                    g_ascii_strcasecmp(tk, "overline")  == 0 ||
-                    g_ascii_strcasecmp(tk, "line-through") == 0 ||
-                    g_ascii_strcasecmp(tk, "none") == 0) {
+                if (word_is_one_of(tk, "underline overline line-through none")) {
                     if (lines->len > 0) g_string_append_c(lines, ' ');
                     char *low = g_ascii_strdown(tk, -1);
                     g_string_append(lines, low);
                     g_free(low);
                 } else if (line_only) {
                     continue;
-                } else if (g_ascii_strcasecmp(tk, "solid")  == 0 ||
-                           g_ascii_strcasecmp(tk, "double") == 0 ||
-                           g_ascii_strcasecmp(tk, "dotted") == 0 ||
-                           g_ascii_strcasecmp(tk, "dashed") == 0 ||
-                           g_ascii_strcasecmp(tk, "wavy")   == 0) {
-                    ns_css_value *v = g_new0(ns_css_value, 1);
-                    v->kind = NS_CSS_V_KEYWORD;
-                    v->u.keyword = g_ascii_strdown(tk, -1);
-                    ns_css_decl d = {
-                        .prop = NS_CSS_TEXT_DECORATION_STYLE,
-                        .value = v, .important = important
-                    };
-                    g_array_append_val(decls_out, d);
-                } else if (parse_color(tk, &cr, &cg, &cb, &ca)) {
-                    ns_css_value *v = g_new0(ns_css_value, 1);
-                    v->kind = NS_CSS_V_COLOR;
-                    v->u.color.r = cr; v->u.color.g = cg;
-                    v->u.color.b = cb; v->u.color.a = ca;
-                    ns_css_decl d = {
-                        .prop = NS_CSS_TEXT_DECORATION_COLOR,
-                        .value = v, .important = important
-                    };
-                    g_array_append_val(decls_out, d);
+                } else if (!style &&
+                           word_is_one_of(tk, "solid double dotted dashed wavy")) {
+                    style = tk;
+                } else if (!color &&
+                           (parse_color(tk, &cr, &cg, &cb, &ca) ||
+                            is_color_keyword(tk))) {
+                    color = tk;
+                } else {
+                    valid = FALSE;
                 }
             }
-            if (lines->len > 0) {
+            const ns_css_prop props[2] = { NS_CSS_TEXT_DECORATION_STYLE,
+                                           NS_CSS_TEXT_DECORATION_COLOR };
+            const char *const texts[2] = { style ? style : "solid",
+                                           color ? color : "currentcolor" };
+            if (valid && !line_only)
+                valid = emit_longhands(decls_out, props, texts, 2, important);
+            if (valid && (lines->len > 0 || !line_only)) {
                 ns_css_value *v = g_new0(ns_css_value, 1);
                 v->kind = NS_CSS_V_KEYWORD;
-                v->u.keyword = g_string_free(lines, FALSE);
-                lines = NULL;
+                v->u.keyword = lines->len > 0 ? g_strdup(lines->str)
+                                              : g_strdup("none");
                 ns_css_decl d = {
                     .prop = NS_CSS_TEXT_DECORATION,
                     .value = v, .important = important
                 };
                 g_array_append_val(decls_out, d);
             }
-            if (lines) g_string_free(lines, TRUE);
+            g_string_free(lines, TRUE);
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
             g_free(vtext);
@@ -16509,27 +16536,23 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "flex-flow") == 0) {
             char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
-            for (int i = 0; i < n; i++) {
-                char *t = tokens[i];
-                if (g_ascii_strcasecmp(t, "row") == 0 ||
-                    g_ascii_strcasecmp(t, "row-reverse") == 0 ||
-                    g_ascii_strcasecmp(t, "column") == 0 ||
-                    g_ascii_strcasecmp(t, "column-reverse") == 0) {
-                    ns_css_value *v = parse_value_for(NS_CSS_FLEX_DIRECTION, t);
-                    if (v) {
-                        ns_css_decl d = { .prop = NS_CSS_FLEX_DIRECTION, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                } else if (g_ascii_strcasecmp(t, "wrap") == 0 ||
-                           g_ascii_strcasecmp(t, "nowrap") == 0 ||
-                           g_ascii_strcasecmp(t, "wrap-reverse") == 0) {
-                    ns_css_value *v = parse_value_for(NS_CSS_FLEX_WRAP, t);
-                    if (v) {
-                        ns_css_decl d = { .prop = NS_CSS_FLEX_WRAP, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                }
+            const char *direction = NULL, *wrap = NULL;
+            gboolean valid = n >= 1 && n <= 2;
+            for (int i = 0; valid && i < n; i++) {
+                const char *t = tokens[i];
+                if (!direction &&
+                    word_is_one_of(t, "row row-reverse column column-reverse"))
+                    direction = t;
+                else if (!wrap && word_is_one_of(t, "wrap nowrap wrap-reverse"))
+                    wrap = t;
+                else
+                    valid = FALSE;
             }
+            const ns_css_prop props[2] = { NS_CSS_FLEX_DIRECTION,
+                                           NS_CSS_FLEX_WRAP };
+            const char *const texts[2] = { direction ? direction : "row",
+                                           wrap ? wrap : "nowrap" };
+            if (valid) emit_longhands(decls_out, props, texts, 2, important);
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
             g_free(vtext);
