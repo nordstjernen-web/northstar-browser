@@ -41045,8 +41045,15 @@ ns_media_resolve_src(JSContext *ctx, ns_node *node)
     }
     if (!src || !*src) return NULL;
     ns_js *js = js_from_ctx(ctx);
-    return (js && js->current_url) ? ns_url_resolve(js->current_url, src)
-                                   : g_strdup(src);
+    char *abs = (js && js->current_url) ? ns_url_resolve(js->current_url, src)
+                                        : g_strdup(src);
+    if (abs && g_str_has_prefix(abs, "file:") &&
+        (!js || !js->current_url ||
+         !g_str_has_prefix(js->current_url, "file:"))) {
+        g_free(abs);
+        return NULL;
+    }
+    return abs;
 }
 
 static void

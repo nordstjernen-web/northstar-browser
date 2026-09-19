@@ -15,6 +15,26 @@ Significant changes in each release:
   integers (1 to 1000, defaulting to 2 and 20), so an attribute like
   `rows="2000000000"` no longer makes layout build billions of
   placeholder lines and exhaust memory.
+* SVG rendering bounds the element tree it walks to 256 levels in every
+  recursive pass -- rendering, `id` indexing for `url(#...)` references and
+  locating the root of an SVG image -- so a document nested tens of
+  thousands of `<g>` or `<div>` elements deep can no longer overflow the
+  stack. Masks are budgeted at 256 MB of live surfaces across nesting.
+  The SVG property resolver keeps its scratch buffers and the computed-style
+  table in the per-render context instead of process-wide statics, so
+  SVG images decoding on worker threads no longer race the main thread's
+  inline SVG paint.
+* XML internal entities expand to at most 1 MB per document; a nested
+  entity chain (the "billion laughs" pattern) now makes the document
+  not well-formed instead of exhausting memory.
+* `<audio>` and `<video>` elements on `http(s)` documents can no longer
+  name a `file:` URL, matching the rule the stream path already
+  applied; a `file:` document may still play local media.
+* Animation timelines: `currentTime` seeks on audio and animated images
+  clamp non-finite and out-of-range values before converting to frame
+  indices, per-frame delays are capped at ten minutes and total durations
+  accumulate in 64 bits, so a crafted APNG or a huge `currentTime` cannot
+  overflow the integer arithmetic.
 
 1.0.8:
 ======

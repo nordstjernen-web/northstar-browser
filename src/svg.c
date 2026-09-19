@@ -16,10 +16,13 @@
 
 enum {
     NS_SVG_MAX_DEPTH        = 24,
+    NS_SVG_MAX_TREE_DEPTH   = 256,
     NS_SVG_MAX_NODES        = 60000,
+    NS_SVG_VALUE_BUF_MAX    = 256,
     NS_SVG_MAX_INPUT_BYTES  = 8 * 1024 * 1024,
     NS_SVG_MAX_DIM_PX       = 8192,
     NS_SVG_MAX_PIXELS       = 4096 * 4096,
+    NS_SVG_MAX_MASK_BYTES   = 256 * 1024 * 1024,
     NS_SVG_DEFAULT_DIM_PX   = 512,
     NS_SVG_DEFAULT_OBJECT_W = 300,
     NS_SVG_DEFAULT_OBJECT_H = 150,
@@ -71,12 +74,18 @@ typedef struct {
     GHashTable    *styles;
     GHashTable    *ids;
     int            depth;
+    int            tree_depth;
     int            nodes;
+    gsize          mask_bytes;
     double         vw, vh;
+    char           decl_buf[NS_SVG_VALUE_BUF_MAX];
+    char           prop_buf[NS_SVG_VALUE_BUF_MAX];
 } svg_ctx;
 
 static void svg_render_node(svg_ctx *ctx, const ns_node *n,
                             const svg_state *parent);
+static void svg_render_element(svg_ctx *ctx, const ns_node *n,
+                               const svg_state *parent);
 
 static gboolean
 svg_is_ws(char c)
@@ -347,9 +356,9 @@ svg_anchor_of(const char *s)
 }
 
 static const char *
-svg_style_decl(const ns_node *n, const char *prop)
+svg_style_decl(svg_ctx *ctx, const ns_node *n, const char *prop)
 {
-    static char buf[256];
+    char *buf = ctx->decl_buf;
     const char *style = ns_element_get_attr(n, "style");
     if (!style) return NULL;
     gsize plen = strlen(prop);
@@ -375,34 +384,33 @@ svg_style_decl(const ns_node *n, const char *prop)
             found_len = (gsize)(val_end - val);
         }
     }
-    if (!found || found_len == 0 || found_len >= sizeof buf) return NULL;
+    if (!found || found_len == 0 || found_len >= NS_SVG_VALUE_BUF_MAX)
+        return NULL;
     memcpy(buf, found, found_len);
     buf[found_len] = '\0';
     return buf;
 }
 
-static GHashTable *g_svg_var_styles;
-
 static const char *
-svg_prop(const ns_node *n, const char *name)
+svg_prop(svg_ctx *ctx, const ns_node *n, const char *name)
 {
-    const char *v = svg_style_decl(n, name);
+    const char *v = svg_style_decl(ctx, n, name);
     if (!v) v = ns_element_get_attr(n, name);
     if (!v || !strstr(v, "var(")) return v;
 
-    const ns_style *st = g_svg_var_styles
-        ? g_hash_table_lookup(g_svg_var_styles, (gpointer)n) : NULL;
+    const ns_style *st = ctx->styles
+        ? g_hash_table_lookup(ctx->styles, (gpointer)n) : NULL;
     if (!st) return v;
-    static char buf[256];
     char *resolved = ns_css_resolve_style_vars(v, st);
     if (!resolved) return v;
-    if (strlen(resolved) >= sizeof buf) {
+    gsize rlen = strlen(resolved);
+    if (rlen >= NS_SVG_VALUE_BUF_MAX) {
         g_free(resolved);
         return v;
     }
-    strcpy(buf, resolved);
+    memcpy(ctx->prop_buf, resolved, rlen + 1);
     g_free(resolved);
-    return buf;
+    return ctx->prop_buf;
 }
 
 static void
@@ -453,7 +461,7 @@ svg_state_apply_node(svg_ctx *ctx, svg_state *st, const ns_node *n)
         st->color_b = s->values[NS_CSS_COLOR]->u.color.b / 255.0;
         st->color_a = s->values[NS_CSS_COLOR]->u.color.a / 255.0;
     } else {
-        const char *col = svg_prop(n, "color");
+        const char *col = svg_prop(ctx, n, "color");
         guint8 r, g, b, a;
         if (col && ns_css_parse_color(col, &r, &g, &b, &a)) {
             st->color_r = r / 255.0; st->color_g = g / 255.0;
@@ -462,39 +470,39 @@ svg_state_apply_node(svg_ctx *ctx, svg_state *st, const ns_node *n)
     }
 
     const char *v;
-    if ((v = svg_prop(n, "fill")))   svg_parse_paint(v, st, &st->fill);
-    if ((v = svg_prop(n, "stroke"))) svg_parse_paint(v, st, &st->stroke);
-    if ((v = svg_prop(n, "fill-opacity")))
+    if ((v = svg_prop(ctx, n, "fill")))   svg_parse_paint(v, st, &st->fill);
+    if ((v = svg_prop(ctx, n, "stroke"))) svg_parse_paint(v, st, &st->stroke);
+    if ((v = svg_prop(ctx, n, "fill-opacity")))
         st->fill_opacity = CLAMP(svg_length_str(v, 1.0, st->font_size, 1.0), 0.0, 1.0);
-    if ((v = svg_prop(n, "stroke-opacity")))
+    if ((v = svg_prop(ctx, n, "stroke-opacity")))
         st->stroke_opacity = CLAMP(svg_length_str(v, 1.0, st->font_size, 1.0), 0.0, 1.0);
-    if ((v = svg_prop(n, "stroke-width")))
+    if ((v = svg_prop(ctx, n, "stroke-width")))
         st->stroke_width = MAX(0.0, svg_length_str(v, basis, st->font_size, 1.0));
-    if ((v = svg_prop(n, "stroke-linecap")))    st->line_cap = svg_cap_of(v);
-    if ((v = svg_prop(n, "stroke-linejoin")))   st->line_join = svg_join_of(v);
-    if ((v = svg_prop(n, "stroke-miterlimit")))
+    if ((v = svg_prop(ctx, n, "stroke-linecap")))    st->line_cap = svg_cap_of(v);
+    if ((v = svg_prop(ctx, n, "stroke-linejoin")))   st->line_join = svg_join_of(v);
+    if ((v = svg_prop(ctx, n, "stroke-miterlimit")))
         st->miter_limit = MAX(1.0, svg_length_str(v, 1.0, st->font_size, 4.0));
-    if ((v = svg_prop(n, "stroke-dashoffset")))
+    if ((v = svg_prop(ctx, n, "stroke-dashoffset")))
         st->dash_offset = svg_length_str(v, basis, st->font_size, 0.0);
-    if ((v = svg_prop(n, "stroke-dasharray")))
+    if ((v = svg_prop(ctx, n, "stroke-dasharray")))
         svg_set_dashes(st, v, basis, st->font_size);
-    if ((v = svg_prop(n, "fill-rule")))
+    if ((v = svg_prop(ctx, n, "fill-rule")))
         st->fill_rule = (g_ascii_strcasecmp(v, "evenodd") == 0)
             ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING;
-    if ((v = svg_prop(n, "clip-rule")))
+    if ((v = svg_prop(ctx, n, "clip-rule")))
         st->clip_rule = (g_ascii_strcasecmp(v, "evenodd") == 0)
             ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING;
-    if ((v = svg_prop(n, "text-anchor"))) st->text_anchor = svg_anchor_of(v);
-    if ((v = svg_prop(n, "font-size"))) {
+    if ((v = svg_prop(ctx, n, "text-anchor"))) st->text_anchor = svg_anchor_of(v);
+    if ((v = svg_prop(ctx, n, "font-size"))) {
         st->font_size = MAX(0.0, svg_length_str(v, inherited_font_size,
                                                 inherited_font_size, 16.0));
         font_size_from_attr = TRUE;
     }
-    if ((v = svg_prop(n, "font-family"))) {
+    if ((v = svg_prop(ctx, n, "font-family"))) {
         g_free(st->font_family);
         st->font_family = g_strdup(v);
     }
-    if ((v = svg_prop(n, "font-weight"))) {
+    if ((v = svg_prop(ctx, n, "font-weight"))) {
         if (g_ascii_strcasecmp(v, "bold") == 0) st->font_weight = 700;
         else if (g_ascii_strcasecmp(v, "normal") == 0) st->font_weight = 400;
         else {
@@ -502,14 +510,14 @@ svg_state_apply_node(svg_ctx *ctx, svg_state *st, const ns_node *n)
             if (w >= 1 && w <= 1000) st->font_weight = w;
         }
     }
-    if ((v = svg_prop(n, "font-style")))
+    if ((v = svg_prop(ctx, n, "font-style")))
         st->font_italic = g_ascii_strcasecmp(v, "normal") != 0;
-    if ((v = svg_prop(n, "paint-order")))
+    if ((v = svg_prop(ctx, n, "paint-order")))
         st->stroke_first = g_ascii_strncasecmp(v, "stroke", 6) == 0;
-    if ((v = svg_prop(n, "visibility")))
+    if ((v = svg_prop(ctx, n, "visibility")))
         st->hidden = (g_ascii_strcasecmp(v, "hidden") == 0 ||
                       g_ascii_strcasecmp(v, "collapse") == 0);
-    if ((v = svg_prop(n, "vector-effect")))
+    if ((v = svg_prop(ctx, n, "vector-effect")))
         st->non_scaling_stroke = g_ascii_strcasecmp(v, "non-scaling-stroke") == 0;
 
     if (!s) return;
@@ -839,7 +847,7 @@ svg_geom(svg_ctx *ctx, const ns_node *n, const char *attr, ns_css_prop prop,
         if (v->kind == NS_CSS_V_LENGTH || v->kind == NS_CSS_V_CALC)
             return svg_css_number(s, prop, basis, fallback);
     }
-    const char *a = svg_prop(n, attr);
+    const char *a = svg_prop(ctx, n, attr);
     if (!a) return fallback;
     if (g_ascii_strcasecmp(a, "auto") == 0) {
         if (out_auto) *out_auto = TRUE;
@@ -964,14 +972,15 @@ svg_shape_path(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 }
 
 static void
-svg_index_ids(svg_ctx *ctx, const ns_node *n)
+svg_index_ids(svg_ctx *ctx, const ns_node *n, int depth)
 {
+    if (depth >= NS_SVG_MAX_TREE_DEPTH) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT) continue;
         const char *id = ns_element_get_attr(c, "id");
         if (id && *id && !g_hash_table_contains(ctx->ids, id))
             g_hash_table_insert(ctx->ids, (gpointer)id, (gpointer)c);
-        svg_index_ids(ctx, c);
+        svg_index_ids(ctx, c, depth + 1);
     }
 }
 
@@ -984,7 +993,7 @@ svg_by_id(svg_ctx *ctx, const char *id)
         const char *rid = ns_element_get_attr(ctx->root, "id");
         if (rid && *rid) g_hash_table_insert(ctx->ids, (gpointer)rid,
                                              (gpointer)ctx->root);
-        svg_index_ids(ctx, ctx->root);
+        svg_index_ids(ctx, ctx->root, 0);
     }
     return g_hash_table_lookup(ctx->ids, id);
 }
@@ -1041,7 +1050,7 @@ svg_add_stops(svg_ctx *ctx, cairo_pattern_t *pat, const ns_node *owner,
     for (const ns_node *c = owner->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name || strcmp(c->name, "stop") != 0)
             continue;
-        const char *os = svg_prop(c, "offset");
+        const char *os = svg_prop(ctx, c, "offset");
         double off = os ? svg_length_str(os, 1.0, st->font_size, 0.0) : 0.0;
         if (os && strchr(os, '%') == NULL && off > 1.0) off = 1.0;
         off = CLAMP(off, 0.0, 1.0);
@@ -1059,7 +1068,7 @@ svg_add_stops(svg_ctx *ctx, cairo_pattern_t *pat, const ns_node *owner,
             got = TRUE;
         }
         if (!got) {
-            const char *sc = svg_prop(c, "stop-color");
+            const char *sc = svg_prop(ctx, c, "stop-color");
             guint8 cr8, cg8, cb8, ca8;
             if (sc && g_ascii_strcasecmp(sc, "currentcolor") == 0) {
                 r = st->color_r; g = st->color_g; b = st->color_b; a = st->color_a;
@@ -1071,7 +1080,7 @@ svg_add_stops(svg_ctx *ctx, cairo_pattern_t *pat, const ns_node *owner,
         const ns_css_value *ov = cs ? cs->values[NS_CSS_STOP_OPACITY] : NULL;
         if (ov) so = CLAMP(svg_css_number(cs, NS_CSS_STOP_OPACITY, 1.0, 1.0), 0.0, 1.0);
         else {
-            const char *sos = svg_prop(c, "stop-opacity");
+            const char *sos = svg_prop(ctx, c, "stop-opacity");
             if (sos) so = CLAMP(svg_length_str(sos, 1.0, st->font_size, 1.0), 0.0, 1.0);
         }
         cairo_pattern_add_color_stop_rgba(pat, off, r, g, b, a * so * alpha);
@@ -1273,7 +1282,7 @@ svg_clip_path_children(svg_ctx *ctx, const ns_node *clip, const svg_state *st)
 static cairo_surface_t *
 svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 {
-    const char *mv = svg_prop(n, "mask");
+    const char *mv = svg_prop(ctx, n, "mask");
     if (!mv) return NULL;
     char *id = svg_url_id(mv, NULL);
     if (!id) return NULL;
@@ -1294,10 +1303,14 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     int w = (int)ceil(MAX(cx1, cx2) + ox);
     int h = (int)ceil(MAX(cy1, cy2) + oy);
     if (w <= 0 || h <= 0 || (double)w * h > (double)NS_SVG_MAX_PIXELS) return NULL;
+    gsize bytes = (gsize)w * (gsize)h * 5;
+    if (bytes > NS_SVG_MAX_MASK_BYTES - ctx->mask_bytes) return NULL;
+    ctx->mask_bytes += bytes;
 
     cairo_surface_t *rgb = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
     if (cairo_surface_status(rgb) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(rgb);
+        ctx->mask_bytes -= bytes;
         return NULL;
     }
     cairo_t *mcr = cairo_create(rgb);
@@ -1316,6 +1329,7 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     svg_state_clear(&ms);
     ctx->depth--;
     ctx->cr = saved;
+    ctx->mask_bytes -= bytes;
     cairo_destroy(mcr);
     cairo_surface_flush(rgb);
 
@@ -1349,7 +1363,7 @@ svg_mask_surface(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 static void
 svg_apply_clip(svg_ctx *ctx, const ns_node *n, const svg_state *st)
 {
-    const char *cp = svg_prop(n, "clip-path");
+    const char *cp = svg_prop(ctx, n, "clip-path");
     if (!cp) return;
     char *id = svg_url_id(cp, NULL);
     if (!id) return;
@@ -1568,8 +1582,8 @@ svg_path_vertices(cairo_t *cr)
 static const ns_node *
 svg_marker_ref(svg_ctx *ctx, const ns_node *n, const char *prop)
 {
-    const char *v = svg_prop(n, prop);
-    if (!v) v = svg_prop(n, "marker");
+    const char *v = svg_prop(ctx, n, prop);
+    if (!v) v = svg_prop(ctx, n, "marker");
     if (!v) return NULL;
     char *id = svg_url_id(v, NULL);
     if (!id) return NULL;
@@ -1612,7 +1626,7 @@ svg_draw_marker(svg_ctx *ctx, const ns_node *marker, const svg_state *st,
     cairo_matrix_transform_point(&vm, &rx, &ry);
     cairo_translate(cr, -rx, -ry);
 
-    const char *ov = svg_prop(marker, "overflow");
+    const char *ov = svg_prop(ctx, marker, "overflow");
     gboolean clip = !ov || (g_ascii_strcasecmp(ov, "visible") != 0 &&
                             g_ascii_strcasecmp(ov, "auto") != 0);
     if (clip) {
@@ -1706,7 +1720,7 @@ svg_is_hidden(svg_ctx *ctx, const ns_node *n)
         const char *d = ns_style_keyword(s, NS_CSS_DISPLAY);
         if (d && strcmp(d, "none") == 0) return TRUE;
     }
-    const char *d = svg_prop(n, "display");
+    const char *d = svg_prop(ctx, n, "display");
     return d && g_ascii_strcasecmp(d, "none") == 0;
 }
 
@@ -1715,7 +1729,16 @@ svg_render_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
 {
     if (!n->name) return;
     if (ctx->depth >= NS_SVG_MAX_DEPTH) return;
+    if (ctx->tree_depth >= NS_SVG_MAX_TREE_DEPTH) return;
     if (++ctx->nodes > NS_SVG_MAX_NODES) return;
+    ctx->tree_depth++;
+    svg_render_element(ctx, n, parent);
+    ctx->tree_depth--;
+}
+
+static void
+svg_render_element(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
+{
 
     const char *tag = n->name;
     if (strcmp(tag, "defs") == 0 || strcmp(tag, "symbol") == 0 ||
@@ -1739,7 +1762,7 @@ svg_render_node(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
     if (s && s->values[NS_CSS_OPACITY])
         opacity = CLAMP(svg_css_number(s, NS_CSS_OPACITY, 1.0, 1.0), 0.0, 1.0);
     else {
-        const char *o = svg_prop(n, "opacity");
+        const char *o = svg_prop(ctx, n, "opacity");
         if (o) opacity = CLAMP(svg_length_str(o, 1.0, st.font_size, 1.0), 0.0, 1.0);
     }
 
@@ -1965,11 +1988,8 @@ ns_svg_render_node(cairo_t *cr, const ns_node *svg, double width, double height,
         }
     }
 
-    GHashTable *prev_var_styles = g_svg_var_styles;
-    g_svg_var_styles = styles;
     svg_state_apply_node(&ctx, &st, svg);
     svg_render_children(&ctx, svg, &st);
-    g_svg_var_styles = prev_var_styles;
 
     cairo_restore(cr);
     svg_state_clear(&st);
@@ -1990,12 +2010,12 @@ ns_svg_bytes_look_like_svg(const guchar *data, gsize len)
 }
 
 static const ns_node *
-svg_find_root(const ns_node *n)
+svg_find_root(const ns_node *n, int depth)
 {
-    if (!n) return NULL;
+    if (!n || depth >= NS_SVG_MAX_TREE_DEPTH) return NULL;
     if (ns_svg_node_is_root(n)) return n;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        const ns_node *r = svg_find_root(c);
+        const ns_node *r = svg_find_root(c, depth + 1);
         if (r) return r;
     }
     return NULL;
@@ -2009,7 +2029,7 @@ ns_svg_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
 
     ns_node *doc = ns_html_parse((const char *)data, (gssize)len);
     if (!doc) return NULL;
-    const ns_node *root = svg_find_root(doc);
+    const ns_node *root = svg_find_root(doc, 0);
     if (!root) {
         ns_node_free(doc);
         return NULL;

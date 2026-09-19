@@ -24,8 +24,11 @@ typedef struct {
     const char *end;
     GPtrArray  *ns_stack;
     GHashTable *entities;
+    gsize       expanded;
     gboolean    ok;
 } xml_parser;
+
+enum { XML_MAX_ENTITY_EXPANSION = 1 << 20 };
 
 static gboolean
 xml_is_space(char c)
@@ -177,6 +180,12 @@ xml_decode_text(xml_parser *xp, const char *s, gsize len)
             const char *value = g_hash_table_lookup(xp->entities, name);
             g_free(name);
             if (!value) { xp->ok = FALSE; break; }
+            gsize vlen = strlen(value);
+            if (vlen > XML_MAX_ENTITY_EXPANSION - xp->expanded) {
+                xp->ok = FALSE;
+                break;
+            }
+            xp->expanded += vlen;
             g_string_append(out, value);
         }
         p = semi + 1;

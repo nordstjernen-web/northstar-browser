@@ -963,7 +963,9 @@ cmd_seek(NsAudioContext *context, const char *token, double seconds)
 {
     ns_audio_player *p = player_find(context, token);
     if (!p || !p->pcm) return;
-    if (seconds < 0) seconds = 0;
+    if (!(seconds >= 0)) seconds = 0;
+    double max_seconds = (double)p->frames / NS_AUDIO_DEVICE_RATE;
+    if (seconds > max_seconds) seconds = max_seconds;
     size_t frame = (size_t)(seconds * NS_AUDIO_DEVICE_RATE);
     audio_lock();
     if (frame > p->frames) frame = p->frames;

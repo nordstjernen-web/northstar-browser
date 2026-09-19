@@ -568,7 +568,7 @@ ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
         memcpy(copy, pix, frame_bytes);
 
         uint64_t flicks = wuffs_base__frame_config__duration(&fc);
-        int delay_ms = (int)(flicks / 705600);
+        int delay_ms = (int)MIN(flicks / 705600, (uint64_t)600000);
         if (delay_ms <= 0) delay_ms = 100;
 
         ns_image_pixel_frame f = {
