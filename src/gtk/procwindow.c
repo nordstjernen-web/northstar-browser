@@ -26,6 +26,8 @@
 #include <string.h>
 
 #define NS_PROC_APP_ID "org.northstar.WebBrowser"
+#define NS_SUGGEST_MAX 8
+#define NS_SUGGEST_BOOKMARKS 3
 
 static int g_initial_win_w;
 static int g_initial_win_h;
@@ -103,6 +105,11 @@ typedef struct {
     GtkWidget      *window;
     NsProcView     *view;
     GtkWidget      *address;
+    GtkEventController *address_focus;
+    gboolean        address_quiet;
+    GtkWidget      *suggest_popover;
+    GtkWidget      *suggest_list;
+    char           *suggest_typed;
     GtkWidget      *zoom_button;
     GtkWidget      *back;
     GtkWidget      *forward;
@@ -152,6 +159,7 @@ procwindow_free(gpointer data)
     g_free(pw->session_path);
     g_free(pw->home_url);
     g_free(pw->status_base);
+    g_free(pw->suggest_typed);
     if (pw->bookmarks)
         ns_bookmarks_free(pw->bookmarks);
     g_free(pw);
@@ -246,20 +254,6 @@ install_status_css(void)
         "  box-shadow: 0 1px 0 #6b778c;"
         "  padding: 1px 3px;"
         "}"
-        ".ns-toolbargrippy {"
-        "  min-width: 8px;"
-        "  margin: 1px 5px 1px 1px;"
-        "  border-top: 1px solid #ffffff;"
-        "  border-left: 1px solid #ffffff;"
-        "  border-right: 1px solid #9aa5b8;"
-        "  border-bottom: 1px solid #9aa5b8;"
-        "  background-color: #e6eaf1;"
-        "  background-image: repeating-linear-gradient(to right,"
-        "      #ffffff 0px, #ffffff 1px, #9aa5b8 1px, #9aa5b8 2px, #e6eaf1 2px, #e6eaf1 3px);"
-        "}"
-        ".ns-toolbargrippy:hover {"
-        "  background-color: #cfdcf3;"
-        "}"
         ".ns-toolbar-separator {"
         "  min-width: 2px;"
         "  margin: 3px 5px;"
@@ -320,39 +314,6 @@ install_status_css(void)
         "  margin-top: 0;"
         "  margin-bottom: 0;"
         "}"
-        ".ns-location-label {"
-        "  color: #000000;"
-        "  font-size: 12px;"
-        "  margin: 0 4px 0 3px;"
-        "}"
-        ".ns-toolbar button.ns-go-button {"
-        "  border-top: 1px solid #ffffff;"
-        "  border-left: 1px solid #ffffff;"
-        "  border-right: 1px solid #6b778c;"
-        "  border-bottom: 1px solid #6b778c;"
-        "  box-shadow: inset -1px -1px 0 #9aa5b8;"
-        "  background-color: #e6eaf1;"
-        "  padding: 1px 6px;"
-        "  margin: 0 2px;"
-        "  min-height: 22px;"
-        "  min-width: 26px;"
-        "}"
-        ".ns-toolbar button.ns-go-button .ns-toolbar-label {"
-        "  margin: 0 0 0 3px;"
-        "  font-size: 12px;"
-        "}"
-        ".ns-toolbar button.ns-go-button:hover {"
-        "  background-color: #f4f6fa;"
-        "}"
-        ".ns-toolbar button.ns-go-button:active {"
-        "  border-top: 1px solid #6b778c;"
-        "  border-left: 1px solid #6b778c;"
-        "  border-right: 1px solid #ffffff;"
-        "  border-bottom: 1px solid #ffffff;"
-        "  box-shadow: inset 1px 1px 0 #9aa5b8;"
-        "  background-color: #d3d9e3;"
-        "  padding: 2px 5px 0 7px;"
-        "}"
         ".ns-toolbar entry.ns-address {"
         "  min-height: 20px;"
         "  padding: 1px 4px;"
@@ -378,6 +339,40 @@ install_status_css(void)
         "  box-shadow: inset 1px 1px 0 #000000, inset -1px -1px 0 #e6eaf1;"
         "}"
         ".ns-address image.left { margin-right: 5px; }"
+        ".ns-suggest, .ns-suggest > contents {"
+        "  box-shadow: none;"
+        "}"
+        ".ns-suggest > contents {"
+        "  padding: 1px;"
+        "  border: 1px solid #6b778c;"
+        "  border-radius: 0;"
+        "  background-color: #ffffff;"
+        "}"
+        ".ns-suggest list {"
+        "  background: transparent;"
+        "}"
+        ".ns-suggest row {"
+        "  padding: 3px 8px;"
+        "  border-radius: 0;"
+        "  color: #000000;"
+        "}"
+        ".ns-suggest row:hover {"
+        "  background-color: #e6eaf1;"
+        "}"
+        ".ns-suggest row:selected {"
+        "  background-color: #2f5aa8;"
+        "  color: #ffffff;"
+        "}"
+        ".ns-suggest-title {"
+        "  font-size: 12px;"
+        "}"
+        ".ns-suggest-url {"
+        "  font-size: 11px;"
+        "  color: #6b778c;"
+        "}"
+        ".ns-suggest row:selected .ns-suggest-url {"
+        "  color: #dfe6f4;"
+        "}"
         ".ns-zoom {"
         "  font-size: smaller;"
         "  padding: 0 5px;"
@@ -462,27 +457,6 @@ toolbar_button(const char *icon, const char *label, const char *tooltip,
     return b;
 }
 
-static GtkWidget *
-go_button(const char *label, GCallback cb, gpointer data)
-{
-    GtkWidget *b = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
-    GtkWidget *img = gtk_image_new_from_icon_name("northstar-go");
-    gtk_image_set_pixel_size(GTK_IMAGE(img), 16);
-    GtkWidget *lbl = gtk_label_new(label);
-    gtk_widget_add_css_class(lbl, "ns-toolbar-label");
-    gtk_box_append(GTK_BOX(box), img);
-    gtk_box_append(GTK_BOX(box), lbl);
-    gtk_button_set_child(GTK_BUTTON(b), box);
-    gtk_widget_add_css_class(b, "ns-go-button");
-    gtk_widget_set_tooltip_text(b, label);
-    set_accessible_label(b, label);
-    g_signal_connect(b, "clicked", cb, data);
-    return b;
-}
-
 static NsProcView *
 current_view(ProcWindow *pw)
 {
@@ -540,10 +514,18 @@ address_display_url(const char *url)
 }
 
 static void
+address_set_text_quiet(ProcWindow *pw, const char *text)
+{
+    pw->address_quiet = TRUE;
+    gtk_editable_set_text(GTK_EDITABLE(pw->address), text);
+    pw->address_quiet = FALSE;
+}
+
+static void
 set_address_text(ProcWindow *pw, const char *url)
 {
     char *shown = address_display_url(url);
-    gtk_editable_set_text(GTK_EDITABLE(pw->address), shown);
+    address_set_text_quiet(pw, shown);
     g_free(shown);
 }
 
@@ -669,7 +651,7 @@ update_chrome(ProcWindow *pw)
 {
     NsProcView *v = current_view(pw);
     if (!v) {
-        gtk_editable_set_text(GTK_EDITABLE(pw->address), "");
+        address_set_text_quiet(pw, "");
         gtk_window_set_title(GTK_WINDOW(pw->window), ns_brand_versioned());
         gtk_widget_set_sensitive(pw->back, FALSE);
         gtk_widget_set_sensitive(pw->forward, FALSE);
@@ -1123,7 +1105,7 @@ static void
 proc_window_load(ProcWindow *pw, const char *url)
 {
     char *resolved = normalize_url(url);
-    gtk_editable_set_text(GTK_EDITABLE(pw->address), resolved);
+    address_set_text_quiet(pw, resolved);
     ns_proc_view_load(pw->view, resolved);
     g_free(resolved);
 }
@@ -1145,16 +1127,288 @@ on_address_focus_enter(GtkEventControllerFocus *ctrl, gpointer user_data)
 }
 
 static void
+suggest_hide(ProcWindow *pw)
+{
+    if (pw->suggest_popover && gtk_widget_get_visible(pw->suggest_popover))
+        gtk_popover_popdown(GTK_POPOVER(pw->suggest_popover));
+}
+
+static void
+on_address_focus_leave(GtkEventControllerFocus *ctrl, gpointer user_data)
+{
+    (void)ctrl;
+    suggest_hide(user_data);
+}
+
+static GtkWidget *
+suggest_row_new(const char *title, const char *url, const char *target)
+{
+    GtkWidget *row = gtk_list_box_row_new();
+    gtk_widget_set_focusable(row, FALSE);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *title_label = gtk_label_new(title);
+    gtk_label_set_xalign(GTK_LABEL(title_label), 0);
+    gtk_label_set_ellipsize(GTK_LABEL(title_label), PANGO_ELLIPSIZE_END);
+    gtk_widget_add_css_class(title_label, "ns-suggest-title");
+    gtk_box_append(GTK_BOX(box), title_label);
+    if (url) {
+        GtkWidget *url_label = gtk_label_new(url);
+        gtk_label_set_xalign(GTK_LABEL(url_label), 0);
+        gtk_label_set_ellipsize(GTK_LABEL(url_label), PANGO_ELLIPSIZE_END);
+        gtk_widget_add_css_class(url_label, "ns-suggest-url");
+        gtk_box_append(GTK_BOX(box), url_label);
+    }
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+    g_object_set_data_full(G_OBJECT(row), "ns-target", g_strdup(target),
+                           g_free);
+    if (url)
+        g_object_set_data_full(G_OBJECT(row), "ns-fill", g_strdup(url),
+                               g_free);
+    return row;
+}
+
+static gboolean
+suggest_has_target(GtkListBox *list, const char *target)
+{
+    for (GtkWidget *c = gtk_widget_get_first_child(GTK_WIDGET(list)); c;
+         c = gtk_widget_get_next_sibling(c)) {
+        const char *t = g_object_get_data(G_OBJECT(c), "ns-target");
+        if (t && strcmp(t, target) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+suggest_clear(GtkListBox *list)
+{
+    GtkWidget *c;
+    while ((c = gtk_widget_get_first_child(GTK_WIDGET(list))))
+        gtk_list_box_remove(list, c);
+}
+
+static gboolean
+text_contains_fold(const char *haystack, const char *needle_fold)
+{
+    if (!haystack || !*haystack)
+        return FALSE;
+    char *h = g_utf8_casefold(haystack, -1);
+    gboolean hit = strstr(h, needle_fold) != NULL;
+    g_free(h);
+    return hit;
+}
+
+static void
+suggest_refresh(ProcWindow *pw)
+{
+    char *text =
+        g_strstrip(g_strdup(gtk_editable_get_text(GTK_EDITABLE(pw->address))));
+    if (!*text) {
+        g_free(text);
+        suggest_hide(pw);
+        return;
+    }
+    g_free(pw->suggest_typed);
+    pw->suggest_typed = text;
+    GtkListBox *list = GTK_LIST_BOX(pw->suggest_list);
+    suggest_clear(list);
+    guint rows = 0;
+    gboolean offer_search = !strstr(text, "://") &&
+                            !g_str_has_prefix(text, "about:") &&
+                            !g_str_has_prefix(text, "file:");
+    gboolean search_first = offer_search && ns_address_is_search(text);
+    char *search_url = ns_search_url_for(text);
+    char *search_label = g_strconcat(ns_i18n("Search for"), " “", text, "”",
+                                     NULL);
+    if (search_first) {
+        gtk_list_box_append(list, suggest_row_new(search_label, NULL,
+                                                  search_url));
+        rows++;
+    }
+    char *fold = g_utf8_casefold(text, -1);
+    guint n = pw->bookmarks ? ns_bookmarks_count(pw->bookmarks) : 0;
+    guint bookmark_rows = 0;
+    for (guint i = 0; i < n && bookmark_rows < NS_SUGGEST_BOOKMARKS; i++) {
+        const ns_bookmark *b = ns_bookmarks_get(pw->bookmarks, i);
+        if (!text_contains_fold(b->url, fold) &&
+            !text_contains_fold(b->title, fold))
+            continue;
+        if (suggest_has_target(list, b->url))
+            continue;
+        const char *title = b->title && *b->title ? b->title : b->url;
+        gtk_list_box_append(list, suggest_row_new(title, b->url, b->url));
+        rows++;
+        bookmark_rows++;
+    }
+    GPtrArray *hits = ns_history_search(text, NS_SUGGEST_MAX);
+    for (guint i = 0; i < hits->len && rows < NS_SUGGEST_MAX; i++) {
+        ns_history_match *m = g_ptr_array_index(hits, i);
+        if (suggest_has_target(list, m->url))
+            continue;
+        const char *title = *m->title ? m->title : m->url;
+        gtk_list_box_append(list, suggest_row_new(title, m->url, m->url));
+        rows++;
+    }
+    g_ptr_array_unref(hits);
+    if (offer_search && !search_first) {
+        gtk_list_box_append(list, suggest_row_new(search_label, NULL,
+                                                  search_url));
+        rows++;
+    }
+    g_free(fold);
+    g_free(search_label);
+    g_free(search_url);
+    if (!rows) {
+        suggest_hide(pw);
+        return;
+    }
+    gtk_list_box_unselect_all(list);
+    gtk_widget_set_size_request(pw->suggest_popover,
+                                gtk_widget_get_width(pw->address), -1);
+    if (!gtk_widget_get_visible(pw->suggest_popover))
+        gtk_popover_popup(GTK_POPOVER(pw->suggest_popover));
+    else
+        gtk_popover_present(GTK_POPOVER(pw->suggest_popover));
+}
+
+static void
+on_address_changed(GtkEditable *editable, gpointer user_data)
+{
+    (void)editable;
+    ProcWindow *pw = user_data;
+    if (pw->address_quiet || !pw->suggest_popover)
+        return;
+    if (!gtk_event_controller_focus_contains_focus(
+            GTK_EVENT_CONTROLLER_FOCUS(pw->address_focus)))
+        return;
+    suggest_refresh(pw);
+}
+
+static void
+suggest_load(ProcWindow *pw, GtkListBoxRow *row)
+{
+    char *target = g_strdup(g_object_get_data(G_OBJECT(row), "ns-target"));
+    suggest_hide(pw);
+    if (!target)
+        return;
+    NsProcView *v = current_view(pw);
+    address_set_text_quiet(pw, target);
+    ns_proc_view_load(v, target);
+    if (v)
+        ns_proc_view_focus(v);
+    g_free(target);
+}
+
+static void
+on_suggest_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer ud)
+{
+    (void)list;
+    suggest_load(ud, row);
+}
+
+static void
+suggest_move(ProcWindow *pw, int delta)
+{
+    GtkListBox *list = GTK_LIST_BOX(pw->suggest_list);
+    int count = 0;
+    for (GtkWidget *c = gtk_widget_get_first_child(GTK_WIDGET(list)); c;
+         c = gtk_widget_get_next_sibling(c))
+        count++;
+    if (!count)
+        return;
+    GtkListBoxRow *selected = gtk_list_box_get_selected_row(list);
+    int index = selected ? gtk_list_box_row_get_index(selected) : -1;
+    index += delta;
+    if (index < -1)
+        index = count - 1;
+    else if (index >= count)
+        index = -1;
+    if (index < 0) {
+        gtk_list_box_unselect_all(list);
+        address_set_text_quiet(pw, pw->suggest_typed ? pw->suggest_typed : "");
+    } else {
+        GtkListBoxRow *row = gtk_list_box_get_row_at_index(list, index);
+        gtk_list_box_select_row(list, row);
+        const char *fill = g_object_get_data(G_OBJECT(row), "ns-fill");
+        address_set_text_quiet(pw, fill ? fill
+                                        : pw->suggest_typed ? pw->suggest_typed
+                                                            : "");
+    }
+    gtk_editable_set_position(GTK_EDITABLE(pw->address), -1);
+}
+
+static gboolean
+on_address_suggest_key(ProcWindow *pw, guint keyval, GdkModifierType state)
+{
+    if (!pw->suggest_popover || !gtk_widget_get_visible(pw->suggest_popover))
+        return FALSE;
+    if (keyval == GDK_KEY_Escape) {
+        suggest_hide(pw);
+        return TRUE;
+    }
+    if (keyval == GDK_KEY_Down || keyval == GDK_KEY_Up) {
+        suggest_move(pw, keyval == GDK_KEY_Down ? 1 : -1);
+        return TRUE;
+    }
+    if ((keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) &&
+        !(state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK))) {
+        GtkListBoxRow *row =
+            gtk_list_box_get_selected_row(GTK_LIST_BOX(pw->suggest_list));
+        if (row) {
+            suggest_load(pw, row);
+            return TRUE;
+        }
+        suggest_hide(pw);
+    }
+    return FALSE;
+}
+
+static GtkWidget *
+suggest_popover_new(ProcWindow *pw)
+{
+    GtkWidget *popover = gtk_popover_new();
+    gtk_widget_add_css_class(popover, "ns-suggest");
+    gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
+    gtk_popover_set_autohide(GTK_POPOVER(popover), FALSE);
+    gtk_popover_set_position(GTK_POPOVER(popover), GTK_POS_BOTTOM);
+    gtk_widget_set_can_focus(popover, FALSE);
+    pw->suggest_list = gtk_list_box_new();
+    gtk_widget_set_focusable(pw->suggest_list, FALSE);
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(pw->suggest_list),
+                                    GTK_SELECTION_SINGLE);
+    gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(pw->suggest_list),
+                                              TRUE);
+    g_signal_connect(pw->suggest_list, "row-activated",
+                     G_CALLBACK(on_suggest_row_activated), pw);
+    gtk_popover_set_child(GTK_POPOVER(popover), pw->suggest_list);
+    gtk_widget_set_parent(popover, pw->address);
+    return popover;
+}
+
+static void
+on_window_destroy_unparent_suggest(GtkWidget *window, gpointer user_data)
+{
+    (void)window;
+    ProcWindow *pw = user_data;
+    if (pw->suggest_popover) {
+        gtk_widget_unparent(pw->suggest_popover);
+        pw->suggest_popover = NULL;
+        pw->suggest_list = NULL;
+    }
+}
+
+static void
 on_address_activate(GtkEntry *entry, gpointer user_data)
 {
     ProcWindow *pw = user_data;
     NsProcView *v = current_view(pw);
+    suggest_hide(pw);
     char *resolved = normalize_url(gtk_editable_get_text(GTK_EDITABLE(entry)));
     if (!*resolved) {
         g_free(resolved);
         return;
     }
-    gtk_editable_set_text(GTK_EDITABLE(pw->address), resolved);
+    address_set_text_quiet(pw, resolved);
     ns_proc_view_load(v, resolved);
     if (v)
         ns_proc_view_focus(v);
@@ -1168,6 +1422,8 @@ on_address_key_pressed(GtkEventControllerKey *controller, guint keyval,
     (void)controller;
     (void)keycode;
     ProcWindow *pw = ud;
+    if (on_address_suggest_key(pw, keyval, state))
+        return TRUE;
     if (keyval != GDK_KEY_Return && keyval != GDK_KEY_KP_Enter)
         return FALSE;
     gboolean ctrl  = (state & GDK_CONTROL_MASK) != 0;
@@ -1190,7 +1446,7 @@ on_address_key_pressed(GtkEventControllerKey *controller, guint keyval,
         ? g_strconcat(prefix, text, NULL)
         : g_strconcat(prefix, text, suffix, NULL);
     g_free(text);
-    gtk_editable_set_text(GTK_EDITABLE(pw->address), host);
+    address_set_text_quiet(pw, host);
     g_free(host);
     on_address_activate(GTK_ENTRY(pw->address), pw);
     return TRUE;
@@ -1252,18 +1508,17 @@ on_logo_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
-on_go_clicked(GtkButton *b, gpointer ud)
-{
-    (void)b;
-    ProcWindow *pw = ud;
-    on_address_activate(GTK_ENTRY(pw->address), pw);
-}
-
-static void
 on_print_clicked(GtkButton *b, gpointer ud)
 {
     (void)b;
     ns_proc_view_print(current_view(ud));
+}
+
+static void
+on_downloads_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    show_downloads_window(ud);
 }
 
 static void
@@ -2078,9 +2333,6 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_widget_set_margin_start(toolbar, 4);
     gtk_widget_set_margin_end(toolbar, 4);
 
-    GtkWidget *grippy = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_add_css_class(grippy, "ns-toolbargrippy");
-
     pw->back = toolbar_button("northstar-back", ns_i18n("Back"),
                               ns_i18n("Go back one page"),
                               G_CALLBACK(on_back_clicked), pw);
@@ -2100,6 +2352,10 @@ proc_window_new(GtkApplication *app, const char *home_url,
     GtkWidget *print = toolbar_button("northstar-print", ns_i18n("Print"),
                                       ns_i18n("Print this page"),
                                       G_CALLBACK(on_print_clicked), pw);
+    GtkWidget *downloads = toolbar_button("northstar-downloads",
+                                          ns_i18n("Downloads"),
+                                          ns_i18n("Show downloads"),
+                                          G_CALLBACK(on_downloads_clicked), pw);
     GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_widget_add_css_class(sep, "ns-toolbar-separator");
     toolbar_button_icon_size(pw->back, 20);
@@ -2108,8 +2364,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
     toolbar_button_icon_size(pw->stop, 20);
     toolbar_button_icon_size(home, 20);
     toolbar_button_icon_size(print, 20);
-    GtkWidget *location_label = gtk_label_new(ns_i18n("Location:"));
-    gtk_widget_add_css_class(location_label, "ns-location-label");
+    toolbar_button_icon_size(downloads, 20);
 
     pw->spinner = gtk_spinner_new();
     gtk_widget_set_tooltip_text(pw->spinner, ns_i18n("Loading"));
@@ -2134,7 +2389,15 @@ proc_window_new(GtkApplication *app, const char *home_url,
     GtkEventController *addr_focus = gtk_event_controller_focus_new();
     g_signal_connect(addr_focus, "enter",
                      G_CALLBACK(on_address_focus_enter), pw);
+    g_signal_connect(addr_focus, "leave",
+                     G_CALLBACK(on_address_focus_leave), pw);
     gtk_widget_add_controller(pw->address, addr_focus);
+    pw->address_focus = addr_focus;
+    pw->suggest_popover = suggest_popover_new(pw);
+    g_signal_connect(pw->address, "changed",
+                     G_CALLBACK(on_address_changed), pw);
+    g_signal_connect(pw->window, "destroy",
+                     G_CALLBACK(on_window_destroy_unparent_suggest), pw);
     GtkEventController *addr_keys = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(addr_keys, GTK_PHASE_CAPTURE);
     g_signal_connect(addr_keys, "key-pressed",
@@ -2151,7 +2414,6 @@ proc_window_new(GtkApplication *app, const char *home_url,
     g_signal_connect(pw->zoom_button, "clicked",
                      G_CALLBACK(on_zoom_indicator_clicked), pw);
 
-    GtkWidget *go = go_button(ns_i18n("Go"), G_CALLBACK(on_go_clicked), pw);
     GtkWidget *sep2 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_widget_add_css_class(sep2, "ns-toolbar-separator");
     pw->bookmarks_button = toolbar_button("northstar-bookmarks",
@@ -2190,19 +2452,17 @@ proc_window_new(GtkApplication *app, const char *home_url,
     set_accessible_label(logo_button, ns_i18n("Visit nordstjernen.org"));
     g_signal_connect(logo_button, "clicked", G_CALLBACK(on_logo_clicked), pw);
 
-    gtk_box_append(GTK_BOX(toolbar), grippy);
     gtk_box_append(GTK_BOX(toolbar), pw->back);
     gtk_box_append(GTK_BOX(toolbar), pw->forward);
     gtk_box_append(GTK_BOX(toolbar), pw->reload);
     gtk_box_append(GTK_BOX(toolbar), pw->stop);
     gtk_box_append(GTK_BOX(toolbar), home);
     gtk_box_append(GTK_BOX(toolbar), print);
+    gtk_box_append(GTK_BOX(toolbar), downloads);
     gtk_box_append(GTK_BOX(toolbar), sep);
     gtk_box_append(GTK_BOX(toolbar), pw->spinner);
-    gtk_box_append(GTK_BOX(toolbar), location_label);
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), pw->zoom_button);
-    gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), sep2);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(toolbar), menu_button);

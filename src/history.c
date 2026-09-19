@@ -202,6 +202,61 @@ static const char k_history_style[] =
     "}"
     "</style>";
 
+static void
+history_match_free(gpointer data)
+{
+    ns_history_match *m = data;
+    g_free(m->url);
+    g_free(m->title);
+    g_free(m);
+}
+
+static char *
+history_like_pattern(const char *query)
+{
+    GString *s = g_string_new("%");
+    for (const char *p = query; *p; p++) {
+        if (*p == '%' || *p == '_' || *p == '\\')
+            g_string_append_c(s, '\\');
+        g_string_append_c(s, *p);
+    }
+    g_string_append_c(s, '%');
+    return g_string_free(s, FALSE);
+}
+
+GPtrArray *
+ns_history_search(const char *query, guint limit)
+{
+    GPtrArray *out = g_ptr_array_new_with_free_func(history_match_free);
+    if (!query || !*query || !limit)
+        return out;
+    char *pattern = history_like_pattern(query);
+    g_mutex_lock(&g_history_mutex);
+    sqlite3_stmt *st = NULL;
+    if (g_history_db &&
+        sqlite3_prepare_v2(g_history_db,
+            "SELECT url,title FROM visits "
+            "WHERE url LIKE ?1 ESCAPE '\\' OR title LIKE ?1 ESCAPE '\\' "
+            "ORDER BY visit_count DESC, last_visit DESC LIMIT ?2",
+            -1, &st, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, pattern, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 2, (int)limit);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const char *url   = (const char *)sqlite3_column_text(st, 0);
+            const char *title = (const char *)sqlite3_column_text(st, 1);
+            if (!url) continue;
+            ns_history_match *m = g_new0(ns_history_match, 1);
+            m->url = g_strdup(url);
+            m->title = g_strdup(title ? title : "");
+            g_ptr_array_add(out, m);
+        }
+        sqlite3_finalize(st);
+    }
+    g_mutex_unlock(&g_history_mutex);
+    g_free(pattern);
+    return out;
+}
+
 char *
 ns_history_html_page(void)
 {

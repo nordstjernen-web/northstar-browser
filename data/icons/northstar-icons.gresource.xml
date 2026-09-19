@@ -7,8 +7,8 @@
     <file alias="northstar-home.svg">hicolor/scalable/apps/northstar-home.svg</file>
     <file alias="northstar-reload.svg">hicolor/scalable/apps/northstar-reload.svg</file>
     <file alias="northstar-stop.svg">hicolor/scalable/apps/northstar-stop.svg</file>
-    <file alias="northstar-go.svg">hicolor/scalable/apps/northstar-go.svg</file>
     <file alias="northstar-print.svg">hicolor/scalable/apps/northstar-print.svg</file>
+    <file alias="northstar-downloads.svg">hicolor/scalable/apps/northstar-downloads.svg</file>
     <file alias="northstar-bookmarks.svg">hicolor/scalable/apps/northstar-bookmarks.svg</file>
     <file alias="northstar-bookmarks-saved.svg">hicolor/scalable/apps/northstar-bookmarks-saved.svg</file>
     <file alias="northstar-console.svg">hicolor/scalable/apps/northstar-console.svg</file>
