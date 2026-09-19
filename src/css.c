@@ -18892,8 +18892,22 @@ css_parse_import_prelude(ns_css_stylesheet *sh, const char *current_layer,
         g_free(layer_name);
         layer_name = full;
     }
+    gboolean supported = TRUE;
+    p = css_skip_ws_comments(p, end);
+    if (css_at_keyword(p, end, "supports")) {
+        const char *open = css_skip_ws_comments(p + 8, end);
+        if (open < end && *open == '(') {
+            const char *close = match_close_paren(open + 1, end);
+            if (close) {
+                char *condition = g_strndup(open + 1, (gsize)(close - open - 1));
+                supported = ns_css_supports_condition(condition, TRUE);
+                g_free(condition);
+                p = close + 1;
+            }
+        }
+    }
     char *media = css_trim_dup_range(p, end);
-    css_stylesheet_add_import(sh, url, layer_name, media);
+    if (supported) css_stylesheet_add_import(sh, url, layer_name, media);
     g_free(media);
     g_free(layer_name);
     g_free(url);
