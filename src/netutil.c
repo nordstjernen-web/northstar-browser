@@ -215,6 +215,17 @@ ns_address_is_search(const char *s)
     return TRUE;
 }
 
+gboolean
+ns_about_url_is_public(const char *url)
+{
+    static const char *const public_pages[] = {
+        "about:blank", "about:start", "about:home", "about:newtab", NULL,
+    };
+    for (gsize i = 0; public_pages[i]; i++)
+        if (g_ascii_strcasecmp(url, public_pages[i]) == 0) return TRUE;
+    return FALSE;
+}
+
 char *
 ns_search_url_for(const char *query)
 {

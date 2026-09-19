@@ -4237,16 +4237,6 @@ static const char k_about_settings_html[] =
 "load();\n"
 "</script></body></html>";
 
-static char *
-about_request_form(const char *url, const char *method,
-                   const void *body, gsize body_len)
-{
-    if (method && g_ascii_strcasecmp(method, "POST") == 0 && body && body_len)
-        return g_strndup((const char *)body, body_len);
-    const char *qs = strchr(url, '?');
-    return g_strdup(qs ? qs + 1 : "");
-}
-
 static void
 about_emit_json(ns_response *resp, char *json)
 {
@@ -4356,22 +4346,34 @@ about_start_tagline(void)
 }
 
 static gboolean
-about_request_from_chrome(const char *top_url)
+about_request_from_chrome(const char *top_url, gboolean navigation)
 {
-    return !top_url || !*top_url || g_str_has_prefix(top_url, "about:");
+    if (top_url && *top_url) return g_str_has_prefix(top_url, "about:");
+    return navigation;
+}
+
+static void
+about_emit_text(ns_response *resp, long status, const char *body)
+{
+    resp->status = status;
+    g_free(resp->content_type);
+    resp->content_type = g_strdup("text/plain; charset=utf-8");
+    g_byte_array_set_size(resp->body, 0);
+    g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
 }
 
 static gboolean
 synthesize_about_response(const char *url, const char *top_url,
-                          const char *method, const void *req_body,
-                          gsize req_body_len, ns_response *resp)
+                          gboolean navigation, const char *method,
+                          const void *req_body, gsize req_body_len,
+                          ns_response *resp)
 {
     if (!g_str_has_prefix(url, "about:")) return FALSE;
     const char *what = url + strlen("about:");
     if ((g_str_equal(what, "history") ||
          g_str_equal(what, "config") ||
          g_str_has_prefix(what, "settings")) &&
-        !about_request_from_chrome(top_url)) {
+        !about_request_from_chrome(top_url, navigation)) {
         resp->status = 403;
         resp->final_url = g_strdup(url);
         resp->content_type = g_strdup("text/plain; charset=utf-8");
@@ -4518,13 +4520,20 @@ synthesize_about_response(const char *url, const char *top_url,
                             (guint)strlen(k_about_settings_html));
     } else if (g_str_has_prefix(what, "settings-data")) {
         about_emit_json(resp, about_settings_json());
-    } else if (g_str_has_prefix(what, "settings-save")) {
-        char *form = about_request_form(url, method, req_body, req_body_len);
-        about_settings_save(form);
-        g_free(form);
-        about_emit_json(resp, g_strdup("{\"ok\":true}"));
-    } else if (g_str_has_prefix(what, "settings-clear")) {
-        about_settings_clear();
+    } else if (g_str_has_prefix(what, "settings-save") ||
+               g_str_has_prefix(what, "settings-clear")) {
+        if (!method || g_ascii_strcasecmp(method, "POST") != 0) {
+            about_emit_text(resp, 405, "settings changes require POST");
+            return TRUE;
+        }
+        if (g_str_has_prefix(what, "settings-save")) {
+            char *form = req_body && req_body_len
+                ? g_strndup((const char *)req_body, req_body_len) : NULL;
+            about_settings_save(form);
+            g_free(form);
+        } else {
+            about_settings_clear();
+        }
         about_emit_json(resp, g_strdup("{\"ok\":true}"));
     } else {
         const char *body = "<!doctype html><title>Northstar</title>";
@@ -4867,7 +4876,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    if (synthesize_about_response(url, top_url, method, body, body_len, resp))
+    if (synthesize_about_response(url, top_url, is_navigation, method, body,
+                                  body_len, resp))
         return resp;
     if (synthesize_view_source_response(url, top_url, cancellable, resp))
         return resp;
