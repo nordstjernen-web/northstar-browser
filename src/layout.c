@@ -11547,7 +11547,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 c->x = inner_x + left_off;
             else
                 c->x = inner_x + cw - right_off - tentative_outer;
-            c->y = float_y + c->margin.top;
+            c->y = float_y;
             double saved_cw = c->content_width;
             c->content_width = cw_for_float;
             gboolean explicit_float_w = wv2 &&
@@ -11570,11 +11570,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             float_ref fr = {
                 .box = c, .side = fside,
-                .top = c->y - c->margin.top,
+                .top = c->y,
                 .bottom = c->y + c->content_height
                     + c->padding.top + c->padding.bottom
                     + c->border.top + c->border.bottom
-                    + c->margin.bottom,
+                    + c->margin.top + c->margin.bottom,
                 .outer_w = actual_outer,
                 .left_edge = c->x,
                 .right_edge = c->x + actual_outer,
