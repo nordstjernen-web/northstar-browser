@@ -46,6 +46,18 @@ Significant changes in each release:
   README screenshot is updated with a full browser window capture,
   showing the classic menubar and navigation toolbar above the sunny
   about:start comic.
+* The navigation toolbar is shorter. The icon-over-label buttons drop
+  from 44 to 34 pixels with 20-pixel icons and a smaller label, the
+  location field, Go button and throbber shrink to match, and the
+  toolbar's own padding and margins tighten, so the whole bar is about a
+  quarter less tall. The toolbar icons are redrawn in a style between the
+  earlier flat gradient glyphs and the faceted 3D set: each keeps a
+  single smooth gradient and a thin dark outline, and gains a soft drop
+  shadow and a glossy top highlight, without the split facets and bevel
+  edges. Stop is a red button with a white cross again, Reload a plain
+  circular arrow, Home a blue-roofed house with door and windows, Print a
+  printer with paper in and out, and Bookmarks a blue ribbon whose gold
+  star fills in when the page is saved.
 * `<textarea rows>` and `cols` are parsed as bounded non-negative
   integers (1 to 1000, defaulting to 2 and 20), so an attribute like
   `rows="2000000000"` no longer makes layout build billions of

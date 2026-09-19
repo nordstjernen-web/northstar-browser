@@ -1,41 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <defs>
-    <linearGradient id="go-upper" x1="0" y1="0" x2="0.6" y2="1">
-      <stop offset="0%" stop-color="#bbfba8"/>
-      <stop offset="35%" stop-color="#72e87c"/>
-      <stop offset="100%" stop-color="#34c252"/>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c2f2b0"/>
+      <stop offset="0.5" stop-color="#5fbf62"/>
+      <stop offset="1" stop-color="#2c8a3c"/>
     </linearGradient>
-    <linearGradient id="go-lower" x1="0" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#1b8833"/>
-      <stop offset="65%" stop-color="#0d5e21"/>
-      <stop offset="100%" stop-color="#063e14"/>
-    </linearGradient>
-    <linearGradient id="go-bevel" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#155523"/>
-      <stop offset="100%" stop-color="#07270e"/>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-
-  <!-- Drop Shadow -->
-  <polygon points="5,4 20.5,12 5,20" fill="#000000" opacity="0.22" transform="translate(1.2, 1.2)"/>
-
-  <!-- Dark Outer Contour -->
-  <polygon points="4.2,3.2 20.8,12 4.2,20.8"
-           fill="#041a0a" stroke="#031508" stroke-width="0.5" stroke-linejoin="round"/>
-
-  <!-- Lower Shaded Bevel -->
-  <polygon points="4.8,12 20,12 4.8,20" fill="url(#go-bevel)"/>
-
-  <!-- Lower Facet (Deep Emerald) -->
-  <polygon points="4.8,12 19.5,12 4.8,19.4" fill="url(#go-lower)"/>
-
-  <!-- Upper Facet (Mint / Spring Green) -->
-  <polygon points="4.8,12 4.8,4.6 19.5,12" fill="url(#go-upper)"/>
-
-  <!-- Specular Highlight Top Edge -->
-  <line x1="4.8" y1="4.8" x2="19.2" y2="12" stroke="#ffffff" stroke-width="0.75" stroke-linecap="round" opacity="0.85"/>
-
-  <!-- Center Ridge Highlight -->
-  <line x1="4.8" y1="12" x2="19.2" y2="12" stroke="#e4ffeb" stroke-width="0.7" stroke-linecap="round" opacity="0.8"/>
+  <path d="M5.5 4 L20 12 L5.5 20 Z" fill="#000000" opacity="0.18" transform="translate(0.7 0.9)"/>
+  <path d="M5.5 4 L20 12 L5.5 20 Z" fill="url(#g)" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M6 5 L18.6 12 L6 12 Z" fill="url(#gloss)"/>
 </svg>

@@ -252,11 +252,11 @@ install_status_css(void)
         "  border-top: 1px solid #ffffff;"
         "  border-bottom: 1px solid #9aa5b8;"
         "  box-shadow: 0 1px 0 #6b778c;"
-        "  padding: 2px 3px;"
+        "  padding: 1px 3px;"
         "}"
         ".ns-toolbargrippy {"
         "  min-width: 8px;"
-        "  margin: 2px 5px 2px 1px;"
+        "  margin: 1px 5px 1px 1px;"
         "  border-top: 1px solid #ffffff;"
         "  border-left: 1px solid #ffffff;"
         "  border-right: 1px solid #9aa5b8;"
@@ -276,9 +276,9 @@ install_status_css(void)
         "  background: none;"
         "}"
         ".ns-toolbar button {"
-        "  min-height: 28px;"
-        "  min-width: 28px;"
-        "  padding: 2px 4px;"
+        "  min-height: 24px;"
+        "  min-width: 24px;"
+        "  padding: 1px 4px;"
         "  border: 1px solid transparent;"
         "  border-radius: 0;"
         "  background: transparent;"
@@ -287,9 +287,9 @@ install_status_css(void)
         "  text-shadow: none;"
         "}"
         ".ns-toolbar button.ns-nav-button {"
-        "  min-width: 46px;"
-        "  min-height: 44px;"
-        "  padding: 3px 6px 2px 6px;"
+        "  min-width: 40px;"
+        "  min-height: 34px;"
+        "  padding: 2px 5px 1px 5px;"
         "}"
         ".ns-toolbar button:hover {"
         "  border-top: 1px solid #ffffff;"
@@ -306,10 +306,10 @@ install_status_css(void)
         "  border-bottom: 1px solid #ffffff;"
         "  box-shadow: inset 1px 1px 0 #9aa5b8;"
         "  background-color: #d3d9e3;"
-        "  padding: 3px 3px 1px 5px;"
+        "  padding: 2px 3px 0 5px;"
         "}"
         ".ns-toolbar button.ns-nav-button:active, .ns-toolbar button.ns-nav-button:checked {"
-        "  padding: 4px 5px 1px 7px;"
+        "  padding: 3px 4px 0 6px;"
         "}"
         ".ns-toolbar button:disabled {"
         "  border: 1px solid transparent;"
@@ -322,10 +322,10 @@ install_status_css(void)
         "  text-shadow: 1px 1px 0 #ffffff;"
         "}"
         ".ns-toolbar-label {"
-        "  font-size: 11px;"
+        "  font-size: 10px;"
         "  font-weight: normal;"
         "  color: #000000;"
-        "  margin-top: 1px;"
+        "  margin-top: 0;"
         "  margin-bottom: 0;"
         "}"
         ".ns-location-label {"
@@ -340,9 +340,9 @@ install_status_css(void)
         "  border-bottom: 1px solid #6b778c;"
         "  box-shadow: inset -1px -1px 0 #9aa5b8;"
         "  background-color: #e6eaf1;"
-        "  padding: 2px 6px;"
+        "  padding: 1px 6px;"
         "  margin: 0 2px;"
-        "  min-height: 24px;"
+        "  min-height: 22px;"
         "  min-width: 26px;"
         "}"
         ".ns-toolbar button.ns-go-button .ns-toolbar-label {"
@@ -359,10 +359,10 @@ install_status_css(void)
         "  border-bottom: 1px solid #ffffff;"
         "  box-shadow: inset 1px 1px 0 #9aa5b8;"
         "  background-color: #d3d9e3;"
-        "  padding: 3px 5px 1px 7px;"
+        "  padding: 2px 5px 0 7px;"
         "}"
         ".ns-toolbar entry.ns-address {"
-        "  min-height: 22px;"
+        "  min-height: 20px;"
         "  padding: 1px 4px;"
         "  border-top: 1px solid #9aa5b8;"
         "  border-left: 1px solid #9aa5b8;"
@@ -373,6 +373,14 @@ install_status_css(void)
         "  color: #000000;"
         "  border-radius: 0;"
         "  font-size: 12px;"
+        "}"
+        ".ns-toolbar entry.ns-address > text {"
+        "  min-height: 0;"
+        "  padding: 0;"
+        "}"
+        ".ns-toolbar entry.ns-address > image {"
+        "  margin-top: 0;"
+        "  margin-bottom: 0;"
         "}"
         ".ns-toolbar entry.ns-address:focus {"
         "  box-shadow: inset 1px 1px 0 #000000, inset -1px -1px 0 #e6eaf1;"
@@ -385,8 +393,8 @@ install_status_css(void)
         "  border: 1px solid transparent;"
         "}"
         ".ns-throbber {"
-        "  min-width: 30px;"
-        "  min-height: 30px;"
+        "  min-width: 26px;"
+        "  min-height: 26px;"
         "  border-top: 1px solid #9aa5b8;"
         "  border-left: 1px solid #9aa5b8;"
         "  border-right: 1px solid #ffffff;"
@@ -395,7 +403,7 @@ install_status_css(void)
         "  background-color: #080e22;"
         "  border-radius: 0;"
         "  padding: 1px;"
-        "  margin: 2px 1px 2px 5px;"
+        "  margin: 1px 1px 1px 5px;"
         "}"
         ".ns-throbber:hover {"
         "  background-color: #121c3c;"
@@ -2096,8 +2104,8 @@ proc_window_new(GtkApplication *app, const char *home_url,
 
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_widget_add_css_class(toolbar, "ns-toolbar");
-    gtk_widget_set_margin_top(toolbar, 2);
-    gtk_widget_set_margin_bottom(toolbar, 2);
+    gtk_widget_set_margin_top(toolbar, 1);
+    gtk_widget_set_margin_bottom(toolbar, 1);
     gtk_widget_set_margin_start(toolbar, 4);
     gtk_widget_set_margin_end(toolbar, 4);
 
@@ -2125,12 +2133,12 @@ proc_window_new(GtkApplication *app, const char *home_url,
                                       G_CALLBACK(on_print_clicked), pw);
     GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_widget_add_css_class(sep, "ns-toolbar-separator");
-    toolbar_button_icon_size(pw->back, 24);
-    toolbar_button_icon_size(pw->forward, 24);
-    toolbar_button_icon_size(pw->reload, 24);
-    toolbar_button_icon_size(pw->stop, 24);
-    toolbar_button_icon_size(home, 24);
-    toolbar_button_icon_size(print, 24);
+    toolbar_button_icon_size(pw->back, 20);
+    toolbar_button_icon_size(pw->forward, 20);
+    toolbar_button_icon_size(pw->reload, 20);
+    toolbar_button_icon_size(pw->stop, 20);
+    toolbar_button_icon_size(home, 20);
+    toolbar_button_icon_size(print, 20);
     GtkWidget *location_label = gtk_label_new(ns_i18n("Location:"));
     gtk_widget_add_css_class(location_label, "ns-location-label");
 
@@ -2141,6 +2149,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
 
     pw->address = gtk_entry_new();
     gtk_widget_set_hexpand(pw->address, TRUE);
+    gtk_widget_set_valign(pw->address, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(pw->address, "ns-address");
     gtk_entry_set_icon_from_icon_name(GTK_ENTRY(pw->address),
                                       GTK_ENTRY_ICON_PRIMARY,
@@ -2180,7 +2189,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
                                           ns_i18n("Bookmarks"),
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
-    toolbar_button_icon_size(pw->bookmarks_button, 24);
+    toolbar_button_icon_size(pw->bookmarks_button, 20);
 
     GMenuModel *menubar_model = build_menubar_model();
     GtkWidget *menubar = gtk_popover_menu_bar_new_from_model(menubar_model);
@@ -2188,7 +2197,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
     g_object_unref(menubar_model);
 
     GtkWidget *logo = gtk_image_new_from_icon_name("northstar");
-    gtk_image_set_pixel_size(GTK_IMAGE(logo), 26);
+    gtk_image_set_pixel_size(GTK_IMAGE(logo), 22);
     GtkWidget *logo_button = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(logo_button), logo);
     gtk_button_set_has_frame(GTK_BUTTON(logo_button), FALSE);

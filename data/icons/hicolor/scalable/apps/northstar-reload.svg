@@ -1,65 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <defs>
-    <!-- Paper outer surface gradient -->
-    <linearGradient id="rel-paper" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="25%" stop-color="#b8d4fc"/>
-      <stop offset="70%" stop-color="#6e9ce6"/>
-      <stop offset="100%" stop-color="#4270c4"/>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9c8f4"/>
+      <stop offset="0.5" stop-color="#4a80d9"/>
+      <stop offset="1" stop-color="#26509c"/>
     </linearGradient>
-
-    <!-- Deep navy shadow inside the curl -->
-    <linearGradient id="rel-shadow" x1="0" y1="0" x2="0.8" y2="1">
-      <stop offset="0%" stop-color="#071236"/>
-      <stop offset="50%" stop-color="#0d2159"/>
-      <stop offset="100%" stop-color="#142f7c"/>
-    </linearGradient>
-
-    <!-- Upright document spine / right side -->
-    <linearGradient id="rel-spine" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#2c4d9a"/>
-      <stop offset="50%" stop-color="#1a3272"/>
-      <stop offset="100%" stop-color="#0c1a40"/>
-    </linearGradient>
-
-    <!-- Bottom curl / return arrow -->
-    <linearGradient id="rel-bottom" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#9fc4f8"/>
-      <stop offset="100%" stop-color="#3b69bd"/>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-
-  <!-- Drop Shadow -->
-  <path d="M 4 19 L 19 19 L 21 16 L 21 7 L 17 4 L 9 4 Z" fill="#000000" opacity="0.2" transform="translate(1.2, 1.2)"/>
-
-  <!-- Upright Sheet Spine (Right Background Column) -->
-  <path d="M 13.5 4.5 L 18.2 4.5 C 19.2 4.5, 20.0 5.3, 20.0 6.3 L 20.0 18.0 L 14.5 18.0 Z"
-        fill="url(#rel-spine)" stroke="#091433" stroke-width="0.5"/>
-
-  <!-- Inside Hollow Cavity of the Roll (Dark Navy) -->
-  <path d="M 7.5 7.8 C 7.5 4.0, 18.5 4.0, 18.5 7.8 L 18.5 17.5 L 14.5 17.5 L 14.5 9.0 C 14.5 7.0, 10.5 7.0, 9.5 9.0 Z"
-        fill="url(#rel-shadow)"/>
-
-  <!-- Bottom Return Loop -->
-  <path d="M 4.5 15.5 L 4.5 18.5 C 4.5 19.5, 5.5 20.0, 6.5 20.0 L 19.5 20.0 L 19.5 17.5 L 6.5 17.5 L 6.5 15.5 Z"
-        fill="url(#rel-bottom)" stroke="#091433" stroke-width="0.5"/>
-
-  <!-- Rolling Over Top Sheet (The Main Reload Document) -->
-  <path d="M 7.0 6.8 C 7.0 3.2, 18.5 3.2, 18.5 7.2 C 18.5 10.5, 14.5 12.8, 10.5 12.8 L 10.5 9.5 L 3.5 13.8 L 10.5 18.2 L 10.5 14.5 C 15.8 14.5, 19.8 11.5, 19.8 7.0 C 19.8 1.8, 6.0 1.8, 6.0 7.2 Z"
-        fill="url(#rel-paper)" stroke="#091538" stroke-width="0.6" stroke-linejoin="round"/>
-
-  <!-- Specular Highlight along Top Curl Arc -->
-  <path d="M 7.5 5.5 C 9.0 3.5, 16.5 3.5, 18.2 5.8"
-        fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" opacity="0.9"/>
-
-  <!-- Document Webpage Content Lines on curling sheet -->
-  <line x1="8.5" y1="8.5" x2="14.5" y2="8.5" stroke="#ffffff" stroke-width="0.75" stroke-linecap="round" opacity="0.7"/>
-  <line x1="8.5" y1="10.5" x2="13.5" y2="10.5" stroke="#ffffff" stroke-width="0.75" stroke-linecap="round" opacity="0.7"/>
-
-  <!-- Arrow Head Specular Glare -->
-  <polygon points="4.8,13.8 9.8,10.5 9.8,11.8 5.8,14.2" fill="#ffffff" opacity="0.55"/>
-
-  <!-- Bottom Sheet Highlight -->
-  <line x1="6.8" y1="18.0" x2="18.8" y2="18.0" stroke="#cfe4ff" stroke-width="0.5" opacity="0.8"/>
+  <path d="M17.9 8.2 A6.6 6.6 0 1 0 18.6 13.4" fill="none" stroke="#000000" stroke-width="3.2" stroke-linecap="round" opacity="0.18" transform="translate(0.7 0.9)"/>
+  <path d="M14.6 3.6 L21.4 4.4 L20.6 11.2 Z" fill="#000000" opacity="0.18" transform="translate(0.7 0.9)"/>
+  <path d="M17.9 8.2 A6.6 6.6 0 1 0 18.6 13.4" fill="none" stroke="#1f3149" stroke-width="3.8" stroke-linecap="round"/>
+  <path d="M17.9 8.2 A6.6 6.6 0 1 0 18.6 13.4" fill="none" stroke="url(#g)" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M14.6 3.6 L21.4 4.4 L20.6 11.2 Z" fill="url(#g)" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M6.2 11.8 A5.9 5.9 0 0 1 16.6 8.9 L15.4 9.9 A4.4 4.4 0 0 0 7.6 12 Z" fill="url(#gloss)"/>
 </svg>
