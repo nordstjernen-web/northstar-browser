@@ -18088,11 +18088,15 @@ cq_parse_feature(const char *text)
     return n;
 }
 
-static cq_node *cq_parse_query(const char *p, const char *end, gboolean *ok);
+#define CQ_MAX_DEPTH 32
+
+static cq_node *cq_parse_query(const char *p, const char *end, gboolean *ok,
+                               int depth);
 
 static cq_node *
-cq_parse_in_parens(const char **pp, const char *end, gboolean *ok)
+cq_parse_in_parens(const char **pp, const char *end, gboolean *ok, int depth)
 {
+    if (depth > CQ_MAX_DEPTH) { *ok = FALSE; return NULL; }
     const char *p = cq_skip_ws(*pp, end);
     if (p < end && *p == '(') {
         const char *close = cq_match_paren(p, end);
@@ -18104,7 +18108,8 @@ cq_parse_in_parens(const char **pp, const char *end, gboolean *ok)
         if (inner >= inner_end) { *ok = FALSE; return NULL; }
         if (*inner == '(' || cq_word_at(inner, inner_end, "not")) {
             gboolean sub_ok = TRUE;
-            cq_node *q = cq_parse_query(inner, inner_end, &sub_ok);
+            cq_node *q = cq_parse_query(inner, inner_end, &sub_ok,
+                                        depth + 1);
             if (q && sub_ok) {
                 cq_node *g = cq_node_new(CQ_NODE_GROUP);
                 g_ptr_array_add(g->children, q);
@@ -18137,12 +18142,13 @@ cq_parse_in_parens(const char **pp, const char *end, gboolean *ok)
 }
 
 static cq_node *
-cq_parse_query(const char *p, const char *end, gboolean *ok)
+cq_parse_query(const char *p, const char *end, gboolean *ok, int depth)
 {
+    if (depth > CQ_MAX_DEPTH) { *ok = FALSE; return NULL; }
     p = cq_skip_ws(p, end);
     if (cq_word_at(p, end, "not")) {
         p += 3;
-        cq_node *child = cq_parse_in_parens(&p, end, ok);
+        cq_node *child = cq_parse_in_parens(&p, end, ok, depth + 1);
         if (!child) { *ok = FALSE; return NULL; }
         p = cq_skip_ws(p, end);
         if (p < end) { cq_node_free(child); *ok = FALSE; return NULL; }
@@ -18150,7 +18156,7 @@ cq_parse_query(const char *p, const char *end, gboolean *ok)
         g_ptr_array_add(n->children, child);
         return n;
     }
-    cq_node *first = cq_parse_in_parens(&p, end, ok);
+    cq_node *first = cq_parse_in_parens(&p, end, ok, depth + 1);
     if (!first) { *ok = FALSE; return NULL; }
     cq_node *list = NULL;
     while (TRUE) {
@@ -18168,7 +18174,7 @@ cq_parse_query(const char *p, const char *end, gboolean *ok)
             *ok = FALSE;
             break;
         }
-        cq_node *next = cq_parse_in_parens(&p, end, ok);
+        cq_node *next = cq_parse_in_parens(&p, end, ok, depth + 1);
         if (!next) { *ok = FALSE; break; }
         g_ptr_array_add(list->children, next);
     }
@@ -18224,7 +18230,7 @@ cq_parse_condition(const char *cond, char **out_name, cq_node **out_query)
     }
     if (p >= end) return FALSE;
     gboolean ok = TRUE;
-    cq_node *n = cq_parse_query(p, end, &ok);
+    cq_node *n = cq_parse_query(p, end, &ok, 0);
     if (!n || !ok) {
         cq_node_free(n);
         g_free(*out_name);
