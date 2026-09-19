@@ -672,7 +672,15 @@ mq_parse_feature(const char *s, const char *e)
         if (!ne || mq_skip_ws(ne, colon) != colon) return NULL;
         int minmax = 0;
         const char *base = name;
-        if (g_str_has_prefix(name, "min-")) { minmax = 1; base = name + 4; }
+        gboolean pixel_ratio = FALSE;
+        if (g_str_has_prefix(name, "-webkit-")) {
+            const char *rest = name + 8;
+            if (g_str_has_prefix(rest, "min-")) { minmax = 1; rest += 4; }
+            else if (g_str_has_prefix(rest, "max-")) { minmax = 2; rest += 4; }
+            if (strcmp(rest, "device-pixel-ratio") != 0) return NULL;
+            pixel_ratio = TRUE;
+            base = "resolution";
+        } else if (g_str_has_prefix(name, "min-")) { minmax = 1; base = name + 4; }
         else if (g_str_has_prefix(name, "max-")) { minmax = 2; base = name + 4; }
         const mq_feature_def *f = mq_feature_lookup(base);
         if (!f) return NULL;
@@ -680,7 +688,22 @@ mq_parse_feature(const char *s, const char *e)
                        g_ascii_strcasecmp(f->name, "grid") == 0))
             return NULL;
         mq_value v;
-        if (!mq_value_parse(colon + 1, e, f->type, f, &v)) return NULL;
+        if (pixel_ratio) {
+            const char *vs = mq_skip_ws(colon + 1, e);
+            const char *ve = NULL;
+            double ratio = 0;
+            if (!mq_parse_number(vs, e, &ratio, &ve) || ratio < 0 ||
+                mq_skip_ws(ve, e) != e)
+                return NULL;
+            memset(&v, 0, sizeof v);
+            v.kind = MQF_RESOLUTION;
+            v.denom = 1;
+            v.num = ratio;
+            v.serialized_num = ratio;
+            g_strlcpy(v.unit, "dppx", sizeof v.unit);
+        } else if (!mq_value_parse(colon + 1, e, f->type, f, &v)) {
+            return NULL;
+        }
         mq_node *n = mq_node_new(MQN_FEATURE);
         n->feature = f;
         n->minmax = minmax;
