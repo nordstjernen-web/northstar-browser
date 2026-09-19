@@ -3887,7 +3887,8 @@ ns_file_access_allowed(const char *top_url)
 }
 
 static gboolean
-synthesize_file_response(const char *url, const char *top_url, ns_response *resp)
+synthesize_file_response(const char *url, const char *top_url,
+                         gboolean navigation, ns_response *resp)
 {
     if (!url || !g_str_has_prefix(url, "file:")) return FALSE;
     if (!ns_file_access_allowed(top_url)) {
@@ -3908,6 +3909,13 @@ synthesize_file_response(const char *url, const char *top_url, ns_response *resp
     }
 
     if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
+        if (!navigation) {
+            resp->status = 0;
+            resp->error = g_strdup("directory listings are only shown to "
+                                   "navigations");
+            g_free(path);
+            return TRUE;
+        }
         g_free(resp->final_url);
         resp->final_url = file_uri_for_path(path, TRUE);
         if (!resp->final_url)
@@ -4916,7 +4924,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         return resp;
     if (synthesize_data_response(url, resp))
         return resp;
-    if (synthesize_file_response(url, top_url, resp))
+    if (synthesize_file_response(url, top_url, is_navigation, resp))
         return resp;
 
     char *hsts_upgraded = ns_net_hsts_upgrade(url);
