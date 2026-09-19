@@ -1,16 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <defs>
-    <linearGradient id="g" x1="12" y1="2.8" x2="12" y2="21.2" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#a9e3a4"/>
-      <stop offset="0.48" stop-color="#5fb765"/>
-      <stop offset="1" stop-color="#2f8a3e"/>
+    <linearGradient id="fwd-upper" x1="1" y1="0" x2="0.4" y2="1">
+      <stop offset="0%" stop-color="#bbfba8"/>
+      <stop offset="35%" stop-color="#72e87c"/>
+      <stop offset="100%" stop-color="#34c252"/>
+    </linearGradient>
+    <linearGradient id="fwd-lower" x1="1" y1="0" x2="0.6" y2="1">
+      <stop offset="0%" stop-color="#1b8833"/>
+      <stop offset="65%" stop-color="#0d5e21"/>
+      <stop offset="100%" stop-color="#063e14"/>
+    </linearGradient>
+    <linearGradient id="fwd-edge" x1="1" y1="0" x2="0" y2="0.5">
+      <stop offset="0%" stop-color="#144e20"/>
+      <stop offset="100%" stop-color="#07240d"/>
     </linearGradient>
   </defs>
-  <path d="M20.4 12 L13 5 L13 9.2 L4.4 9.2 L4.4 14.8 L13 14.8 L13 19 Z"
-        fill="none" stroke="#142033" stroke-width="0.62"
-        stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M20.4 12 L13 5 L13 9.2 L4.4 9.2 L4.4 14.8 L13 14.8 L13 19 Z"
-        fill="url(#g)" stroke="#1f3149" stroke-width="0.18"
-        stroke-linejoin="round" stroke-linecap="round"/>
+
+  <!-- Drop Shadow -->
+  <path d="M 21.2 12.8 L 12.8 4.4 L 12.8 7.8 L 3.4 7.8 L 3.4 16.2 L 12.8 16.2 L 12.8 20.6 Z"
+        fill="#000000" opacity="0.22" transform="translate(1.2, 1.2)"/>
+
+  <!-- Dark Contour -->
+  <path d="M 22.2 12 L 13.2 3.0 L 13.2 6.8 L 3.2 6.8 L 3.2 17.2 L 13.2 17.2 L 13.2 21.0 Z"
+        fill="#041a0a" stroke="#031508" stroke-width="0.5" stroke-linejoin="round"/>
+
+  <!-- Lower Bevel / Shadow Edge -->
+  <path d="M 13.2 17.2 L 3.2 17.2 L 3.2 16.4 L 13.2 16.4 Z M 13.2 17.2 L 13.2 20.8 L 22.0 12 L 13.2 12 Z"
+        fill="url(#fwd-edge)"/>
+
+  <!-- Lower Facet (Forest Green) -->
+  <polygon points="21.6,12 13.6,12 13.6,16.5 3.8,16.5 3.8,12 13.6,12" fill="url(#fwd-lower)"/>
+  <polygon points="21.6,12 13.6,12 13.6,16.5" fill="url(#fwd-lower)"/>
+
+  <!-- Upper Facet (Bright Mint/Spring Green) -->
+  <polygon points="21.6,12 13.6,3.8 13.6,7.4 3.8,7.4 3.8,12" fill="url(#fwd-upper)"/>
+
+  <!-- Specular highlight facet on top wing -->
+  <polygon points="20.8,11.3 13.6,4.2 13.6,8.5 19.5,11.8" fill="#ffffff" opacity="0.28"/>
+
+  <!-- Crisp Central Ridge Highlight -->
+  <line x1="21.6" y1="12" x2="3.8" y2="12" stroke="#e4ffeb" stroke-width="0.75" stroke-linecap="round"/>
+
+  <!-- Eaves Highlight -->
+  <path d="M 21.4 11.6 L 13.6 3.9 L 13.6 7.4 L 3.8 7.4"
+        fill="none" stroke="#ffffff" stroke-width="0.65" stroke-linecap="round" opacity="0.8"/>
 </svg>

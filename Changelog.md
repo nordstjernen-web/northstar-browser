@@ -17,19 +17,20 @@ Significant changes in each release:
   rabbits ride the stern deck, cats and mice sit on the roof, snakes sun
   on the ridge, giraffes poke through the cabin roof and penguins stand
   at the bow, while a woman on deck holds an umbrella against the rain
-  and doves circle the clouds. Noah's speech bubble reads "Two of each.
-  Yes, even browsers." and the title block carries the 1.0.9 number above
-  the tagline "Yet another web browser." The 32 frames at 80 ms animate
-  near and far rain drifting in gusts, the waves, the ark rocking and
-  heaving, walking legs, nodding heads, the elephant's trunk and ears,
-  hopping rabbits and kangaroos, slithering snakes, the umbrella tilting,
-  the doves flying a figure of eight, a whale surfacing to spout and a
-  lightning flash, on one 256-colour palette rendered at three times
-  supersampling; the GIF is about 750 KB. `scripts/gen-splash.sh` runs
-  `scripts/gen-splash.py`, a numpy and Pillow renderer with hand-wobbled
-  strokes seeded per element and Comic Neue lettering that needs no
-  ImageMagick; gifsicle remains an optional final optimiser. The README
-  screenshot shows the new page.
+  and doves circle the clouds, one bearing an olive sprig. An animated
+  lighthouse on a rocky islet in the waves sweeps its beam across the sea
+  with a waving keeper on the gallery railing, beneath the twinkling
+  North Star. Noah's speech bubble reads "Two of each. Yes, even
+  browsers." and the title block displays "Northstar web browser" with the
+  subtitle "Yet another open source web browser" and version 1.0.9. The 32
+  frames at 80 ms animate near and far rain drifting in gusts, the waves,
+  the rotating lighthouse beacon, the ark rocking and heaving, walking
+  legs, nodding heads, the elephant's trunk and ears, hopping rabbits and
+  kangaroos, slithering snakes, the umbrella tilting, the doves flying, a
+  whale surfacing to spout and a lightning flash, on one 256-colour
+  palette rendered at three times supersampling. `scripts/gen-splash.py`
+  supports cross-platform font resolution across Linux and Windows. The
+  README screenshot is updated with a full browser window capture.
 * `<textarea rows>` and `cols` are parsed as bounded non-negative
   integers (1 to 1000, defaulting to 2 and 20), so an attribute like
   `rows="2000000000"` no longer makes layout build billions of

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <defs>
+    <linearGradient id="bms-ribbon" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#556edb"/>
+      <stop offset="35%" stop-color="#3b52c0"/>
+      <stop offset="75%" stop-color="#283d9e"/>
+      <stop offset="100%" stop-color="#18276f"/>
+    </linearGradient>
+    <linearGradient id="bms-gold" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffe682"/>
+      <stop offset="50%" stop-color="#e2b236"/>
+      <stop offset="100%" stop-color="#9a6e14"/>
+    </linearGradient>
+    <linearGradient id="star-lit" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="40%" stop-color="#fff088"/>
+      <stop offset="100%" stop-color="#f8c830"/>
+    </linearGradient>
+    <linearGradient id="star-dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#d49e1e"/>
+      <stop offset="100%" stop-color="#805006"/>
+    </linearGradient>
+    <radialGradient id="star-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffe875" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#ffe875" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Drop Shadow -->
+  <polygon points="6,3 18,3 18,21 12,16.5 6,21" fill="#000000" opacity="0.22" transform="translate(1, 1)"/>
+
+  <!-- Outer Ribbon Border -->
+  <polygon points="5.5,2.5 18.5,2.5 18.5,21.5 12,16.8 5.5,21.5"
+           fill="#0f1947" stroke="#0a1030" stroke-width="0.5" stroke-linejoin="round"/>
+
+  <!-- Blue Ribbon Body -->
+  <polygon points="6,3 18,3 18,20.8 12,16.4 6,20.8" fill="url(#bms-ribbon)"/>
+
+  <!-- Gold Top Trim -->
+  <rect x="6" y="3" width="12" height="2" fill="url(#bms-gold)"/>
+
+  <!-- Golden Star Glow -->
+  <circle cx="12" cy="11.5" r="5.5" fill="url(#star-glow)"/>
+
+  <!-- 3D FACETED GOLD STAR -->
+  <!-- Dark facet group -->
+  <polygon points="12,11.5 12,7.0 13.4,10.2" fill="url(#star-dark)"/>
+  <polygon points="12,11.5 16.8,10.4 14.4,12.6" fill="url(#star-dark)"/>
+  <polygon points="12,11.5 15.0,16.0 12,14.2" fill="url(#star-dark)"/>
+  <polygon points="12,11.5 9.0,16.0 9.6,12.6" fill="url(#star-dark)"/>
+  <polygon points="12,11.5 7.2,10.4 10.6,10.2" fill="url(#star-dark)"/>
+
+  <!-- Lit facet group -->
+  <polygon points="12,11.5 12,7.0 10.6,10.2" fill="url(#star-lit)"/>
+  <polygon points="12,11.5 16.8,10.4 13.4,10.2" fill="url(#star-lit)"/>
+  <polygon points="12,11.5 15.0,16.0 14.4,12.6" fill="url(#star-lit)"/>
+  <polygon points="12,11.5 9.0,16.0 12,14.2" fill="url(#star-lit)"/>
+  <polygon points="12,11.5 7.2,10.4 9.6,12.6" fill="url(#star-lit)"/>
+
+  <!-- Star Outline for crisp definition -->
+  <polygon points="12,7.0 13.4,10.2 16.8,10.4 14.4,12.6 15.0,16.0 12,14.2 9.0,16.0 9.6,12.6 7.2,10.4 10.6,10.2"
+           fill="none" stroke="#5a3804" stroke-width="0.4" stroke-linejoin="round"/>
+
+  <!-- Star Core Specular Sparkle -->
+  <circle cx="12" cy="11.5" r="0.8" fill="#ffffff"/>
+</svg>

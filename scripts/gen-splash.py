@@ -20,7 +20,7 @@ S = 3
 FRAMES = int(os.environ.get("NS_SPLASH_FRAMES", "32"))
 DELAY_MS = int(os.environ.get("NS_SPLASH_DELAY_MS", "80"))
 LOSSY = int(os.environ.get("NS_SPLASH_LOSSY", "60"))
-TAGLINE = "YET ANOTHER WEB BROWSER."
+TAGLINE = "Yet another open source web browser"
 BUBBLE = ["TWO OF EACH.", "YES, EVEN BROWSERS."]
 
 INK = (0, 0, 0)
@@ -48,6 +48,12 @@ def find_font(query, *paths):
         if f and os.path.isfile(f):
             return f
     for p in paths:
+        if os.path.isfile(p):
+            return p
+    win_fonts = os.environ.get("WINDIR", "C:\\Windows") + "\\Fonts"
+    for fn in ("comicbd.ttf", "comic.ttf", "LiberationSans-Bold.ttf", "LiberationSans-Regular.ttf",
+               "DejaVuSans-Bold.ttf", "DejaVuSans.ttf", "arialbd.ttf", "arial.ttf"):
+        p = os.path.join(win_fonts, fn)
         if os.path.isfile(p):
             return p
     sys.exit("missing font: " + query)
@@ -569,22 +575,141 @@ def ark(ink, phase):
     return t
 
 
-def speech_bubble(ink, x, y, lines, size, tail_to):
+def dove_with_olive(ink, t, phase, olive=False):
+    gensplash_dove = dove
+    gensplash_dove(ink, t, phase)
+    if olive:
+        bx, by = t.p(14, -1)
+        ink.stroke([(bx, by), (bx + 5 * t.scale, by + 4 * t.scale)], width=t.lw(0.7), amp=0.1)
+        ink.stroke([(bx + 3 * t.scale, by + 2 * t.scale), (bx + 6 * t.scale, by + 1 * t.scale)], width=t.lw(0.5), amp=0.1)
+        ink.stroke([(bx + 5 * t.scale, by + 4 * t.scale), (bx + 8 * t.scale, by + 3 * t.scale)], width=t.lw(0.5), amp=0.1)
+
+
+def speech_bubble(ink, cx, cy, lines, size, tail_to):
     widths = [ink.text_width(s, size) for s in lines]
-    w = max(widths) + 26
-    h = len(lines) * (size + 6) + 14
-    pts = circle(x + w / 2, y + h / 2, w / 2, 48, ry=h / 2)
-    ink.stroke(pts, fill=PAPER, amp=0.8)
-    bx, by = x + w * 0.72, y + h - 2
-    ink.stroke([(bx - 8, by), (tail_to[0], tail_to[1]), (bx + 10, by - 3)], fill=PAPER, amp=0.4)
+    max_w = max(widths)
+    w = max_w + 32
+    h = len(lines) * (size + 5) + 18
+    pts = circle(cx, cy, w / 2, 48, ry=h / 2)
+    ink.stroke(pts, fill=PAPER, amp=0.6)
+    bx, by = cx + w * 0.28, cy + h / 2 - 2
+    ink.stroke([(bx - 8, by), (tail_to[0], tail_to[1]), (bx + 8, by - 4)], fill=PAPER, amp=0.3)
+    start_y = cy - (len(lines) * (size + 5)) / 2
     for i, s in enumerate(lines):
-        ink.text(x + w / 2, y + 12 + i * (size + 6), s, size, anchor="ma")
+        ink.text(cx, start_y + i * (size + 5), s, size, anchor="ma")
+
+
+def lighthouse(ink, phase, lx=656, ly=192):
+    rock_pts = [(lx - 24, ly + 14), (lx - 20, ly + 4), (lx - 14, ly - 2),
+                (lx + 14, ly - 2), (lx + 20, ly + 4), (lx + 24, ly + 14)]
+    ink.stroke(rock_pts, fill=PAPER, width=LINE * 1.1)
+    ink.hatch([(lx - 22, ly + 12), (lx - 13, ly - 1), (lx + 13, ly - 1), (lx + 22, ly + 12)],
+              spacing=3.8, angle=-40, width=LINE * 0.5)
+
+    base_y = ly - 2
+    deck_y = base_y - 74
+    bw = 18.0
+    tw = 11.0
+    tower = [(lx - bw / 2, base_y), (lx - tw / 2, deck_y),
+             (lx + tw / 2, deck_y), (lx + bw / 2, base_y)]
+    ink.stroke(tower, fill=PAPER, closed=True, width=LINE * 1.1)
+
+    b1_bot = base_y - 18
+    b1_top = base_y - 32
+    b1_w1 = bw - (bw - tw) * (18 / 74)
+    b1_w2 = bw - (bw - tw) * (32 / 74)
+    ink.hatch([(lx - b1_w1 / 2, b1_bot), (lx - b1_w2 / 2, b1_top),
+               (lx + b1_w2 / 2, b1_top), (lx + b1_w1 / 2, b1_bot)],
+              spacing=4.0, angle=25, width=LINE * 0.5)
+    ink.stroke([(lx - b1_w1 / 2, b1_bot), (lx + b1_w1 / 2, b1_bot)], width=LINE * 0.7, amp=0.2)
+    ink.stroke([(lx - b1_w2 / 2, b1_top), (lx + b1_w2 / 2, b1_top)], width=LINE * 0.7, amp=0.2)
+
+    b2_bot = base_y - 48
+    b2_top = base_y - 62
+    b2_w1 = bw - (bw - tw) * (48 / 74)
+    b2_w2 = bw - (bw - tw) * (62 / 74)
+    ink.hatch([(lx - b2_w1 / 2, b2_bot), (lx - b2_w2 / 2, b2_top),
+               (lx + b2_w2 / 2, b2_top), (lx + b2_w1 / 2, b2_bot)],
+              spacing=3.8, angle=25, width=LINE * 0.5)
+    ink.stroke([(lx - b2_w1 / 2, b2_bot), (lx + b2_w1 / 2, b2_bot)], width=LINE * 0.7, amp=0.2)
+    ink.stroke([(lx - b2_w2 / 2, b2_top), (lx + b2_w2 / 2, b2_top)], width=LINE * 0.7, amp=0.2)
+
+    for wy in (base_y - 10, base_y - 40):
+        ink.stroke([(lx - 1.8, wy), (lx + 1.8, wy), (lx + 1.8, wy - 4), (lx - 1.8, wy - 4)],
+                   fill=INK, closed=True, width=LINE * 0.5, amp=0.2)
+
+    rw = tw + 7.0
+    ink.stroke([(lx - rw / 2, deck_y), (lx + rw / 2, deck_y)], width=LINE * 1.2, amp=0.2)
+    rail_y = deck_y - 7
+    ink.stroke([(lx - rw / 2, rail_y), (lx + rw / 2, rail_y)], width=LINE * 0.7, amp=0.2)
+    for px in (-rw / 2 + 1, -rw / 6, rw / 6, rw / 2 - 1):
+        ink.stroke([(lx + px, deck_y), (lx + px, rail_y)], width=LINE * 0.6, amp=0.1)
+
+    keeper_x = lx - rw / 2 + 3
+    ink.dot(keeper_x, rail_y - 5, 1.2)
+    ink.stroke([(keeper_x, rail_y - 4), (keeper_x, rail_y + 3)], width=LINE * 0.7, amp=0.2)
+    wave_arm = 2.0 * math.sin(2 * math.pi * phase * 2)
+    ink.stroke([(keeper_x, rail_y - 2), (keeper_x - 3, rail_y - 6 + wave_arm)], width=LINE * 0.6, amp=0.1)
+
+    roof_base_y = deck_y - 16
+    ink.stroke([(lx - tw / 2 + 1, deck_y), (lx - tw / 2 + 1, roof_base_y),
+                (lx + tw / 2 - 1, roof_base_y), (lx + tw / 2 - 1, deck_y)],
+               fill=PAPER, closed=True, width=LINE * 0.9, amp=0.2)
+    ink.stroke([(lx, deck_y), (lx, roof_base_y)], width=LINE * 0.6, amp=0.1)
+
+    apex_y = roof_base_y - 8
+    ink.stroke([(lx - tw / 2 - 1, roof_base_y), (lx, apex_y), (lx + tw / 2 + 1, roof_base_y)],
+               fill=PAPER, closed=True, width=LINE * 1.0, amp=0.2)
+    ink.stroke([(lx, apex_y), (lx, apex_y - 5)], width=LINE * 0.8, amp=0.1)
+    ink.dot(lx, apex_y - 5, 0.9)
+
+    beam_cy = deck_y - 12
+    rot = 2 * math.pi * phase
+    dx = math.sin(rot)
+    dz = math.cos(rot)
+
+    blen = 200.0
+    spread = 15.0
+    if dz > -0.25:
+        alpha_factor = max(0.2, (dz + 0.25) / 1.25)
+        end_x1 = lx + dx * blen - dz * spread
+        end_y1 = beam_cy - 10 + dx * 8
+        end_x2 = lx + dx * blen + dz * spread
+        end_y2 = beam_cy + 10 + dx * 8
+
+        ink.stroke([(lx, beam_cy), (end_x1, end_y1)], width=LINE * 0.7 * alpha_factor, amp=0.1)
+        ink.stroke([(lx, beam_cy), (end_x2, end_y2)], width=LINE * 0.7 * alpha_factor, amp=0.1)
+        mid_x = (end_x1 + end_x2) / 2
+        mid_y = (end_y1 + end_y2) / 2
+        ink.stroke([(lx, beam_cy), (mid_x, mid_y)], width=LINE * 0.4 * alpha_factor, amp=0.05)
+
+    if dz > 0.6:
+        flare = (dz - 0.6) / 0.4
+        fl_r = 3.0 + 5.0 * flare
+        for a in (0, math.pi / 4, math.pi / 2, 3 * math.pi / 4):
+            c_a, s_a = math.cos(a), math.sin(a)
+            ray_len = fl_r * 2.2
+            ink.stroke([(lx - c_a * ray_len, beam_cy - s_a * ray_len),
+                        (lx + c_a * ray_len, beam_cy + s_a * ray_len)],
+                       width=LINE * 0.6 * flare, amp=0.1)
+    else:
+        ink.dot(lx, beam_cy, 2.0)
+
+
+def north_star(ink, phase, sx=760, sy=26):
+    twinkle = 0.8 + 0.3 * math.sin(2 * math.pi * phase * 2)
+    r = 3.5 * twinkle
+    ink.dot(sx, sy, 1.6 * twinkle)
+    ink.stroke([(sx - r * 2.2, sy), (sx + r * 2.2, sy)], width=LINE * 0.5 * twinkle, amp=0.1)
+    ink.stroke([(sx, sy - r * 2.2), (sx, sy + r * 2.2)], width=LINE * 0.5 * twinkle, amp=0.1)
+    ink.stroke([(sx - r * 1.1, sy - r * 1.1), (sx + r * 1.1, sy + r * 1.1)], width=LINE * 0.35 * twinkle, amp=0.1)
+    ink.stroke([(sx - r * 1.1, sy + r * 1.1), (sx + r * 1.1, sy - r * 1.1)], width=LINE * 0.35 * twinkle, amp=0.1)
 
 
 def title(ink, ver):
-    ink.text(30, 18, "NORTHSTAR " + ver, 52)
-    ink.text(32, 84, "NORTHSTAR WEB BROWSER", 21)
-    ink.text(32, 114, TAGLINE, 17)
+    ink.text(30, 20, "NORTHSTAR WEB BROWSER", 36, bold=True)
+    ink.text(32, 68, TAGLINE, 18, bold=False)
+    ink.text(32, 94, "Version " + ver, 15, bold=False)
 
 
 PROCESSION = [
@@ -632,6 +757,10 @@ def render_frame(i, fonts, ver):
     road(ink)
     ink.start("whale")
     whale(ink, Place(652, 314, 0.55), phase)
+    ink.start("lighthouse")
+    lighthouse(ink, phase, lx=656, ly=192)
+    ink.start("north_star")
+    north_star(ink, phase, sx=760, sy=26)
     ink.start("ark")
     t = ark(ink, phase)
     ink.start("deck")
@@ -658,12 +787,13 @@ def render_frame(i, fonts, ver):
     ink.start("noah")
     stick_person(ink, Place(NOAH_X, GROUND_Y, 0.85), phase, beard=True, staff=True, wave=True)
     ink.start("doves")
-    for k, (cx, cy, rx, ry, sc) in enumerate(((560, 96, 90, 22, 1.0), (610, 78, 70, 18, 0.8))):
+    for k, (cx, cy, rx, ry, sc) in enumerate(((530, 88, 70, 18, 0.9), (580, 72, 55, 14, 0.75))):
         a = 2 * math.pi * (phase + 0.3 * k)
         flip = math.sin(a) < 0
-        dove(ink, Place(cx + rx * math.cos(a), cy + ry * math.sin(2 * a), sc, flip), phase + 0.2 * k)
+        dove_with_olive(ink, Place(cx + rx * math.cos(a), cy + ry * math.sin(2 * a), sc, flip),
+                        phase + 0.2 * k, olive=(k == 0))
     ink.start("bubble")
-    speech_bubble(ink, 380, 126, BUBBLE, 15, (NOAH_X - 4, GROUND_Y - 50))
+    speech_bubble(ink, 480, 136, BUBBLE, 14, (NOAH_X - 4, GROUND_Y - 50))
     ink.start("title")
     title(ink, ver)
     return ink.img.resize((W, H), Image.LANCZOS)
@@ -702,13 +832,19 @@ def write_header(gif, header):
 def main():
     ver = version()
     fonts = (find_font("Comic Neue:bold",
+                       "C:/Windows/Fonts/comicbd.ttf",
                        "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf",
                        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                       "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+                       "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                       "C:/Windows/Fonts/LiberationSans-Bold.ttf",
+                       "C:/Windows/Fonts/DejaVuSans-Bold.ttf"),
              find_font("Comic Neue",
+                       "C:/Windows/Fonts/comic.ttf",
                        "/usr/share/fonts/opentype/comic-neue/ComicNeue-Regular.otf",
                        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                       "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
+                       "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                       "C:/Windows/Fonts/LiberationSans-Regular.ttf",
+                       "C:/Windows/Fonts/DejaVuSans.ttf"))
     print("rendering %d frames for %s ..." % (FRAMES, ver))
     frames = [render_frame(i, fonts, ver) for i in range(FRAMES)]
     work = os.environ.get("NS_SPLASH_WORKDIR") or tempfile.mkdtemp()
@@ -719,6 +855,9 @@ def main():
     if os.environ.get("OUTGIF"):
         shutil.copy(gif, os.environ["OUTGIF"])
     write_header(gif, os.path.join(ROOT, "src", "about_splash_gif.h"))
+    splash_png = os.path.join(ROOT, "data", "splash.png")
+    frames[0].save(splash_png)
+    print("wrote %s" % splash_png)
 
 
 if __name__ == "__main__":
