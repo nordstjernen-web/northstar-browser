@@ -367,7 +367,7 @@ ns_css_syntax_scan(const char *input, const char *end,
                 p += 2;
                 continue;
             }
-            if (c == quote) quote = 0;
+            if (c == quote || c == '\n' || c == '\r' || c == '\f') quote = 0;
             p++;
             continue;
         }
