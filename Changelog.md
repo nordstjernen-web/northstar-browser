@@ -35,6 +35,34 @@ Significant changes in each release:
   indices, per-frame delays are capped at ten minutes and total durations
   accumulate in 64 bits, so a crafted APNG or a huge `currentTime` cannot
   overflow the integer arithmetic.
+* The JavaScript engine is quickjs-ng v0.17.0 (from v0.16.2), which adds
+  `Iterator.zip`, `Array.fromAsync` and the upstream fixes of that
+  release. The compatibility shims and the Windows link patch apply
+  unchanged.
+* The address bar shows the URL as serialised instead of percent-decoding
+  it, and drops any `user:password@` part of the authority, so
+  `https://bank.example%2Flogin@evil.example/` can no longer read as a
+  page on the first host.
+* Downloads triggered by `<a download>` require a recent user gesture, so
+  a page cannot drop files into the download directory from a timer or
+  from `click()`; names beginning with a dot or containing a path
+  separator fall back to `download`.
+* `navigator.clipboard.writeText()` and `execCommand("copy")` require a
+  recent user gesture and reject with `NotAllowedError` otherwise, so a
+  page cannot replace the clipboard contents while the user is elsewhere.
+* The camera permission bar names the requesting origin, or "this page"
+  when there is none, and never renders a raw `data:` or `blob:` URL in
+  the prompt.
+* After a crash or hang the supervisor restores the previous session once;
+  if the restored session fails again before it has run for five minutes
+  the next start is a clean one, so a page that wedges the browser cannot
+  keep it in a restart loop.
+* The in-process audio mixer accepts only `http(s):`, `data:` and `file:`
+  URLs from the engine's side channel; anything else is refused instead
+  of being treated as a local path. Side-channel headers (`X-Nav`,
+  `X-Download`, `X-Audio`) that exceed their length limit are dropped
+  whole rather than truncated to a different URL or command, and a queued
+  audio command is only appended when it fits.
 
 1.0.8:
 ======

@@ -769,7 +769,7 @@ local_path_for(NsAudioContext *context, const char *url, char **tmp_out)
         *tmp_out = t;
         return t;
     }
-    return url;
+    return NULL;
 }
 
 
@@ -979,7 +979,7 @@ cmd_volume(NsAudioContext *context, const char *token, double vol)
 {
     ns_audio_player *p = player_find(context, token);
     if (!p || !p->pcm) return;
-    if (vol < 0) vol = 0;
+    if (!(vol >= 0)) vol = 0;
     if (vol > 1) vol = 1;
     audio_lock();
     p->volume = (float)vol;

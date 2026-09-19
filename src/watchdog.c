@@ -39,6 +39,7 @@
 #define NS_WATCHDOG_BACKOFF_MS     1000
 #define NS_WATCHDOG_BURST_MAX      5
 #define NS_WATCHDOG_BURST_SECS     60
+#define NS_WATCHDOG_STABLE_SECS    300
 #define NS_WATCHDOG_STOP_GRACE_SECS 3
 #define NS_WATCHDOG_HANG_EXIT      70
 
@@ -197,6 +198,8 @@ typedef struct {
     guint       watch_id;
     int         burst_count;
     gint64      burst_start_us;
+    gint64      spawned_us;
+    int         recover_streak;
     int         exit_status;
 } ns_watchdog;
 
@@ -387,7 +390,7 @@ ns_watchdog_respawn_cb(gpointer user_data)
 {
     ns_watchdog *wd = user_data;
     if (!wd->stopping)
-        ns_watchdog_spawn(wd, TRUE);
+        ns_watchdog_spawn(wd, wd->recover_streak++ == 0);
     return G_SOURCE_REMOVE;
 }
 
@@ -420,6 +423,9 @@ ns_watchdog_child_exited(GPid pid, gint status, gpointer user_data)
     g_spawn_close_pid(pid);
     wd->have_pid = FALSE;
     wd->watch_id = 0;
+    if (g_get_monotonic_time() - wd->spawned_us >
+        (gint64)NS_WATCHDOG_STABLE_SECS * G_USEC_PER_SEC)
+        wd->recover_streak = 0;
 
     if (wd->stopping) {
         g_main_loop_quit(wd->loop);
@@ -490,6 +496,7 @@ ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
         return FALSE;
     }
     wd->pid = pid;
+    wd->spawned_us = g_get_monotonic_time();
     wd->have_pid = TRUE;
     wd->watch_id = g_child_watch_add(pid, ns_watchdog_child_exited, wd);
     return TRUE;

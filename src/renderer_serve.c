@@ -225,6 +225,7 @@ serve_append_hdr(char *buf, int pos, size_t cap, const char *name,
                  const char *value, int maxval)
 {
     if (!value || !*value || pos < 0 || (size_t)pos >= cap) return pos;
+    if (strlen(value) > (size_t)maxval) return pos;
     int need = snprintf(NULL, 0, "%s: %.*s\r\n", name, maxval, value);
     if (need <= 0 || (size_t)pos + (size_t)need >= cap) return pos;
     return pos + snprintf(buf + pos, cap - (size_t)pos, "%s: %.*s\r\n",

@@ -288,24 +288,15 @@ static char *
 address_display_url(const char *url)
 {
     if (!url || !*url) return g_strdup("");
-    if (!strchr(url, '%')) return g_strdup(url);
-    char *dec = g_uri_unescape_string(url, NULL);
-    if (!dec) return g_strdup(url);
-    if (!g_utf8_validate(dec, -1, NULL)) {
-        g_free(dec);
-        return g_strdup(url);
-    }
-    for (const char *p = dec; *p; p = g_utf8_next_char(p)) {
-        gunichar c = g_utf8_get_char(p);
-        if (c < 0x20 || c == 0x7f ||
-            (c >= 0x200e && c <= 0x200f) ||
-            (c >= 0x202a && c <= 0x202e) ||
-            (c >= 0x2066 && c <= 0x2069)) {
-            g_free(dec);
-            return g_strdup(url);
-        }
-    }
-    return dec;
+    const char *scheme_end = strstr(url, "://");
+    if (!scheme_end) return g_strdup(url);
+    const char *authority = scheme_end + 3;
+    const char *authority_end = authority + strcspn(authority, "/?#");
+    const char *at = NULL;
+    for (const char *p = authority; p < authority_end; p++)
+        if (*p == '@') at = p;
+    if (!at) return g_strdup(url);
+    return g_strdup_printf("%.*s%s", (int)(authority - url), url, at + 1);
 }
 
 static void
@@ -695,6 +686,13 @@ show_downloads_window(ProcWindow *pw)
     gtk_window_present(GTK_WINDOW(win));
 }
 
+static gboolean
+download_name_acceptable(const char *name)
+{
+    return name && *name && name[0] != '.' && strcmp(name, "/") != 0 &&
+           !strchr(name, '/') && !strchr(name, '\\');
+}
+
 static void
 pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
 {
@@ -702,12 +700,12 @@ pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
     char *name = NULL;
     if (suggested && *suggested)
         name = g_path_get_basename(suggested);
-    if (!name || !*name || strcmp(name, ".") == 0 || strcmp(name, "/") == 0) {
+    if (!download_name_acceptable(name)) {
         g_free(name);
         char *base = g_path_get_basename(url);
         char *q = base ? strchr(base, '?') : NULL;
         if (q) *q = '\0';
-        if (base && *base && strcmp(base, ".") != 0 && strcmp(base, "/") != 0)
+        if (download_name_acceptable(base))
             name = base;
         else { g_free(base); name = g_strdup("download"); }
     }

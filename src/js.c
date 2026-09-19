@@ -10843,6 +10843,12 @@ ns_clipboard_writeText(JSContext *ctx, JSValueConst this_val,
             "NotAllowedError: clipboard write not available");
         return promise;
     }
+    if (!ns_js_has_transient_activation(js)) {
+        ns_js_promise_reject(ctx, resolvers,
+            "NotAllowedError: clipboard write requires a user gesture");
+        return promise;
+    }
+    ns_js_consume_user_activation(js);
     const char *text = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
     gboolean ok = js->clipboard_write_cb(text ? text : "",
                                           js->clipboard_write_user_data);
@@ -10904,7 +10910,9 @@ ns_document_command_run(ns_js *js, const char *cmd)
     if (!js || !cmd) return FALSE;
     if (g_ascii_strcasecmp(cmd, "copy") == 0 ||
         g_ascii_strcasecmp(cmd, "cut") == 0) {
-        if (!js->selection_has_range || !js->clipboard_write_cb) return FALSE;
+        if (!js->selection_has_range || !js->clipboard_write_cb ||
+            !ns_js_has_transient_activation(js))
+            return FALSE;
         return js->clipboard_write_cb(
             js->selection_text ? js->selection_text : "",
             js->clipboard_write_user_data);
@@ -39276,6 +39284,8 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
         if (ns_iframe_follow_href(ctx, act, href))
             return JS_UNDEFINED;
         if (href && *href && ns_element_get_attr(act, "download") && js->download_cb) {
+            if (!ns_js_has_transient_activation(js)) return JS_UNDEFINED;
+            ns_js_consume_user_activation(js);
             g_autofree char *abs_url = ns_element_anchor_resolved_href(act, js);
             const char *dl = ns_element_get_attr(act, "download");
             js->download_cb(abs_url ? abs_url : href, dl, js->download_user_data);

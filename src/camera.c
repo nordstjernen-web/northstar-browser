@@ -65,7 +65,7 @@ ns_camera_permission(ns_js *js)
     char *origin = ns_url_origin_from(url);
     if (!origin || !*origin) {
         g_free(origin);
-        origin = g_strdup(url && *url ? url : "this page");
+        origin = g_strdup("this page");
     }
 
     if (!g_camera_decisions)
