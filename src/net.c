@@ -4325,6 +4325,17 @@ about_settings_json(void)
     return json;
 }
 
+static gboolean
+about_settings_url_ok(const char *v, gboolean allow_about)
+{
+    if (!*v) return TRUE;
+    if (strlen(v) > 2048) return FALSE;
+    for (const char *p = v; *p; p++)
+        if ((guchar)*p < 0x20 || *p == 0x7f) return FALSE;
+    if (allow_about && g_str_has_prefix(v, "about:")) return TRUE;
+    return ns_url_is_http_or_https(v) && ns_url_is_valid_absolute(v);
+}
+
 static void
 about_settings_save(const char *form)
 {
@@ -4335,13 +4346,16 @@ about_settings_save(const char *form)
     ns_config_lock();
     ns_config *c = ns_config_mut();
     const char *v;
-    if ((v = g_hash_table_lookup(q, "home_url"))) {
+    if ((v = g_hash_table_lookup(q, "home_url")) &&
+        about_settings_url_ok(v, TRUE)) {
         g_free(c->home_url); c->home_url = g_strdup(v);
     }
-    if ((v = g_hash_table_lookup(q, "search_engine"))) {
+    if ((v = g_hash_table_lookup(q, "search_engine")) &&
+        about_settings_url_ok(v, FALSE)) {
         g_free(c->search_engine); c->search_engine = g_strdup(v);
     }
-    if ((v = g_hash_table_lookup(q, "cookie_policy")))
+    if ((v = g_hash_table_lookup(q, "cookie_policy")) &&
+        atoi(v) >= NS_COOKIE_ALWAYS && atoi(v) <= NS_COOKIE_NEVER)
         c->cookie_policy = (ns_cookie_policy)atoi(v);
     if ((v = g_hash_table_lookup(q, "do_not_track")))
         c->do_not_track = atoi(v) != 0;
