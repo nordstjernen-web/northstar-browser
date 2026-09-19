@@ -37536,14 +37536,10 @@ ns_element_table_rows(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *tbl = ns_unwrap_element(this_val);
     if (tbl && tbl->name && g_ascii_strcasecmp(tbl->name, "textarea") == 0) {
-        const char *v = ns_element_get_attr(tbl, "rows");
-        int32_t n = 2;
-        if (v) {
-            char *end = NULL;
-            long parsed = strtol(v, &end, 10);
-            if (end && end != v) n = (int32_t)parsed;
-        }
-        return JS_NewInt32(ctx, n);
+        for (int i = 0; i < (int)G_N_ELEMENTS(g_int_attrs); i++)
+            if (strcmp(g_int_attrs[i].attr, "rows") == 0)
+                return ns_element_int_attr_getter(ctx, this_val, i);
+        return JS_NewInt32(ctx, 2);
     }
     if (tbl && tbl->name && g_ascii_strcasecmp(tbl->name, "frameset") == 0) {
         const char *v = ns_element_get_attr(tbl, "rows");
