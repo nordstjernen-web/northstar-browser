@@ -3627,6 +3627,7 @@ static JSClassDef ns_window_named_class = {
 static void ns_js_start_image_load(ns_js *js, ns_node *el, const char *src);
 static void ns_js_flush_ready_images(ns_js *js);
 static const char *ns_js_node_doc_base(ns_js *js, const ns_node *el);
+static char *ns_js_node_document_base_url(ns_js *js, const ns_node *node);
 
 static ns_node *
 ns_unwrap_element_mut(JSValueConst val)
@@ -33498,10 +33499,11 @@ ns_element_img_current_src(JSContext *ctx, JSValueConst this_val)
     char *chosen = ns_img_chosen_url(sel);
     if (!chosen || !*chosen) { g_free(chosen); return JS_NewString(ctx, ""); }
     ns_js *js = js_from_ctx(ctx);
-    const char *base = js ? ns_js_node_doc_base(js, n) : NULL;
+    char *base = js ? ns_js_node_document_base_url(js, n) : NULL;
     char *abs_url = base ? ns_url_resolve(base, chosen) : NULL;
     JSValue r = JS_NewString(ctx, abs_url ? abs_url : chosen);
     g_free(abs_url);
+    g_free(base);
     g_free(chosen);
     return r;
 }
@@ -39567,13 +39569,14 @@ ns_js_rescan_subtree_images(ns_js *js, ns_node *root, int depth)
         ns_js_image_load *r = (src && *src && js->js_image_loads)
             ? g_hash_table_lookup(js->js_image_loads, root) : NULL;
         if (r && r->requested_url) {
-            const char *base = ns_js_node_doc_base(js, root);
+            char *base = ns_js_node_document_base_url(js, root);
             char *abs = base ? ns_url_resolve(base, src) : NULL;
             if (abs && strcmp(abs, r->requested_url) != 0) {
                 root->flags &= ~NS_NODE_IMG_LOAD_FIRED;
                 ns_js_start_image_load(js, root, src);
             }
             g_free(abs);
+            g_free(base);
         }
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
@@ -39694,7 +39697,7 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
         g_hash_table_remove(js->js_image_loads, el);
         return;
     }
-    const char *base = ns_js_node_doc_base(js, el);
+    g_autofree char *base = ns_js_node_document_base_url(js, el);
     char *abs_url = base ? ns_url_resolve(base, src) : g_strdup(src);
     if (!abs_url) {
         g_hash_table_remove(js->js_image_loads, el);
@@ -39724,7 +39727,7 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
     if (js->image_cache && el->name && strcmp(el->name, "img") == 0) {
         const char *src = ns_element_get_attr(el, "src");
         if (src && *src) {
-            const char *base = ns_js_node_doc_base(js, el);
+            g_autofree char *base = ns_js_node_document_base_url(js, el);
             char *abs_url = base ? ns_url_resolve(base, src) : g_strdup(src);
             if (abs_url) {
                 ns_image *im = ns_image_cache_peek(js->image_cache, abs_url);
