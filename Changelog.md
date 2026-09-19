@@ -4,16 +4,24 @@ Significant changes in each release:
 
 1.0.9:
 ======
-* The `about:start` splash is redrawn in a Firefox-inspired style: a
-  flame-coloured fox curls around a blue globe under a violet night sky,
-  a woman stands on the hill to the right holding a lantern up toward the
-  twinkling pole star, and the 1.0.9 number sits in the title. The
-  animation is 24 frames of flickering flame, swaying hair and dress,
-  pulsing lantern glow and a slowly turning globe on one 256-colour
-  palette with a static ordered dither, so the GIF stays around 420 KB.
+* The `about:start` splash is redrawn as an xkcd-style comic in black
+  ink on white: Noah, bearded and leaning on his staff, waves the animals
+  up the gangplank two by two -- dogs, sheep, pigs, an elephant with a
+  pair of monkeys on its back, lions, cows, zebras, kangaroos, bears and
+  camels queue on the shore, turtles crawl up the ramp, ducks paddle
+  beside the hull, rabbits and mice ride the deck and roof, snakes sun
+  on the ridge, giraffes poke through the cabin roof and penguins stand
+  at the bow -- while a woman on deck holds an umbrella against the rain,
+  doves circle the clouds and a whale spouts astern. Noah's speech bubble
+  reads "Two of each. Yes, even browsers." and the title block carries
+  the 1.0.9 number above the tagline "Yet another web browser." The 24
+  frames animate the rain, waves, walking legs, hopping rabbits and
+  kangaroos, the slithering snakes, the doves' wings and Noah's wave on
+  one 256-colour palette, so the GIF stays around 500 KB.
   `scripts/gen-splash.sh` now runs `scripts/gen-splash.py`, a numpy and
-  Pillow renderer that no longer needs ImageMagick; gifsicle remains an
-  optional final optimiser. The README screenshot shows the new page.
+  Pillow renderer with hand-wobbled strokes and Comic Neue lettering that
+  no longer needs ImageMagick; gifsicle remains an optional final
+  optimiser. The README screenshot shows the new page.
 * `<textarea rows>` and `cols` are parsed as bounded non-negative
   integers (1 to 1000, defaulting to 2 and 20), so an attribute like
   `rows="2000000000"` no longer makes layout build billions of
