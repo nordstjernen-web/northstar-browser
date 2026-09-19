@@ -43,7 +43,9 @@ Significant changes in each release:
   whale surfacing to spout, on one 256-colour palette rendered at three
   times supersampling. `scripts/gen-splash.py` prefers its explicit font
   paths over `fc-match`, so the lettering stays comic on Windows. The
-  README screenshot is updated with a full browser window capture.
+  README screenshot is updated with a full browser window capture,
+  showing the classic menubar and navigation toolbar above the sunny
+  about:start comic.
 * `<textarea rows>` and `cols` are parsed as bounded non-negative
   integers (1 to 1000, defaulting to 2 and 20), so an attribute like
   `rows="2000000000"` no longer makes layout build billions of
