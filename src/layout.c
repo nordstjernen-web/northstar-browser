@@ -8942,10 +8942,38 @@ layout_flex_row_wrap(ns_box *box, double cw,
         for (guint k = 0; k < line_count; k++)
             remaining -= lens[line_start + k].target;
 
+        int auto_margins = 0;
+        for (guint k = 0; k < line_count; k++) {
+            const ns_box *c = items->pdata[line_start + k];
+            if (!c->style) continue;
+            if (keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto")) auto_margins++;
+            if (keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto")) auto_margins++;
+        }
+        if (auto_margins > 0 && remaining > 0) {
+            double share = remaining / auto_margins;
+            for (guint k = 0; k < line_count; k++) {
+                guint gi = line_start + k;
+                ns_box *c = items->pdata[gi];
+                if (!c->style) continue;
+                double added = 0;
+                if (keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto")) {
+                    c->margin.left += share;
+                    added += share;
+                }
+                if (keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto")) {
+                    c->margin.right += share;
+                    added += share;
+                }
+                g_array_index(extras_arr, double, gi) += added;
+            }
+            remaining = 0;
+        }
+
         double leading = 0;
         double between = 0;
-        flex_justify_offsets(box, justify, remaining, line_count, reverse,
-                             &leading, &between);
+        if (auto_margins == 0 || remaining < 0)
+            flex_justify_offsets(box, justify, remaining, line_count, reverse,
+                                 &leading, &between);
 
         for (guint k = 0; k < line_count; k++) {
             guint gi = line_start + k;
