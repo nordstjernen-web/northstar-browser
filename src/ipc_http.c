@@ -156,6 +156,18 @@ conn_fill(http_conn *c)
 }
 
 static int
+header_long(const char *val, long min, long *out)
+{
+    char *end = NULL;
+    errno = 0;
+    long v = strtol(val, &end, 10);
+    if (end == val || errno == ERANGE || v < min)
+        return -1;
+    *out = v;
+    return 0;
+}
+
+static int
 conn_read_line(http_conn *c, char *out, size_t cap)
 {
     size_t n = 0;
@@ -270,30 +282,31 @@ http_read_head(http_conn *c, http_head *out)
         const char *val = colon + 1;
         while (*val == ' ')
             val++;
+        int parsed = 0;
         if (strcasecmp(line, "Content-Length") == 0)
-            out->content_length = atol(val);
+            parsed = header_long(val, 0, &out->content_length);
         else if (strcasecmp(line, "X-W") == 0)
-            out->x_w = atol(val);
+            parsed = header_long(val, 0, &out->x_w);
         else if (strcasecmp(line, "X-H") == 0)
-            out->x_h = atol(val);
+            parsed = header_long(val, 0, &out->x_h);
         else if (strcasecmp(line, "X-Stride") == 0)
-            out->x_stride = atol(val);
+            parsed = header_long(val, 0, &out->x_stride);
         else if (strcasecmp(line, "X-Anim") == 0)
-            out->x_anim = atol(val);
+            parsed = header_long(val, 0, &out->x_anim);
         else if (strcasecmp(line, "X-PageW") == 0)
-            out->x_page_w = atol(val);
+            parsed = header_long(val, 0, &out->x_page_w);
         else if (strcasecmp(line, "X-PageH") == 0)
-            out->x_page_h = atol(val);
+            parsed = header_long(val, 0, &out->x_page_h);
         else if (strcasecmp(line, "X-ScrollY") == 0)
-            out->x_scroll_y = atol(val);
+            parsed = header_long(val, -1, &out->x_scroll_y);
         else if (strcasecmp(line, "X-ScrollX") == 0)
-            out->x_scroll_x = atol(val);
+            parsed = header_long(val, -1, &out->x_scroll_x);
         else if (strcasecmp(line, "X-Unchanged") == 0)
-            out->x_unchanged = atol(val);
+            parsed = header_long(val, 0, &out->x_unchanged);
         else if (strcasecmp(line, "X-Render-RC") == 0)
-            out->x_render_rc = atol(val);
+            parsed = header_long(val, -1, &out->x_render_rc);
         else if (strcasecmp(line, "X-Clipboard") == 0)
-            out->x_clipboard = atol(val);
+            parsed = header_long(val, 0, &out->x_clipboard);
         else if (strcasecmp(line, "X-Nav") == 0) {
             size_t vlen = strlen(val);
             if (vlen >= sizeof out->x_nav)
@@ -322,6 +335,8 @@ http_read_head(http_conn *c, http_head *out)
             memcpy(out->x_audio, val, vlen);
             out->x_audio[vlen] = '\0';
         }
+        if (parsed < 0)
+            return -1;
     }
     if (out->content_length < 0 || out->content_length > NS_HTTP_MAX_BODY)
         return -1;
