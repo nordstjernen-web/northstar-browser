@@ -12233,12 +12233,22 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
         transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
     }
 
-    if (want_origin && strcmp(want_origin, "*") != 0 &&
-        strcmp(want_origin, "/") != 0) {
+    if (want_origin && strcmp(want_origin, "*") != 0) {
         g_autofree char *actual = ns_window_origin_of(ctx, target);
-        gboolean match = actual && g_str_has_prefix(want_origin, actual) &&
-            (want_origin[strlen(actual)] == '\0' ||
-             want_origin[strlen(actual)] == '/');
+        g_autofree char *wanted = NULL;
+        if (strcmp(want_origin, "/") == 0) {
+            JSValue src_win = JS_IsObject(source_override)
+                ? JS_DupValue(ctx, source_override) : JS_GetGlobalObject(caller);
+            wanted = ns_window_origin_of(ctx, src_win);
+            JS_FreeValue(ctx, src_win);
+        } else {
+            char *colon = strchr(want_origin, ':');
+            for (char *c = want_origin; colon && c < colon; c++)
+                *c = g_ascii_tolower(*c);
+            wanted = ns_url_origin_from(want_origin);
+        }
+        gboolean match = actual && wanted &&
+                         g_ascii_strcasecmp(wanted, actual) == 0;
         if (!match) {
             JS_FreeValue(ctx, transfer);
             JS_FreeValue(ctx, target);
@@ -39817,6 +39827,44 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
     return NULL;
 }
 
+gboolean
+ns_js_urls_same_origin(const char *a, const char *b)
+{
+    if (!a || !b) return FALSE;
+    if (ns_url_is_http_or_https(a) || ns_url_is_http_or_https(b))
+        return ns_url_same_origin(a, b);
+    const char *ca = strchr(a, ':'), *cb = strchr(b, ':');
+    return ca && cb && ca - a == cb - b &&
+           g_ascii_strncasecmp(a, b, (gsize)(ca - a)) == 0;
+}
+
+static const char *
+ns_js_ctx_document_url(ns_js *js, JSContext *ctx)
+{
+    if (js->frame_contexts) {
+        GHashTableIter it;
+        gpointer frame, fctx;
+        g_hash_table_iter_init(&it, js->frame_contexts);
+        while (g_hash_table_iter_next(&it, &frame, &fctx)) {
+            if (fctx != ctx) continue;
+            const char *fu = ns_element_get_attr(frame, "data-nd-frame-url");
+            if (fu && *fu) return fu;
+        }
+    }
+    return js->current_url;
+}
+
+gboolean
+ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im)
+{
+    if (!im) return TRUE;
+    const char *url = im->final_url ? im->final_url : im->url;
+    if (!url || g_str_has_prefix(url, "data:") ||
+        g_str_has_prefix(url, "blob:"))
+        return TRUE;
+    return ns_js_urls_same_origin(url, ns_js_ctx_document_url(js, ctx));
+}
+
 static ns_image *
 ns_media_animation_for(JSContext *ctx, JSValueConst this_val)
 {
@@ -39947,6 +39995,9 @@ ns_element_toDataURL(JSContext *ctx, JSValueConst this_val,
     if (!el || !js_from_ctx(ctx)) return JS_NewString(ctx, "data:,");
     ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
     if (!st || !st->surf) return JS_NewString(ctx, "data:,");
+    if (!st->origin_clean)
+        return ns_throw_security_error(ctx,
+            "Tainted canvases may not be exported.");
     GByteArray *buf = g_byte_array_new();
     cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
         ns_canvas_png_write, buf);
@@ -39969,12 +40020,14 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1 || !JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
     const ns_node *el = ns_unwrap_element(this_val);
+    ns_canvas_state *st = el && js_from_ctx(ctx)
+        ? ns_canvas_state_for(js_from_ctx(ctx), el) : NULL;
+    if (st && !st->origin_clean)
+        return ns_throw_security_error(ctx,
+            "Tainted canvases may not be exported.");
     JSValue cb = JS_DupValue(ctx, argv[0]);
     JSValue blob = JS_NULL;
-    if (el && js_from_ctx(ctx)) {
-        ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
-        if (st) blob = ns_canvas_blob_from_surface(ctx, st->surf);
-    }
+    if (st) blob = ns_canvas_blob_from_surface(ctx, st->surf);
     JSValueConst cb_args[1] = { blob };
     JSValue r = JS_Call(ctx, cb, JS_UNDEFINED, 1, cb_args);
     if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
@@ -42294,12 +42347,21 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
     return cd;
 }
 
-static JSValue
-ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
+static gboolean
+ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe)
 {
-    ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || (!ns_node_is_element_named(n, "iframe") &&
-               !ns_node_is_element_named(n, "object"))) return JS_NULL;
+    unsigned sandbox = ns_iframe_effective_sandbox(iframe);
+    if ((sandbox & NS_SANDBOX_ACTIVE) &&
+        !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
+        return TRUE;
+    const char *frame_url = ns_element_get_attr(iframe, "data-nd-frame-url");
+    if (!frame_url || !*frame_url) return FALSE;
+    return !ns_js_urls_same_origin(frame_url, ns_js_node_doc_base(js, iframe));
+}
+
+static JSValue
+ns_iframe_content_document(JSContext *ctx, JSValueConst this_val, ns_node *n)
+{
     JSValue realm = JS_GetPropertyStr(ctx, this_val, "__ndRealmDoc");
     if (JS_IsObject(realm)) return realm;
     JS_FreeValue(ctx, realm);
@@ -42310,12 +42372,89 @@ ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
+{
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n || (!ns_node_is_element_named(n, "iframe") &&
+               !ns_node_is_element_named(n, "object"))) return JS_NULL;
+    if (ns_iframe_is_cross_origin(js_from_ctx(ctx), n)) return JS_NULL;
+    return ns_iframe_content_document(ctx, this_val, n);
+}
+
+static const char ns_cross_window_bootstrap[] =
+    "(function(G, target){"
+    "  var cache = G.__ndCrossWindows;"
+    "  if (!(cache instanceof WeakMap)) {"
+    "    cache = new WeakMap();"
+    "    Object.defineProperty(G, '__ndCrossWindows', { value: cache, configurable: true });"
+    "  }"
+    "  if (cache.has(target)) return cache.get(target);"
+    "  var proxy, loc = {};"
+    "  function denied(){ throw new DOMException('Blocked cross-origin frame access', 'SecurityError'); }"
+    "  Object.defineProperty(loc, 'href', { enumerable:true, set:function(v){ target.location.href=v; }, get:denied });"
+    "  loc.replace = function(v){ target.location.replace(v); };"
+    "  loc.assign = function(v){ target.location.href=v; };"
+    "  var allowed = ['window','self','frames','parent','top','opener','postMessage',"
+    "    'location','closed','length','close','focus','blur'];"
+    "  proxy = new Proxy({}, {"
+    "    get:function(t,p){"
+    "      if(p==='window'||p==='self'||p==='frames') return proxy;"
+    "      if(p==='parent') return G.window || G;"
+    "      if(p==='top') return G.top || G;"
+    "      if(p==='opener') return null;"
+    "      if(p==='postMessage') return function(){ return G.__nsPostMessageFrom.apply(G, [target, G.__ndWindowProxy || G].concat(Array.prototype.slice.call(arguments))); };"
+    "      if(p==='location') return loc;"
+    "      if(p==='closed') return !!target.closed;"
+    "      if(p==='length') return target.length >>> 0;"
+    "      if(p==='close'||p==='focus'||p==='blur') return function(){ return target[p](); };"
+    "      if(p===Symbol.toStringTag) return 'Window';"
+    "      return denied(); },"
+    "    set:function(t,p,v){ if(p==='location'){ target.location.href=v; return true; } return denied(); },"
+    "    has:function(t,p){ return allowed.indexOf(p) >= 0; },"
+    "    ownKeys:function(){ return allowed.slice(); },"
+    "    getOwnPropertyDescriptor:function(t,p){"
+    "      if(allowed.indexOf(p) < 0) return undefined;"
+    "      return { value: proxy[p], writable: false, enumerable: true, configurable: true }; },"
+    "    defineProperty:function(){ return denied(); },"
+    "    deleteProperty:function(){ return denied(); },"
+    "    getPrototypeOf:function(){ return null; },"
+    "    setPrototypeOf:function(){ return denied(); }"
+    "  });"
+    "  cache.set(target, proxy);"
+    "  return proxy;"
+    "})";
+
+static JSValue
+ns_iframe_cross_origin_window(JSContext *ctx, JSValue target)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue maker = JS_Eval(ctx, ns_cross_window_bootstrap,
+                            strlen(ns_cross_window_bootstrap),
+                            "<cross-window>", JS_EVAL_TYPE_GLOBAL);
+    JSValue proxy = JS_NULL;
+    if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
+        JSValueConst args[2] = { global, target };
+        proxy = JS_Call(ctx, maker, JS_UNDEFINED, 2, args);
+        if (JS_IsException(proxy)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            proxy = JS_NULL;
+        }
+    } else if (JS_IsException(maker)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, maker);
+    JS_FreeValue(ctx, global);
+    JS_FreeValue(ctx, target);
+    return proxy;
+}
+
+static JSValue
 ns_iframe_build_lite_window(JSContext *ctx, JSValueConst iframe_el,
                             ns_node *iframe)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_GetGlobalObject(ctx);
-    JSValue doc = ns_element_get_contentDocument(ctx, iframe_el);
+    JSValue doc = ns_iframe_content_document(ctx, iframe_el, iframe);
     if (!JS_IsObject(doc)) {
         JS_FreeValue(ctx, doc);
         return JS_GetGlobalObject(ctx);
@@ -42343,11 +42482,8 @@ ns_iframe_build_lite_window(JSContext *ctx, JSValueConst iframe_el,
 }
 
 static JSValue
-ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
+ns_iframe_realm_window(JSContext *ctx, JSValueConst this_val, ns_node *n)
 {
-    ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || !ns_node_is_element_named(n, "iframe")) return JS_NULL;
-    if (!ns_iframe_ensure_content_root(n)) return JS_NULL;
     JSValue realm = JS_GetPropertyStr(ctx, this_val, "__ndRealmWindow");
     if (JS_IsObject(realm)) return realm;
     JS_FreeValue(ctx, realm);
@@ -42356,6 +42492,18 @@ ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
     if (JS_IsObject(stored)) return stored;
     JS_FreeValue(ctx, stored);
     return ns_iframe_build_lite_window(ctx, this_val, n);
+}
+
+static JSValue
+ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
+{
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n || !ns_node_is_element_named(n, "iframe")) return JS_NULL;
+    if (!ns_iframe_ensure_content_root(n)) return JS_NULL;
+    JSValue win = ns_iframe_realm_window(ctx, this_val, n);
+    if (!JS_IsObject(win) || !ns_iframe_is_cross_origin(js_from_ctx(ctx), n))
+        return win;
+    return ns_iframe_cross_origin_window(ctx, win);
 }
 
 static void
