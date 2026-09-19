@@ -34263,17 +34263,6 @@ ns_input_value_to_ms(ns_input_kind kind, const char *v, gboolean as_date, double
 }
 
 static void
-ns_num_to_str(double d, char *buf, size_t n)
-{
-    for (int prec = 1; prec <= 17; prec++) {
-        char fmt[8];
-        g_snprintf(fmt, sizeof fmt, "%%.%dg", prec);
-        g_ascii_formatd(buf, (gint)n, fmt, d);
-        if (g_ascii_strtod(buf, NULL) == d) return;
-    }
-}
-
-static void
 ns_append_time_ms(GString *out, long ms_of_day)
 {
     long ms = ns_dt_floormod(ms_of_day, 86400000);
@@ -36449,7 +36438,9 @@ ns_input_sanitize_value(const ns_node *el, const char *value)
             v = lo + (hi - lo) / 2;
         else if (v < lo) v = lo;
         else if (v > hi) v = hi;
-        out = g_strdup_printf("%g", v);
+        char num[64];
+        ns_num_to_str(v, num, sizeof num);
+        out = g_strdup(num);
     } else if (!strcmp(type, "color")) {
         char *trimmed = g_strstrip(g_strdup(value));
         if (ns_is_simple_color(trimmed)) {

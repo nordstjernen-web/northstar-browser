@@ -140,16 +140,105 @@ ns_form_control_supports_required(const ns_node *control)
 }
 
 static gboolean
+ns_is_valid_floating_point_number(const char *v)
+{
+    const char *p = v;
+    if (*p == '-') p++;
+    gboolean digits = FALSE;
+    while (g_ascii_isdigit((guchar)*p)) { p++; digits = TRUE; }
+    if (*p == '.') {
+        p++;
+        if (!g_ascii_isdigit((guchar)*p)) return FALSE;
+        while (g_ascii_isdigit((guchar)*p)) p++;
+        digits = TRUE;
+    }
+    if (!digits) return FALSE;
+    if (*p == 'e' || *p == 'E') {
+        p++;
+        if (*p == '-' || *p == '+') p++;
+        if (!g_ascii_isdigit((guchar)*p)) return FALSE;
+        while (g_ascii_isdigit((guchar)*p)) p++;
+    }
+    return *p == '\0';
+}
+
+static gboolean
 ns_form_parse_finite_double(const char *v, double *out)
 {
-    if (!v || !*v) return FALSE;
-    char *end = NULL;
-    double d = g_ascii_strtod(v, &end);
-    if (!end || end == v) return FALSE;
-    while (*end == ' ' || *end == '\t') end++;
-    if (*end != '\0' || !isfinite(d)) return FALSE;
+    if (!v || !ns_is_valid_floating_point_number(v)) return FALSE;
+    double d = g_ascii_strtod(v, NULL);
+    if (!isfinite(d)) return FALSE;
     if (out) *out = d;
     return TRUE;
+}
+
+void
+ns_num_to_str(double d, char *buf, size_t n)
+{
+    if (d == 0 || !isfinite(d)) {
+        g_ascii_formatd(buf, (gint)n, "%g", d == 0 ? 0 : d);
+        return;
+    }
+    char sci[64];
+    int prec = 1;
+    for (; prec < 17; prec++) {
+        char fmt[8];
+        g_snprintf(fmt, sizeof fmt, "%%.%de", prec - 1);
+        g_ascii_formatd(sci, sizeof sci, fmt, d);
+        if (g_ascii_strtod(sci, NULL) == d) break;
+    }
+    if (prec == 17) g_ascii_formatd(sci, sizeof sci, "%.16e", d);
+    char digits[32];
+    int nd = 0;
+    const char *p = sci;
+    if (*p == '-') p++;
+    for (; *p && *p != 'e'; p++)
+        if (g_ascii_isdigit((guchar)*p)) digits[nd++] = *p;
+    int point = atoi(p + 1) + 1;
+    GString *out = g_string_new(d < 0 ? "-" : "");
+    if (point >= nd && point <= 21) {
+        g_string_append_len(out, digits, nd);
+        for (int i = nd; i < point; i++) g_string_append_c(out, '0');
+    } else if (point > 0 && point <= 21) {
+        g_string_append_len(out, digits, point);
+        g_string_append_c(out, '.');
+        g_string_append_len(out, digits + point, nd - point);
+    } else if (point > -6 && point <= 0) {
+        g_string_append(out, "0.");
+        for (int i = point; i < 0; i++) g_string_append_c(out, '0');
+        g_string_append_len(out, digits, nd);
+    } else {
+        g_string_append_c(out, digits[0]);
+        if (nd > 1) {
+            g_string_append_c(out, '.');
+            g_string_append_len(out, digits + 1, nd - 1);
+        }
+        g_string_append_printf(out, "e%s%d", point - 1 >= 0 ? "+" : "",
+                               point - 1);
+    }
+    g_strlcpy(buf, out->str, n);
+    g_string_free(out, TRUE);
+}
+
+static int
+ns_decimal_places(const char *v)
+{
+    if (!v) return 0;
+    const char *dot = strchr(v, '.');
+    int places = 0;
+    for (const char *p = dot ? dot + 1 : v; dot && g_ascii_isdigit((guchar)*p); p++)
+        places++;
+    const char *e = strpbrk(v, "eE");
+    if (e) places -= atoi(e + 1);
+    return places < 0 ? 0 : places;
+}
+
+static double
+ns_round_to_places(double v, int places)
+{
+    if (places <= 0 || places > 15) return v;
+    double scale = pow(10.0, places);
+    return round(v * scale) / scale;
 }
 
 
@@ -282,7 +371,7 @@ ns_input_number_to_value(ns_form_input_kind kind, double v, char *buf,
     case NS_FORM_INPUT_NUMBER:
     case NS_FORM_INPUT_RANGE: {
         char num[G_ASCII_DTOSTR_BUF_SIZE];
-        g_ascii_dtostr(num, sizeof num, v == 0 ? 0 : v);
+        ns_num_to_str(v == 0 ? 0 : v, num, sizeof num);
         g_string_append(out, num);
         break;
     }
@@ -391,6 +480,14 @@ ns_input_step_apply(const ns_node *input, int sign, double n, char *buf,
         value = base + floor((bound - base) / step) * step;
     if ((sign > 0 && value < before) || (sign < 0 && value > before))
         return NS_STEP_UNCHANGED;
+    if (kind == NS_FORM_INPUT_NUMBER || kind == NS_FORM_INPUT_RANGE) {
+        int places = ns_decimal_places(step_attr);
+        int value_places = ns_decimal_places(ns_input_used_value(input));
+        int min_places = ns_decimal_places(ns_element_get_attr(input, "min"));
+        if (value_places > places) places = value_places;
+        if (min_places > places) places = min_places;
+        value = ns_round_to_places(value, places);
+    }
     if (!ns_input_number_to_value(kind, value, buf, buflen))
         return NS_STEP_UNCHANGED;
     return NS_STEP_OK;
