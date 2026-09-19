@@ -219,8 +219,8 @@ install_status_css(void)
         "}"
         ".ns-toolbar menubutton > button {"
         "  min-height: 34px;"
-        "  min-width: 30px;"
-        "  padding: 2px 5px;"
+        "  min-width: 40px;"
+        "  padding: 2px 5px 1px 5px;"
         "  border-radius: 0;"
         "}"
         ".ns-toolbar menubutton > button:hover {"
@@ -2162,8 +2162,16 @@ proc_window_new(GtkApplication *app, const char *home_url,
 
     GMenuModel *appmenu = build_app_menu_model();
     GtkWidget *menu_button = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
-                                  "open-menu-symbolic");
+    GtkWidget *menu_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_halign(menu_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(menu_box, GTK_ALIGN_CENTER);
+    GtkWidget *menu_icon = gtk_image_new_from_icon_name("open-menu-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(menu_icon), 20);
+    GtkWidget *menu_label = gtk_label_new(ns_i18n("Menu"));
+    gtk_widget_add_css_class(menu_label, "ns-toolbar-label");
+    gtk_box_append(GTK_BOX(menu_box), menu_icon);
+    gtk_box_append(GTK_BOX(menu_box), menu_label);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(menu_button), menu_box);
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button), appmenu);
     ns_popover_menu_fit(GTK_WIDGET(gtk_menu_button_get_popover(
                             GTK_MENU_BUTTON(menu_button))));

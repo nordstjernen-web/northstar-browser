@@ -24,9 +24,9 @@ Significant changes in each release:
   and sink when pressed, and Stop stays in place greyed out while nothing
   is loading. A "Location:" label leads into the sunken location field
   with its page proxy icon, followed by a raised "Go" button, a groove
-  separator, the Bookmarks button, the hamburger menu and the dark
-  throbber frame. The hamburger menu keeps every window action with its
-  shortcut, including Quit. A new faceted printer icon joins the icon
+  separator, the Bookmarks button, the hamburger menu button with a
+  "Menu" label under its icon, and the dark throbber frame. The menu
+  keeps every window action with its shortcut, including Quit. A new faceted printer icon joins the icon
   set.
 * The `about:start` splash is redrawn as a flat, sunny xkcd-style comic:
   black ink on white paper with only a few flat colours -- a yellow sun
