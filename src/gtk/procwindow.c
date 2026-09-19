@@ -217,30 +217,61 @@ install_status_css(void)
         "  min-width: 26px;"
         "  padding: 0;"
         "}"
-        ".ns-toolbar {"
-        "  background: linear-gradient(to bottom, #eae6db 0%, #d8d4c8 35%, #cac5b8 100%);"
+        "menubar.ns-menubar {"
+        "  background-color: #f4f6f9;"
+        "  color: #000000;"
+        "  padding: 1px 2px 0 2px;"
+        "  min-height: 22px;"
         "  border-top: 1px solid #ffffff;"
-        "  border-bottom: 1px solid #808080;"
-        "  box-shadow: inset 0 1px 0 #ffffff;"
+        "  border-bottom: 1px solid #9aa5b8;"
+        "}"
+        "menubar.ns-menubar > item {"
+        "  padding: 2px 7px;"
+        "  margin: 0;"
+        "  border-radius: 0;"
+        "  border: 1px solid transparent;"
+        "  color: #000000;"
+        "  font-size: 12px;"
+        "}"
+        "menubar.ns-menubar > item:hover {"
+        "  border-top-color: #ffffff;"
+        "  border-left-color: #ffffff;"
+        "  border-right-color: #9aa5b8;"
+        "  border-bottom-color: #9aa5b8;"
+        "}"
+        "menubar.ns-menubar > item.active, menubar.ns-menubar > item:active {"
+        "  background-color: #2f5aa8;"
+        "  color: #ffffff;"
+        "  border-top-color: #9aa5b8;"
+        "  border-left-color: #9aa5b8;"
+        "  border-right-color: #ffffff;"
+        "  border-bottom-color: #ffffff;"
+        "}"
+        ".ns-toolbar {"
+        "  background-image: linear-gradient(to bottom, #fdfdfe 0%, #f1f3f7 45%, #e2e6ee 100%);"
+        "  border-top: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #9aa5b8;"
+        "  box-shadow: 0 1px 0 #6b778c;"
         "  padding: 2px 3px;"
         "}"
         ".ns-toolbargrippy {"
-        "  min-width: 7px;"
-        "  margin: 1px 4px 1px 1px;"
+        "  min-width: 8px;"
+        "  margin: 2px 5px 2px 1px;"
         "  border-top: 1px solid #ffffff;"
         "  border-left: 1px solid #ffffff;"
-        "  border-right: 1px solid #808080;"
-        "  border-bottom: 1px solid #808080;"
-        "  background-color: #d4d0c8;"
-        "  background-image: radial-gradient(#808080 1px, transparent 1px),"
-        "                    radial-gradient(#ffffff 1px, transparent 1px);"
-        "  background-size: 3px 3px;"
-        "  background-position: 1px 1px, 2px 2px;"
+        "  border-right: 1px solid #9aa5b8;"
+        "  border-bottom: 1px solid #9aa5b8;"
+        "  background-color: #e6eaf1;"
+        "  background-image: repeating-linear-gradient(to right,"
+        "      #ffffff 0px, #ffffff 1px, #9aa5b8 1px, #9aa5b8 2px, #e6eaf1 2px, #e6eaf1 3px);"
+        "}"
+        ".ns-toolbargrippy:hover {"
+        "  background-color: #cfdcf3;"
         "}"
         ".ns-toolbar-separator {"
         "  min-width: 2px;"
-        "  margin: 2px 4px;"
-        "  border-left: 1px solid #808080;"
+        "  margin: 3px 5px;"
+        "  border-left: 1px solid #9aa5b8;"
         "  border-right: 1px solid #ffffff;"
         "  background: none;"
         "}"
@@ -249,45 +280,104 @@ install_status_css(void)
         "  min-width: 28px;"
         "  padding: 2px 4px;"
         "  border: 1px solid transparent;"
-        "  border-radius: 2px;"
+        "  border-radius: 0;"
         "  background: transparent;"
         "  color: #000000;"
+        "  box-shadow: none;"
+        "  text-shadow: none;"
+        "}"
+        ".ns-toolbar button.ns-nav-button {"
+        "  min-width: 46px;"
+        "  min-height: 44px;"
+        "  padding: 3px 6px 2px 6px;"
         "}"
         ".ns-toolbar button:hover {"
         "  border-top: 1px solid #ffffff;"
         "  border-left: 1px solid #ffffff;"
-        "  border-right: 1px solid #707070;"
-        "  border-bottom: 1px solid #707070;"
-        "  background-color: rgba(255, 255, 255, 0.35);"
+        "  border-right: 1px solid #6b778c;"
+        "  border-bottom: 1px solid #6b778c;"
+        "  box-shadow: inset -1px -1px 0 #9aa5b8;"
+        "  background-color: #e6eaf1;"
         "}"
-        ".ns-toolbar button:active {"
-        "  border-top: 1px solid #707070;"
-        "  border-left: 1px solid #707070;"
+        ".ns-toolbar button:active, .ns-toolbar button:checked {"
+        "  border-top: 1px solid #6b778c;"
+        "  border-left: 1px solid #6b778c;"
         "  border-right: 1px solid #ffffff;"
         "  border-bottom: 1px solid #ffffff;"
-        "  background-color: rgba(0, 0, 0, 0.08);"
+        "  box-shadow: inset 1px 1px 0 #9aa5b8;"
+        "  background-color: #d3d9e3;"
+        "  padding: 3px 3px 1px 5px;"
+        "}"
+        ".ns-toolbar button.ns-nav-button:active, .ns-toolbar button.ns-nav-button:checked {"
+        "  padding: 4px 5px 1px 7px;"
         "}"
         ".ns-toolbar button:disabled {"
-        "  opacity: 0.35;"
         "  border: 1px solid transparent;"
         "  background: transparent;"
+        "  box-shadow: none;"
+        "  -gtk-icon-filter: opacity(0.35) grayscale(1);"
+        "}"
+        ".ns-toolbar button:disabled .ns-toolbar-label {"
+        "  color: #9aa5b8;"
+        "  text-shadow: 1px 1px 0 #ffffff;"
+        "}"
+        ".ns-toolbar-label {"
+        "  font-size: 11px;"
+        "  font-weight: normal;"
+        "  color: #000000;"
+        "  margin-top: 1px;"
+        "  margin-bottom: 0;"
+        "}"
+        ".ns-location-label {"
+        "  color: #000000;"
+        "  font-size: 12px;"
+        "  margin: 0 4px 0 3px;"
+        "}"
+        ".ns-toolbar button.ns-go-button {"
+        "  border-top: 1px solid #ffffff;"
+        "  border-left: 1px solid #ffffff;"
+        "  border-right: 1px solid #6b778c;"
+        "  border-bottom: 1px solid #6b778c;"
+        "  box-shadow: inset -1px -1px 0 #9aa5b8;"
+        "  background-color: #e6eaf1;"
+        "  padding: 2px 6px;"
+        "  margin: 0 2px;"
+        "  min-height: 24px;"
+        "  min-width: 26px;"
+        "}"
+        ".ns-toolbar button.ns-go-button .ns-toolbar-label {"
+        "  margin: 0 0 0 3px;"
+        "  font-size: 12px;"
+        "}"
+        ".ns-toolbar button.ns-go-button:hover {"
+        "  background-color: #f4f6fa;"
+        "}"
+        ".ns-toolbar button.ns-go-button:active {"
+        "  border-top: 1px solid #6b778c;"
+        "  border-left: 1px solid #6b778c;"
+        "  border-right: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #ffffff;"
+        "  box-shadow: inset 1px 1px 0 #9aa5b8;"
+        "  background-color: #d3d9e3;"
+        "  padding: 3px 5px 1px 7px;"
         "}"
         ".ns-toolbar entry.ns-address {"
-        "  min-height: 26px;"
-        "  padding: 2px 6px;"
-        "  border-top: 2px solid #707070;"
-        "  border-left: 2px solid #707070;"
-        "  border-right: 2px solid #ffffff;"
-        "  border-bottom: 2px solid #ffffff;"
+        "  min-height: 22px;"
+        "  padding: 1px 4px;"
+        "  border-top: 1px solid #9aa5b8;"
+        "  border-left: 1px solid #9aa5b8;"
+        "  border-right: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #ffffff;"
+        "  box-shadow: inset 1px 1px 0 #6b778c, inset -1px -1px 0 #e6eaf1;"
         "  background-color: #ffffff;"
         "  color: #000000;"
-        "  border-radius: 2px;"
-        "  box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.2);"
+        "  border-radius: 0;"
+        "  font-size: 12px;"
         "}"
         ".ns-toolbar entry.ns-address:focus {"
-        "  box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px #4060b0;"
+        "  box-shadow: inset 1px 1px 0 #000000, inset -1px -1px 0 #e6eaf1;"
         "}"
-        ".ns-address image.left { margin-right: 4px; }"
+        ".ns-address image.left { margin-right: 5px; }"
         ".ns-zoom {"
         "  font-size: smaller;"
         "  padding: 0 5px;"
@@ -295,17 +385,25 @@ install_status_css(void)
         "  border: 1px solid transparent;"
         "}"
         ".ns-throbber {"
-        "  border-top: 1px solid #707070;"
-        "  border-left: 1px solid #707070;"
+        "  min-width: 30px;"
+        "  min-height: 30px;"
+        "  border-top: 1px solid #9aa5b8;"
+        "  border-left: 1px solid #9aa5b8;"
         "  border-right: 1px solid #ffffff;"
         "  border-bottom: 1px solid #ffffff;"
-        "  background-color: #c4c0b4;"
-        "  border-radius: 2px;"
+        "  box-shadow: inset 1px 1px 0 #6b778c;"
+        "  background-color: #080e22;"
+        "  border-radius: 0;"
         "  padding: 1px;"
-        "  margin-left: 4px;"
+        "  margin: 2px 1px 2px 5px;"
         "}"
         ".ns-throbber:hover {"
-        "  background-color: #d8d4c8;"
+        "  background-color: #121c3c;"
+        "  border-top: 1px solid #9aa5b8;"
+        "  border-left: 1px solid #9aa5b8;"
+        "  border-right: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #ffffff;"
+        "  box-shadow: inset 1px 1px 0 #6b778c;"
         "}");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
@@ -320,22 +418,67 @@ set_accessible_label(GtkWidget *w, const char *label)
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, label, -1);
 }
 
+static GtkImage *
+toolbar_button_image(GtkWidget *button)
+{
+    GtkWidget *child = gtk_button_get_child(GTK_BUTTON(button));
+    if (GTK_IS_BOX(child))
+        child = gtk_widget_get_first_child(child);
+    return GTK_IS_IMAGE(child) ? GTK_IMAGE(child) : NULL;
+}
+
 static void
 toolbar_button_icon_size(GtkWidget *button, int pixels)
 {
-    GtkWidget *child = gtk_button_get_child(GTK_BUTTON(button));
-    if (GTK_IS_IMAGE(child))
-        gtk_image_set_pixel_size(GTK_IMAGE(child), pixels);
+    GtkImage *img = toolbar_button_image(button);
+    if (img)
+        gtk_image_set_pixel_size(img, pixels);
 }
 
 static GtkWidget *
-toolbar_button(const char *icon, const char *tooltip, GCallback cb,
-               gpointer data)
+toolbar_button(const char *icon, const char *label, const char *tooltip,
+               GCallback cb, gpointer data)
 {
-    GtkWidget *b = gtk_button_new_from_icon_name(icon);
+    GtkWidget *b = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+    if (label && *label) {
+        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
+        GtkWidget *img = gtk_image_new_from_icon_name(icon);
+        GtkWidget *lbl = gtk_label_new(label);
+        gtk_widget_add_css_class(lbl, "ns-toolbar-label");
+        gtk_box_append(GTK_BOX(box), img);
+        gtk_box_append(GTK_BOX(box), lbl);
+        gtk_button_set_child(GTK_BUTTON(b), box);
+        gtk_widget_add_css_class(b, "ns-nav-button");
+    } else {
+        GtkWidget *img = gtk_image_new_from_icon_name(icon);
+        gtk_button_set_child(GTK_BUTTON(b), img);
+    }
     gtk_widget_set_tooltip_text(b, tooltip);
     set_accessible_label(b, tooltip);
+    g_signal_connect(b, "clicked", cb, data);
+    return b;
+}
+
+static GtkWidget *
+go_button(const char *label, GCallback cb, gpointer data)
+{
+    GtkWidget *b = gtk_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
+    GtkWidget *img = gtk_image_new_from_icon_name("northstar-go");
+    gtk_image_set_pixel_size(GTK_IMAGE(img), 16);
+    GtkWidget *lbl = gtk_label_new(label);
+    gtk_widget_add_css_class(lbl, "ns-toolbar-label");
+    gtk_box_append(GTK_BOX(box), img);
+    gtk_box_append(GTK_BOX(box), lbl);
+    gtk_button_set_child(GTK_BUTTON(b), box);
+    gtk_widget_add_css_class(b, "ns-go-button");
+    gtk_widget_set_tooltip_text(b, label);
+    set_accessible_label(b, label);
     g_signal_connect(b, "clicked", cb, data);
     return b;
 }
@@ -378,7 +521,7 @@ set_loading_ui(ProcWindow *pw, gboolean loading)
     gtk_widget_set_visible(pw->spinner, loading);
     gtk_spinner_set_spinning(GTK_SPINNER(pw->spinner), loading);
     if (pw->stop)
-        gtk_widget_set_visible(pw->stop, loading);
+        gtk_widget_set_sensitive(pw->stop, loading);
 }
 
 static char *
@@ -431,7 +574,10 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
         break;
     }
     if (!icon_name || !url || !*url) {
-        gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY, NULL);
+        gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY,
+                                          "northstar-bookmarks");
+        gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_PRIMARY,
+                                        ns_i18n("Page location"));
         return;
     }
     gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY, icon_name);
@@ -464,9 +610,10 @@ update_bookmark_indicator(ProcWindow *pw)
     if (!pw->bookmarks_button)
         return;
     gboolean saved = current_page_bookmarked(pw);
-    gtk_button_set_icon_name(GTK_BUTTON(pw->bookmarks_button),
-                             saved ? "northstar-bookmarks-saved"
-                                   : "northstar-bookmarks");
+    GtkImage *img = toolbar_button_image(pw->bookmarks_button);
+    if (img)
+        gtk_image_set_from_icon_name(img, saved ? "northstar-bookmarks-saved"
+                                                : "northstar-bookmarks");
     gtk_widget_set_tooltip_text(pw->bookmarks_button,
                                 saved ? ns_i18n("Bookmarked — open bookmarks")
                                       : ns_i18n("Bookmarks"));
@@ -1110,6 +1257,13 @@ on_go_clicked(GtkButton *b, gpointer ud)
     (void)b;
     ProcWindow *pw = ud;
     on_address_activate(GTK_ENTRY(pw->address), pw);
+}
+
+static void
+on_print_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    ns_proc_view_print(current_view(ud));
 }
 
 static void
@@ -1821,6 +1975,90 @@ menu_append_accel(GMenu *menu, const char *label, const char *action,
     g_object_unref(item);
 }
 
+static void
+menubar_append_submenu(GMenu *bar, const char *label, GMenu *first,
+                       GMenu *second)
+{
+    GMenu *submenu = g_menu_new();
+    g_menu_append_section(submenu, NULL, G_MENU_MODEL(first));
+    g_object_unref(first);
+    if (second) {
+        g_menu_append_section(submenu, NULL, G_MENU_MODEL(second));
+        g_object_unref(second);
+    }
+    g_menu_append_submenu(bar, label, G_MENU_MODEL(submenu));
+    g_object_unref(submenu);
+}
+
+static GMenuModel *
+build_menubar_model(void)
+{
+    GMenu *bar = g_menu_new();
+
+    GMenu *file_a = g_menu_new();
+    menu_append_accel(file_a, ns_i18n("New Window"), "win.new-window",
+                      "<Ctrl>n");
+    menu_append_accel(file_a, ns_i18n("Print…"), "win.print", "<Ctrl>p");
+    menu_append_accel(file_a, ns_i18n("Save Page as PDF…"), "win.save-pdf",
+                      "<Ctrl><Shift>p");
+    menu_append_accel(file_a, ns_i18n("Save Page as Image…"),
+                      "win.save-image", NULL);
+    GMenu *file_b = g_menu_new();
+    menu_append_accel(file_b, ns_i18n("Quit"), "win.quit", "<Ctrl>q");
+    menubar_append_submenu(bar, ns_i18n("File"), file_a, file_b);
+
+    GMenu *edit_a = g_menu_new();
+    menu_append_accel(edit_a, ns_i18n("Find in Page"), "win.find",
+                      "<Ctrl>f");
+    GMenu *edit_b = g_menu_new();
+    menu_append_accel(edit_b, ns_i18n("Settings"), "win.settings",
+                      "<Ctrl>comma");
+    menubar_append_submenu(bar, ns_i18n("Edit"), edit_a, edit_b);
+
+    GMenu *view_a = g_menu_new();
+    menu_append_accel(view_a, ns_i18n("Zoom In"), "win.zoom-in",
+                      "<Ctrl>plus");
+    menu_append_accel(view_a, ns_i18n("Zoom Out"), "win.zoom-out",
+                      "<Ctrl>minus");
+    menu_append_accel(view_a, ns_i18n("Reset Zoom"), "win.zoom-reset",
+                      "<Ctrl>0");
+    GMenu *view_b = g_menu_new();
+    menu_append_accel(view_b, ns_i18n("Full Screen"), "win.fullscreen",
+                      "F11");
+    menu_append_accel(view_b, ns_i18n("Page Source"), "win.view-source",
+                      "<Ctrl>u");
+    menubar_append_submenu(bar, ns_i18n("View"), view_a, view_b);
+
+    GMenu *go_a = g_menu_new();
+    menu_append_accel(go_a, ns_i18n("Back"), "win.back", "<Alt>Left");
+    menu_append_accel(go_a, ns_i18n("Forward"), "win.forward", "<Alt>Right");
+    menu_append_accel(go_a, ns_i18n("Reload"), "win.reload", "<Ctrl>r");
+    menu_append_accel(go_a, ns_i18n("Home"), "win.home", "<Alt>Home");
+    GMenu *go_b = g_menu_new();
+    menu_append_accel(go_b, ns_i18n("History"), "win.history", "<Ctrl>h");
+    menubar_append_submenu(bar, ns_i18n("Go"), go_a, go_b);
+
+    GMenu *bookmarks_a = g_menu_new();
+    menu_append_accel(bookmarks_a, ns_i18n("Bookmark This Page"),
+                      "win.bookmark-page", "<Ctrl>d");
+    menubar_append_submenu(bar, ns_i18n("Bookmarks"), bookmarks_a, NULL);
+
+    GMenu *tools_a = g_menu_new();
+    menu_append_accel(tools_a, ns_i18n("Downloads"), "win.downloads",
+                      "<Ctrl>j");
+    menu_append_accel(tools_a, ns_i18n("JavaScript Console"), "win.console",
+                      "<Ctrl><Shift>j");
+    menu_append_accel(tools_a, ns_i18n("Task Manager"), "win.task-manager",
+                      "<Shift>Escape");
+    menubar_append_submenu(bar, ns_i18n("Tools"), tools_a, NULL);
+
+    GMenu *help_a = g_menu_new();
+    g_menu_append(help_a, ns_i18n("About Northstar"), "win.about");
+    menubar_append_submenu(bar, ns_i18n("Help"), help_a, NULL);
+
+    return G_MENU_MODEL(bar);
+}
+
 static ProcWindow *
 proc_window_new(GtkApplication *app, const char *home_url,
                 gboolean private_mode)
@@ -1867,23 +2105,34 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_widget_add_css_class(grippy, "ns-toolbargrippy");
 
     pw->back = toolbar_button("northstar-back", ns_i18n("Back"),
+                              ns_i18n("Go back one page"),
                               G_CALLBACK(on_back_clicked), pw);
     pw->forward = toolbar_button("northstar-forward", ns_i18n("Forward"),
+                                 ns_i18n("Go forward one page"),
                                  G_CALLBACK(on_forward_clicked), pw);
     pw->reload = toolbar_button("northstar-reload", ns_i18n("Reload"),
+                                ns_i18n("Reload this page"),
                                 G_CALLBACK(on_reload_clicked), pw);
     pw->stop = toolbar_button("northstar-stop", ns_i18n("Stop"),
+                              ns_i18n("Stop loading this page"),
                               G_CALLBACK(on_stop_clicked), pw);
-    gtk_widget_set_visible(pw->stop, FALSE);
+    gtk_widget_set_sensitive(pw->stop, FALSE);
     GtkWidget *home = toolbar_button("northstar-home", ns_i18n("Home"),
+                                     ns_i18n("Go to the home page"),
                                      G_CALLBACK(on_home_clicked), pw);
+    GtkWidget *print = toolbar_button("northstar-print", ns_i18n("Print"),
+                                      ns_i18n("Print this page"),
+                                      G_CALLBACK(on_print_clicked), pw);
     GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
     gtk_widget_add_css_class(sep, "ns-toolbar-separator");
-    toolbar_button_icon_size(pw->back, 22);
-    toolbar_button_icon_size(pw->forward, 22);
-    toolbar_button_icon_size(pw->reload, 22);
-    toolbar_button_icon_size(pw->stop, 22);
-    toolbar_button_icon_size(home, 22);
+    toolbar_button_icon_size(pw->back, 24);
+    toolbar_button_icon_size(pw->forward, 24);
+    toolbar_button_icon_size(pw->reload, 24);
+    toolbar_button_icon_size(pw->stop, 24);
+    toolbar_button_icon_size(home, 24);
+    toolbar_button_icon_size(print, 24);
+    GtkWidget *location_label = gtk_label_new(ns_i18n("Location:"));
+    gtk_widget_add_css_class(location_label, "ns-location-label");
 
     pw->spinner = gtk_spinner_new();
     gtk_widget_set_tooltip_text(pw->spinner, ns_i18n("Loading"));
@@ -1893,6 +2142,12 @@ proc_window_new(GtkApplication *app, const char *home_url,
     pw->address = gtk_entry_new();
     gtk_widget_set_hexpand(pw->address, TRUE);
     gtk_widget_add_css_class(pw->address, "ns-address");
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(pw->address),
+                                      GTK_ENTRY_ICON_PRIMARY,
+                                      "northstar-bookmarks");
+    gtk_entry_set_icon_tooltip_text(GTK_ENTRY(pw->address),
+                                    GTK_ENTRY_ICON_PRIMARY,
+                                    ns_i18n("Page location"));
     gtk_entry_set_placeholder_text(GTK_ENTRY(pw->address),
                                    ns_i18n("Search or enter a URL"));
     set_accessible_label(pw->address, ns_i18n("Address and search bar"));
@@ -1918,68 +2173,19 @@ proc_window_new(GtkApplication *app, const char *home_url,
     g_signal_connect(pw->zoom_button, "clicked",
                      G_CALLBACK(on_zoom_indicator_clicked), pw);
 
-    GtkWidget *go = toolbar_button("northstar-go", ns_i18n("Go"),
-                                   G_CALLBACK(on_go_clicked), pw);
-    toolbar_button_icon_size(go, 22);
+    GtkWidget *go = go_button(ns_i18n("Go"), G_CALLBACK(on_go_clicked), pw);
+    GtkWidget *sep2 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+    gtk_widget_add_css_class(sep2, "ns-toolbar-separator");
     pw->bookmarks_button = toolbar_button("northstar-bookmarks",
                                           ns_i18n("Bookmarks"),
+                                          ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
-    toolbar_button_icon_size(pw->bookmarks_button, 22);
+    toolbar_button_icon_size(pw->bookmarks_button, 24);
 
-    GMenu *appmenu = g_menu_new();
-    GMenu *sec_window = g_menu_new();
-    menu_append_accel(sec_window, ns_i18n("New Window"), "win.new-window",
-                      NULL);
-    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_window));
-    g_object_unref(sec_window);
-    GMenu *sec_view = g_menu_new();
-    menu_append_accel(sec_view, ns_i18n("Zoom In"), "win.zoom-in",
-                      "<Ctrl>plus");
-    menu_append_accel(sec_view, ns_i18n("Zoom Out"), "win.zoom-out",
-                      "<Ctrl>minus");
-    menu_append_accel(sec_view, ns_i18n("Reset Zoom"), "win.zoom-reset",
-                      "<Ctrl>0");
-    menu_append_accel(sec_view, ns_i18n("Full Screen"), "win.fullscreen", NULL);
-    menu_append_accel(sec_view, ns_i18n("Find in Page"), "win.find", NULL);
-    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_view));
-    g_object_unref(sec_view);
-    GMenu *sec_page = g_menu_new();
-    menu_append_accel(sec_page, ns_i18n("Bookmark This Page"),
-                      "win.bookmark-page", "<Ctrl>d");
-    menu_append_accel(sec_page, ns_i18n("History"), "win.history", NULL);
-    menu_append_accel(sec_page, ns_i18n("Downloads"), "win.downloads", NULL);
-    menu_append_accel(sec_page, ns_i18n("Print…"), "win.print",
-                      "<Ctrl>P");
-    menu_append_accel(sec_page, ns_i18n("Save Page as PDF…"), "win.save-pdf",
-                      NULL);
-    menu_append_accel(sec_page, ns_i18n("Save Page as Image…"),
-                      "win.save-image", NULL);
-    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_page));
-    g_object_unref(sec_page);
-    GMenu *sec_tools = g_menu_new();
-    menu_append_accel(sec_tools, ns_i18n("Page Source"), "win.view-source",
-                      "<Ctrl>u");
-    menu_append_accel(sec_tools, ns_i18n("JavaScript Console"), "win.console",
-                      "<Ctrl><Shift>j");
-    menu_append_accel(sec_tools, ns_i18n("Task Manager"), "win.task-manager",
-                      NULL);
-    menu_append_accel(sec_tools, ns_i18n("Settings"), "win.settings", NULL);
-    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_tools));
-    g_object_unref(sec_tools);
-    GMenu *appmenu_about = g_menu_new();
-    g_menu_append(appmenu_about, ns_i18n("About Northstar"), "win.about");
-    g_menu_append_section(appmenu, NULL, G_MENU_MODEL(appmenu_about));
-    g_object_unref(appmenu_about);
-    GtkWidget *menu_button = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
-                                  "open-menu-symbolic");
-    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
-                                   G_MENU_MODEL(appmenu));
-    ns_popover_menu_fit(GTK_WIDGET(gtk_menu_button_get_popover(
-                            GTK_MENU_BUTTON(menu_button))));
-    gtk_widget_set_tooltip_text(menu_button, ns_i18n("Menu"));
-    set_accessible_label(menu_button, ns_i18n("Menu"));
-    g_object_unref(appmenu);
+    GMenuModel *menubar_model = build_menubar_model();
+    GtkWidget *menubar = gtk_popover_menu_bar_new_from_model(menubar_model);
+    gtk_widget_add_css_class(menubar, "ns-menubar");
+    g_object_unref(menubar_model);
 
     GtkWidget *logo = gtk_image_new_from_icon_name("northstar");
     gtk_image_set_pixel_size(GTK_IMAGE(logo), 26);
@@ -1997,14 +2203,17 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_box_append(GTK_BOX(toolbar), pw->reload);
     gtk_box_append(GTK_BOX(toolbar), pw->stop);
     gtk_box_append(GTK_BOX(toolbar), home);
+    gtk_box_append(GTK_BOX(toolbar), print);
     gtk_box_append(GTK_BOX(toolbar), sep);
     gtk_box_append(GTK_BOX(toolbar), pw->spinner);
+    gtk_box_append(GTK_BOX(toolbar), location_label);
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), pw->zoom_button);
     gtk_box_append(GTK_BOX(toolbar), go);
+    gtk_box_append(GTK_BOX(toolbar), sep2);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
-    gtk_box_append(GTK_BOX(toolbar), menu_button);
     gtk_box_append(GTK_BOX(toolbar), logo_button);
+    gtk_box_append(GTK_BOX(vbox), menubar);
     gtk_box_append(GTK_BOX(vbox), toolbar);
 
     GtkWidget *page = ns_proc_view_widget(pw->view);

@@ -297,6 +297,7 @@ install_data(
   'data/icons/hicolor/scalable/apps/northstar-reload.svg',
   'data/icons/hicolor/scalable/apps/northstar-stop.svg',
   'data/icons/hicolor/scalable/apps/northstar-go.svg',
+  'data/icons/hicolor/scalable/apps/northstar-print.svg',
   'data/icons/hicolor/scalable/apps/northstar-bookmarks.svg',
   'data/icons/hicolor/scalable/apps/northstar-bookmarks-saved.svg',
   'data/icons/hicolor/scalable/apps/northstar-console.svg',

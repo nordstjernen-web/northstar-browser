@@ -31,7 +31,7 @@
 
   <!-- Lower Facet (Forest Green) -->
   <polygon points="21.6,12 13.6,12 13.6,16.5 3.8,16.5 3.8,12 13.6,12" fill="url(#fwd-lower)"/>
-  <polygon points="21.6,12 13.6,12 13.6,16.5" fill="url(#fwd-lower)"/>
+  <polygon points="21.6,12 13.6,12 13.6,20.2" fill="url(#fwd-lower)"/>
 
   <!-- Upper Facet (Bright Mint/Spring Green) -->
   <polygon points="21.6,12 13.6,3.8 13.6,7.4 3.8,7.4 3.8,12" fill="url(#fwd-upper)"/>

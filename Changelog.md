@@ -16,32 +16,33 @@ Significant changes in each release:
   `document.fullscreenEnabled` is false, instead of resolving as if the
   page had been granted full screen; page scripts cannot put the window
   into full screen in this edition and are no longer told otherwise.
-* The `about:start` splash is an xkcd-style comic in black ink on
-  white, drawn with perspective: the animal pairs queue along a road that
-  converges toward a horizon of distant hills, each pair smaller and
-  finer-lined the further back it stands, while the ark sits in
-  three-quarter view with a visible cabin side, a hatched roof and hull,
-  and a foreshortened deck. Noah, bearded and leaning on his staff, waves
-  the animals up the gangplank two by two -- dogs, sheep, pigs, an
-  elephant with a pair of monkeys on its back, lions, cows, zebras,
-  kangaroos, bears, camels, cats, turtles, ducks, rabbits, mice and
-  penguins -- turtles crawl up the ramp, ducks paddle beside the hull,
-  rabbits ride the stern deck, cats and mice sit on the roof, snakes sun
-  on the ridge, giraffes poke through the cabin roof and penguins stand
-  at the bow, while a woman on deck holds an umbrella against the rain
-  and doves circle the clouds, one bearing an olive sprig. An animated
-  lighthouse on a rocky islet in the waves sweeps its beam across the sea
-  with a waving keeper on the gallery railing, beneath the twinkling
-  North Star. Noah's speech bubble reads "Two of each. Yes, even
-  browsers." and the title block displays "Northstar web browser" with the
-  subtitle "Yet another open source web browser" and version 1.0.9. The 32
-  frames at 80 ms animate near and far rain drifting in gusts, the waves,
-  the rotating lighthouse beacon, the ark rocking and heaving, walking
-  legs, nodding heads, the elephant's trunk and ears, hopping rabbits and
-  kangaroos, slithering snakes, the umbrella tilting, the doves flying, a
-  whale surfacing to spout and a lightning flash, on one 256-colour
-  palette rendered at three times supersampling. `scripts/gen-splash.py`
-  supports cross-platform font resolution across Linux and Windows. The
+* The browser chrome is laid out like Mozilla 1.0 and Netscape
+  Communicator. A classic menubar (File, Edit, View, Go, Bookmarks,
+  Tools, Help) replaces the hamburger menu and carries every window action
+  with its shortcut. Below it, the navigation toolbar sits on a bright
+  silver-blue face with a white top highlight and a dark bottom groove,
+  starts with a ridged grippy, and shows Back, Forward, Reload, Stop, Home,
+  Print and Bookmarks as large buttons with the faceted 3D icon above a
+  text label; they are flat until hovered, raise on hover and sink when
+  pressed, and Stop stays in place greyed out while nothing is loading. A
+  "Location:" label leads into the sunken location field with its page
+  proxy icon, followed by a raised "Go" button, a groove separator and the
+  dark throbber frame. A new faceted printer icon joins the icon set.
+* The `about:start` splash is redrawn as a flat, sunny xkcd-style comic:
+  black ink on white paper with only a few flat colours -- a yellow sun
+  with wobbling rays, blue wave lines, a tan-planked ark and a red-banded
+  lighthouse. The rain, lightning, umbrella, night sky and perspective
+  road are gone; the animal pairs walk a plain ground line toward Noah in
+  side view, and at the head of the queue two little browser windows on
+  stick legs wait their turn beneath the speech bubble "Two of each. Yes,
+  even browsers." A star pennant flutters on the ark's roof, Noah's wife
+  waves from the deck, gulls circle the lighthouse, the keeper waves from
+  the gallery and the dove carries its olive sprig. The 32 frames at 80 ms
+  animate the sun's rays, drifting clouds, waves, the rocking ark, walking
+  legs, hopping rabbits and kangaroos, the flapping dove and gulls and a
+  whale surfacing to spout, on one 256-colour palette rendered at three
+  times supersampling. `scripts/gen-splash.py` prefers its explicit font
+  paths over `fc-match`, so the lettering stays comic on Windows. The
   README screenshot is updated with a full browser window capture.
 * `<textarea rows>` and `cols` are parsed as bounded non-negative
   integers (1 to 1000, defaulting to 2 and 20), so an attribute like
