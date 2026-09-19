@@ -2361,7 +2361,10 @@ ns_form_owner(const ns_node *control, const ns_node *doc)
     if (!control || control->kind != NS_NODE_ELEMENT) return NULL;
     if (!doc) doc = ns_node_root(control);
     const char *form_id = ns_element_get_attr(control, "form");
-    if (form_id) {
+    const ns_node *root = ns_node_root(control);
+    gboolean connected = root && root->kind == NS_NODE_DOCUMENT &&
+                         !(root->flags & NS_NODE_FRAGMENT);
+    if (form_id && connected) {
         if (*form_id) {
             const ns_node *tree_root = control;
             while (tree_root->parent &&
