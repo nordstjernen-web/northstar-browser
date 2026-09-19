@@ -3741,8 +3741,26 @@ static ns_css_value *parse_calc(const char *text);
 static ns_css_value *parse_calc_inner(const char *text);
 static char *angle_expr_rewrite(const char *s, gboolean to_radians);
 
+typedef struct { double em, rem, lh, rlh; } ns_font_units;
+
+static void
+font_units_set(ns_font_units *font, ns_css_unit unit, double v,
+               double *out_px)
+{
+    if (!font) {
+        *out_px = v * (unit == NS_CSS_UNIT_EM || unit == NS_CSS_UNIT_REM
+                       ? 16.0 : 19.2);
+        return;
+    }
+    if (unit == NS_CSS_UNIT_EM) font->em = v;
+    else if (unit == NS_CSS_UNIT_REM) font->rem = v;
+    else if (unit == NS_CSS_UNIT_LH) font->lh = v;
+    else font->rlh = v;
+}
+
 static gboolean
-resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
+resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
+                       double *out_pct, ns_font_units *font)
 {
     char *s = g_strndup(text, len);
     g_strstrip(s);
@@ -3755,9 +3773,17 @@ resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
         g_free(wrapped);
     }
     if (v && v->kind == NS_CSS_V_CALC) {
-        double rel = (v->u.calc.em + v->u.calc.rem) * 16.0 +
-                     (v->u.calc.lh + v->u.calc.rlh) * 19.2;
-        *out_px = rel == 0 ? v->u.calc.px : v->u.calc.px + rel;
+        if (font) {
+            font->em = v->u.calc.em;
+            font->rem = v->u.calc.rem;
+            font->lh = v->u.calc.lh;
+            font->rlh = v->u.calc.rlh;
+            *out_px = v->u.calc.px;
+        } else {
+            *out_px = v->u.calc.px +
+                      (v->u.calc.em + v->u.calc.rem) * 16.0 +
+                      (v->u.calc.lh + v->u.calc.rlh) * 19.2;
+        }
         *out_pct = v->u.calc.pct;
         ns_css_value_free(v);
         g_free(s);
@@ -3770,11 +3796,9 @@ resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
             break;
         case NS_CSS_UNIT_EM:
         case NS_CSS_UNIT_REM:
-            *out_px = v->u.length.v * 16.0;
-            break;
         case NS_CSS_UNIT_LH:
         case NS_CSS_UNIT_RLH:
-            *out_px = v->u.length.v * 19.2;
+            font_units_set(font, v->u.length.unit, v->u.length.v, out_px);
             break;
         case NS_CSS_UNIT_VW:
         case NS_CSS_UNIT_SVW:
@@ -3817,9 +3841,9 @@ resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
         switch (u) {
         case NS_CSS_UNIT_PERCENT: *out_pct = num; break;
         case NS_CSS_UNIT_EM:
-        case NS_CSS_UNIT_REM:     *out_px = num * 16.0; break;
+        case NS_CSS_UNIT_REM:
         case NS_CSS_UNIT_LH:
-        case NS_CSS_UNIT_RLH:     *out_px = num * 19.2; break;
+        case NS_CSS_UNIT_RLH:     font_units_set(font, u, num, out_px); break;
         case NS_CSS_UNIT_VW:
         case NS_CSS_UNIT_SVW:
         case NS_CSS_UNIT_LVW:
@@ -3861,6 +3885,12 @@ resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
     }
     g_free(s);
     return FALSE;
+}
+
+static gboolean
+resolve_to_px_pct(const char *text, gsize len, double *out_px, double *out_pct)
+{
+    return resolve_to_px_pct_font(text, len, out_px, out_pct, NULL);
 }
 
 static const char *
@@ -4782,6 +4812,7 @@ parse_calc_inner(const char *text)
     if (fn != 0) {
         double values_px[8] = {0};
         double values_pct[8] = {0};
+        ns_font_units values_font[8] = {{0}};
         gboolean is_none[8] = {0};
         int num_count = 0;
         int none_count = 0;
@@ -4800,9 +4831,10 @@ parse_calc_inner(const char *text)
                     is_none[slot] = TRUE;
                     none_count++;
                     if (fn != 3) ok = FALSE;
-                } else if (!resolve_to_px_pct(part, strlen(part),
-                                              &values_px[slot],
-                                              &values_pct[slot])) {
+                } else if (!resolve_to_px_pct_font(part, strlen(part),
+                                                   &values_px[slot],
+                                                   &values_pct[slot],
+                                                   &values_font[slot])) {
                     ok = FALSE;
                 } else if (calc_arg_is_number(part)) {
                     num_count++;
@@ -4819,8 +4851,15 @@ parse_calc_inner(const char *text)
         gboolean all_numbers = non_none > 0 && num_count == non_none;
         if (n > 8) n = 8;
         double keys[8] = {0};
-        for (int i = 0; i < n; i++)
-            keys[i] = values_px[i] + values_pct[i] * 0.01 * g_viewport_w;
+        gboolean font_dependent = FALSE;
+        for (int i = 0; i < n; i++) {
+            const ns_font_units *f = &values_font[i];
+            if (f->em != 0 || f->rem != 0 || f->lh != 0 || f->rlh != 0)
+                font_dependent = TRUE;
+            keys[i] = values_px[i] + (f->em + f->rem) * 16.0 +
+                      (f->lh + f->rlh) * 19.2 +
+                      values_pct[i] * 0.01 * g_viewport_w;
+        }
         double out_px;
         if (fn == 3) {
             double min_v = is_none[0] ? -HUGE_VAL : keys[0];
@@ -4844,12 +4883,9 @@ parse_calc_inner(const char *text)
             if (any_nan) out_px = NAN;
         }
         if (all_numbers) return calc_num_value(out_px);
-        gboolean basis_dependent = n <= 4;
-        if (basis_dependent) {
-            basis_dependent = FALSE;
-            for (int i = 0; i < n; i++)
-                if (values_pct[i] != 0) basis_dependent = TRUE;
-        }
+        gboolean basis_dependent = n <= 4 && font_dependent;
+        for (int i = 0; n <= 4 && i < n; i++)
+            if (values_pct[i] != 0) basis_dependent = TRUE;
         if (!basis_dependent) return calc_px_value(out_px);
         ns_css_value *mv = g_new0(ns_css_value, 1);
         mv->kind = NS_CSS_V_CALC;
@@ -4859,6 +4895,10 @@ parse_calc_inner(const char *text)
         for (int i = 0; i < n; i++) {
             mv->u.calc.args[i].px  = values_px[i];
             mv->u.calc.args[i].pct = values_pct[i];
+            mv->u.calc.args[i].em  = values_font[i].em;
+            mv->u.calc.args[i].rem = values_font[i].rem;
+            mv->u.calc.args[i].lh  = values_font[i].lh;
+            mv->u.calc.args[i].rlh = values_font[i].rlh;
             if (is_none[i]) mv->u.calc.arg_none |= (guint8)(1u << i);
         }
         return mv;
@@ -26590,6 +26630,59 @@ style_line_height_px(const ns_style *s, double font_px, double root_px,
     }
 }
 
+static gboolean
+calc_has_font_units(const ns_css_value *v)
+{
+    if (v->u.calc.em != 0 || v->u.calc.rem != 0 || v->u.calc.lh != 0 ||
+        v->u.calc.rlh != 0)
+        return TRUE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
+        if (v->u.calc.args[i].em != 0 || v->u.calc.args[i].rem != 0 ||
+            v->u.calc.args[i].lh != 0 || v->u.calc.args[i].rlh != 0)
+            return TRUE;
+    return FALSE;
+}
+
+static void
+calc_fold_font_units(ns_css_value *v, double font_px, double root_px,
+                     double lh_px, double rlh_px)
+{
+    v->u.calc.px += v->u.calc.em * font_px + v->u.calc.rem * root_px +
+                    v->u.calc.lh * lh_px + v->u.calc.rlh * rlh_px;
+    v->u.calc.em = 0;
+    v->u.calc.rem = 0;
+    v->u.calc.lh = 0;
+    v->u.calc.rlh = 0;
+    if (!v->u.calc.fn || v->u.calc.n_args == 0) return;
+    gboolean pct = FALSE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
+        double *px = &v->u.calc.args[i].px;
+        *px += v->u.calc.args[i].em * font_px + v->u.calc.args[i].rem * root_px +
+               v->u.calc.args[i].lh * lh_px + v->u.calc.args[i].rlh * rlh_px;
+        v->u.calc.args[i].em = 0;
+        v->u.calc.args[i].rem = 0;
+        v->u.calc.args[i].lh = 0;
+        v->u.calc.args[i].rlh = 0;
+        if (v->u.calc.args[i].pct != 0) pct = TRUE;
+    }
+    v->u.calc.px = ns_css_calc_math_fn_px(v, g_viewport_w);
+    if (pct) return;
+    v->u.calc.fn = 0;
+    v->u.calc.n_args = 0;
+    v->u.calc.arg_none = 0;
+}
+
+static double
+calc_font_size_px(const ns_css_value *fs, double parent_px, double root_px,
+                  double lh_px, double rlh_px)
+{
+    ns_css_value tmp = *fs;
+    calc_fold_font_units(&tmp, parent_px, root_px, lh_px, rlh_px);
+    if (tmp.u.calc.fn && tmp.u.calc.n_args)
+        return ns_css_calc_math_fn_px(&tmp, parent_px);
+    return tmp.u.calc.px + tmp.u.calc.pct * parent_px / 100.0;
+}
+
 static double
 resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
 {
@@ -26606,13 +26699,10 @@ resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
                                                       ? g_root_line_px
                                                       : normal_line_height_px(parent_px));
     if (fs && fs->kind == NS_CSS_V_CALC)
-        return fs->u.calc.px + fs->u.calc.em * parent_px +
-               fs->u.calc.rem * parent_px +
-               fs->u.calc.lh * parent_line_px +
-               fs->u.calc.rlh * (g_root_line_px > 0
-                                      ? g_root_line_px
-                                      : normal_line_height_px(parent_px)) +
-               fs->u.calc.pct * parent_px / 100.0;
+        return calc_font_size_px(fs, parent_px, parent_px, parent_line_px,
+                                 g_root_line_px > 0
+                                     ? g_root_line_px
+                                     : normal_line_height_px(parent_px));
     if (!fs || fs->kind != NS_CSS_V_LENGTH) return parent_px;
     switch (fs->u.length.unit) {
     case NS_CSS_UNIT_PX:      return fs->u.length.v;
@@ -26709,9 +26799,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * root_px;
     } else if (out->values[NS_CSS_FONT_SIZE] &&
                out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_CALC &&
-               (out->values[NS_CSS_FONT_SIZE]->u.calc.rem != 0 ||
-                out->values[NS_CSS_FONT_SIZE]->u.calc.lh != 0 ||
-                out->values[NS_CSS_FONT_SIZE]->u.calc.rlh != 0)) {
+               calc_has_font_units(out->values[NS_CSS_FONT_SIZE])) {
         const ns_css_value *fsv = out->values[NS_CSS_FONT_SIZE];
         double parent_px = 16;
         if (parent_style && parent_style->values[NS_CSS_FONT_SIZE] &&
@@ -26719,17 +26807,13 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             parent_style->values[NS_CSS_FONT_SIZE]->u.length.unit ==
                 NS_CSS_UNIT_PX)
             parent_px = parent_style->values[NS_CSS_FONT_SIZE]->u.length.v;
-        my_font_px = fsv->u.calc.px + fsv->u.calc.em * parent_px +
-                     fsv->u.calc.rem * root_px +
-                     fsv->u.calc.lh * style_line_height_px(
-                         parent_style, parent_px, root_px,
-                         normal_line_height_px(parent_px),
-                         g_root_line_px > 0 ? g_root_line_px
-                                            : normal_line_height_px(root_px)) +
-                     fsv->u.calc.rlh *
-                         (g_root_line_px > 0 ? g_root_line_px
-                                            : normal_line_height_px(root_px)) +
-                     fsv->u.calc.pct * parent_px / 100.0;
+        double root_line = g_root_line_px > 0 ? g_root_line_px
+                                              : normal_line_height_px(root_px);
+        my_font_px = calc_font_size_px(
+            fsv, parent_px, root_px,
+            style_line_height_px(parent_style, parent_px, root_px,
+                                 normal_line_height_px(parent_px), root_line),
+            root_line);
     }
     if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
     if (out->values[NS_CSS_FONT_SIZE] &&
@@ -26810,21 +26894,13 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             continue;
         }
         if (v->kind == NS_CSS_V_CALC) {
-            if (v->u.calc.em != 0 || v->u.calc.rem != 0 ||
-                v->u.calc.lh != 0 || v->u.calc.rlh != 0)
-                v = ns_css_value_cow(out, i);
+            if (!calc_has_font_units(v)) continue;
+            v = ns_css_value_cow(out, i);
             double lh_base = i == NS_CSS_LINE_HEIGHT
                 ? initial_line_px : my_line_px;
             double rlh_base = i == NS_CSS_LINE_HEIGHT && !parent_style
                 ? initial_line_px : root_line_px;
-            v->u.calc.px += v->u.calc.em * my_font_px +
-                            v->u.calc.rem * root_px +
-                            v->u.calc.lh * lh_base +
-                            v->u.calc.rlh * rlh_base;
-            v->u.calc.em = 0;
-            v->u.calc.rem = 0;
-            v->u.calc.lh = 0;
-            v->u.calc.rlh = 0;
+            calc_fold_font_units(v, my_font_px, root_px, lh_base, rlh_base);
             continue;
         }
         if (v->kind == NS_CSS_V_SIZE && !v->u.size.w_auto && !v->u.size.h_auto) {
