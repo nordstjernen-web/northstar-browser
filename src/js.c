@@ -16861,10 +16861,11 @@ ns_window_option_ctor(JSContext *ctx, JSValueConst this_val,
         const char *v = JS_ToCString(ctx, argv[1]);
         if (v) { ns_element_set_attr(el, "value", v); JS_FreeCString(ctx, v); }
     }
-    if (argc >= 3 && JS_ToBool(ctx, argv[2]))
-        ns_element_set_attr(el, "defaultSelected", "");
-    if (argc >= 4 && JS_ToBool(ctx, argv[3]))
-        ns_element_set_attr(el, "selected", "");
+    gboolean default_selected = argc >= 3 && JS_ToBool(ctx, argv[2]);
+    gboolean selected = argc >= 4 && JS_ToBool(ctx, argv[3]);
+    if (default_selected) ns_element_set_attr(el, "selected", "");
+    if (selected != default_selected)
+        ns_element_set_attr(el, "data-nd-selected", selected ? "1" : "0");
     g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, el);
     return ns_make_element(ctx, el);
 }
@@ -18568,28 +18569,17 @@ ns_form_data_append_select(JSContext *ctx, JSValueConst fd,
         g_free(v);
         return;
     }
-    for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
-            if (ns_element_effectively_disabled(c) ||
-                ns_element_get_attr(c, "disabled"))
-                continue;
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected") &&
-                    !ns_form_data_option_disabled(cc)) {
-                    char *v = ns_option_value_dup(cc);
-                    ns_form_data_append_pair(ctx, fd, name, v ? v : "");
-                    g_free(v);
-                }
-            }
-        } else if (ns_node_is_element_named(c, "option") &&
-                   ns_element_get_attr(c, "selected") &&
-                   !ns_form_data_option_disabled(c)) {
-            char *v = ns_option_value_dup(c);
-            ns_form_data_append_pair(ctx, fd, name, v ? v : "");
-            g_free(v);
-        }
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    for (guint i = 0; i < opts->len; i++) {
+        const ns_node *o = g_ptr_array_index(opts, i);
+        if (!ns_option_is_selected(o) || ns_form_data_option_disabled(o))
+            continue;
+        char *v = ns_option_value_dup(o);
+        ns_form_data_append_pair(ctx, fd, name, v ? v : "");
+        g_free(v);
     }
+    g_ptr_array_free(opts, TRUE);
 }
 
 static gboolean ns_node_is_submit_trigger(const ns_node *el);
@@ -34102,49 +34092,23 @@ ns_element_get_selected(JSContext *ctx, JSValueConst this_val)
 {
     (void)ctx;
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n) return JS_FALSE;
-    if (ns_element_get_attr(n, "selected")) return JS_TRUE;
     if (!ns_node_is_element_named(n, "option")) return JS_FALSE;
     const ns_node *p = n->parent;
     if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
     if (ns_node_is_element_named(p, "select") &&
-        !ns_element_get_attr(p, "multiple") &&
-        ns_select_chosen_option(p) == n)
-        return JS_TRUE;
-    return JS_FALSE;
+        !ns_element_get_attr(p, "multiple"))
+        return ns_select_chosen_option(p) == n ? JS_TRUE : JS_FALSE;
+    return ns_option_is_selected(n) ? JS_TRUE : JS_FALSE;
 }
 
 static JSValue
 ns_element_set_selected(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n) return JS_UNDEFINED;
+    if (!ns_node_is_element_named(n, "option")) return JS_UNDEFINED;
+    ns_option_set_selected(n, JS_ToBool(ctx, val) ? TRUE : FALSE);
     ns_js *_j = js_from_ctx(ctx);
-    gboolean on = JS_ToBool(ctx, val) ? TRUE : FALSE;
-    if (ns_node_is_element_named(n, "option")) {
-        ns_node *sel = n->parent;
-        if (ns_node_is_element_named(sel, "optgroup")) sel = sel->parent;
-        if (ns_node_is_element_named(sel, "select"))
-            ns_element_remove_attr(sel, "data-nd-noselect");
-    }
-    if (on && ns_node_is_element_named(n, "option")) {
-        ns_node *p = n->parent;
-        if (ns_node_is_element_named(p, "optgroup")) p = p->parent;
-        if (ns_node_is_element_named(p, "select") &&
-            !ns_element_get_attr(p, "multiple")) {
-            for (ns_node *c = p->first_child; c; c = c->next_sibling) {
-                if (ns_node_is_element_named(c, "option")) {
-                    if (c != n) ns_element_remove_attr(c, "selected");
-                } else if (ns_node_is_element_named(c, "optgroup")) {
-                    for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                        if (ns_node_is_element_named(cc, "option") && cc != n)
-                            ns_element_remove_attr(cc, "selected");
-                }
-            }
-        }
-    }
-    if (on) ns_js_set_attr_recorded(_j, n, "selected", "");
-    else    ns_js_remove_attr_recorded(_j, n, "selected");
+    if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
@@ -36540,22 +36504,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
                 if (chosen) break;
             }
         }
-        for (ns_node *c = el->first_child; c; c = c->next_sibling) {
-            if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-            if (strcmp(c->name, "option") == 0)
-                ns_element_remove_attr(c, "selected");
-            else if (strcmp(c->name, "optgroup") == 0) {
-                for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                    if (ns_node_is_element_named(cc, "option"))
-                        ns_element_remove_attr(cc, "selected");
-            }
-        }
-        if (chosen) {
-            ns_element_set_attr(chosen, "selected", "");
-            ns_element_remove_attr(el, "data-nd-noselect");
-        } else {
-            ns_element_set_attr(el, "data-nd-noselect", "1");
-        }
+        ns_select_set_selected_option(el, chosen);
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
         { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
@@ -36665,22 +36614,7 @@ ns_element_set_selectedIndex(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
-    for (ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0)
-            ns_element_remove_attr(c, "selected");
-        else if (strcmp(c->name, "optgroup") == 0) {
-            for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option"))
-                    ns_element_remove_attr(cc, "selected");
-        }
-    }
-    if (chosen) {
-        ns_element_set_attr(chosen, "selected", "");
-        ns_element_remove_attr(el, "data-nd-noselect");
-    } else {
-        ns_element_set_attr(el, "data-nd-noselect", "1");
-    }
+    ns_select_set_selected_option(el, chosen);
     ns_js *_j = js_from_ctx(ctx);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
@@ -38030,18 +37964,14 @@ ns_element_get_selectedOptions(JSContext *ctx, JSValueConst this_val)
         if (opt) JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, opt));
         goto bind;
     }
-    for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            if (ns_element_get_attr(c, "selected"))
-                JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected"))
-                    JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, cc));
-        }
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(el, opts);
+    for (guint k = 0; k < opts->len; k++) {
+        const ns_node *o = g_ptr_array_index(opts, k);
+        if (ns_option_is_selected(o))
+            JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, o));
     }
+    g_ptr_array_free(opts, TRUE);
 bind:
     JS_DefinePropertyValueStr(ctx, arr, "item",
         JS_NewCFunction(ctx, ns_array_item,      "item",      1), 0);
@@ -39401,17 +39331,7 @@ ns_js_select_choose_option(ns_js *js, ns_node *option)
         select = select->parent;
     if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
     if (ns_node_is_disabled_form_control(option)) return FALSE;
-    for (ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0)
-            ns_element_remove_attr(c, "selected");
-        else if (strcmp(c->name, "optgroup") == 0)
-            for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
-                if (ns_node_is_element_named(cc, "option"))
-                    ns_element_remove_attr(cc, "selected");
-    }
-    ns_element_set_attr(option, "selected", "");
-    ns_element_remove_attr(select, "data-nd-noselect");
+    ns_select_set_selected_option(select, option);
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
@@ -39428,11 +39348,7 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
         select = select->parent;
     if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
     if (ns_node_is_disabled_form_control(option)) return FALSE;
-    if (ns_element_get_attr(option, "selected"))
-        ns_element_remove_attr(option, "selected");
-    else
-        ns_element_set_attr(option, "selected", "");
-    ns_element_remove_attr(select, "data-nd-noselect");
+    ns_option_set_selected(option, !ns_option_is_selected(option));
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
@@ -39440,27 +39356,12 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
     return TRUE;
 }
 
-static void
-ns_select_collect_options(ns_node *select, GPtrArray *out)
-{
-    for (ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (strcmp(c->name, "option") == 0) {
-            g_ptr_array_add(out, c);
-        } else if (strcmp(c->name, "optgroup") == 0) {
-            for (ns_node *o = c->first_child; o; o = o->next_sibling)
-                if (ns_node_is_element_named(o, "option"))
-                    g_ptr_array_add(out, o);
-        }
-    }
-}
-
 static int
 ns_select_current_index(ns_node *select, GPtrArray *opts)
 {
     int cur = -1;
     for (guint i = 0; i < opts->len; i++)
-        if (ns_element_get_attr(g_ptr_array_index(opts, i), "selected"))
+        if (ns_option_is_selected(g_ptr_array_index(opts, i)))
             cur = (int)i;
     if (cur < 0) {
         const ns_node *chosen = ns_select_chosen_option(select);

@@ -2147,28 +2147,82 @@ ns_option_value_dup(const ns_node *option)
     return ns_option_text_dup(option);
 }
 
+gboolean
+ns_option_is_selected(const ns_node *option)
+{
+    if (!option) return FALSE;
+    const char *dirty = ns_element_get_attr(option, "data-nd-selected");
+    if (dirty) return strcmp(dirty, "1") == 0;
+    return ns_element_get_attr(option, "selected") != NULL;
+}
+
+void
+ns_select_collect_options(const ns_node *select, GPtrArray *out)
+{
+    for (const ns_node *c = select ? select->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "option")) {
+            g_ptr_array_add(out, (gpointer)c);
+        } else if (ns_node_is_element_named(c, "optgroup")) {
+            for (const ns_node *o = c->first_child; o; o = o->next_sibling)
+                if (ns_node_is_element_named(o, "option"))
+                    g_ptr_array_add(out, (gpointer)o);
+        }
+    }
+}
+
 const ns_node *
 ns_select_first_selected_option(const ns_node *select)
 {
     if (!select) return NULL;
     gboolean last_wins = !ns_element_get_attr(select, "multiple");
     const ns_node *found = NULL;
-    for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected")) {
-                    if (!last_wins) return cc;
-                    found = cc;
-                }
-            }
-        } else if (ns_node_is_element_named(c, "option") &&
-                   ns_element_get_attr(c, "selected")) {
-            if (!last_wins) return c;
-            found = c;
-        }
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    for (guint i = 0; i < opts->len; i++) {
+        const ns_node *o = g_ptr_array_index(opts, i);
+        if (!ns_option_is_selected(o)) continue;
+        found = o;
+        if (!last_wins) break;
     }
+    g_ptr_array_free(opts, TRUE);
     return found;
+}
+
+static ns_node *
+ns_option_select(const ns_node *option)
+{
+    ns_node *select = option ? option->parent : NULL;
+    if (ns_node_is_element_named(select, "optgroup")) select = select->parent;
+    return ns_node_is_element_named(select, "select") ? select : NULL;
+}
+
+void
+ns_select_set_selected_option(ns_node *select, const ns_node *chosen)
+{
+    if (!select) return;
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    for (guint i = 0; i < opts->len; i++) {
+        ns_node *o = g_ptr_array_index(opts, i);
+        ns_element_set_attr(o, "data-nd-selected", o == chosen ? "1" : "0");
+    }
+    g_ptr_array_free(opts, TRUE);
+    if (chosen) ns_element_remove_attr(select, "data-nd-noselect");
+    else        ns_element_set_attr(select, "data-nd-noselect", "1");
+}
+
+void
+ns_option_set_selected(ns_node *option, gboolean on)
+{
+    if (!ns_node_is_element_named(option, "option")) return;
+    ns_node *select = ns_option_select(option);
+    if (on && select && !ns_element_get_attr(select, "multiple")) {
+        ns_select_set_selected_option(select, option);
+        return;
+    }
+    ns_element_set_attr(option, "data-nd-selected", on ? "1" : "0");
+    if (select) ns_element_remove_attr(select, "data-nd-noselect");
 }
 
 const ns_node *
@@ -2249,10 +2303,12 @@ ns_form_reset_control(ns_node *n)
         ns_element_remove_attr(n, "data-nd-user-edited");
     } else if (strcmp(n->name, "select") == 0) {
         ns_element_remove_attr(n, "data-nd-noselect");
-        for (ns_node *o = n->first_child; o; o = o->next_sibling) {
-            if (ns_node_is_element_named(o, "option"))
-                ns_element_remove_attr(o, "selected");
-        }
+        GPtrArray *opts = g_ptr_array_new();
+        ns_select_collect_options(n, opts);
+        for (guint i = 0; i < opts->len; i++)
+            ns_element_remove_attr(g_ptr_array_index(opts, i),
+                                   "data-nd-selected");
+        g_ptr_array_free(opts, TRUE);
     }
 }
 

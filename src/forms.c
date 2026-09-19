@@ -72,23 +72,14 @@ form_selected_options(const ns_node *select)
             g_ptr_array_add(out, (gpointer)opt);
         return out;
     }
-    for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
-            if (ns_element_effectively_disabled(c) ||
-                ns_element_get_attr(c, "disabled"))
-                continue;
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected") &&
-                    !form_option_disabled(cc))
-                    g_ptr_array_add(out, (gpointer)cc);
-            }
-        } else if (ns_node_is_element_named(c, "option") &&
-                   ns_element_get_attr(c, "selected") &&
-                   !form_option_disabled(c)) {
-            g_ptr_array_add(out, (gpointer)c);
-        }
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    for (guint i = 0; i < opts->len; i++) {
+        const ns_node *o = g_ptr_array_index(opts, i);
+        if (ns_option_is_selected(o) && !form_option_disabled(o))
+            g_ptr_array_add(out, (gpointer)o);
     }
+    g_ptr_array_free(opts, TRUE);
     return out;
 }
 
