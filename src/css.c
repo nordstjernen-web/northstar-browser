@@ -3366,6 +3366,7 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                     if (group->len == 0) {
                         g_ptr_array_free(group, TRUE);
                         cmp->never_match = TRUE;
+                        g_sel_parse_error = TRUE;
                     } else {
                         if (!cmp->has_groups)
                             cmp->has_groups = g_ptr_array_new_with_free_func(
@@ -3429,6 +3430,8 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                     GPtrArray *group = parse_selector_group(arg_s, arg_n, depth + 1);
                     if (group->len == 0) {
                         g_ptr_array_free(group, TRUE);
+                        cmp->never_match = TRUE;
+                        g_sel_parse_error = TRUE;
                     } else {
                         if (!cmp->matches_none)
                             cmp->matches_none = g_ptr_array_new_with_free_func(
