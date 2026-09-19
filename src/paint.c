@@ -5053,9 +5053,48 @@ paint_entry_cmp(const void *a, const void *b)
 }
 
 static gboolean
+box_has_z_index(const ns_box *b)
+{
+    const ns_css_value *v = b && b->style ? b->style->values[NS_CSS_Z_INDEX] : NULL;
+    return v && v->kind == NS_CSS_V_LENGTH;
+}
+
+static gboolean
+box_is_flex_or_grid_item(const ns_box *b)
+{
+    const ns_style *ps = b && b->parent ? b->parent->style : NULL;
+    if (!ps) return FALSE;
+    ns_display d = ns_css_display_of(ps);
+    return ns_display_is_flex_container(d) || ns_display_is_grid_container(d);
+}
+
+static gboolean
+box_is_z_ordered(const ns_box *b)
+{
+    return box_is_positioned(b) ||
+           (box_has_z_index(b) && box_is_flex_or_grid_item(b));
+}
+
+static gboolean
+box_is_float(const ns_box *b)
+{
+    const ns_css_value *v = b && b->style ? b->style->values[NS_CSS_FLOAT] : NULL;
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           (strcmp(v->u.keyword, "left") == 0 ||
+            strcmp(v->u.keyword, "right") == 0);
+}
+
+static int
+box_paint_key(const ns_box *b)
+{
+    if (box_is_z_ordered(b)) return box_z_index(b) * 2;
+    return box_is_float(b) ? 1 : 0;
+}
+
+static gboolean
 box_defers_to_positioned_layer(const ns_box *b)
 {
-    return box_is_positioned(b) && box_z_index(b) >= 0;
+    return box_is_z_ordered(b) && box_z_index(b) >= 0;
 }
 
 static int
@@ -6270,12 +6309,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         paint_entry e;
         e.box = c;
         e.order = order++;
-        if (box_is_positioned(c)) {
-            e.key = box_z_index(c);
-            if (e.key != 0) any_z = TRUE;
-        } else {
-            e.key = 0;
-        }
+        e.key = box_paint_key(c);
+        if (e.key != 0) any_z = TRUE;
         entries[e.order] = e;
     }
     if (any_z) {
