@@ -32,6 +32,8 @@ static GPtrArray     *g_paint_deferred_list;
 
 static int            g_paint_defer_depth;
 static const ns_box  *g_paint_flush_box;
+static GHashTable    *g_paint_hoisted;
+static gboolean       g_paint_any_negative_z = TRUE;
 static ns_js         *g_paint_js;
 static ns_anim       *g_paint_anim;
 static gboolean       g_search_case_sensitive;
@@ -6055,6 +6057,61 @@ ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
                x0, y0, x1 - x0, y1 - y0, bg, kx0, ky0, kx1, ky1);
 }
 
+static gboolean
+box_keeps_negative_descendants(const ns_box *b)
+{
+    const ns_style *s = b->style;
+    if (box_is_z_ordered(b) && box_has_z_index(b)) return TRUE;
+    if (box_opacity(b) < 0.999 || box_establishes_3d(b)) return TRUE;
+    if (!s) return FALSE;
+    if (blend_mode_operator(s) != CAIRO_OPERATOR_OVER) return TRUE;
+    if (s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
+        s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE] ||
+        s->values[NS_CSS_MASK_IMAGE] || s->values[NS_CSS_CLIP_PATH])
+        return TRUE;
+    if (overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW_X)) ||
+        overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW_Y)) ||
+        overflow_kw_clips(ns_style_keyword(s, NS_CSS_OVERFLOW)))
+        return TRUE;
+    return ns_css_keyword_is(s->values[NS_CSS_POSITION], "sticky");
+}
+
+static void
+collect_negative_z(const ns_box *b, GPtrArray *out)
+{
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        if (box_is_hidden(c)) continue;
+        if (g_paint_hoisted && g_hash_table_contains(g_paint_hoisted, c))
+            continue;
+        if (box_is_z_ordered(c) && box_z_index(c) < 0) {
+            g_ptr_array_add(out, (gpointer)c);
+            continue;
+        }
+        if (box_keeps_negative_descendants(c)) continue;
+        collect_negative_z(c, out);
+    }
+}
+
+static gboolean
+tree_has_negative_z(const ns_box *b)
+{
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        if (box_is_z_ordered(c) && box_z_index(c) < 0) return TRUE;
+        if (tree_has_negative_z(c)) return TRUE;
+    }
+    return FALSE;
+}
+
+static int
+negative_z_cmp(gconstpointer va, gconstpointer vb)
+{
+    const ns_box *a = *(const ns_box *const *)va;
+    const ns_box *b = *(const ns_box *const *)vb;
+    int za = box_z_index(a), zb = box_z_index(b);
+    if (za != zb) return za < zb ? -1 : 1;
+    return dom_tree_order_cmp(a->dom, b->dom);
+}
+
 static void
 paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
 {
@@ -6073,6 +6130,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (g_paint_collect_stats) g_paint_stats.skipped_top++;
         return;
     }
+    if (g_paint_hoisted && b != g_paint_flush_box &&
+        g_hash_table_contains(g_paint_hoisted, b))
+        return;
     if (g_paint_defer_depth > 0 && b != g_paint_flush_box &&
         box_defers_to_positioned_layer(b)) {
         if (!g_paint_deferred_list)
@@ -6395,12 +6455,33 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                                clip_overflow || has_path_clip ||
                                b == g_paint_flush_box;
     GPtrArray *saved_layer_list = NULL;
+    GPtrArray *hoisted = NULL;
     if (own_layer_scope) {
         saved_layer_list = g_paint_deferred_list;
         g_paint_deferred_list = NULL;
         g_paint_defer_depth++;
+        if (!b->parent) g_paint_any_negative_z = tree_has_negative_z(b);
+        hoisted = g_ptr_array_new();
+        if (g_paint_any_negative_z) collect_negative_z(b, hoisted);
+        if (hoisted->len == 0) {
+            g_ptr_array_free(hoisted, TRUE);
+            hoisted = NULL;
+        }
     }
     if (has_transform || has_sticky) g_paint_no_cull++;
+    if (hoisted) {
+        g_ptr_array_sort(hoisted, negative_z_cmp);
+        if (!g_paint_hoisted)
+            g_paint_hoisted = g_hash_table_new(NULL, NULL);
+        for (guint i = 0; i < hoisted->len; i++)
+            g_hash_table_add(g_paint_hoisted, hoisted->pdata[i]);
+        const ns_box *saved_flush = g_paint_flush_box;
+        for (guint i = 0; i < hoisted->len; i++) {
+            g_paint_flush_box = hoisted->pdata[i];
+            paint_walk(cr, hoisted->pdata[i], highlight);
+        }
+        g_paint_flush_box = saved_flush;
+    }
     for (guint i = 0; i < n_children; i++)
         paint_walk(cr, entries[i].box, highlight);
     if (has_transform || has_sticky) g_paint_no_cull--;
@@ -6565,6 +6646,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         paint_flush_deferred(cr, deferred_mine, highlight);
         if (has_transform || has_sticky) g_paint_no_cull--;
         g_ptr_array_free(deferred_mine, TRUE);
+    }
+    if (hoisted) {
+        for (guint i = 0; i < hoisted->len; i++)
+            g_hash_table_remove(g_paint_hoisted, hoisted->pdata[i]);
+        g_ptr_array_free(hoisted, TRUE);
     }
 
     if (has_transform) cairo_restore(cr);
