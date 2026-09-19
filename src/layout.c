@@ -12056,17 +12056,6 @@ style_is_relative(const ns_style *s)
            strcmp(v->u.keyword, "relative") == 0;
 }
 
-static double
-length_or_zero(const ns_css_value *v, double basis)
-{
-    if (!v || v->kind != NS_CSS_V_LENGTH) return 0;
-    if (v->u.length.unit == NS_CSS_UNIT_PERCENT)
-        return v->u.length.v * basis / 100.0;
-    if (v->u.length.unit == NS_CSS_UNIT_EM)
-        return v->u.length.v * 16.0;
-    return v->u.length.v;
-}
-
 static void
 translate_subtree(ns_box *box, double dx, double dy)
 {
@@ -12114,23 +12103,23 @@ apply_position_offsets(ns_box *box, double parent_w, double parent_h)
         gboolean t_auto = !tv || length_is_auto(tv);
         double dx = 0, dy = 0;
         if (!l_auto)
-            dx = length_or_zero(lv, parent_w);
+            dx = length_resolve(lv, parent_w, 0);
         else if (rv && !length_is_auto(rv))
-            dx = -length_or_zero(rv, parent_w);
+            dx = -length_resolve(rv, parent_w, 0);
         double cb_h = -2;
         if (!t_auto) {
             if (height_is_percent(tv)) {
                 if (cb_h == -2) cb_h = relative_pct_cb_height(box);
-                dy = cb_h < 0 ? 0 : length_or_zero(tv, cb_h);
+                dy = cb_h < 0 ? 0 : length_resolve(tv, cb_h, 0);
             } else {
-                dy = length_or_zero(tv, parent_h);
+                dy = length_resolve(tv, parent_h, 0);
             }
         } else if (bv && !length_is_auto(bv)) {
             if (height_is_percent(bv)) {
                 if (cb_h == -2) cb_h = relative_pct_cb_height(box);
-                dy = cb_h < 0 ? 0 : -length_or_zero(bv, cb_h);
+                dy = cb_h < 0 ? 0 : -length_resolve(bv, cb_h, 0);
             } else {
-                dy = -length_or_zero(bv, parent_h);
+                dy = -length_resolve(bv, parent_h, 0);
             }
         }
         translate_subtree(box, dx, dy);
