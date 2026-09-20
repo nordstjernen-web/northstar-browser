@@ -4,6 +4,36 @@ Significant changes in each release:
 
 1.0.9:
 ======
+* Text layout is ns-pango `3c6adba`, which merges upstream Pango 1.58.2.
+  Of upstream's changes, four reach code the fork carries: an overline or
+  strikethrough now spans the wider of a run's ink and logical extents,
+  as the underline already did, so a decorated run whose glyphs are
+  narrower than their advance no longer shows a shorter line above or
+  through it than under it; a run with no font has its offsets zeroed
+  rather than left uninitialised; the variant-to-feature mapping moves
+  into shared helpers; and two zero-length memcpy and qsort calls that
+  UBSan flags are guarded. The fork keeps its Ubuntu 24.04 dependency
+  floors rather than upstream's new HarfBuzz 11 and fontconfig 2.17
+  requirements, since nothing in the merged code needs them.
+* Text layout is ns-pango `5a49882`, and a paragraph now comes out the
+  same wherever it sits in its text. The fork's itemisation cache keyed a
+  paragraph on its bytes and the layout's attribute list but not on the
+  paragraph's offset, and attributes are ranges over the whole text: in a
+  textarea, a `<pre>` or a pre-line paragraph whose second line repeated
+  the first, a bold or a font on the first line was served to the second.
+  Its shaping cache copied a font-feature range as an absolute offset into
+  the paragraph, so a word shaped once under `font-feature-settings` on
+  the word before it kept that shaping when it turned up elsewhere -- a
+  kerning pair lost, or a ligature kept, on a word the feature never
+  covered. Both keys carry what they lacked, and the fork's harness gains
+  a `position` mode that fails on the old caches. The same pin fixes a
+  heap overflow in the attribute-list deserialiser on a lone quote, two
+  latent out-of-bounds reads inherited from upstream Pango, the fontmap
+  serial not moving when a font file is added, and compares the item
+  cache's attribute lists in linear rather than quadratic time. The fork
+  now asks for stack protectors, stack-clash and control-flow protection
+  and `_FORTIFY_SOURCE=3` by name, so a clang build carries them too, and
+  runs its harness under AddressSanitizer and UBSan in its CI.
 * Entering full screen now shows a notice. When the window goes full
   screen -- through the View menu, the shortcut or any other path -- a
   dark banner at the top of the page reads "<host> is now full screen.
