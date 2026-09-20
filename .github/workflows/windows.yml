@@ -70,6 +70,9 @@ jobs:
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-libavif
             mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-opusfile
+            mingw-w64-x86_64-libvorbis
+            mingw-w64-x86_64-enchant
 
       - name: Restore ccache
         id: ccache-restore
@@ -116,6 +119,26 @@ jobs:
       - name: ccache stats
         if: always()
         run: ccache --show-stats
+
+      - name: Smoke test (binary present)
+        run: |
+          test -f builddir/src/gtk/northstar.exe
+          ls -l builddir/src/gtk/northstar.exe
+
+      - name: Headless smoke (about:start)
+        run: |
+          set -o pipefail
+          ./builddir/src/gtk/northstar.exe --headless --dump=text about:start > about.txt
+          head -3 about.txt
+          grep -q Northstar about.txt
+
+      - name: Upload northstar binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: northstar-windows-${{ matrix.windows }}-mingw64
+          path: builddir/src/gtk/northstar.exe
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Save ccache
         if: always() && steps.ccache-restore.outputs.cache-hit != 'true'

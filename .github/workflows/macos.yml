@@ -46,7 +46,8 @@ jobs:
         run: |
           brew install meson ninja pkg-config cmake gtk4 curl ccache \
               harfbuzz fribidi cairo fontconfig freetype \
-              openssl@3 uchardet libpsl sqlite libavif sdl2
+              openssl@3 uchardet libpsl sqlite libavif sdl2 \
+              opusfile libvorbis enchant
           {
             echo "PKG_CONFIG_PATH=$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
           } >> "$GITHUB_ENV"

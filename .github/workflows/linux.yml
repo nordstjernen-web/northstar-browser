@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: ['24.04']
+        ubuntu: ['24.04', '26.04']
 
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -49,15 +49,16 @@ jobs:
             libharfbuzz-dev libfribidi-dev libcairo2-dev \
             libfontconfig-dev libfreetype-dev \
             libuchardet-dev libpsl-dev libsqlite3-dev \
-            libavif-dev libsdl2-dev libseccomp-dev libenchant-2-dev ca-certificates
+            libavif-dev libsdl2-dev libseccomp-dev libenchant-2-dev \
+            libopusfile-dev libvorbis-dev ca-certificates
 
       - name: Restore ccache
         uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
-          key: ccache-linux-gcc-${{ github.sha }}
+          key: ccache-linux-${{ matrix.ubuntu }}-gcc-${{ github.sha }}
           restore-keys: |
-            ccache-linux-gcc-
+            ccache-linux-${{ matrix.ubuntu }}-gcc-
 
       - name: Configure ccache
         run: |
