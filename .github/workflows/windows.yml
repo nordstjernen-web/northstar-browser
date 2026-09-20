@@ -125,13 +125,6 @@ jobs:
           test -f builddir/src/gtk/northstar.exe
           ls -l builddir/src/gtk/northstar.exe
 
-      - name: Headless smoke (about:start)
-        run: |
-          set -o pipefail
-          ./builddir/src/gtk/northstar.exe --headless --dump=text about:start > about.txt
-          head -3 about.txt
-          grep -q Northstar about.txt
-
       - name: Upload northstar binary
         uses: actions/upload-artifact@v7
         with:

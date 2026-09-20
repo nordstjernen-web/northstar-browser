@@ -275,9 +275,8 @@ Significant changes in each release:
 * Continuous integration builds with the optional Ogg Opus/Vorbis and
   Enchant libraries on every platform, so the in-process Ogg decode and
   spell-checking paths compile on Linux, Alpine, macOS and Windows; the
-  Linux job also builds on Ubuntu 26.04, the Windows job runs the
-  headless `about:start` smoke test and uploads its binary, and
-  Dependabot keeps the GitHub Actions versions current.
+  Linux job also builds on Ubuntu 26.04, the Windows job uploads its
+  binary, and Dependabot keeps the GitHub Actions versions current.
 
 1.0.8:
 ======
