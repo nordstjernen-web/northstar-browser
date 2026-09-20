@@ -610,6 +610,10 @@ typedef enum ns_css_unit {
     NS_CSS_UNIT_RCH,
     NS_CSS_UNIT_RCAP,
     NS_CSS_UNIT_RIC,
+    NS_CSS_UNIT_DEG,
+    NS_CSS_UNIT_MS,
+    NS_CSS_UNIT_DPPX,
+    NS_CSS_UNIT_FR,
 } ns_css_unit;
 
 void     ns_css_set_viewport(double vw_px, double vh_px);
@@ -712,6 +716,8 @@ int                 ns_css_value_layer_count(const ns_css_value *head);
 
 double   ns_css_length_or(const ns_css_value *v, double fallback);
 gboolean ns_css_calc_is_math_fn(const ns_css_value *v);
+gboolean ns_css_calc_media(const char *text, gsize len, gboolean resolution,
+                           double *out);
 double   ns_css_calc_math_fn_px(const ns_css_value *v, double basis);
 double   ns_css_dimension_px(const ns_css_value *v, double font_size,
                              double basis);

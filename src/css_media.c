@@ -370,115 +370,6 @@ mq_resolution_unit_dppx(double v, const char *unit)
     return NAN;
 }
 
-typedef double (*mq_unit_fn)(double v, const char *unit);
-
-static gboolean mq_calc_sum(const char **pp, const char *end, mq_unit_fn fn,
-                            double *out, int depth);
-
-static gboolean
-mq_calc_primary(const char **pp, const char *end, mq_unit_fn fn,
-                double *out, gboolean *is_number, int depth)
-{
-    if (depth > MQ_MAX_DEPTH) return FALSE;
-    const char *p = mq_skip_ws(*pp, end);
-    if (p < end && *p == '(') {
-        p++;
-        if (!mq_calc_sum(&p, end, fn, out, depth + 1)) return FALSE;
-        p = mq_skip_ws(p, end);
-        if (p < end && *p == ')') p++;
-        *is_number = FALSE;
-        *pp = p;
-        return TRUE;
-    }
-    if (p < end && g_ascii_strncasecmp(p, "calc(", 5) == 0) {
-        p += 5;
-        if (!mq_calc_sum(&p, end, fn, out, depth + 1)) return FALSE;
-        p = mq_skip_ws(p, end);
-        if (p < end && *p == ')') p++;
-        *is_number = FALSE;
-        *pp = p;
-        return TRUE;
-    }
-    char *num_end = NULL;
-    double v = g_ascii_strtod(p, &num_end);
-    if (!num_end || num_end == p || num_end > end) return FALSE;
-    char unit[8];
-    gsize u = 0;
-    const char *q = num_end;
-    while (q < end && (g_ascii_isalpha(*q) || *q == '%') && u < sizeof unit - 1)
-        unit[u++] = *q++;
-    unit[u] = '\0';
-    if (u == 0) {
-        *is_number = TRUE;
-        *out = v;
-    } else {
-        double c = fn(v, unit);
-        if (isnan(c)) return FALSE;
-        *is_number = FALSE;
-        *out = c;
-    }
-    *pp = q;
-    return TRUE;
-}
-
-static gboolean
-mq_calc_product(const char **pp, const char *end, mq_unit_fn fn,
-                double *out, gboolean *is_number, int depth)
-{
-    if (!mq_calc_primary(pp, end, fn, out, is_number, depth)) return FALSE;
-    for (;;) {
-        const char *p = mq_skip_ws(*pp, end);
-        if (p >= end || (*p != '*' && *p != '/')) return TRUE;
-        char op = *p++;
-        double rhs = 0;
-        gboolean rhs_num = FALSE;
-        if (!mq_calc_primary(&p, end, fn, &rhs, &rhs_num, depth)) return FALSE;
-        if (op == '*') {
-            if (!*is_number && !rhs_num) return FALSE;
-            *out *= rhs;
-            *is_number = *is_number && rhs_num;
-        } else {
-            if (!rhs_num || rhs == 0) return FALSE;
-            *out /= rhs;
-        }
-        *pp = p;
-    }
-}
-
-static gboolean
-mq_calc_sum(const char **pp, const char *end, mq_unit_fn fn,
-            double *out, int depth)
-{
-    if (depth > MQ_MAX_DEPTH) return FALSE;
-    gboolean is_number = FALSE;
-    if (!mq_calc_product(pp, end, fn, out, &is_number, depth)) return FALSE;
-    for (;;) {
-        const char *p = mq_skip_ws(*pp, end);
-        if (p >= end || (*p != '+' && *p != '-')) return TRUE;
-        if (!mq_is_ws(p[-1])) return FALSE;
-        char op = *p++;
-        if (p >= end || !mq_is_ws(*p)) return FALSE;
-        double rhs = 0;
-        gboolean rhs_num = FALSE;
-        if (!mq_calc_product(&p, end, fn, &rhs, &rhs_num, depth)) return FALSE;
-        if (rhs_num != is_number) return FALSE;
-        *out += op == '+' ? rhs : -rhs;
-        *pp = p;
-    }
-}
-
-static gboolean
-mq_parse_calc(const char *s, const char *end, mq_unit_fn fn, double *out)
-{
-    const char *p = s;
-    if (g_ascii_strncasecmp(p, "calc(", 5) != 0) return FALSE;
-    p += 5;
-    if (!mq_calc_sum(&p, end, fn, out, 0)) return FALSE;
-    p = mq_skip_ws(p, end);
-    if (p < end && *p == ')') p++;
-    return mq_skip_ws(p, end) == end;
-}
-
 static gboolean
 mq_parse_number(const char *s, const char *end, double *out,
                 const char **unit_start)
@@ -551,7 +442,7 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
     if (type == MQF_RESOLUTION) {
         if (g_ascii_strncasecmp(s, "calc(", 5) == 0) {
             double v = 0;
-            if (!mq_parse_calc(s, e, mq_resolution_unit_dppx, &v)) return FALSE;
+            if (!ns_css_calc_media(s, (gsize)(e - s), TRUE, &v)) return FALSE;
             out->num = v;
             out->serialized_num = v;
             out->calculated = TRUE;
@@ -578,7 +469,7 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
 
     if (g_ascii_strncasecmp(s, "calc(", 5) == 0) {
         double v = 0;
-        if (!mq_parse_calc(s, e, mq_length_unit_px, &v)) return FALSE;
+        if (!ns_css_calc_media(s, (gsize)(e - s), FALSE, &v)) return FALSE;
         out->num = v;
         out->serialized_num = v;
         out->calculated = TRUE;

@@ -313,6 +313,17 @@ Significant changes in each release:
   motivated the sidecar are gone; an existing sidecar is folded into the
   jar on first use. Scripts still cannot read or overwrite `HttpOnly`
   cookies.
+* One `calc()` evaluator. The CSS engine's math parser now carries a
+  value kind (number, length, angle, time, resolution, flex) through
+  every operation and function, so the five private evaluators that
+  colour channels, `image-set()` resolutions, time properties, media
+  queries and `sin()`/`cos()`/`tan()` arguments each kept are deleted,
+  along with the text rewriters that turned angle and time units into
+  bare numbers. `atan()`, `asin()`, `acos()` and `atan2()` now yield
+  angles, so `rotate(atan(1))` rotates by 45deg instead of being
+  dropped, `min()`, `max()` and `clamp()` compare angles, times and
+  resolutions, and a length property no longer accepts `calc(10deg)`
+  as zero.
 
 1.0.8:
 ======
