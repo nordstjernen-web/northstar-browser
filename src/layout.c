@@ -117,7 +117,7 @@ aspect_ratio_number(const ns_css_value *v, gboolean *with_auto)
 }
 
 static gboolean
-height_is_percent(const ns_css_value *v)
+value_is_percent(const ns_css_value *v)
 {
     if (!v) return FALSE;
     if (v->kind == NS_CSS_V_LENGTH && v->u.length.unit == NS_CSS_UNIT_PERCENT)
@@ -145,7 +145,7 @@ resolve_used_height(const ns_box *box, const ns_css_value *hv,
                     double width_basis, double fallback)
 {
     if (!hv) return fallback;
-    if (height_is_percent(hv)) {
+    if (value_is_percent(hv)) {
         double vh;
         if (box_is_doc_root(box)) {
             vh = ns_css_viewport_h();
@@ -216,7 +216,7 @@ containing_block_definite_height(const ns_box *box)
             return p->content_width / ratio;
         return -1;
     }
-    if (height_is_percent(h)) {
+    if (value_is_percent(h)) {
         double base = box_is_doc_root(p) ? ns_css_viewport_h()
                                          : containing_block_definite_height(p);
         if (base < 0) return -1;
@@ -6703,7 +6703,7 @@ layout_image(ns_box *box, double parent_content_width)
         if (w < 0) w = 0;
     }
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC)) {
-        if (height_is_percent(hv)) {
+        if (value_is_percent(hv)) {
             double cb_h = containing_block_definite_height(box);
             if (cb_h >= 0) {
                 h = (hv->kind == NS_CSS_V_CALC)
@@ -7044,16 +7044,15 @@ table_intrinsic_width(ns_box *box, const ns_style *inherited, gboolean min)
                 edges_from_style(cell->style, 0, &m, &pd, &bd);
                 double extra = m.left + m.right + pd.left + pd.right +
                                bd.left + bd.right;
-                double w = min ? measure_min_width(cell, cs)
+                double content_min = measure_min_content_width(cell, cs);
+                double w = min ? content_min
                                : measure_natural_width(cell, cs);
                 const ns_css_value *wv = cell->style
                     ? cell->style->values[NS_CSS_WIDTH] : NULL;
                 if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC) &&
-                    !(wv->kind == NS_CSS_V_LENGTH &&
-                      wv->u.length.unit == NS_CSS_UNIT_PERCENT)) {
+                    !value_is_percent(wv)) {
                     double e = length_resolve(wv, 0, -1);
-                    double floor_w = min ? w : measure_min_width(cell, cs);
-                    if (e >= 0) w = e > floor_w ? e : floor_w;
+                    if (e >= 0) w = e > content_min ? e : content_min;
                 }
                 table_widen_columns(cols, max_cols, col, span,
                                     w + extra - hsp * (span - 1));
@@ -7295,7 +7294,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
     if (style_contains_inline_size(box->style)) return 0;
     if (box->style) {
         const ns_css_value *wv = box->style->values[NS_CSS_WIDTH];
-        if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC)) {
+        if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC) &&
+            !value_is_percent(wv)) {
             double w = length_resolve(wv, 0, -1);
             if (w >= 0) {
                 if (ns_css_keyword_is(box->style->values[NS_CSS_BOX_SIZING],
@@ -7745,8 +7745,8 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                         double h_extra = pd.left + pd.right + bd.left + bd.right +
                                          m.left + m.right;
                         table_widen_columns(col_min, max_cols, col, span,
-                                            measure_min_width(cell, cs) + h_extra
-                                            - hsp * (span - 1));
+                                            measure_min_content_width(cell, cs)
+                                            + h_extra - hsp * (span - 1));
                         col += (guint)span;
                     }
                     table_row_done(rs_remain, max_cols);
@@ -8420,7 +8420,7 @@ flex_item_min_main(ns_box *c, double cw, const ns_style *inherited)
     if (mn < 0) mn = 0;
     const ns_css_value *wv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
     if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC)) {
-        double specified = height_is_percent(wv) && flex_item_is_replaced_like(c)
+        double specified = value_is_percent(wv) && flex_item_is_replaced_like(c)
             ? flex_border_box_to_content(c, length_resolve(wv, 0, -1))
             : flex_border_box_to_content(c, length_resolve(wv, cw, -1));
         if (specified >= 0 && specified < mn) mn = specified;
@@ -8613,7 +8613,7 @@ static double
 flex_main_height_outer(const ns_box *c, const ns_css_value *v,
                        double cross_size, double container_main_size)
 {
-    double out = height_is_percent(v)
+    double out = value_is_percent(v)
         ? resolve_height_with_basis(v, cross_size, container_main_size, 0)
         : length_resolve(v, cross_size, 0);
     if (!flex_box_is_border_box(c))
@@ -8631,14 +8631,14 @@ flex_basis_main_height(const ns_box *c, double cross_size,
     if (!s) return 0;
     const ns_css_value *b = s->values[NS_CSS_FLEX_BASIS];
     if (b && (b->kind == NS_CSS_V_LENGTH || b->kind == NS_CSS_V_CALC)) {
-        if (height_is_percent(b) && container_main_size < 0) return 0;
+        if (value_is_percent(b) && container_main_size < 0) return 0;
         *out_explicit = TRUE;
         return flex_main_height_outer(c, b, cross_size,
                                       container_main_size);
     }
     const ns_css_value *h = s->values[NS_CSS_HEIGHT];
     if (h && (h->kind == NS_CSS_V_LENGTH || h->kind == NS_CSS_V_CALC)) {
-        if (height_is_percent(h) && container_main_size < 0) return 0;
+        if (value_is_percent(h) && container_main_size < 0) return 0;
         *out_explicit = TRUE;
         return flex_main_height_outer(c, h, cross_size,
                                       container_main_size);
@@ -8667,7 +8667,7 @@ flex_preset_cross_size(ns_box *c, double line_cross_size)
     if (!c->first_child) return FALSE;
     const ns_css_value *chv =
         c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
-    if (chv && chv->kind != NS_CSS_V_KEYWORD && !height_is_percent(chv))
+    if (chv && chv->kind != NS_CSS_V_KEYWORD && !value_is_percent(chv))
         return FALSE;
     double stretched = line_cross_size
         - c->margin.top  - c->margin.bottom
@@ -8884,7 +8884,7 @@ layout_flex_row(ns_box *box, double cw,
             const ns_css_value *chv =
                 c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
             gboolean cross_flexible =
-                !chv || chv->kind == NS_CSS_V_KEYWORD || height_is_percent(chv);
+                !chv || chv->kind == NS_CSS_V_KEYWORD || value_is_percent(chv);
             if (stretched > c->content_height)
                 c->content_height = stretched;
             else if (cross_flexible && stretched >= 0 &&
@@ -9114,7 +9114,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             const ns_css_value *chv =
                 c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
             gboolean cross_flexible = !chv ||
-                chv->kind == NS_CSS_V_KEYWORD || height_is_percent(chv);
+                chv->kind == NS_CSS_V_KEYWORD || value_is_percent(chv);
             gboolean stretches = cross_flexible &&
                 (strcmp(eff_align, "stretch") == 0 ||
                  strcmp(eff_align, "normal") == 0);
@@ -9199,7 +9199,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
                     const ns_css_value *chv =
                         c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
                     gboolean cross_flexible = !chv ||
-                        chv->kind == NS_CSS_V_KEYWORD || height_is_percent(chv);
+                        chv->kind == NS_CSS_V_KEYWORD || value_is_percent(chv);
                     if ((strcmp(eff_align, "stretch") == 0 ||
                          strcmp(eff_align, "normal") == 0) && cross_flexible) {
                         double pre_h = c->content_height;
@@ -9258,7 +9258,7 @@ flex_item_min_main_height(ns_box *c, double cw, double pct_basis)
                     c->border.top + c->border.bottom;
     const ns_css_value *mnh = c->style ? c->style->values[NS_CSS_MIN_HEIGHT] : NULL;
     if (mnh && (mnh->kind == NS_CSS_V_LENGTH || mnh->kind == NS_CSS_V_CALC)) {
-        if (height_is_percent(mnh) && pct_basis < 0) return 0;
+        if (value_is_percent(mnh) && pct_basis < 0) return 0;
         double mn = flex_main_height_outer(c, mnh, cw, pct_basis);
         return mn > 0 ? mn : 0;
     }
@@ -9273,8 +9273,8 @@ flex_item_min_main_height(ns_box *c, double cw, double pct_basis)
     if (box_clips_children(c)) return 0;
     const ns_css_value *hv = c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC) &&
-        !(height_is_percent(hv) && pct_basis < 0)) {
-        double specified = height_is_percent(hv) && flex_item_is_replaced_like(c)
+        !(value_is_percent(hv) && pct_basis < 0)) {
+        double specified = value_is_percent(hv) && flex_item_is_replaced_like(c)
             ? flex_main_height_outer(c, hv, cw, 0)
             : flex_main_height_outer(c, hv, cw, pct_basis);
         if (specified >= 0 && specified < content) content = specified;
@@ -9288,7 +9288,7 @@ flex_item_max_main_height(ns_box *c, double cw, double pct_basis)
     const ns_css_value *mxh = c->style ? c->style->values[NS_CSS_MAX_HEIGHT] : NULL;
     if (!mxh || !(mxh->kind == NS_CSS_V_LENGTH || mxh->kind == NS_CSS_V_CALC))
         return -1;
-    if (height_is_percent(mxh) && pct_basis < 0) return -1;
+    if (value_is_percent(mxh) && pct_basis < 0) return -1;
     return flex_main_height_outer(c, mxh, cw, pct_basis);
 }
 
@@ -12282,7 +12282,7 @@ relative_pct_cb_height(const ns_box *box)
     if (h && h->kind == NS_CSS_V_KEYWORD)
         return height_keyword_stretches(h) ? containing_block_definite_height(box) : -1;
     if (!h) return -1;
-    if (height_is_percent(h)) {
+    if (value_is_percent(h)) {
         double base;
         if (p->dom && p->dom->name && strcmp(p->dom->name, "html") == 0)
             base = ns_css_viewport_h();
@@ -12317,14 +12317,14 @@ apply_position_offsets(ns_box *box, double parent_w, double parent_h)
             dx = -length_resolve(rv, parent_w, 0);
         double cb_h = -2;
         if (!t_auto) {
-            if (height_is_percent(tv)) {
+            if (value_is_percent(tv)) {
                 if (cb_h == -2) cb_h = relative_pct_cb_height(box);
                 dy = cb_h < 0 ? 0 : length_resolve(tv, cb_h, 0);
             } else {
                 dy = length_resolve(tv, parent_h, 0);
             }
         } else if (bv && !length_is_auto(bv)) {
-            if (height_is_percent(bv)) {
+            if (value_is_percent(bv)) {
                 if (cb_h == -2) cb_h = relative_pct_cb_height(box);
                 dy = cb_h < 0 ? 0 : -length_resolve(bv, cb_h, 0);
             } else {
@@ -13357,7 +13357,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             ? abox->style->values[NS_CSS_HEIGHT] : NULL;
         gboolean has_explicit_height = ahv &&
             (ahv->kind == NS_CSS_V_LENGTH || ahv->kind == NS_CSS_V_CALC);
-        if (has_explicit_height && height_is_percent(ahv) &&
+        if (has_explicit_height && value_is_percent(ahv) &&
             cb_h > 0) {
             double pre_h = resolve_height_with_basis(ahv, avail, cb_h, -1);
             if (pre_h > 0) {

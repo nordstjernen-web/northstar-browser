@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A table column with a specified width is no longer narrower than its
+  cells need. The auto table layout took a cell's own `width` as that
+  cell's minimum, so the width won outright: `width: 1%` on a heading
+  cell -- the idiom Wikipedia's navboxes, and countless other tables,
+  use to shrink a column to its label -- left the column one per cent of
+  the table wide and its text ran across the cell beside it. A cell's
+  floor is now its min-content width, measured without its own `width`,
+  and a percentage `width` no longer counts as a definite minimum
+  anywhere intrinsic sizes are measured, since it resolves against a
+  basis that is not yet known.
 
 1.0.9:
 ======
