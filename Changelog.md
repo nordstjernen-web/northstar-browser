@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `content: '[' / ''` renders just the bracket. The alternative text a
+  `content` value may carry after a slash, for a screen reader to read in
+  place of the glyphs, was being drawn as part of the text, so
+  MediaWiki's section-edit links came out as `[/ edit ]/`.
+* A list item styled `display: inline-block` or `display: block` no
+  longer draws a bullet. Only a `list-item` display generates a marker;
+  the painter went by the tag name, so an `<li>` that a page had made
+  into something else -- a thumbnail in a MediaWiki gallery, say --
+  carried a bullet no browser would show.
 * A `<th>` no longer paints a grey background of its own, and a
   `<caption>` is no longer bold with padding under it. No browser's
   default stylesheet has either, so a table that sets its own colours --

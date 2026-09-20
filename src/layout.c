@@ -2327,7 +2327,7 @@ resolve_pseudo_content(const char *raw, const ns_node *host)
     const char *p = raw;
     while (*p) {
         while (*p && g_ascii_isspace(*p)) p++;
-        if (!*p) break;
+        if (!*p || *p == '/') break;
         if (*p == '"' || *p == '\'') {
             char q = *p++;
             const char *start = p;
