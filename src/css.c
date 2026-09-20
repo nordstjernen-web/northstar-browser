@@ -3147,6 +3147,9 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
         while (p < end) {
             const char *tok_start = p;
             char cc = *p;
+            if (is_ws(cc) || cc == ',' || cc == '{' ||
+                cc == '>' || cc == '+' || cc == '~')
+                break;
             if (sel->pseudo_element != NS_CSS_PE_NONE &&
                 !(cc == ':' && p + 1 < end && p[1] != ':' &&
                   css_user_action_pseudo_at(p + 1, end)))

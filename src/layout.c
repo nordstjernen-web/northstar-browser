@@ -7798,7 +7798,10 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
             if (min_sum >= col_avail) {
                 if (min_sum > 0) {
                     for (guint i = 0; i < max_cols; i++)
-                        col_widths[i] = col_avail * col_min[i] / min_sum;
+                        col_widths[i] = col_min[i];
+                    col_avail = min_sum;
+                    cw = col_avail + total_hsp;
+                    box->content_width = cw;
                 } else {
                     double evenly = col_avail / (double)max_cols;
                     for (guint i = 0; i < max_cols; i++) col_widths[i] = evenly;

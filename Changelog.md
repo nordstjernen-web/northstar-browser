@@ -4,6 +4,23 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A style rule that names a pseudo-element is no longer thrown away
+  because of what follows the pseudo-element's name. The selector parser
+  treated any character after `::before` or `::after` as a syntax error,
+  and the whole rule went with it -- so `li::after { ... }` survived only
+  when the brace sat tight against the selector, and a selector list like
+  `dd::after, li::after { ... }` never survived at all. That is how
+  Wikipedia's horizontal lists are punctuated, so an infobox's platform
+  list or a navbox's links ran together as one unbreakable word, which in
+  turn forced the column measures wrong. Only something that really
+  continues the compound selector is an error now; whitespace, a comma, a
+  combinator and the block's brace merely end it.
+* A table no longer squeezes its columns below the width their contents
+  need. When a table asked for a width smaller than the sum of its
+  columns' minimums -- an infobox at `width: 22em` whose labels do not
+  fit, say -- every column was scaled down proportionally and the text
+  ran out over the cell beside it. The table now grows to that sum, as
+  CSS 2.1 requires.
 * `min-width` and `max-width` on a table cell now take part in the
   column measures. The auto layout read only the cell's `width`, so a
   cell asking for `width: 50px; min-width: 150px` stayed at 50px and a
