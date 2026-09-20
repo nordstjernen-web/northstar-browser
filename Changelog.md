@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A `<th>` no longer paints a grey background of its own, and a
+  `<caption>` is no longer bold with padding under it. No browser's
+  default stylesheet has either, so a table that sets its own colours --
+  a Wikipedia infobox, for one -- showed its header cells in a shade the
+  page never asked for.
 * An inline-block whose width is a percentage no longer drags the
   intrinsic width of whatever contains it up to the width of the page. A
   percentage is indefinite while intrinsic sizes are being measured, but
