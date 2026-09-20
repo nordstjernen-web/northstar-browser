@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A table cell inherits `text-align` from the table or the row again.
+  The default stylesheet pinned `td, th` to `text-align: left`, which no
+  browser's does, so `text-align: center` set on a `<table>` or a `<tr>`
+  reached the caption and nothing else: a Wikipedia navbox title, a
+  sidebar heading and every `align="center"`-era table layout came out
+  left-aligned. `th` still centres on its own account.
 * A table column with a specified width is no longer narrower than its
   cells need. The auto table layout took a cell's own `width` as that
   cell's minimum, so the width won outright: `width: 1%` on a heading
