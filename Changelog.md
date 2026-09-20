@@ -2,6 +2,9 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.10:
+=======
+
 1.0.9:
 ======
 * Placeholder text in an `<input>` or `<textarea>` is no longer
