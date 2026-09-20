@@ -190,6 +190,7 @@ fi
 # the exe at runtime (see src/net.c::about_read_first).
 mkdir -p "$APP/share/northstar"
 cp "$ROOT/LICENSE" "$APP/share/northstar/"
+cp "$ROOT/data/splash.gif" "$APP/share/northstar/"
 
 # Northstar's own GPL text plus the third-party copyright + license notices
 # required by the libraries we ship, both at the root of the bundle.

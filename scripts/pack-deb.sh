@@ -50,6 +50,7 @@ install -m644 "$ROOT/data/northstar.desktop" \
 # about:license reads this at ../share/northstar/LICENSE relative to the
 # binary (/usr/bin -> /usr/share/northstar).
 install -m644 "$ROOT/LICENSE" "$PKGROOT/usr/share/northstar/LICENSE"
+install -m644 "$ROOT/data/splash.gif" "$PKGROOT/usr/share/northstar/splash.gif"
 install -m644 "$ROOT/README.md" "$PKGROOT/usr/share/doc/northstar/"
 install -m644 "$ROOT/THIRD-PARTY-LICENSES.md" "$PKGROOT/usr/share/doc/northstar/"
 install -m644 "$ROOT/LICENSE" "$PKGROOT/usr/share/doc/northstar/copyright"

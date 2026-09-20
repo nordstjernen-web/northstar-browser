@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gen-splash.sh — regenerate src/about_splash_gif.h, the about:start splash animation.
+# gen-splash.sh — regenerate data/splash.gif, the about:start splash animation.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 -c 'import numpy, PIL' 2>/dev/null || {

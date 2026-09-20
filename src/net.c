@@ -13,8 +13,6 @@
 #include "html.h"
 #include "image.h"
 #include "security.h"
-#include "about_logo_gif.h"
-#include "about_splash_gif.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -2522,7 +2520,7 @@ about_logo_data_uri(void)
     static const char *const gif_paths[] = {
         "share/icons/hicolor/scalable/apps/northstar.gif",
         "../share/icons/hicolor/scalable/apps/northstar.gif",
-        "../../data/icons/hicolor/scalable/apps/northstar.gif",
+        "../../../data/icons/hicolor/scalable/apps/northstar.gif",
         "data/icons/hicolor/scalable/apps/northstar.gif",
         NULL,
     };
@@ -2536,30 +2534,53 @@ about_logo_data_uri(void)
         return cached;
     }
 
-    cached = g_strconcat("data:image/gif;base64,", about_logo_gif_b64, NULL);
-    return cached;
+    return NULL;
 }
 
 static char *
 about_logo_markup(void)
 {
+    const char *uri = about_logo_data_uri();
+    if (!uri) return g_strdup("");
     return g_strdup_printf("<img class=\"mark-img\" src=\"%s\" alt=\"\" "
-                           "aria-hidden=\"true\">",
-                           about_logo_data_uri());
+                           "aria-hidden=\"true\">", uri);
+}
+
+static const char *
+about_splash_data_uri(void)
+{
+    static char *cached = NULL;
+    if (cached) return cached;
+
+    static const char *const gif_paths[] = {
+        "share/northstar/splash.gif",
+        "../share/northstar/splash.gif",
+        "../Resources/share/northstar/splash.gif",
+        "../../../data/splash.gif",
+        "data/splash.gif",
+        NULL,
+    };
+    gsize gif_len = 0;
+    char *gif = about_read_first(gif_paths, &gif_len);
+    if (!gif) return NULL;
+    gchar *b64 = g_base64_encode((const guchar *)gif, gif_len);
+    g_free(gif);
+    cached = g_strconcat("data:image/gif;base64,", b64, NULL);
+    g_free(b64);
+    return cached;
 }
 
 static char *
 about_splash_markup(void)
 {
-    char *uri = g_strconcat("data:image/gif;base64,", about_splash_gif_b64, NULL);
-    char *markup = g_strdup_printf(
+    const char *uri = about_splash_data_uri();
+    if (!uri) return g_strdup("");
+    return g_strdup_printf(
         "<img class=\"splash\" src=\"%s\" "
         "alt=\"Northstar " NS_VERSION " splash\" "
         "style=\"display:block;width:auto;max-width:96%%;height:auto;"
         "margin:2px auto 36px;border-radius:4px;\">",
         uri);
-    g_free(uri);
-    return markup;
 }
 
 static char *

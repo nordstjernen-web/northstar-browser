@@ -287,6 +287,12 @@ Significant changes in each release:
   GTK main loop and the window stays responsive while a page loads;
   audio, navigation, camera and download signals come back as plain
   fields of a rendered frame instead of length-capped headers.
+* The `about:start` splash animation and the logo are read from
+  `share/northstar/splash.gif` and the installed `northstar.gif` instead
+  of being compiled in as base64 arrays, which takes 660 KB out of the
+  binary and a second copy off the heap on every start page; the
+  unreferenced `data/splash.png` is gone and `scripts/gen-splash.py`
+  writes `data/splash.gif` directly.
 
 1.0.8:
 ======

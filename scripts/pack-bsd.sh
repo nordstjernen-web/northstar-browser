@@ -32,6 +32,7 @@ cp "$ROOT"/data/icons/hicolor/scalable/apps/northstar*.svg \
 cp "$ROOT"/data/icons/hicolor/scalable/apps/northstar.gif \
    "$STAGE/data/icons/hicolor/scalable/apps/" 2>/dev/null || true
 cp "$ROOT/data/northstar.desktop" "$STAGE/data/" 2>/dev/null || true
+cp "$ROOT/data/splash.gif" "$STAGE/data/" 2>/dev/null || true
 cp "$ROOT/README.md" "$STAGE/" 2>/dev/null || true
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/" 2>/dev/null || true
 cp "$ROOT/LICENSE" "$STAGE/" 2>/dev/null || true

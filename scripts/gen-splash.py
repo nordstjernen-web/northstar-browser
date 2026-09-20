@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# gen-splash.py — render the about:start splash animation and embed it as src/about_splash_gif.h.
-import base64
+# gen-splash.py — render the about:start splash animation into data/splash.gif.
 import math
 import os
 import re
@@ -8,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
 import zlib
 
 import numpy as np
@@ -696,22 +694,6 @@ def assemble(frames, out_gif):
     return os.path.getsize(out_gif)
 
 
-def write_header(gif, header):
-    b64 = base64.b64encode(open(gif, "rb").read()).decode()
-    lines = textwrap.wrap(b64, 96)
-    out = ["/* about_splash_gif.h — the about:start release splash animation, embedded.",
-           " * Copyright 2026 Andreas Røsdal",
-           " * SPDX-License-Identifier: GPL-3.0-or-later",
-           " */",
-           "#ifndef NS_ABOUT_SPLASH_GIF_H", "#define NS_ABOUT_SPLASH_GIF_H", "",
-           "static const char about_splash_gif_b64[] ="]
-    out += ['    "%s"%s' % (ln, ";" if i == len(lines) - 1 else "")
-            for i, ln in enumerate(lines)]
-    out += ["", "#endif", ""]
-    open(header, "w", encoding="utf-8", newline="\n").write("\n".join(out))
-    print("wrote %s (%d b64 chars)" % (header, len(b64)))
-
-
 def main():
     ver = version()
     fonts = (find_font("Comic Neue:bold",
@@ -737,10 +719,9 @@ def main():
     print("assembled splash.gif %df %dx%d (%d bytes)" % (FRAMES, W, H, size))
     if os.environ.get("OUTGIF"):
         shutil.copy(gif, os.environ["OUTGIF"])
-    write_header(gif, os.path.join(ROOT, "src", "about_splash_gif.h"))
-    splash_png = os.path.join(ROOT, "data", "splash.png")
-    frames[0].save(splash_png)
-    print("wrote %s" % splash_png)
+    dest = os.path.join(ROOT, "data", "splash.gif")
+    shutil.copy(gif, dest)
+    print("wrote %s (%d bytes)" % (dest, size))
 
 
 if __name__ == "__main__":

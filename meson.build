@@ -320,6 +320,7 @@ install_data(
 
 install_data(
   'data/safebrowsing.list',
+  'data/splash.gif',
   install_dir: get_option('datadir') / 'northstar',
 )
 
