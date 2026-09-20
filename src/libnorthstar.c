@@ -4,6 +4,7 @@
  */
 
 #include "libnorthstar.h"
+#include "mainctx.h"
 
 #include <cairo.h>
 #include <gio/gio.h>
@@ -419,7 +420,7 @@ browser_wait_images(ns_browser *browser)
     gint64 deadline = g_get_monotonic_time() + (gint64)15 * G_USEC_PER_SEC;
     while (browser_images_outstanding(browser) > 0 &&
            g_get_monotonic_time() < deadline)
-        g_main_context_iteration(NULL, TRUE);
+        g_main_context_iteration(ns_engine_context(), TRUE);
     if (browser->dirty) {
         browser_relayout(browser);
         browser->dirty = FALSE;
@@ -635,7 +636,7 @@ browser_settle_quiet(ns_browser *b)
     if (b->js && ns_js_has_pending_work(b->js)) return FALSE;
     if (b->js && ns_js_has_pending_animation_frame(b->js)) return FALSE;
     if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
-    if (g_main_context_pending(NULL)) return FALSE;
+    if (g_main_context_pending(ns_engine_context())) return FALSE;
     return TRUE;
 }
 
@@ -672,13 +673,13 @@ browser_settle(ns_browser *b, int settle_ms)
 {
     if (settle_ms <= 0) return;
     if (browser_settle_quiet(b)) return;
-    GMainLoop *loop = g_main_loop_new(NULL, FALSE);
+    GMainLoop *loop = g_main_loop_new(ns_engine_context(), FALSE);
     settle_ctx ctx = { .b = b, .loop = loop };
-    guint quit = g_timeout_add(settle_ms, settle_quit_cb, loop);
-    guint tick = g_timeout_add(16, settle_tick_cb, &ctx);
+    guint quit = ns_engine_timeout_add(settle_ms, settle_quit_cb, loop);
+    guint tick = ns_engine_timeout_add(16, settle_tick_cb, &ctx);
     g_main_loop_run(loop);
-    g_source_remove(tick);
-    g_source_remove(quit);
+    ns_engine_source_remove(tick);
+    ns_engine_source_remove(quit);
     g_main_loop_unref(loop);
 }
 
@@ -1517,8 +1518,8 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
 
         gboolean did_iter = FALSE;
         int it = 0;
-        while (g_main_context_pending(NULL) && it++ < 64) {
-            g_main_context_iteration(NULL, FALSE);
+        while (g_main_context_pending(ns_engine_context()) && it++ < 64) {
+            g_main_context_iteration(ns_engine_context(), FALSE);
             did_iter = TRUE;
             changed = TRUE;
         }

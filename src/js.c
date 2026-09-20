@@ -48,6 +48,7 @@
 #include "eventsource.h"
 #include "security.h"
 #include "wasm.h"
+#include "mainctx.h"
 #include "webcrypto.h"
 #include "ws.h"
 
@@ -105,6 +106,7 @@ struct ns_worker_host {
     GThread      *thread;
     gint          joined;
     GMainContext *context;
+    GMainContext *owner_context;
     GMainLoop    *loop;
     ns_js        *worker_js;
     char         *url;
@@ -566,7 +568,7 @@ ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
                                        headers, NULL, error);
 
     ns_js_pumped_fetch pf = {0};
-    pf.loop = g_main_loop_new(NULL, FALSE);
+    pf.loop = g_main_loop_new(ns_engine_context(), FALSE);
     ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers, NULL,
                          ns_js_pumped_fetch_done, &pf);
     gboolean saved = js->in_pump;
@@ -2311,7 +2313,7 @@ ns_storage_flush(ns_js *js)
 {
     if (!js) return;
     if (js->local_storage_flush_source) {
-        g_source_remove(js->local_storage_flush_source);
+        ns_engine_source_remove(js->local_storage_flush_source);
         js->local_storage_flush_source = 0;
     }
     if (!js->local_storage_dirty || !js->local_storage_path) return;
@@ -2354,7 +2356,7 @@ ns_storage_schedule_flush(ns_js *js)
     if (!js || !js->local_storage_dirty || js->local_storage_disabled) return;
     if (js->local_storage_flush_source) return;
     js->local_storage_flush_source =
-        g_timeout_add(1000, ns_storage_flush_timer, js);
+        ns_engine_timeout_add(1000, ns_storage_flush_timer, js);
 }
 
 static GHashTable *
@@ -8133,7 +8135,7 @@ ns_on_js_fetch_deliver_idle(gpointer user_data)
 {
     ns_js_fetch_delivery *d = user_data;
     if (d->st && d->st->js && d->st->js->in_pump) {
-        g_timeout_add(4, ns_on_js_fetch_deliver_idle, d);
+        ns_engine_timeout_add(4, ns_on_js_fetch_deliver_idle, d);
         return G_SOURCE_REMOVE;
     }
     ns_on_js_fetch_deliver(d->st, d->resp, d->err);
@@ -17837,7 +17839,7 @@ ns_on_xhr_deliver_idle(gpointer user_data)
 {
     ns_xhr_delivery *d = user_data;
     if (d->st && d->st->js && d->st->js->in_pump) {
-        g_timeout_add(4, ns_on_xhr_deliver_idle, d);
+        ns_engine_timeout_add(4, ns_on_xhr_deliver_idle, d);
         return G_SOURCE_REMOVE;
     }
     ns_xhr_deliver(d->st, d->resp, d->err);
@@ -17857,7 +17859,7 @@ ns_on_xhr_done(GObject *src, GAsyncResult *result, gpointer user_data)
         d->st = st;
         d->resp = resp;
         d->err = err;
-        g_timeout_add(4, ns_on_xhr_deliver_idle, d);
+        ns_engine_timeout_add(4, ns_on_xhr_deliver_idle, d);
         return;
     }
     ns_xhr_deliver(st, resp, err);
@@ -17868,7 +17870,7 @@ ns_xhr_emit_blocked_idle(gpointer user_data)
 {
     ns_xhr_state *st = user_data;
     if (st->js && st->js->in_pump) {
-        g_timeout_add(4, ns_xhr_emit_blocked_idle, st);
+        ns_engine_timeout_add(4, ns_xhr_emit_blocked_idle, st);
         return G_SOURCE_REMOVE;
     }
     if (st->ctx) {
@@ -19007,7 +19009,7 @@ ns_abort_signal_timeout_fire(gpointer user_data)
     if (!t || !t->ctx) { g_free(t); return G_SOURCE_REMOVE; }
     ns_js *abort_js = js_from_ctx(t->ctx);
     if (abort_js && abort_js->in_pump) {
-        g_timeout_add(4, ns_abort_signal_timeout_fire, t);
+        ns_engine_timeout_add(4, ns_abort_signal_timeout_fire, t);
         return G_SOURCE_REMOVE;
     }
     JSValue aborted = JS_GetPropertyStr(t->ctx, t->sig, "aborted");
@@ -19047,7 +19049,7 @@ ns_abort_signal_static_timeout(JSContext *ctx, JSValueConst this_val,
         if (!abort_js->pending_aborts) abort_js->pending_aborts = g_ptr_array_new();
         g_ptr_array_add(abort_js->pending_aborts, t);
     }
-    g_timeout_add((guint)ms, ns_abort_signal_timeout_fire, t);
+    ns_engine_timeout_add((guint)ms, ns_abort_signal_timeout_fire, t);
     return sig;
 }
 
@@ -19595,7 +19597,7 @@ ns_filereader_complete(gpointer ud)
     ns_filereader_idle *fr = ud;
     ns_js *js = fr->js;
     if (js && js->in_pump) {
-        fr->source = g_timeout_add(4, ns_filereader_complete, fr);
+        fr->source = ns_engine_timeout_add(4, ns_filereader_complete, fr);
         return G_SOURCE_REMOVE;
     }
     JSContext *ctx = js->ctx;
@@ -19621,7 +19623,7 @@ ns_filereader_schedule(JSContext *ctx, JSValueConst self)
     if (!js->filereader_idles)
         js->filereader_idles = g_ptr_array_new();
     g_ptr_array_add(js->filereader_idles, fr);
-    fr->source = g_idle_add(ns_filereader_complete, fr);
+    fr->source = ns_engine_idle_add(ns_filereader_complete, fr);
 }
 
 static char *
@@ -21279,6 +21281,7 @@ ns_worker_host_unref(ns_worker_host *host)
     if (!host || !g_atomic_int_dec_and_test(&host->ref_count)) return;
     g_mutex_clear(&host->lock);
     if (host->context) g_main_context_unref(host->context);
+    if (host->owner_context) g_main_context_unref(host->owner_context);
     g_free(host->url);
     g_free(host->base_url);
     g_free(host->name);
@@ -21853,7 +21856,7 @@ ns_worker_post_owner_message(ns_worker_host *host, ns_worker_message *msg)
         ns_worker_message_free(msg);
         return;
     }
-    g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
+    g_main_context_invoke_full(host->owner_context, G_PRIORITY_DEFAULT,
                                ns_worker_deliver_owner, msg, NULL);
 }
 
@@ -21900,7 +21903,7 @@ ns_worker_log_cb(const char *line, gpointer user_data)
     ns_worker_log_delivery *d = g_new0(ns_worker_log_delivery, 1);
     d->host = ns_worker_host_ref(host);
     d->line = g_strdup(line);
-    g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
+    g_main_context_invoke_full(host->owner_context, G_PRIORITY_DEFAULT,
                                ns_worker_log_deliver, d, NULL);
 }
 
@@ -22650,7 +22653,7 @@ ns_sw_fetch_result(JSContext *ctx, JSValueConst this_val,
             if (e) { res->error = g_strdup(e); JS_FreeCString(ctx, e); }
         }
     }
-    g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
+    g_main_context_invoke_full(host->owner_context, G_PRIORITY_DEFAULT,
                                ns_sw_fetch_result_on_owner, res, NULL);
     return JS_UNDEFINED;
 }
@@ -22684,7 +22687,7 @@ ns_sw_report_unhandled(ns_worker_host *host, guint id)
     res->host = ns_worker_host_ref(host);
     res->id = id;
     res->outcome = 0;
-    g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
+    g_main_context_invoke_full(host->owner_context, G_PRIORITY_DEFAULT,
                                ns_sw_fetch_result_on_owner, res, NULL);
 }
 
@@ -23300,6 +23303,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->owner_ctx = ctx;
     host->owner_obj = JS_DupValue(ctx, obj);
     host->context = g_main_context_new();
+    host->owner_context = g_main_context_ref(js->main_context);
     host->url = abs_url;
     host->base_url = g_strdup(js->current_url ? js->current_url : abs_url);
     host->name = g_strdup(name ? name : "");
@@ -23511,6 +23515,7 @@ ns_sw_start_registration(JSContext *ctx, JSValueConst container, ns_js *js,
     host->owner_ctx = ctx;
     host->owner_obj = JS_DupValue(ctx, sw);
     host->context = g_main_context_new();
+    host->owner_context = g_main_context_ref(js->main_context);
     host->url = g_strdup(abs_url);
     host->base_url = g_strdup(js->current_url ? js->current_url : abs_url);
     host->name = g_strdup("");
@@ -25701,7 +25706,7 @@ static void
 ns_observer_schedule_tick(ns_js *js)
 {
     if (!js || !js->ctx || js->worker_host || js->observer_tick_source) return;
-    js->observer_tick_source = g_timeout_add(4, ns_observer_tick_timer, js);
+    js->observer_tick_source = ns_engine_timeout_add(4, ns_observer_tick_timer, js);
 }
 
 static JSValue
@@ -25840,7 +25845,7 @@ ns_window_request_idle_callback(JSContext *ctx, JSValueConst this_val,
         }
         JS_FreeValue(ctx, to);
     }
-    t->glib_source = g_timeout_add(delay_ms, ns_timer_fire, t);
+    t->glib_source = ns_engine_timeout_add(delay_ms, ns_timer_fire, t);
     g_hash_table_insert(js->timers, GINT_TO_POINTER(t->id), t);
     return JS_NewInt32(ctx, t->id);
 }
@@ -25878,7 +25883,7 @@ ns_raf_schedule_tick(ns_js *js)
 {
     if (!js || !js->ctx || js->worker_host || js->raf_tick_source ||
         js->raf_host_driven) return;
-    js->raf_tick_source = g_timeout_add(16, ns_raf_tick_timer, js);
+    js->raf_tick_source = ns_engine_timeout_add(16, ns_raf_tick_timer, js);
 }
 
 static JSValue
@@ -39705,7 +39710,7 @@ ns_js_image_load_free(gpointer data)
 {
     ns_js_image_load *r = data;
     if (!r) return;
-    if (r->ready_idle) g_source_remove(r->ready_idle);
+    if (r->ready_idle) ns_engine_source_remove(r->ready_idle);
     if (r->js && r->js->image_cache)
         ns_image_cache_cancel_cb(r->js->image_cache, r);
     g_free(r->requested_url);
@@ -39718,7 +39723,7 @@ ns_js_image_ready_idle(gpointer data)
     ns_js_image_load *r = data;
     ns_js *js = r->js;
     if (js && !js->halted && (js->in_pump || ns_engine_in_blocking_fetch())) {
-        r->ready_idle = g_timeout_add(4, ns_js_image_ready_idle, r);
+        r->ready_idle = ns_engine_timeout_add(4, ns_js_image_ready_idle, r);
         return G_SOURCE_REMOVE;
     }
     r->ready_idle = 0;
@@ -39772,7 +39777,7 @@ ns_js_on_image_ready(ns_image *img, gpointer user_data)
     if (g_hash_table_lookup(js->js_image_loads, r->el) != r) return;
     r->img = img;
     if (!r->ready_idle)
-        r->ready_idle = g_idle_add(ns_js_image_ready_idle, r);
+        r->ready_idle = ns_engine_idle_add(ns_js_image_ready_idle, r);
 }
 
 static void
@@ -39803,7 +39808,7 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
                                 base ? base : abs_url,
                                 ns_js_on_image_ready, r);
     if (r->img && (r->img->loaded || r->img->failed) && !r->ready_idle)
-        r->ready_idle = g_idle_add(ns_js_image_ready_idle, r);
+        r->ready_idle = ns_engine_idle_add(ns_js_image_ready_idle, r);
 }
 
 const ns_image *
@@ -40225,7 +40230,7 @@ ns_text_selection_fire(gpointer user_data)
     ns_select_event_task *task = user_data;
     ns_js *js = task->js;
     if (js && js->in_pump) {
-        task->source = g_timeout_add(4, ns_text_selection_fire, task);
+        task->source = ns_engine_timeout_add(4, ns_text_selection_fire, task);
         return G_SOURCE_REMOVE;
     }
     const ns_node *el = ns_unwrap_element(task->target);
@@ -40259,7 +40264,7 @@ ns_text_selection_dispatch(JSContext *ctx, JSValueConst this_val,
     if (!js->select_event_tasks)
         js->select_event_tasks = g_ptr_array_new();
     g_ptr_array_add(js->select_event_tasks, task);
-    task->source = g_idle_add(ns_text_selection_fire, task);
+    task->source = ns_engine_idle_add(ns_text_selection_fire, task);
 }
 
 static JSValue
@@ -47185,7 +47190,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->history_length = 1;
     js->timers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                        NULL, ns_timer_free);
-    js->main_context = g_main_context_default();
+    js->main_context = ns_engine_context() ? ns_engine_context()
+                                           : g_main_context_default();
     js->workers = g_ptr_array_new();
     js->frame_ctxs = g_ptr_array_new();
     js->frame_contexts = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -51469,7 +51475,7 @@ ns_js_reset_runtime_state(ns_js *js)
     js->ce_in_attr_callback = 0;
 
     if (js->async_script_source) {
-        g_source_remove(js->async_script_source);
+        ns_engine_source_remove(js->async_script_source);
         js->async_script_source = 0;
     }
     if (js->microtask_source) {
@@ -52200,22 +52206,22 @@ ns_js_free(ns_js *js)
         js->pending_ws = NULL;
     }
     if (js->observer_tick_source) {
-        g_source_remove(js->observer_tick_source);
+        ns_engine_source_remove(js->observer_tick_source);
         js->observer_tick_source = 0;
     }
     if (js->raf_tick_source) {
-        g_source_remove(js->raf_tick_source);
+        ns_engine_source_remove(js->raf_tick_source);
         js->raf_tick_source = 0;
     }
     if (js->async_script_source) {
-        g_source_remove(js->async_script_source);
+        ns_engine_source_remove(js->async_script_source);
         js->async_script_source = 0;
     }
     if (js->filereader_idles) {
         for (guint i = 0; i < js->filereader_idles->len; i++) {
             ns_filereader_idle *fr = g_ptr_array_index(js->filereader_idles, i);
             if (!fr) continue;
-            g_source_remove(fr->source);
+            ns_engine_source_remove(fr->source);
             JS_FreeValue(js->ctx, fr->self);
             g_free(fr);
         }
@@ -52227,7 +52233,7 @@ ns_js_free(ns_js *js)
             ns_select_event_task *task =
                 g_ptr_array_index(js->select_event_tasks, i);
             if (!task) continue;
-            g_source_remove(task->source);
+            ns_engine_source_remove(task->source);
             JS_FreeValue(js->ctx, task->target);
             g_free(task);
         }

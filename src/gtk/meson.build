@@ -3,11 +3,9 @@ northstar_gtk_sources = files(
   'procview.c',
   'procwindow.c',
   '../libnorthstar.c',
-  '../renderer_serve.c',
-  '../rproc_http.c',
-  '../rproc_inproc.c',
-  '../ipc_http.c',
+  '../page_session.c',
   '../threaddump.c',
+  'enginethread.c',
 )
 
 northstar_gtk_deps = northstar_deps + [gtk4_dep]

@@ -277,6 +277,16 @@ Significant changes in each release:
   spell-checking paths compile on Linux, Alpine, macOS and Windows; the
   Linux job also builds on Ubuntu 26.04, the Windows job uploads its
   binary, and Dependabot keeps the GitHub Actions versions current.
+* The shell calls the page engine directly. The internal HTTP/JSON
+  request protocol that carried every page load, event and frame over a
+  socketpair between two halves of the same process is gone, together
+  with the fork-and-exec spawners for a renderer executable that was
+  never built and the Task Manager that listed this one process. The
+  engine now runs on a dedicated thread with its own GLib main context,
+  so page timers, fetch completions and settle loops no longer share the
+  GTK main loop and the window stays responsive while a page loads;
+  audio, navigation, camera and download signals come back as plain
+  fields of a rendered frame instead of length-capped headers.
 
 1.0.8:
 ======

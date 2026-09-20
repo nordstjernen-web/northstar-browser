@@ -18,8 +18,10 @@ per-origin renderer process; every page shares one address space.
     │  spawns + restarts on crash/hang
     ▼
  browser process  (src/gtk/ shell + engine, single-process)
-    │   ├─ GTK 4 UI: one page view, omnibox, menus  (src/gtk/*.c)
-    │   ├─ engine: fetch → parse → style → layout → paint
+    │   ├─ GTK 4 UI on the main thread: one page view, omnibox, menus
+    │   │                                            (src/gtk/*.c)
+    │   ├─ engine thread: fetch → parse → style → layout → paint
+    │   │      with its own GLib main context     (src/gtk/enginethread.c)
     │   ├─ QuickJS runtime for the current top-level page
     │   └─ asynchronous audio worker           (src/audio/audio.c)
     │          <audio> decode (minimp3 / pl_mpeg / opus / vorbis) → SDL2
@@ -33,19 +35,23 @@ per-origin renderer process; every page shares one address space.
   restarts it on crash or hang. It initialises no network, sandbox, or
   UI. Headless/tooling modes are never supervised.
 - **Browser process** — the GTK 4 shell (`src/gtk/`) hosts the engine
-  directly. `ns_rproc_single_process_enable()` (`rproc_inproc.c`) wires
-  the in-process render path so no renderer subprocess is spawned.
+  directly. The page engine runs on one dedicated thread
+  (`src/gtk/enginethread.c`) with its own GLib main context, so page
+  timers, fetch completions and nested settle loops never block the
+  GTK main loop; the view posts each request as a job to that thread
+  and receives the result back on the main loop.
 - **Audio mixer** (`src/audio/audio.c`) — downloads and decodes `<audio>`
   on an in-process worker thread, then outputs through SDL2. Per-view audio
   contexts keep page state separate.
 
-A single internal HTTP/JSON request protocol (`renderer_serve.c`,
-`rproc_http.c`, framed by `ipc_http.c`) still describes each render as a
-request/response; in single-process mode both ends live in the one process
-(`rproc_inproc.c`), and the same protocol is what a headless dump drives.
-`libnorthstar.c` is the page-engine host both the renderer and the headless
-driver call — an internal interface, not the embeddable library API, which
-this edition does not carry.
+`page_session.c` owns the open page, its back/forward cache, the pending
+POST body and the last frame, and is the direct-call interface both the
+GTK view (on the engine thread) and a headless dump (on the main thread)
+drive. `libnorthstar.c` is the page-engine host beneath it — an internal
+interface, not the embeddable library API, which this edition does not
+carry. Engine code attaches its timers and idle sources through
+`mainctx.c`, which resolves to the engine thread's context in the GUI and
+to the default context headless.
 
 ## Page-load pipeline
 
@@ -182,7 +188,7 @@ written per platform and no dependency is added: the sheets go to
 Windows and the Cocoa panel on macOS.
 
 Paper is not the viewport, so the page is laid out again for it.
-`ns_libnorthstar_print` (`libnorthstar.c`) turns `@media print` on, sets
+`ns_browser_print_pages` (`libnorthstar.c`) turns `@media print` on, sets
 the viewport to a sheet's content box — A4 at 96 dpi with half-inch
 margins to begin with — and relayouts. Only then can `@page` be read,
 because the rule arrives through the cascade that relayout just ran; if

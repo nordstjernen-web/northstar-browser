@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "mainctx.h"
 #include "ws.h"
 
 #include <curl/curl.h>
@@ -102,7 +103,7 @@ ns_ws_dispatch_run(gpointer data)
     ns_ws *ws = d->ws;
     if (!g_atomic_int_get(&ws->detached) && ws->cbs.busy &&
         ws->cbs.busy(ws->user_data)) {
-        g_timeout_add(4, ns_ws_dispatch_run, d);
+        ns_engine_timeout_add(4, ns_ws_dispatch_run, d);
         return G_SOURCE_REMOVE;
     }
     if (!g_atomic_int_get(&ws->detached) && d->invoke)
@@ -135,7 +136,7 @@ ns_ws_post(ns_ws *ws,
     d->invoke = invoke;
     d->payload = payload;
     d->payload_free = payload_free;
-    g_idle_add(ns_ws_dispatch_run, d);
+    ns_engine_idle_add(ns_ws_dispatch_run, d);
 }
 
 typedef struct {

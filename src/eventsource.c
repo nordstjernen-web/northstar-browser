@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "mainctx.h"
 #include "eventsource.h"
 #include "net.h"
 
@@ -66,7 +67,7 @@ ns_es_dispatch_run(gpointer data)
     ns_es *es = d->es;
     if (!g_atomic_int_get(&es->detached) && es->cbs.busy &&
         es->cbs.busy(es->user_data)) {
-        g_timeout_add(4, ns_es_dispatch_run, d);
+        ns_engine_timeout_add(4, ns_es_dispatch_run, d);
         return G_SOURCE_REMOVE;
     }
     if (!g_atomic_int_get(&es->detached) && d->invoke)
@@ -96,7 +97,7 @@ ns_es_post(ns_es *es, void (*invoke)(ns_es *, gpointer), gpointer payload,
     d->invoke = invoke;
     d->payload = payload;
     d->payload_free = payload_free;
-    g_idle_add(ns_es_dispatch_run, d);
+    ns_engine_idle_add(ns_es_dispatch_run, d);
 }
 
 typedef struct {

@@ -1,4 +1,4 @@
-/* Northstar — GTK view backed by the internal renderer protocol.
+/* Northstar — GTK view over the page engine, driven on the engine thread.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -8,7 +8,8 @@
 #include "audio/audio.h"
 
 #include "proc_limits.h"
-#include "rproc_http.h"
+#include "enginethread.h"
+#include "page_session.h"
 #include "net.h"
 
 #include <cairo.h>
@@ -44,7 +45,7 @@ typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLL, REQ_SCROLLBAR,
-    REQ_CAMERA, REQ_PRINT, REQ_QUIT
+    REQ_CAMERA, REQ_PRINT, REQ_CLOSE
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_CONTEXT } LinkAct;
 
@@ -57,6 +58,7 @@ enum {
 };
 
 typedef struct {
+    NsProcView *view;
     ReqType type;
     int     seq;
     char   *url;
@@ -109,6 +111,7 @@ typedef struct {
     char            *camera;
     char            *download;
     char            *audio;
+    GPtrArray       *audio_blobs;
     char            *clipboard;
     cairo_surface_t *surface;
     gboolean         surface_borrowed;
@@ -145,11 +148,7 @@ struct NsProcView {
     GtkAdjustment *vadj;
     gboolean    closed;
 
-    GThread    *thread;
-    GAsyncQueue *queue;
-    ns_rproc_http *proc;
-    GMutex      proc_lock;
-    char       *renderer_path;
+    ns_page_session *session;
     gboolean    private_mode;
 
     NsAudioContext *audio;
@@ -171,7 +170,6 @@ struct NsProcView {
 
     gboolean    render_inflight;
     gboolean    render_pending;
-    int         render_restarts;
 
     gboolean    link_inflight;
     gboolean    link_pending;
@@ -471,19 +469,6 @@ static void
 pv_free(NsProcView *v)
 {
     ns_audio_context_destroy(v->audio);
-    if (v->queue) {
-        Req *r;
-        while ((r = g_async_queue_try_pop(v->queue))) {
-            g_free(r->url);
-            g_free(r->key);
-            g_free(r->code);
-            g_free(r->query);
-            g_free(r->export_dest);
-            g_free(r->paths);
-            g_free(r);
-        }
-        g_async_queue_unref(v->queue);
-    }
     if (v->frame)
         cairo_surface_destroy(v->frame);
     v->frame = NULL;
@@ -494,7 +479,6 @@ pv_free(NsProcView *v)
     g_free(v->ctx_link);
     if (v->history)
         g_ptr_array_unref(v->history);
-    g_free(v->renderer_path);
     g_free(v->current_url);
     g_free(v->current_title);
     g_free(v->remote_ip);
@@ -502,67 +486,36 @@ pv_free(NsProcView *v)
     g_free(v->perm_origin);
     if (v->hourglass_cursor)
         g_object_unref(v->hourglass_cursor);
-    g_mutex_clear(&v->proc_lock);
     g_free(v);
 }
 
 static void pv_unref(NsProcView *v) { if (g_ref_count_dec(&v->rc)) pv_free(v); }
 
-/* Atomically install a new renderer handle (worker thread only) and return the
-   previous one for the caller to close outside the lock. The lock serialises
-   the worker's reassignments against the main thread's close-time interrupt so
-   it can never touch a freed handle. */
-static ns_rproc_http *
-pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
-{
-    g_mutex_lock(&v->proc_lock);
-    ns_rproc_http *old = v->proc;
-    v->proc = newp;
-    g_mutex_unlock(&v->proc_lock);
-    return old;
-}
+typedef struct {
+    char    *token;
+    GBytes  *bytes;
+    gboolean reload;
+} AudioBlob;
 
-char *
-ns_proc_renderer_path(void)
+static void
+audio_blob_free(gpointer data)
 {
-    const char *env = g_getenv(NS_PROC_RENDERER_ENV);
-    if (env && *env)
-        return g_strdup(env);
-#ifdef G_OS_WIN32
-    const char *name = NS_PROC_RENDERER_NAME ".exe";
-#else
-    const char *name = NS_PROC_RENDERER_NAME;
-#endif
-    const char *exe = ns_app_self_exe();
-    if (exe) {
-        char *dir = g_path_get_dirname(exe);
-        char *parent = g_build_filename("..", name, NULL);
-        const char *rel[] = { name, parent, NULL };
-        for (int i = 0; rel[i]; i++) {
-            char *cand = g_build_filename(dir, rel[i], NULL);
-            if (g_file_test(cand, G_FILE_TEST_IS_EXECUTABLE)) {
-                g_free(parent);
-                g_free(dir);
-                return cand;
-            }
-            g_free(cand);
-        }
-        g_free(parent);
-        g_free(dir);
-    }
-    return g_strdup(name);
+    AudioBlob *b = data;
+    g_free(b->token);
+    g_bytes_unref(b->bytes);
+    g_free(b);
 }
 
 static gboolean
-pv_media_blob_command(NsProcView *v, const char *line)
+media_blob_line(const char *line, char **out_token, const char **out_url,
+                gboolean *out_reload)
 {
-    gboolean reload;
     const char *cursor;
     if (g_str_has_prefix(line, "open ")) {
-        reload = FALSE;
+        *out_reload = FALSE;
         cursor = line + 5;
     } else if (g_str_has_prefix(line, "reload ")) {
-        reload = TRUE;
+        *out_reload = TRUE;
         cursor = line + 7;
     } else {
         return FALSE;
@@ -570,31 +523,69 @@ pv_media_blob_command(NsProcView *v, const char *line)
     while (*cursor == ' ') cursor++;
     const char *token_end = strchr(cursor, ' ');
     if (!token_end) return FALSE;
-    g_autofree char *token = g_strndup(cursor, token_end - cursor);
     const char *url = token_end + 1;
     while (*url == ' ') url++;
     if (!g_str_has_prefix(url, "blob:")) return FALSE;
-    GBytes *bytes = ns_net_resolve_blob(url, NULL);
-    if (bytes) {
-        ns_audio_context_dispatch_blob(v->audio, token, bytes, reload);
-        g_bytes_unref(bytes);
-    }
+    *out_token = g_strndup(cursor, token_end - cursor);
+    *out_url = url;
     return TRUE;
 }
 
 static void
-pv_media_pump(NsProcView *v, const char *commands)
+res_take_audio(Res *res, char *commands)
 {
-    if (!commands || !*commands) return;
+    if (!commands) return;
+    GString *rest = g_string_new(NULL);
+    char **lines = g_strsplit(commands, "\n", -1);
+    for (int i = 0; lines[i]; i++) {
+        if (!*lines[i]) continue;
+        char *token = NULL;
+        const char *url = NULL;
+        gboolean reload = FALSE;
+        if (media_blob_line(lines[i], &token, &url, &reload)) {
+            GBytes *bytes = ns_net_resolve_blob(url, NULL);
+            if (bytes) {
+                AudioBlob *b = g_new0(AudioBlob, 1);
+                b->token = token;
+                b->bytes = bytes;
+                b->reload = reload;
+                if (!res->audio_blobs)
+                    res->audio_blobs =
+                        g_ptr_array_new_with_free_func(audio_blob_free);
+                g_ptr_array_add(res->audio_blobs, b);
+            } else {
+                g_free(token);
+            }
+            continue;
+        }
+        g_string_append(rest, lines[i]);
+        g_string_append_c(rest, '\n');
+    }
+    g_strfreev(lines);
+    free(commands);
+    res->audio = g_string_free(rest, FALSE);
+}
+
+static void
+pv_media_pump(NsProcView *v, Res *res)
+{
+    gboolean has_lines = res->audio && *res->audio;
+    if (!res->audio_blobs && !has_lines) return;
     if (!v->audio)
         v->audio = ns_audio_context_new();
-    char **lines = g_strsplit(commands, "\x1f", -1);
+    if (res->audio_blobs)
+        for (guint i = 0; i < res->audio_blobs->len; i++) {
+            AudioBlob *b = g_ptr_array_index(res->audio_blobs, i);
+            ns_audio_context_dispatch_blob(v->audio, b->token, b->bytes,
+                                           b->reload);
+        }
+    if (!has_lines) return;
+    char **lines = g_strsplit(res->audio, "\n", -1);
     for (int i = 0; lines[i]; i++) {
         if (!*lines[i]) continue;
         if (g_getenv("NS_DBG_AUDIO"))
             g_printerr("[audio-pump] cmd: %s\n", lines[i]);
-        if (!pv_media_blob_command(v, lines[i]))
-            ns_audio_context_dispatch(v->audio, lines[i]);
+        ns_audio_context_dispatch(v->audio, lines[i]);
     }
     g_strfreev(lines);
 }
@@ -668,316 +659,269 @@ post(Res *res)
     g_idle_add(on_result, res);
 }
 
-static gpointer
-worker_main(gpointer data)
+static gboolean
+pv_unref_idle(gpointer data)
 {
-    NsProcView *v = data;
-    for (;;) {
-        Req *req = g_async_queue_pop(v->queue);
-        if (req->type == REQ_QUIT) {
-            g_free(req->url);
-            g_free(req);
-            break;
-        }
-        if (!v->proc && !v->closed)
-            pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
-                                     NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
-                                     v->private_mode));
+    pv_unref(data);
+    return G_SOURCE_REMOVE;
+}
 
-        if (req->type == REQ_LOAD) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_PAGE;
-            res->seq = req->seq;
-            ns_rproc_http_page pg;
-            int settle = pv_settle_ms();
-            int rc = v->proc ? ns_rproc_http_open_ex(
-                                             v->proc, req->url, req->vw,
-                                             req->vh, settle, req->history,
-                                             req->user_activated, &pg)
-                             : -1;
-            if (rc != 0 && v->proc && !v->closed) {
-                ns_rproc_http_close(pv_swap_proc(v, NULL));
-                pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
-                                         NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
-                                         v->private_mode));
-                rc = v->proc ? ns_rproc_http_open_ex(
-                                             v->proc, req->url, req->vw,
-                                             req->vh, settle, req->history,
-                                             req->user_activated, &pg)
-                             : -1;
-            }
-            if (rc == 0 && pg.ok) {
-                res->ok = TRUE;
-                res->pw = pg.page_width;
-                res->ph = pg.page_height;
-                res->title = g_strdup(pg.title ? pg.title : "");
-                res->url = g_strdup(pg.url ? pg.url : req->url);
-                res->nav = pg.nav ? g_strdup(pg.nav) : NULL;
-                res->security = pg.security;
-                res->remote_ip = pg.remote_ip ? g_strdup(pg.remote_ip) : NULL;
-            }
-            if (rc == 0)
-                ns_rproc_http_page_clear(&pg);
-            post(res);
-        } else if (req->type == REQ_RENDER) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_FRAME;
-            res->seq = req->seq;
-            ns_rproc_http_frame fr;
-            gboolean rendered = v->proc &&
-                ns_rproc_http_render(v->proc, req->w, req->h, req->sx, req->sy,
-                                req->scale, req->caret_active, &fr) == 0 && fr.ok;
-            if (rendered) {
-                res->ok = TRUE;
-                res->animating = fr.animating ? TRUE : FALSE;
-                res->caret_blinking = fr.caret_blinking ? TRUE : FALSE;
-                res->pw = fr.page_w;
-                res->ph = fr.page_h;
-                res->requested_scroll_y = fr.scroll_y;
-                res->requested_scroll_x = fr.scroll_x;
-                res->frame_unchanged = fr.unchanged ? TRUE : FALSE;
-                if (!fr.unchanged) {
-                    res->surface = stage_fill(v, fr.pixels, fr.width,
-                                              fr.height, fr.stride);
-                    res->surface_borrowed = FALSE;
-                }
-                if (fr.nav) {
-                    res->nav = g_strdup(fr.nav);
-                    free(fr.nav);
-                }
-                if (fr.camera) {
-                    res->camera = g_strdup(fr.camera);
-                    free(fr.camera);
-                }
-                if (fr.download) {
-                    res->download = g_strdup(fr.download);
-                    free(fr.download);
-                }
-                if (fr.audio) {
-                    res->audio = g_strdup(fr.audio);
-                    free(fr.audio);
-                }
-                if (fr.clipboard && v->proc)
-                    res->clipboard = ns_rproc_http_clipboard(v->proc);
-            } else if (v->proc) {
-                ns_rproc_http_close(pv_swap_proc(v, NULL));
-            }
-            post(res);
-        } else if (req->type == REQ_LINK) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_LINK;
-            res->seq = req->seq;
-            res->action = req->action;
-            if (v->proc && req->action == ACT_HOVER)
-                res->href = ns_rproc_http_link_cursor_at(v->proc, req->x,
-                                                         req->y, &res->cursor);
-            else if (v->proc && req->action == ACT_CONTEXT) {
-                int prevented = 0;
-                ns_rproc_http_contextmenu(v->proc, req->x, req->y, &prevented);
-                res->prevented = prevented;
-                if (!prevented)
-                    res->href = ns_rproc_http_link_at(v->proc, req->x, req->y);
-            }
-            else if (v->proc)
-                res->href = ns_rproc_http_link_at(v->proc, req->x, req->y);
-            post(res);
-        } else if (req->type == REQ_CLICK) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_CLICK;
-            res->seq = req->seq;
-            res->href = v->proc
-                ? ns_rproc_http_click(v->proc, req->x, req->y, req->mods)
-                : NULL;
-            post(res);
-        } else if (req->type == REQ_VIEWPORT) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_VIEWPORT;
-            res->seq = req->seq;
-            ns_rproc_http_page pg;
-            if (v->proc &&
-                ns_rproc_http_set_viewport(v->proc, req->vw, req->vh, &pg) == 0) {
-                res->ok = pg.ok;
-                res->pw = pg.page_width;
-                res->ph = pg.page_height;
-                ns_rproc_http_page_clear(&pg);
-            }
-            post(res);
-        } else if (req->type == REQ_KEY) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_KEY;
-            res->seq = req->seq;
-            res->kind = req->kind;
-            res->fallback_scroll = req->fallback_scroll;
-            res->fallback_x = req->fallback_x;
-            res->fallback_y = req->fallback_y;
-            res->href = v->proc
-                ? ns_rproc_http_key_full(v->proc, req->kind, req->key,
-                               req->code, req->keycode, req->mods,
-                               &res->prevented)
-                : NULL;
-            post(res);
-        } else if (req->type == REQ_SELECT) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = (req->kind == 4) ? RES_COPY : RES_SELECT;
-            res->seq = req->seq;
-            res->href = v->proc
-                ? ns_rproc_http_select(v->proc, req->kind, req->x, req->y)
-                : NULL;
-            post(res);
-        } else if (req->type == REQ_HOVER) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_HOVER;
-            res->seq = req->seq;
-            if (v->proc)
-                res->ok = ns_rproc_http_hover_full(v->proc, req->x, req->y,
-                                                   &res->href,
-                                                   &res->cursor) == 1;
-            post(res);
-        } else if (req->type == REQ_SCROLL) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_SCROLL;
-            res->seq = req->seq;
-            res->ok = v->proc
-                ? ns_rproc_http_scroll(v->proc, req->x, req->y,
-                                       req->dx, req->dy)
-                : 0;
-            res->fallback_x = req->fallback_x;
-            res->fallback_y = req->fallback_y;
-            post(res);
-        } else if (req->type == REQ_SCROLLBAR) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_SCROLLBAR;
-            res->seq = req->seq;
-            res->kind = req->kind;
-            res->ok = v->proc
-                ? ns_rproc_http_scrollbar(v->proc, req->kind, req->x, req->y)
-                : 0;
-            post(res);
-        } else if (req->type == REQ_DROPFILES) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_DROPFILES;
-            res->seq = req->seq;
-            if (v->proc && req->paths && *req->paths) {
-                char **list = g_strsplit(req->paths, "\n", -1);
-                guint count = list ? g_strv_length(list) : 0;
-                if (count > 0)
-                    res->ok = ns_rproc_http_drop_files(
-                        v->proc, req->x, req->y,
-                        (const char *const *)list, (int)count) == 1;
-                g_strfreev(list);
-            }
-            post(res);
-        } else if (req->type == REQ_RELEASE) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_RELEASE;
-            res->seq = req->seq;
-            res->href = v->proc
-                ? ns_rproc_http_release_full(v->proc, &res->ok)
-                : NULL;
-            if (v->proc && (!res->href || !*res->href))
-                res->media_url = ns_rproc_http_media_at(v->proc, req->x, req->y,
-                                                   &res->media_is_video,
-                                                   &res->media_stream);
-            post(res);
-        } else if (req->type == REQ_FIND) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_FIND;
-            res->seq = req->seq;
-            if (v->proc)
-                ns_rproc_http_find(v->proc, req->query, req->find_case,
-                              req->find_dir, req->find_from_y,
-                              &res->find_total, &res->find_current,
-                              &res->find_scroll_y);
-            post(res);
-        } else if (req->type == REQ_EXPORT) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_EXPORT;
-            res->seq = req->seq;
-            gboolean ok = FALSE;
-            if (v->proc && req->url && req->export_dest &&
-                ns_rproc_http_export(v->proc, req->url) == 0) {
-                GFile *src = g_file_new_for_path(req->url);
-                GFile *dst = g_file_new_for_path(req->export_dest);
-                ok = g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL,
-                                 NULL, NULL, NULL);
-                g_object_unref(src);
-                g_object_unref(dst);
-            }
-            if (req->url)
-                g_unlink(req->url);
-            res->ok = ok;
-            res->url = g_strdup(req->export_dest ? req->export_dest : "");
-            post(res);
-        } else if (req->type == REQ_CONSOLE) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_CONSOLE;
-            res->seq = req->seq;
-            res->href = v->proc ? ns_rproc_http_console_poll(v->proc) : NULL;
-            post(res);
-        } else if (req->type == REQ_EVAL) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_EVAL;
-            res->seq = req->seq;
-            res->dump_tab = req->dump_tab;
-            res->inspect = req->inspect;
-            res->href = v->proc ? ns_rproc_http_eval(v->proc, req->query) : NULL;
-            post(res);
-        } else if (req->type == REQ_DUMP) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_DUMP;
-            res->seq = req->seq;
-            res->dump_tab = req->dump_tab;
-            res->href = v->proc ? ns_rproc_http_dump(v->proc, req->query) : NULL;
-            post(res);
-        } else if (req->type == REQ_CAMERA) {
-            if (v->proc)
-                ns_rproc_http_resolve_camera(v->proc, req->url, req->mods);
-        } else if (req->type == REQ_PRINT) {
-            Res *res = g_new0(Res, 1);
-            res->view = pv_ref(v);
-            res->type = RES_PRINT;
-            res->seq = req->seq;
-            if (v->proc)
-                res->print_pages = ns_rproc_http_print(v->proc,
-                                                       &res->print_setup);
-            res->ok = res->print_pages != NULL;
-            post(res);
-        }
-        g_free(req->url);
-        g_free(req->key);
-        g_free(req->code);
-        g_free(req->query);
-        g_free(req->export_dest);
-        g_free(req->paths);
-        g_free(req);
+static Res *
+res_new(NsProcView *v, ResType type, int seq)
+{
+    Res *res = g_new0(Res, 1);
+    res->view = pv_ref(v);
+    res->type = type;
+    res->seq = seq;
+    return res;
+}
+
+static void
+req_free(Req *req)
+{
+    g_free(req->url);
+    g_free(req->key);
+    g_free(req->code);
+    g_free(req->query);
+    g_free(req->export_dest);
+    g_free(req->paths);
+    g_free(req);
+}
+
+static void
+run_load(NsProcView *v, ns_page_session *s, Req *req)
+{
+    Res *res = res_new(v, RES_PAGE, req->seq);
+    ns_page_info pg;
+    if (ns_page_session_open(s, req->url, req->vw, req->vh, pv_settle_ms(),
+                             req->history, req->user_activated, &pg) == 0 &&
+        pg.ok) {
+        res->ok = TRUE;
+        res->pw = pg.page_width;
+        res->ph = pg.page_height;
+        res->title = g_strdup(pg.title ? pg.title : "");
+        res->url = g_strdup(pg.url ? pg.url : req->url);
+        res->nav = pg.nav ? g_strdup(pg.nav) : NULL;
+        res->security = pg.security;
+        res->remote_ip = pg.remote_ip ? g_strdup(pg.remote_ip) : NULL;
     }
-    if (v->proc)
-        ns_rproc_http_close(pv_swap_proc(v, NULL));
-    pv_unref(v);
-    return NULL;
+    ns_page_info_clear(&pg);
+    post(res);
+}
+
+static void
+run_render(NsProcView *v, ns_page_session *s, Req *req)
+{
+    Res *res = res_new(v, RES_FRAME, req->seq);
+    ns_page_frame fr;
+    if (ns_page_session_render(s, req->w, req->h, req->sx, req->sy,
+                               req->scale, req->caret_active, &fr) == 0) {
+        res->ok = TRUE;
+        res->animating = fr.animating ? TRUE : FALSE;
+        res->caret_blinking = fr.caret_blinking ? TRUE : FALSE;
+        res->pw = fr.page_w;
+        res->ph = fr.page_h;
+        res->requested_scroll_y = fr.scroll_y;
+        res->requested_scroll_x = fr.scroll_x;
+        res->frame_unchanged = fr.unchanged ? TRUE : FALSE;
+        if (!fr.unchanged)
+            res->surface = stage_fill(v, fr.pixels, fr.width, fr.height,
+                                      fr.stride);
+        res->nav = fr.nav;
+        res->camera = fr.camera;
+        res->download = fr.download;
+        res_take_audio(res, fr.audio);
+        fr.nav = fr.camera = fr.download = fr.audio = NULL;
+        if (fr.clipboard)
+            res->clipboard = ns_page_session_clipboard(s);
+    }
+    ns_page_frame_clear(&fr);
+    post(res);
+}
+
+static void
+run_req(gpointer data)
+{
+    Req *req = data;
+    NsProcView *v = req->view;
+    if (req->type == REQ_CLOSE) {
+        ns_page_session_free(v->session);
+        v->session = NULL;
+        req_free(req);
+        g_idle_add(pv_unref_idle, v);
+        return;
+    }
+    if (!v->session)
+        v->session = ns_page_session_new(NS_PROC_MAX_WIDTH,
+                                         NS_PROC_MAX_HEIGHT);
+    ns_page_session *s = v->session;
+    Res *res;
+    switch (req->type) {
+    case REQ_LOAD:
+        run_load(v, s, req);
+        break;
+    case REQ_RENDER:
+        run_render(v, s, req);
+        break;
+    case REQ_LINK:
+        res = res_new(v, RES_LINK, req->seq);
+        res->action = req->action;
+        if (req->action == ACT_HOVER) {
+            res->href = ns_page_session_link_at(s, req->x, req->y,
+                                                &res->cursor);
+        } else if (req->action == ACT_CONTEXT) {
+            res->prevented = ns_page_session_contextmenu(s, req->x, req->y);
+            if (!res->prevented)
+                res->href = ns_page_session_link_at(s, req->x, req->y, NULL);
+        } else {
+            res->href = ns_page_session_link_at(s, req->x, req->y, NULL);
+        }
+        post(res);
+        break;
+    case REQ_CLICK:
+        res = res_new(v, RES_CLICK, req->seq);
+        res->href = ns_page_session_click(s, req->x, req->y, req->mods);
+        post(res);
+        break;
+    case REQ_VIEWPORT: {
+        res = res_new(v, RES_VIEWPORT, req->seq);
+        ns_page_info pg;
+        if (ns_page_session_set_viewport(s, req->vw, req->vh, &pg) == 0) {
+            res->ok = pg.ok;
+            res->pw = pg.page_width;
+            res->ph = pg.page_height;
+        }
+        ns_page_info_clear(&pg);
+        post(res);
+        break;
+    }
+    case REQ_KEY:
+        res = res_new(v, RES_KEY, req->seq);
+        res->kind = req->kind;
+        res->fallback_scroll = req->fallback_scroll;
+        res->fallback_x = req->fallback_x;
+        res->fallback_y = req->fallback_y;
+        res->href = ns_page_session_key(s, req->kind, req->key, req->code,
+                                        req->keycode, req->mods,
+                                        &res->prevented);
+        post(res);
+        break;
+    case REQ_SELECT:
+        res = res_new(v, req->kind == 4 ? RES_COPY : RES_SELECT, req->seq);
+        res->href = ns_page_session_select(s, req->kind, req->x, req->y);
+        post(res);
+        break;
+    case REQ_HOVER:
+        res = res_new(v, RES_HOVER, req->seq);
+        res->ok = ns_page_session_hover(s, req->x, req->y, &res->href,
+                                        &res->cursor) == 1;
+        post(res);
+        break;
+    case REQ_SCROLL:
+        res = res_new(v, RES_SCROLL, req->seq);
+        res->ok = ns_page_session_scroll(s, req->x, req->y, req->dx,
+                                         req->dy);
+        res->fallback_x = req->fallback_x;
+        res->fallback_y = req->fallback_y;
+        post(res);
+        break;
+    case REQ_SCROLLBAR:
+        res = res_new(v, RES_SCROLLBAR, req->seq);
+        res->kind = req->kind;
+        res->ok = ns_page_session_scrollbar(s, req->kind, req->x, req->y);
+        post(res);
+        break;
+    case REQ_DROPFILES:
+        res = res_new(v, RES_DROPFILES, req->seq);
+        if (req->paths && *req->paths) {
+            char **list = g_strsplit(req->paths, "\n", -1);
+            guint count = list ? g_strv_length(list) : 0;
+            if (count > 0)
+                res->ok = ns_page_session_drop_files(
+                    s, req->x, req->y, (const char *const *)list,
+                    (int)count) == 1;
+            g_strfreev(list);
+        }
+        post(res);
+        break;
+    case REQ_RELEASE:
+        res = res_new(v, RES_RELEASE, req->seq);
+        res->href = ns_page_session_release(s, &res->ok);
+        if (!res->href || !*res->href)
+            res->media_url = ns_page_session_media_at(s, req->x, req->y,
+                                                      &res->media_is_video,
+                                                      &res->media_stream);
+        post(res);
+        break;
+    case REQ_FIND:
+        res = res_new(v, RES_FIND, req->seq);
+        ns_page_session_find(s, req->query, req->find_case, req->find_dir,
+                             req->find_from_y, &res->find_total,
+                             &res->find_current, &res->find_scroll_y);
+        post(res);
+        break;
+    case REQ_EXPORT: {
+        res = res_new(v, RES_EXPORT, req->seq);
+        gboolean ok = FALSE;
+        if (req->url && req->export_dest &&
+            ns_page_session_export(s, req->url) == 0) {
+            GFile *src = g_file_new_for_path(req->url);
+            GFile *dst = g_file_new_for_path(req->export_dest);
+            ok = g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL,
+                             NULL, NULL);
+            g_object_unref(src);
+            g_object_unref(dst);
+        }
+        if (req->url)
+            g_unlink(req->url);
+        res->ok = ok;
+        res->url = g_strdup(req->export_dest ? req->export_dest : "");
+        post(res);
+        break;
+    }
+    case REQ_CONSOLE:
+        res = res_new(v, RES_CONSOLE, req->seq);
+        res->href = ns_page_session_console(s);
+        post(res);
+        break;
+    case REQ_EVAL:
+        res = res_new(v, RES_EVAL, req->seq);
+        res->dump_tab = req->dump_tab;
+        res->inspect = req->inspect;
+        res->href = ns_page_session_eval(s, req->query);
+        post(res);
+        break;
+    case REQ_DUMP:
+        res = res_new(v, RES_DUMP, req->seq);
+        res->dump_tab = req->dump_tab;
+        res->href = ns_page_session_dump(s, req->query);
+        post(res);
+        break;
+    case REQ_CAMERA:
+        ns_page_session_resolve_camera(s, req->url, req->mods);
+        break;
+    case REQ_PRINT:
+        res = res_new(v, RES_PRINT, req->seq);
+        res->print_pages = ns_page_session_print(s, &res->print_setup);
+        res->ok = res->print_pages != NULL;
+        post(res);
+        break;
+    case REQ_CLOSE:
+        break;
+    }
+    req_free(req);
+    g_idle_add(pv_unref_idle, v);
 }
 
 static void
 push_req(NsProcView *v, Req *req)
 {
-    g_async_queue_push(v->queue, req);
+    if (v->closed && req->type != REQ_CLOSE) {
+        req_free(req);
+        return;
+    }
+    req->view = pv_ref(v);
+    ns_engine_thread_post(run_req, req);
 }
 
 static int
@@ -1515,7 +1459,6 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
 void
 ns_proc_view_load(NsProcView *v, const char *url)
 {
-    v->render_restarts = 0;
     do_load(v, url, TRUE, FALSE, TRUE);
 }
 
@@ -1533,7 +1476,6 @@ ns_proc_view_back(NsProcView *v)
     if (!ns_proc_view_can_back(v))
         return;
     v->hist_index--;
-    v->render_restarts = 0;
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
     do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, TRUE, TRUE);
 }
@@ -1544,7 +1486,6 @@ ns_proc_view_forward(NsProcView *v)
     if (!ns_proc_view_can_forward(v))
         return;
     v->hist_index++;
-    v->render_restarts = 0;
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
     do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, TRUE, TRUE);
 }
@@ -1552,7 +1493,6 @@ ns_proc_view_forward(NsProcView *v)
 void
 ns_proc_view_reload(NsProcView *v)
 {
-    v->render_restarts = 0;
     if (v->hist_index >= 0 && v->hist_index < (int)v->history->len)
         do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, FALSE,
                 TRUE);
@@ -1572,28 +1512,6 @@ const char *ns_proc_view_title(NsProcView *v) { return v->current_title; }
 int ns_proc_view_security(NsProcView *v) { return v ? v->security : 0; }
 const char *ns_proc_view_remote_ip(NsProcView *v) { return v ? v->remote_ip : NULL; }
 gboolean ns_proc_view_is_loading(NsProcView *v) { return v->loading; }
-int
-ns_proc_view_renderer_pid(NsProcView *v)
-{
-    if (!v) return -1;
-    g_mutex_lock(&v->proc_lock);
-    int pid = v->proc ? ns_rproc_http_pid(v->proc) : -1;
-    g_mutex_unlock(&v->proc_lock);
-    return pid;
-}
-
-void
-ns_proc_view_end_task(NsProcView *v)
-{
-    if (!v) return;
-    g_mutex_lock(&v->proc_lock);
-    if (v->proc) {
-        ns_rproc_http_interrupt(v->proc);
-        ns_rproc_http_terminate(v->proc);
-    }
-    g_mutex_unlock(&v->proc_lock);
-}
-
 void ns_proc_view_focus(NsProcView *v)
 {
     if (v->area)
@@ -1789,11 +1707,8 @@ on_result(gpointer data)
                 cairo_surface_destroy(v->frame);
             v->frame = res->surface;
             res->surface = NULL;
-            v->render_restarts = 0;
             gtk_widget_queue_draw(v->area);
             clear_busy_cursor(v);
-        } else if (current && res->ok && res->frame_unchanged) {
-            v->render_restarts = 0;
         }
         if (current && res->ok && res->nav && *res->nav &&
             v->js_redirects < NS_PROC_MAX_JS_REDIRECTS) {
@@ -1804,8 +1719,8 @@ on_result(gpointer data)
             pv_perm_bar_show(v, REQ_CAMERA, res->camera);
         if (current && res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
-        if (current && res->ok && res->audio && *res->audio)
-            pv_media_pump(v, res->audio);
+        if (current && res->ok)
+            pv_media_pump(v, res);
         if (current && res->ok && res->clipboard && v->area) {
             gdk_clipboard_set_text(gtk_widget_get_clipboard(v->area),
                                    res->clipboard);
@@ -1815,18 +1730,9 @@ on_result(gpointer data)
         if (v->render_pending) {
             v->render_pending = FALSE;
             start_render(v);
-        } else if (current && !res->ok && v->current_url) {
-            if (v->render_restarts < NS_PROC_MAX_RESTARTS) {
-                v->render_restarts++;
-                post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Renderer restarted"));
-                do_load(v, v->current_url, FALSE, FALSE, FALSE);
-            } else {
-                post_emit(v, NS_PROC_EVT_STATUS,
-                          ns_i18n("The page renderer keeps failing — "
-                                  "reload to retry"));
-                finish_loading(v);
-                clear_busy_cursor(v);
-            }
+        } else if (current && !res->ok) {
+            finish_loading(v);
+            clear_busy_cursor(v);
         }
     } else if (res->type == RES_VIEWPORT) {
         if (res->seq != v->viewport_seq)
@@ -2059,6 +1965,8 @@ done:
     g_free(res->camera);
     g_free(res->download);
     g_free(res->audio);
+    if (res->audio_blobs)
+        g_ptr_array_unref(res->audio_blobs);
     free(res->clipboard);
     free(res->href);
     free(res->cursor);
@@ -2132,7 +2040,7 @@ on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
             ns_proc_view_zoom_out(v);
         return TRUE;
     }
-    if (v->proc) {
+    if (v->opened) {
         double s = cur_scale(v);
         Req *req = g_new0(Req, 1);
         req->type = REQ_SCROLL;
@@ -2878,19 +2786,8 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     v->perm_revealer = NULL;
     v->perm_label = NULL;
     Req *req = g_new0(Req, 1);
-    req->type = REQ_QUIT;
+    req->type = REQ_CLOSE;
     push_req(v, req);
-    /* Unblock the worker if it is mid-request to a wedged renderer, so the join
-     * below can't stall the main loop for up to the 30 s IPC read timeout (which
-     * would also trip the watchdog heartbeat and restart the whole shell). */
-    g_mutex_lock(&v->proc_lock);
-    if (v->proc)
-        ns_rproc_http_interrupt(v->proc);
-    g_mutex_unlock(&v->proc_lock);
-    if (v->thread) {
-        g_thread_join(v->thread);
-        v->thread = NULL;
-    }
     pv_unref(v);
 }
 
@@ -3300,9 +3197,6 @@ ns_proc_view_new(void)
 {
     NsProcView *v = g_new0(NsProcView, 1);
     g_ref_count_init(&v->rc);
-    g_mutex_init(&v->proc_lock);
-    v->renderer_path = ns_proc_renderer_path();
-    v->queue = g_async_queue_new();
     v->history = g_ptr_array_new_with_free_func(g_free);
     v->hist_index = -1;
     v->link_pending_action = ACT_HOVER;
@@ -3395,7 +3289,6 @@ ns_proc_view_new(void)
 
     g_signal_connect(v->area, "destroy", G_CALLBACK(on_area_destroy), v);
 
-    v->thread = g_thread_new("ns-proc-view", worker_main, pv_ref(v));
     return v;
 }
 

@@ -1,4 +1,4 @@
-/* Northstar — GTK view backed by the internal renderer protocol.
+/* Northstar — GTK view over the page engine, driven on the engine thread.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -32,10 +32,6 @@ typedef enum {
 typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
                              const char *text, gpointer user_data);
 
-/* Resolved path to the renderer executable (NS_RENDERER, else discovered next
- * to the running binary). Newly allocated; free with g_free. */
-char *ns_proc_renderer_path(void);
-
 NsProcView *ns_proc_view_new(void);
 GtkWidget  *ns_proc_view_widget(NsProcView *view);
 void        ns_proc_view_set_notify(NsProcView *view, NsProcNotify cb,
@@ -63,10 +59,6 @@ gboolean    ns_proc_view_is_loading(NsProcView *view);
    or NULL). */
 int         ns_proc_view_security(NsProcView *view);
 const char *ns_proc_view_remote_ip(NsProcView *view);
-
-/* Task-manager support for the renderer session. */
-int         ns_proc_view_renderer_pid(NsProcView *view);
-void        ns_proc_view_end_task(NsProcView *view);
 
 /* Ask the user for a destination and write the current page there. */
 void   ns_proc_view_print(NsProcView *view);

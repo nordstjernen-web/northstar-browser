@@ -44,7 +44,6 @@
 #include "proc_limits.h"
 #include "procview.h"
 #include "procwindow.h"
-#include "rproc_inproc.h"
 #include "security.h"
 #include "threaddump.h"
 #include "version.h"
@@ -521,9 +520,6 @@ main(int argc, char **argv)
 
     ns_security_win32_mitigations_init(FALSE);
     ns_add_screenshot_writable_dirs(argc, argv);
-
-    if (proc_mode)
-        ns_rproc_single_process_enable();
 
     if (proc_mode)
         ns_security_add_writable_dir("/dev/shm");

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "mainctx.h"
 #include "engine.h"
 
 #include <cairo-pdf.h>
@@ -82,7 +83,7 @@ ns_engine_fetch_blocking_with_headers(const char *url, const char *top_url,
                                       GError **error)
 {
     fetch_state st = {0};
-    st.loop = g_main_loop_new(NULL, FALSE);
+    st.loop = g_main_loop_new(ns_engine_context(), FALSE);
     ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers,
                          NULL, on_fetch_done, &st);
     g_engine_blocking_depth++;
@@ -106,7 +107,7 @@ ns_engine_post_blocking(const char *url, const char *top_url,
                         const char *content_type, GError **error)
 {
     fetch_state st = {0};
-    st.loop = g_main_loop_new(NULL, FALSE);
+    st.loop = g_main_loop_new(ns_engine_context(), FALSE);
     ns_net_post_async(url, top_url, body, body_len, content_type,
                       NULL, on_fetch_done, &st);
     g_engine_blocking_depth++;
@@ -1031,7 +1032,7 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
     }
 
     imgs_fetch_state st = {0};
-    st.loop = g_main_loop_new(NULL, FALSE);
+    st.loop = g_main_loop_new(ns_engine_context(), FALSE);
     st.pending = (int)n;
     st.cache = cache;
 
