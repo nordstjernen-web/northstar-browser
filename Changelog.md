@@ -4,6 +4,17 @@ Significant changes in each release:
 
 1.0.9:
 ======
+* Text layout is ns-pango `3c6adba`, which merges upstream Pango 1.58.2.
+  Of upstream's changes, four reach code the fork carries: an overline or
+  strikethrough now spans the wider of a run's ink and logical extents,
+  as the underline already did, so a decorated run whose glyphs are
+  narrower than their advance no longer shows a shorter line above or
+  through it than under it; a run with no font has its offsets zeroed
+  rather than left uninitialised; the variant-to-feature mapping moves
+  into shared helpers; and two zero-length memcpy and qsort calls that
+  UBSan flags are guarded. The fork keeps its Ubuntu 24.04 dependency
+  floors rather than upstream's new HarfBuzz 11 and fontconfig 2.17
+  requirements, since nothing in the merged code needs them.
 * Text layout is ns-pango `5a49882`, and a paragraph now comes out the
   same wherever it sits in its text. The fork's itemisation cache keyed a
   paragraph on its bytes and the layout's attribute list but not on the
