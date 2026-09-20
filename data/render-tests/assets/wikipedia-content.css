@@ -33,10 +33,11 @@ body { font: 14px sans-serif; margin: 0; color: #202122; }
 .tmulti .theader { text-align: center; font-weight: bold; }
 .tmulti .thumbcaption { text-align: left; background-color: transparent; }
 
-.hlist ul { margin: 0; padding: 0; }
-.hlist li { display: inline; margin: 0; }
-.hlist li:not(:last-child)::after { content: " · "; font-weight: bold; }
-.hlist ul ul { display: inline; }
+.hlist dl, .hlist ol, .hlist ul { margin: 0; padding: 0; }
+.hlist dd, .hlist dt, .hlist li { display: inline; margin: 0; }
+.hlist dl dl, .hlist ol ol, .hlist ul ul { display: inline; }
+.hlist dd:after, .hlist li:after { content: " · "; font-weight: bold; }
+.hlist dd:last-child:after, .hlist dt:last-child:after, .hlist li:last-child:after { content: none; }
 
 .plainlist ul { list-style: none; margin: 0; padding: 0; }
 

@@ -391,3 +391,8 @@ figure[typeof~="mw:File/Thumb"] > a { display: block; }
   .vector-column-start { display: none; }
   .mw-content-container { padding-left: 0; }
 }
+
+.hlist ul { margin: 0; padding: 0; }
+.hlist li { display: inline; margin: 0; }
+.hlist li:after { content: " · "; font-weight: bold; }
+.hlist li:last-child:after { content: none; }
