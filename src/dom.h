@@ -162,6 +162,13 @@ const char *ns_attr_local_name(const ns_attr *attr);
 guint64     ns_attr_name_bloom_bit(const char *name);
 guint64     ns_node_attr_bloom(const ns_node *el);
 gboolean    ns_node_has_class(const ns_node *el, const char *name, gsize len);
+
+typedef struct ns_class_token {
+    const char *p;
+    guint       len;
+} ns_class_token;
+
+const ns_class_token *ns_node_class_tokens(const ns_node *el, guint *n_out);
 gboolean    ns_node_is_element_named(const ns_node *n, const char *tag);
 
 const ns_node *ns_node_root(const ns_node *n);

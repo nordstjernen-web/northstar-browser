@@ -376,6 +376,21 @@ Significant changes in each release:
   a page and its service worker, so a worker that fills a cache at
   install time serves it offline. Until now every method resolved with
   nothing.
+* Style recalculation reads each element's selector keys once. To find
+  the rules that might match an element, the cascade looks it up in
+  every stylesheet's index by id, by each of its classes, by tag name
+  and by each attribute name -- and it re-derived those keys for every
+  sheet it consulted, so an element was scanned for its `id` and `class`
+  attributes, had its class list re-split into tokens with a copy per
+  token, and had every attribute name measured and lower-cased once per
+  stylesheet rather than once. The keys are now built a single time per
+  element and handed to each sheet, the class tokens come from the
+  parsed class set the element already caches for `ns_node_has_class`,
+  and the tag and attribute names are folded to lower case once instead
+  of at every lookup. Nothing about which rules match changed; the same
+  page simply reaches the same answer with a fraction of the string
+  work, which is most of what style recalculation was doing on a large
+  document.
 
 1.0.8:
 ======

@@ -1075,7 +1075,7 @@ ns_attr_free(ns_attr *a)
 
 typedef struct ns_class_set {
     guint n;
-    struct { const char *p; guint len; } tok[];
+    ns_class_token tok[];
 } ns_class_set;
 
 static ns_class_set g_nd_empty_class_set;
@@ -1119,16 +1119,35 @@ ns_class_set_clear(ns_node *el)
     el->class_set = NULL;
 }
 
-gboolean
-ns_node_has_class(const ns_node *el, const char *name, gsize len)
+static ns_class_set *
+ns_class_set_ensure(const ns_node *el)
 {
-    if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
     ns_class_set *cs = el->class_set;
     if (!cs) {
         const char *cls = ns_element_get_attr(el, "class");
         cs = (cls && *cls) ? ns_class_set_build(cls) : &g_nd_empty_class_set;
         ((ns_node *)el)->class_set = cs;
     }
+    return cs;
+}
+
+const ns_class_token *
+ns_node_class_tokens(const ns_node *el, guint *n_out)
+{
+    if (!el || el->kind != NS_NODE_ELEMENT) {
+        if (n_out) *n_out = 0;
+        return NULL;
+    }
+    ns_class_set *cs = ns_class_set_ensure(el);
+    if (n_out) *n_out = cs->n;
+    return cs->tok;
+}
+
+gboolean
+ns_node_has_class(const ns_node *el, const char *name, gsize len)
+{
+    if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
+    ns_class_set *cs = ns_class_set_ensure(el);
     for (guint i = 0; i < cs->n; i++)
         if (cs->tok[i].len == len && memcmp(cs->tok[i].p, name, len) == 0)
             return TRUE;

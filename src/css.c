@@ -24986,9 +24986,93 @@ typedef struct {
     GArray *pending_out;
 } gather_dest;
 
+typedef struct css_el_keys {
+    const char  *id;
+    const char  *tag;
+    const char  *tag_suffix;
+    const char **classes;
+    const char **attrs;
+    guint        n_classes;
+    guint        n_attrs;
+} css_el_keys;
+
+static GByteArray *g_el_key_buf;
+static GArray     *g_el_key_offs;
+static GPtrArray  *g_el_key_ptrs;
+
+static guint
+css_el_key_put(const char *s, gsize len, gboolean lower)
+{
+    guint off = g_el_key_buf->len;
+    g_byte_array_set_size(g_el_key_buf, off + (guint)len + 1);
+    char *dst = (char *)g_el_key_buf->data + off;
+    if (lower)
+        for (gsize i = 0; i < len; i++) dst[i] = g_ascii_tolower(s[i]);
+    else
+        memcpy(dst, s, len);
+    dst[len] = '\0';
+    return off;
+}
+
+static void
+css_el_keys_build(const ns_node *el, css_el_keys *k)
+{
+    memset(k, 0, sizeof *k);
+    if (!el || el->kind != NS_NODE_ELEMENT) return;
+    if (!g_el_key_buf) {
+        g_el_key_buf  = g_byte_array_sized_new(512);
+        g_el_key_offs = g_array_new(FALSE, FALSE, sizeof(guint));
+        g_el_key_ptrs = g_ptr_array_new();
+    }
+    g_byte_array_set_size(g_el_key_buf, 0);
+    g_array_set_size(g_el_key_offs, 0);
+    g_ptr_array_set_size(g_el_key_ptrs, 0);
+
+    const char *id = ns_element_get_attr(el, "id");
+    k->id = (id && *id) ? id : NULL;
+
+    guint n_tokens = 0;
+    const ns_class_token *toks = ns_node_class_tokens(el, &n_tokens);
+    for (guint i = 0; i < n_tokens; i++) {
+        guint off = css_el_key_put(toks[i].p, toks[i].len, FALSE);
+        g_array_append_val(g_el_key_offs, off);
+    }
+    k->n_classes = n_tokens;
+
+    for (const ns_attr *a = el->attrs; a; a = a->next) {
+        const char *local_name = ns_attr_local_name(a);
+        if (!local_name || !*local_name) continue;
+        guint off = css_el_key_put(local_name, strlen(local_name), TRUE);
+        g_array_append_val(g_el_key_offs, off);
+        k->n_attrs++;
+    }
+
+    guint tag_off = 0, suffix_off = 0;
+    gboolean have_tag = el->name && *el->name, have_suffix = FALSE;
+    if (have_tag) {
+        tag_off = css_el_key_put(el->name, strlen(el->name), TRUE);
+        const char *colon = strchr(el->name, ':');
+        if (colon && ns_element_get_attr(el, "data-nd-ns-prefix")) {
+            suffix_off = css_el_key_put(colon + 1, strlen(colon + 1), TRUE);
+            have_suffix = TRUE;
+        }
+    }
+
+    const char *base = (const char *)g_el_key_buf->data;
+    for (guint i = 0; i < g_el_key_offs->len; i++)
+        g_ptr_array_add(g_el_key_ptrs,
+                        (gpointer)(base + g_array_index(g_el_key_offs, guint, i)));
+    if (k->n_classes) k->classes = (const char **)g_el_key_ptrs->pdata;
+    if (k->n_attrs)
+        k->attrs = (const char **)g_el_key_ptrs->pdata + k->n_classes;
+    k->tag        = have_tag ? base + tag_off : NULL;
+    k->tag_suffix = have_suffix ? base + suffix_off : NULL;
+}
+
 static void
 gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                      int sheet_index, const ns_node *el,
+                     const css_el_keys *keys,
                      gather_dest *dests, guint n_dests,
                      GHashTable *layer_ranks)
 {
@@ -25020,47 +25104,27 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         } \
     } while (0)
 
-    if (el && el->kind == NS_NODE_ELEMENT) {
-        const char *id = ns_element_get_attr(el, "id");
-        if (id && *id) {
-            GArray *bucket = g_hash_table_lookup(idx->by_id, id);
+    if (keys) {
+        if (keys->id) {
+            GArray *bucket = g_hash_table_lookup(idx->by_id, keys->id);
             CAND_PUSH_ARR(bucket);
         }
-        const char *cls = ns_element_get_attr(el, "class");
-        if (cls && *cls) {
-            const char *s = cls;
-            while (*s) {
-                while (*s && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r' || *s == '\f')) s++;
-                const char *tok = s;
-                while (*s && !(*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r' || *s == '\f')) s++;
-                if (s == tok) break;
-                gsize tlen = (gsize)(s - tok);
-                char small[64];
-                char *key;
-                if (tlen < sizeof(small)) {
-                    memcpy(small, tok, tlen); small[tlen] = '\0'; key = small;
-                } else {
-                    key = g_strndup(tok, tlen);
-                }
-                GArray *bucket = g_hash_table_lookup(idx->by_class, key);
-                if (key != small) g_free(key);
-                CAND_PUSH_ARR(bucket);
-            }
+        for (guint i = 0; i < keys->n_classes; i++) {
+            GArray *bucket = g_hash_table_lookup(idx->by_class, keys->classes[i]);
+            CAND_PUSH_ARR(bucket);
         }
-        if (el->name && *el->name) {
-            CAND_PUSH_ARR(css_index_lookup_ci(idx->by_tag, el->name,
-                                              strlen(el->name)));
-            const char *colon = strchr(el->name, ':');
-            if (colon && ns_element_get_attr(el, "data-nd-ns-prefix"))
-                CAND_PUSH_ARR(css_index_lookup_ci(idx->by_tag, colon + 1,
-                                                  strlen(colon + 1)));
+        if (keys->tag) {
+            GArray *bucket = g_hash_table_lookup(idx->by_tag, keys->tag);
+            CAND_PUSH_ARR(bucket);
+        }
+        if (keys->tag_suffix) {
+            GArray *bucket = g_hash_table_lookup(idx->by_tag, keys->tag_suffix);
+            CAND_PUSH_ARR(bucket);
         }
         if (idx->by_attr && g_hash_table_size(idx->by_attr) > 0) {
-            for (const ns_attr *a = el->attrs; a; a = a->next) {
-                const char *local_name = ns_attr_local_name(a);
-                if (!local_name) continue;
-                CAND_PUSH_ARR(css_index_lookup_ci(idx->by_attr, local_name,
-                                                  strlen(local_name)));
+            for (guint i = 0; i < keys->n_attrs; i++) {
+                GArray *bucket = g_hash_table_lookup(idx->by_attr, keys->attrs[i]);
+                CAND_PUSH_ARR(bucket);
             }
         }
     }
@@ -28760,12 +28824,14 @@ cascade_walk(ns_node *node,
             dests[n_pe + 1].pending_out = pg->p;
             n_pe++;
         }
-        gather_matches_multi(ua, NS_CSS_ORIGIN_UA, 0, node, dests,
+        css_el_keys el_keys;
+        css_el_keys_build(node, &el_keys);
+        gather_matches_multi(ua, NS_CSS_ORIGIN_UA, 0, node, &el_keys, dests,
                              (guint)n_pe + 1,
                              layer_ranks);
         for (gsize i = 0; i < n_author; i++)
             gather_matches_multi(author[i], NS_CSS_ORIGIN_AUTHOR,
-                                 (int)(i + 1), node, dests,
+                                 (int)(i + 1), node, &el_keys, dests,
                                  (guint)n_pe + 1, layer_ranks);
 
         char *pres_css = presentational_hints_css(node);
