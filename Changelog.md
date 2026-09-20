@@ -302,6 +302,17 @@ Significant changes in each release:
   polyfill verifier no longer checks for those natively provided
   constructors. Three unreferenced engine functions are removed with
   them.
+* `document.cookie` and network requests share one cookie store per
+  site partition, owned by libcurl. Each partition has a cookie-sharing
+  libcurl share and a holder handle that loads and writes the Netscape
+  jar file; requests attach to that share instead of loading and
+  rewriting the file per handle, script writes go in through
+  `CURLOPT_COOKIELIST` and reads come out of `CURLINFO_COOKIELIST`. The
+  separate `.js.txt` sidecar jar, the hand-written file parser and
+  rewriter and the clobbering race between concurrent handles that
+  motivated the sidecar are gone; an existing sidecar is folded into the
+  jar on first use. Scripts still cannot read or overwrite `HttpOnly`
+  cookies.
 
 1.0.8:
 ======
