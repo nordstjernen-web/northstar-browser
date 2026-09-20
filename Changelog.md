@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `align` and `valign` on a `<tr>`, `<thead>`, `<tbody>`, `<tfoot>`,
+  `<col>` or `<colgroup>` now reach the cells, and a cell's
+  `vertical-align` is inherited rather than pinned to `middle` by the
+  default stylesheet, so a row can set the alignment for its cells the
+  way the HTML rendering rules say it can. Cells still centre by default,
+  because the row groups carry that default and the cells inherit it.
+* `<figcaption>` is no longer italic and smaller than its figure, and a
+  `<figure>`'s and a `<dl>`'s default margins match the HTML rendering
+  rules. The italics in particular showed on every Wikipedia thumbnail
+  caption.
 * A style rule that names a pseudo-element is no longer thrown away
   because of what follows the pseudo-element's name. The selector parser
   treated any character after `::before` or `::after` as a syntax error,
