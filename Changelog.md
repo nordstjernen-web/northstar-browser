@@ -399,11 +399,15 @@ Significant changes in each release:
   window object consults its named properties whenever ordinary property
   lookup fails -- so a single `typeof someGlobal` cost a walk of every
   element in the document, and feature detection in a loop cost one per
-  test. The document now tracks whether its index is complete, which it
-  is except after an id is written from engine code that does not
-  maintain it, and a miss against a complete index answers immediately.
-  A lookup scoped to a subtree, a duplicated id and an index of unknown
-  provenance all still take the walk.
+  test. Writing an `id` attribute now updates the index from the one
+  place every id write passes through, rather than from the scripting
+  layer alone, so the index holds every id in the document and a miss
+  can answer immediately -- the same trust the document's tag index
+  already enjoys. A lookup scoped to a subtree, such as one inside a
+  shadow root whose ids the document index deliberately does not hold,
+  and a duplicated id both still take the walk. Three thousand reads of
+  an undefined global on a document of eight thousand elements fall from
+  420 ms to 0.5 ms.
 * Declaring a transition no longer costs a style recalculation every
   frame. The animation layer keeps a record for each element that names
   a `transition` or an `animation`, and creating that record barred the

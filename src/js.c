@@ -24266,15 +24266,6 @@ ns_js_record_attr_change_ns(ns_js *js, ns_node *target,
          g_ascii_strcasecmp(name, "class") == 0))
         ns_qcache_invalidate(js);
     if (js && js->current_doc && target && name &&
-        g_ascii_strcasecmp(name, "id") == 0) {
-        ns_node *doc = js->current_doc;
-        if (old_value && *old_value)
-            ns_doc_id_index_unregister(doc, old_value, target);
-        const char *new_id = ns_element_get_attr(target, "id");
-        if (new_id && *new_id)
-            ns_doc_id_index_register(doc, new_id, target);
-    }
-    if (js && js->current_doc && target && name &&
         g_ascii_strcasecmp(name, "class") == 0) {
         ns_node *doc = js->current_doc;
         if (old_value && *old_value)
