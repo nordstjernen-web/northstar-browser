@@ -25,10 +25,13 @@ sandbox (plus `PR_SET_NO_NEW_PRIVS`), with a default-deny seccomp syscall
 filter in both GUI and headless/tooling modes · no JIT.
 See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 
-**Minimalism:** one window, one page, one process. The engine is a
-compact body of C — about 160,000 lines of original C (excluding the
-vendored WAMR, Wuffs and audio decoders, and the generated image-data
-tables) — small enough for one person to read and audit end-to-end.
+**Minimalism:** one window, one page, one process. The GTK shell runs on
+the main thread and the page engine on one dedicated thread with its own
+main loop, so a slow page never freezes the window, and the two talk
+through plain function calls. The engine is a compact body of C — about
+170,000 lines of original C, excluding the vendored WAMR, Wuffs and
+audio decoders — small enough for one person to read and audit
+end-to-end.
 
 ## What this edition is
 
@@ -46,7 +49,8 @@ libavif when available, and SVG in the engine).
 ## Browser features
 
 - **HTML** parsed to a DOM by lexbor; **CSS** by the engine's own
-  cascade — flex, grid, transforms, gradients, `@keyframes`, scroll snap.
+  cascade — flex, grid, transforms, gradients, `@keyframes`, scroll snap,
+  and typed `calc()` math over lengths, angles, times and resolutions.
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL).
@@ -54,16 +58,19 @@ libavif when available, and SVG in the engine).
 - **Workers** — dedicated workers with structured-clone messaging,
   message channels and broadcast channels.
 - **Storage** — IndexedDB over SQLite, `localStorage`/`sessionStorage`
-  and the cache API, each partitioned by origin.
+  and the Cache API (`caches`, request/response pairs per the Service
+  Workers specification), each partitioned by site.
 - **Live connections** — WebSockets and server-sent events.
 - **Navigation API** — `window.navigation` for single-page routing.
-- **Service workers** — origin-scoped registration, persistence and
-  controlled-page fetch interception.
+- **Service workers** — origin-scoped registration, persistence,
+  controlled-page fetch interception and offline pages served from the
+  Cache API.
 - **WebExtensions** — installed local extensions with manifest content
   scripts, safe packaged resources, local storage and runtime messaging.
 - **Networking** over HTTP/2 with libcurl — HTTP/3 when the linked
   libcurl provides it — HSTS, CSP, subresource-integrity (SRI) checks,
-  partitioned cookies.
+  and cookies partitioned by site in one libcurl store that
+  `document.cookie` and network requests share.
 - **Safe browsing** — before a top-level navigation is fetched, its host
   is checked against a local SHA-256 blocklist. The check runs entirely
   on-device.
@@ -85,8 +92,8 @@ libavif when available, and SVG in the engine).
 - **Spell checking** — optional, via the Enchant library.
 - **WebAssembly** — the JavaScript API over a vendored WAMR interpreter.
 - **Single window / single process** — the browser shows one page in one
-  window, and the page engine runs in the shell process (no per-tab
-  renderer processes).
+  window, and the page engine runs on its own thread inside the shell
+  process (no renderer processes, no request protocol between the two).
 - **UI** — bookmarks, find-in-page, printing, save-to-PDF, JS console,
   settings, headless mode.
 
@@ -142,7 +149,7 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 | Component | Role |
 |-----------|------|
 | [lexbor](https://github.com/lexbor/lexbor) v3.0.1 | HTML5 → DOM parser and the WHATWG URL module |
-| [quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.16.2 | JavaScript engine — no JIT |
+| [quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.17.0 | JavaScript engine — no JIT |
 | [ns-pango](https://github.com/nordstjernen-web/ns-pango) | Text itemization, shaping and line breaking — a Pango fork with a cross-layout shaping cache |
 
 lexbor and quickjs-ng take a system copy instead when the build finds one

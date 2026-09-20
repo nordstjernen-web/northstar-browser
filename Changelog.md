@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.9:
 ======
+* Placeholder text in an `<input>` or `<textarea>` is no longer
+  spell-checked. The layout already withheld spell ranges from a
+  placeholder, but the painter's fallback underlined every run inside an
+  editable host, so an empty search box showed a red squiggle under its
+  own hint; the fallback now covers only `contenteditable` hosts, whose
+  runs carry no explicit ranges. The README describes the engine thread
+  in place of the removed renderer processes and request protocol, the
+  typed `calc()` math, the Cache API and the site-partitioned cookie
+  store, and its screenshot is recaptured from the 1.0.9 window.
 * Text layout is ns-pango `3c6adba`, which merges upstream Pango 1.58.2.
   Of upstream's changes, four reach code the fork carries: an overline or
   strikethrough now spans the wider of a run's ink and logical extents,
