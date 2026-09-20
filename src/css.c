@@ -24959,26 +24959,6 @@ selector_cache_insert(const ns_css_rule *rule,
     g_hash_table_add(g_selector_cache, entry);
 }
 
-static GArray *
-css_index_lookup_ci(GHashTable *table, const char *name, gsize nlen)
-{
-    for (gsize i = 0; i < nlen; i++)
-        if (name[i] >= 'A' && name[i] <= 'Z') {
-            char small[64];
-            char *key;
-            if (nlen < sizeof(small)) {
-                for (gsize j = 0; j < nlen; j++) small[j] = g_ascii_tolower(name[j]);
-                small[nlen] = '\0'; key = small;
-            } else {
-                key = g_ascii_strdown(name, (gssize)nlen);
-            }
-            GArray *bucket = g_hash_table_lookup(table, key);
-            if (key != small) g_free(key);
-            return bucket;
-        }
-    return g_hash_table_lookup(table, name);
-}
-
 typedef struct {
     ns_css_pseudo_element pe;
     GArray *out;
