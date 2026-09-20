@@ -6842,6 +6842,12 @@ inline_atomic_needs_layout(const ns_box *ab)
 static double
 inline_atomic_measure_basis(const ns_box *box)
 {
+    const ns_css_value *wv = box && box->style
+        ? box->style->values[NS_CSS_WIDTH] : NULL;
+    if (value_is_percent(wv)) {
+        double content = measure_natural_width((ns_box *)box, box->style);
+        if (content >= 0) return content;
+    }
     double basis = ns_css_container_w();
     if (!(basis > 0)) {
         for (const ns_box *p = box ? box->parent : NULL; p; p = p->parent) {

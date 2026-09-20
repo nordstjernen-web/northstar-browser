@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An inline-block whose width is a percentage no longer drags the
+  intrinsic width of whatever contains it up to the width of the page. A
+  percentage is indefinite while intrinsic sizes are being measured, but
+  the atomic was laid out against the containing block anyway, so a table
+  cell holding one reported a minimum as wide as the container and the
+  table grew to match. It is measured against its own content instead.
 * `align` and `valign` on a `<tr>`, `<thead>`, `<tbody>`, `<tfoot>`,
   `<col>` or `<colgroup>` now reach the cells, and a cell's
   `vertical-align` is inherited rather than pinned to `middle` by the
