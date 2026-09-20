@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `min-width` and `max-width` on a table cell now take part in the
+  column measures. The auto layout read only the cell's `width`, so a
+  cell asking for `width: 50px; min-width: 150px` stayed at 50px and a
+  `max-width` never clamped anything. A cell's contribution is now
+  clamped the way every other box's is -- `max-width` first, then
+  `min-width` -- in the min-content floor, the max-content measure and
+  the specified width alike.
 * A table cell inherits `text-align` from the table or the row again.
   The default stylesheet pinned `td, th` to `text-align: left`, which no
   browser's does, so `text-align: center` set on a `<table>` or a `<tr>`

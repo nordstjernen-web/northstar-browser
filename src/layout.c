@@ -7007,6 +7007,28 @@ table_cell_in_pass(const ns_box *cell, int pass)
 }
 
 static double
+table_cell_definite_width(const ns_style *s, ns_css_prop prop, double h_extra)
+{
+    const ns_css_value *v = s ? s->values[prop] : NULL;
+    if (!v || !(v->kind == NS_CSS_V_LENGTH || v->kind == NS_CSS_V_CALC) ||
+        value_is_percent(v))
+        return -1;
+    double w = length_resolve(v, 0, -1);
+    return w >= 0 ? w + h_extra : -1;
+}
+
+static double
+table_cell_clamp(const ns_box *cell, double h_extra, double w)
+{
+    const ns_style *s = cell ? cell->style : NULL;
+    double max_w = table_cell_definite_width(s, NS_CSS_MAX_WIDTH, h_extra);
+    double min_w = table_cell_definite_width(s, NS_CSS_MIN_WIDTH, h_extra);
+    if (max_w >= 0 && w > max_w) w = max_w;
+    if (min_w >= 0 && w < min_w) w = min_w;
+    return w;
+}
+
+static double
 table_intrinsic_width(ns_box *box, const ns_style *inherited, gboolean min)
 {
     double captions = 0;
@@ -7055,7 +7077,8 @@ table_intrinsic_width(ns_box *box, const ns_style *inherited, gboolean min)
                     if (e >= 0) w = e > content_min ? e : content_min;
                 }
                 table_widen_columns(cols, max_cols, col, span,
-                                    w + extra - hsp * (span - 1));
+                                    table_cell_clamp(cell, extra, w + extra)
+                                    - hsp * (span - 1));
                 col += (guint)span;
             }
             table_row_done(rs_remain, max_cols);
@@ -7678,7 +7701,8 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                     double h_extra = cell->padding.left + cell->padding.right
                         + cell->border.left + cell->border.right
                         + cell->margin.left + cell->margin.right;
-                    double cell_outer = natural + h_extra;
+                    double cell_outer =
+                        table_cell_clamp(cell, h_extra, natural + h_extra);
                     gboolean cell_fixed = FALSE;
                     double cell_explicit = -1;
                     if (cell->style && cell->style->values[NS_CSS_WIDTH]) {
@@ -7686,7 +7710,9 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                         if (cwv->kind == NS_CSS_V_LENGTH || cwv->kind == NS_CSS_V_CALC) {
                             cell_fixed = TRUE;
                             double w = length_resolve(cwv, col_avail > 0 ? col_avail : 0, -1);
-                            if (w >= 0) cell_explicit = w + h_extra;
+                            if (w >= 0)
+                                cell_explicit =
+                                    table_cell_clamp(cell, h_extra, w + h_extra);
                         }
                     }
                     table_widen_columns(col_widths, max_cols, col, span,
@@ -7744,9 +7770,11 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                                          &m, &pd, &bd);
                         double h_extra = pd.left + pd.right + bd.left + bd.right +
                                          m.left + m.right;
+                        double cell_floor = table_cell_clamp(
+                            cell, h_extra,
+                            measure_min_content_width(cell, cs) + h_extra);
                         table_widen_columns(col_min, max_cols, col, span,
-                                            measure_min_content_width(cell, cs)
-                                            + h_extra - hsp * (span - 1));
+                                            cell_floor - hsp * (span - 1));
                         col += (guint)span;
                     }
                     table_row_done(rs_remain, max_cols);
