@@ -59,6 +59,20 @@
   </branding>
 
   <releases>
+    <release version="1.0.9" date="2026-09-20">
+      <description>
+        <p>Security, chrome and layout release.</p>
+        <ul>
+          <li>Entering full screen shows a five-second notice naming the host, and Element.requestFullscreen() rejects as the Fullscreen API specifies instead of pretending to succeed.</li>
+          <li>The address bar suggests matching bookmarks, ranked history entries and a search as you type.</li>
+          <li>The navigation toolbar is laid out like Mozilla 1.0 with icon-over-label buttons, and the about:start splash is redrawn.</li>
+          <li>The JavaScript engine is quickjs-ng v0.17.0; canvases are origin-tainted, cross-origin frames no longer expose their DOM, and postMessage matches targetOrigin exactly.</li>
+          <li>Downloads and clipboard writes require a recent user gesture, subresource redirects keep their initiator, and the Linux sandbox probes the Landlock ABI at startup.</li>
+          <li>SVG, XML entity and CSS parsing are bounded; custom properties, color-mix(), shorthands and math functions follow their specifications.</li>
+          <li>Grid auto-placement is uncapped, floats and margin collapsing are placed per specification, and table column counting accounts for spanned cells.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.8" date="2026-09-16">
       <description>
         <p>Animation, layout and forms release.</p>
