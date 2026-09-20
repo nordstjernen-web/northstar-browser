@@ -293,6 +293,15 @@ Significant changes in each release:
   binary and a second copy off the heap on every start page; the
   unreferenced `data/splash.png` is gone and `scripts/gen-splash.py`
   writes `data/splash.gif` directly.
+* Dead JavaScript bindings are gone: the C `Element.animate()` that
+  resolved every animation as finished before the polyfill replaced it,
+  the fake `getSelection()` and `Range` stubs whose twenty methods did
+  nothing, and the polyfill copies of `URLSearchParams`,
+  `AbortController`, `AbortSignal`, `XMLSerializer` and
+  `structuredClone` that never ran because the native binding wins; the
+  polyfill verifier no longer checks for those natively provided
+  constructors. Three unreferenced engine functions are removed with
+  them.
 
 1.0.8:
 ======

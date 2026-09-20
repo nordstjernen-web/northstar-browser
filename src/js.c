@@ -13145,16 +13145,6 @@ ns_css_escape(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_selection_toString(JSContext *ctx, JSValueConst this_val,
-                      int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
-    const char *t = js && js->selection_text ? js->selection_text : "";
-    return JS_NewString(ctx, t);
-}
-
-static JSValue
 ns_make_dom_rect(JSContext *ctx, double x, double y, double w, double h)
 {
     JSValue global = JS_GetGlobalObject(ctx);
@@ -13226,84 +13216,6 @@ ns_range_clone_contents(JSContext *ctx, JSValueConst this_val,
         JS_NewString(ctx, js && js->selection_text ? js->selection_text : ""));
     JS_SetPropertyStr(ctx, frag, "childNodes", JS_NewArray(ctx));
     return frag;
-}
-
-static JSValue
-ns_selection_make_range(JSContext *ctx)
-{
-    ns_js *js = js_from_ctx(ctx);
-    JSValue r = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, r, "collapsed",
-        js && js->selection_has_range ? JS_FALSE : JS_TRUE);
-    JS_SetPropertyStr(ctx, r, "startContainer", JS_NULL);
-    JS_SetPropertyStr(ctx, r, "endContainer",   JS_NULL);
-    JS_SetPropertyStr(ctx, r, "startOffset",    JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, r, "endOffset",      JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, r, "commonAncestorContainer", JS_NULL);
-    JS_SetPropertyStr(ctx, r, "toString",
-        JS_NewCFunction(ctx, ns_selection_toString, "toString", 0));
-    JS_SetPropertyStr(ctx, r, "cloneContents",
-        JS_NewCFunction(ctx, ns_range_clone_contents, "cloneContents", 0));
-    JS_SetPropertyStr(ctx, r, "getBoundingClientRect",
-        JS_NewCFunction(ctx, ns_range_get_bounding_client_rect,
-                        "getBoundingClientRect", 0));
-    JS_SetPropertyStr(ctx, r, "getClientRects",
-        JS_NewCFunction(ctx, ns_range_get_client_rects, "getClientRects", 0));
-    static const char *stub_methods[] = {
-        "setStart","setEnd","setStartBefore","setStartAfter",
-        "setEndBefore","setEndAfter","selectNode","selectNodeContents",
-        "collapse","cloneRange","deleteContents",
-        "extractContents","insertNode","surroundContents",
-        "detach","compareBoundaryPoints","intersectsNode","isPointInRange",
-        "comparePoint","createContextualFragment",
-    };
-    for (gsize i = 0; i < G_N_ELEMENTS(stub_methods); i++)
-        JS_SetPropertyStr(ctx, r, stub_methods[i],
-            JS_NewCFunction(ctx, ns_event_noop, stub_methods[i], 0));
-    return r;
-}
-
-static JSValue
-ns_selection_get_range_at(JSContext *ctx, JSValueConst this_val,
-                          int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    return ns_selection_make_range(ctx);
-}
-
-static JSValue ns_event_false(JSContext *ctx, JSValueConst this_val,
-                              int argc, JSValueConst *argv);
-
-static JSValue
-ns_window_get_selection(JSContext *ctx, JSValueConst this_val,
-                        int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
-    gboolean has = js && js->selection_has_range;
-    static const ns_fn_def sel_methods[] = {
-        { "removeAllRanges", 0 }, { "addRange", 1 }, { "removeRange", 1 },
-        { "collapse", 2 }, { "collapseToStart", 0 }, { "collapseToEnd", 0 },
-        { "empty", 0 }, { "setBaseAndExtent", 4 }, { "extend", 2 },
-        { "selectAllChildren", 1 }, { "modify", 3 }, { "setPosition", 2 },
-        { "deleteFromDocument", 0 },
-    };
-    JSValue sel = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, sel, "anchorNode",   JS_NULL);
-    JS_SetPropertyStr(ctx, sel, "focusNode",    JS_NULL);
-    JS_SetPropertyStr(ctx, sel, "anchorOffset", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, sel, "focusOffset",  JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, sel, "isCollapsed",  has ? JS_FALSE : JS_TRUE);
-    JS_SetPropertyStr(ctx, sel, "rangeCount",   JS_NewInt32(ctx, has ? 1 : 0));
-    JS_SetPropertyStr(ctx, sel, "type",
-        JS_NewString(ctx, has ? "Range" : "None"));
-    JS_SetPropertyStr(ctx, sel, "toString",
-        JS_NewCFunction(ctx, ns_selection_toString, "toString", 0));
-    JS_SetPropertyStr(ctx, sel, "getRangeAt",
-        JS_NewCFunction(ctx, ns_selection_get_range_at, "getRangeAt", 1));
-    ns_bind_fns(ctx, sel, ns_event_noop, sel_methods, G_N_ELEMENTS(sel_methods));
-    ns_bind_fn(ctx, sel, "containsNode", ns_event_false, 2);
-    return sel;
 }
 
 static JSValue
@@ -30657,92 +30569,6 @@ ns_element_hasAttributes(JSContext *ctx, JSValueConst this_val,
 static JSValue ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 static JSValue ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 
-static JSValue
-ns_anim_finish_job(JSContext *ctx, int argc, JSValueConst *argv)
-{
-    if (argc < 1) return JS_UNDEFINED;
-    JSValueConst anim = argv[0];
-    JSValue ev = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, ev, "type",          JS_NewString(ctx, "finish"));
-    JS_SetPropertyStr(ctx, ev, "target",        JS_DupValue(ctx, anim));
-    JS_SetPropertyStr(ctx, ev, "currentTarget", JS_DupValue(ctx, anim));
-
-    JSValue onf = JS_GetPropertyStr(ctx, anim, "onfinish");
-    if (JS_IsFunction(ctx, onf)) {
-        JSValueConst a[1] = { ev };
-        JSValue r = JS_Call(ctx, onf, anim, 1, a);
-        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
-        JS_FreeValue(ctx, r);
-    }
-    JS_FreeValue(ctx, onf);
-
-    JSValue listeners = JS_GetPropertyStr(ctx, anim, "_listeners");
-    if (JS_IsArray(listeners)) {
-        uint32_t len = ns_js_array_length(ctx, listeners);
-        for (uint32_t i = 0; i < len; i++) {
-            JSValue e = JS_GetPropertyUint32(ctx, listeners, i);
-            JSValue tv = JS_GetPropertyStr(ctx, e, "type");
-            const char *ts = JS_ToCString(ctx, tv);
-            if (ts && strcmp(ts, "finish") == 0) {
-                JSValue cb = JS_GetPropertyStr(ctx, e, "cb");
-                if (JS_IsFunction(ctx, cb)) {
-                    JSValueConst a[1] = { ev };
-                    JSValue r = JS_Call(ctx, cb, anim, 1, a);
-                    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
-                    JS_FreeValue(ctx, r);
-                }
-                JS_FreeValue(ctx, cb);
-            }
-            if (ts) JS_FreeCString(ctx, ts);
-            JS_FreeValue(ctx, tv);
-            JS_FreeValue(ctx, e);
-        }
-    }
-    JS_FreeValue(ctx, listeners);
-    JS_FreeValue(ctx, ev);
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_element_animate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    static const ns_fn_def anim_methods[] = {
-        { "play", 0 }, { "pause", 0 }, { "cancel", 0 },
-        { "finish", 0 }, { "reverse", 0 },
-        { "commitStyles", 0 }, { "persist", 0 },
-        { "updatePlaybackRate", 1 },
-    };
-    JSValue anim = JS_NewObject(ctx);
-    ns_bind_fns(ctx, anim, ns_event_noop, anim_methods, G_N_ELEMENTS(anim_methods));
-    ns_bind_fn(ctx, anim, "addEventListener",    ns_port_add_event_listener,    2);
-    ns_bind_fn(ctx, anim, "removeEventListener", ns_port_remove_event_listener, 2);
-    JS_SetPropertyStr(ctx, anim, "_listeners",   JS_NewArray(ctx));
-    JS_SetPropertyStr(ctx, anim, "onfinish",     JS_NULL);
-    JS_SetPropertyStr(ctx, anim, "oncancel",     JS_NULL);
-    JS_SetPropertyStr(ctx, anim, "playState",    JS_NewString(ctx, "finished"));
-    JS_SetPropertyStr(ctx, anim, "playbackRate", JS_NewInt32(ctx, 1));
-    JS_SetPropertyStr(ctx, anim, "currentTime",  JS_NewFloat64(ctx, 0));
-    JS_SetPropertyStr(ctx, anim, "startTime",    JS_NULL);
-    JS_SetPropertyStr(ctx, anim, "pending",      JS_FALSE);
-    JS_SetPropertyStr(ctx, anim, "id",           JS_NewString(ctx, ""));
-    JSValue resolvers[2];
-    JSValue finished = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(finished)) { JS_FreeValue(ctx, anim); return finished; }
-    JSValueConst self_arg[1] = { anim };
-    JSValue r = JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, self_arg);
-    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
-    JS_FreeValue(ctx, r);
-    JS_FreeValue(ctx, resolvers[0]);
-    JS_FreeValue(ctx, resolvers[1]);
-    JS_SetPropertyStr(ctx, anim, "finished", finished);
-    JS_SetPropertyStr(ctx, anim, "ready",    JS_DupValue(ctx, finished));
-
-    JSValueConst job_arg[1] = { anim };
-    JS_EnqueueJob(ctx, ns_anim_finish_job, 1, job_arg);
-    return anim;
-}
-
 static JSValue ns_validate_attr_ns(JSContext *ctx, const char *ns_uri,
                                     const char *qname);
 
@@ -42659,8 +42485,6 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("setAttributeNS",          3, ns_element_setAttributeNS),
     JS_CFUNC_DEF("removeAttributeNS",       2, ns_element_removeAttributeNS),
     JS_CFUNC_DEF("requestFullscreen",       0, ns_element_requestFullscreen),
-    JS_CFUNC_DEF("getAnimations",           0, ns_event_empty_array),
-    JS_CFUNC_DEF("animate",                 2, ns_element_animate),
     JS_CFUNC_DEF("getRootNode",             1, ns_element_getRootNode),
     JS_CFUNC_DEF("isEqualNode",             1, ns_element_isEqualNode),
     JS_CFUNC_DEF("isSameNode",              1, ns_element_isSameNode),
@@ -48306,7 +48130,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     for (gsize i = 0; i < G_N_ELEMENTS(window_event_handlers); i++)
         JS_SetPropertyStr(ctx, global, window_event_handlers[i], JS_NULL);
 
-    ns_bind_fn(ctx, global, "getSelection",        ns_window_get_selection, 0);
     ns_bind_fn(ctx, global, "requestIdleCallback", ns_window_request_idle_callback, 2);
     ns_bind_fn(ctx, global, "cancelIdleCallback",  ns_js_clearTimer,                1);
 
@@ -49721,6 +49544,20 @@ static JSValue ns_realmdoc_writeln(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv);
 
 static JSValue
+ns_realmdoc_get_selection(JSContext *ctx, JSValueConst this_val, int argc,
+                          JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue fn = JS_GetPropertyStr(ctx, global, "getSelection");
+    JSValue sel = JS_IsFunction(ctx, fn) ? JS_Call(ctx, fn, global, 0, NULL)
+                                         : JS_NULL;
+    JS_FreeValue(ctx, fn);
+    JS_FreeValue(ctx, global);
+    return sel;
+}
+
+static JSValue
 ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
                        const char *charset, const char *content_type,
                        gboolean is_xml, gboolean inert)
@@ -49795,7 +49632,7 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     ns_bind_fn(ctx, w, "importNode",         ns_document_import_node, 2);
     ns_bind_fn(ctx, w, "adoptNode",          ns_document_adopt_node, 1);
     ns_bind_fn(ctx, w, "getElementById",     ns_realmdoc_getElementById, 1);
-    ns_bind_fn(ctx, w, "getSelection",       ns_window_get_selection, 0);
+    ns_bind_fn(ctx, w, "getSelection",       ns_realmdoc_get_selection, 0);
     ns_bind_fn(ctx, w, "hasFocus",           ns_document_has_focus, 0);
     ns_synthdoc_define_getter(ctx, w, "activeElement",
                               ns_realmdoc_get_activeElement);
@@ -49821,7 +49658,7 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     ns_bind_fn(ctx, w, "createNodeIterator", ns_document_create_node_iterator, 3);
     ns_bind_fn(ctx, w, "elementFromPoint",   ns_document_element_from_point, 2);
     ns_bind_fn(ctx, w, "elementsFromPoint",  ns_document_elements_from_point, 2);
-    ns_bind_fn(ctx, w, "getSelection",       ns_window_get_selection, 0);
+    ns_bind_fn(ctx, w, "getSelection",       ns_realmdoc_get_selection, 0);
     ns_bind_fn(ctx, w, "hasFocus",           ns_document_has_focus, 0);
     return w;
 }
@@ -51039,7 +50876,6 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CFUNC_DEF("createRange",       0, ns_document_create_range),
     JS_CFUNC_DEF("createTreeWalker",  3, ns_document_create_tree_walker),
     JS_CFUNC_DEF("createNodeIterator",3, ns_document_create_node_iterator),
-    JS_CFUNC_DEF("getSelection",      0, ns_window_get_selection),
     JS_CFUNC_DEF("adoptNode",         1, ns_document_adopt_node),
     JS_CFUNC_DEF("importNode",        2, ns_document_import_node),
     JS_CFUNC_DEF("exitFullscreen", 0, ns_event_noop),

@@ -671,7 +671,6 @@ void     ns_css_set_device_size(double w, double h);
 void     ns_css_set_media_device(const ns_css_media_device *device);
 void     ns_css_get_media_device(ns_css_media_device *device);
 void     ns_css_set_print_media(gboolean printing);
-gboolean ns_css_print_media(void);
 
 typedef struct ns_css_value {
     ns_css_value_kind kind;

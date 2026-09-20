@@ -1105,12 +1105,6 @@ ns_css_set_print_media(gboolean printing)
     ns_css_stylesheet_cache_drop();
 }
 
-gboolean
-ns_css_print_media(void)
-{
-    return g_mq_print;
-}
-
 static mq_tri
 mq_eval_type(const char *type)
 {

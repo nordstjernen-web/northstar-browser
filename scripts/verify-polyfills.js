@@ -13,19 +13,6 @@ function need(name, expr, why) {
     if (!ok) fails.push(name + (why ? ' (' + why + ')' : ''));
 }
 
-need('URLSearchParams ctor',  function () { return typeof URLSearchParams === 'function'; });
-need('URLSearchParams roundtrip', function () {
-    var u = new URLSearchParams('a=1&b=two&a=3');
-    return u.get('b') === 'two' && u.getAll('a').length === 2 &&
-           u.toString() === 'a=1&b=two&a=3';
-});
-need('URLSearchParams.append/delete', function () {
-    var u = new URLSearchParams();
-    u.append('k', 'v1'); u.append('k', 'v2');
-    if (u.toString() !== 'k=v1&k=v2') return false;
-    u.delete('k');
-    return u.toString() === '';
-});
 
 need('Headers ctor', function () { return typeof Headers === 'function'; });
 need('Headers normalize', function () {
@@ -66,12 +53,7 @@ need('queueMicrotask is callable', function () {
     return typeof queueMicrotask === 'function';
 });
 
-need('XMLSerializer ctor', function () {
-    return typeof XMLSerializer === 'function';
-});
 
-need('AbortSignal ctor', function () { return typeof AbortSignal === 'function'; });
-need('AbortController ctor', function () { return typeof AbortController === 'function'; });
 
 need('NodeFilter constants', function () {
     return typeof NodeFilter === 'object' &&
@@ -169,21 +151,6 @@ need('String.prototype.replaceAll (non-global RegExp throws)', function () {
     catch (e) { return e instanceof TypeError; }
 });
 
-need('structuredClone primitive', function () {
-    return structuredClone(42) === 42 &&
-           structuredClone('hi') === 'hi';
-});
-need('structuredClone deep', function () {
-    var src = {a: [1, 2, {b: 'x'}], d: new Date(123), m: new Map([['k', 'v']])};
-    var c = structuredClone(src);
-    return c.a[2].b === 'x' && c.a !== src.a && c.m !== src.m &&
-           c.m.get('k') === 'v' && c.d.getTime() === 123;
-});
-need('structuredClone handles cycles', function () {
-    var a = {}; a.self = a;
-    var c = structuredClone(a);
-    return c !== a && c.self === c;
-});
 
 need('Symbol.dispose exists', function () {
     return typeof Symbol.dispose === 'symbol' || typeof Symbol.dispose === 'string';
@@ -210,20 +177,6 @@ need('scheduler.yield returns a Promise', function () {
     return scheduler.yield() instanceof Promise;
 });
 
-need('XMLSerializer text node', function () {
-    var s = new XMLSerializer();
-    return s.serializeToString({ nodeType: 3, nodeValue: 'hi & bye' }) === 'hi & bye';
-});
-need('XMLSerializer comment node', function () {
-    var s = new XMLSerializer();
-    return s.serializeToString({ nodeType: 8, nodeValue: 'note' }) === '<!--note-->';
-});
-need('XMLSerializer document fragment', function () {
-    var s = new XMLSerializer();
-    var t = { nodeType: 3, nodeValue: 'X', nextSibling: null };
-    var frag = { nodeType: 11, firstChild: t };
-    return s.serializeToString(frag) === 'X';
-});
 
 need('DOMMatrix ctor', function () { return typeof DOMMatrix === 'function'; });
 need('DOMMatrix matrix3d string', function () {

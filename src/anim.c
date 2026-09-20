@@ -945,13 +945,6 @@ static void
 anim_observe_one(ns_anim *a, const ns_node *dom, const ns_style *style,
                  gint64 now_us, GHashTable *styles);
 
-void
-ns_anim_observe(ns_anim *a, const ns_node *dom,
-                const ns_style *style, gint64 now_us)
-{
-    anim_observe_one(a, dom, style, now_us, NULL);
-}
-
 static void
 anim_observe_one(ns_anim *a, const ns_node *dom, const ns_style *style,
                  gint64 now_us, GHashTable *styles)
