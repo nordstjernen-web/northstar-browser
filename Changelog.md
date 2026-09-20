@@ -404,6 +404,24 @@ Significant changes in each release:
   maintain it, and a miss against a complete index answers immediately.
   A lookup scoped to a subtree, a duplicated id and an index of unknown
   provenance all still take the walk.
+* Declaring a transition no longer costs a style recalculation every
+  frame. The animation layer keeps a record for each element that names
+  a `transition` or an `animation`, and creating that record barred the
+  element from reusing its computed style -- necessarily, because while
+  an animation runs it writes interpolated values straight into that
+  style, and reusing it next frame would hand the cascade a value it
+  never computed. But the bar was raised as soon as the record existed,
+  whether or not anything was animating, and a barred element drags its
+  whole subtree with it. On a page whose stylesheet puts a `transition`
+  on most of its elements -- which is to say a modern page -- that
+  turned an incremental restyle back into a full one: on the Speedometer
+  3.1 TodoMVC pages roughly two thirds of the document was recomputed on
+  every frame with nothing on the page having changed. The bar is now
+  raised and lowered by the code that actually writes the values, so it
+  covers exactly the elements that are mid-animation, and an element is
+  recomputed once more as its animation ends so it never keeps an
+  interpolated value. A declared transition that is not running now
+  costs nothing.
 
 1.0.8:
 ======

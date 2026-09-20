@@ -88,6 +88,7 @@ typedef struct ns_anim_state {
     GHashTable    *base_values;
     ns_style      *prev_style;
     gboolean       has_transition;
+    gboolean       excluded;
     guint          run_generation;
 } ns_anim_state;
 
@@ -436,8 +437,16 @@ state_for(ns_anim *a, const ns_node *dom)
     s = g_new0(ns_anim_state, 1);
     s->node = dom;
     g_hash_table_insert(a->states, (gpointer)dom, s);
-    ns_css_incremental_exclude(dom, TRUE);
     return s;
+}
+
+static void
+anim_sync_exclusion(ns_anim_state *s, gboolean wrote)
+{
+    if (wrote == s->excluded) return;
+    ns_css_incremental_exclude(s->node, wrote);
+    if (!wrote) ns_css_mark_restyle_dirty((ns_node *)s->node);
+    s->excluded = wrote;
 }
 
 static gboolean
@@ -1095,12 +1104,15 @@ ns_anim_apply(ns_anim *a, GHashTable *styles)
         ns_anim_state *s = val;
         ns_style *st = g_hash_table_lookup(styles, key);
         if (!st) continue;
+        gboolean wrote = FALSE;
         if (s->base_values) g_hash_table_remove_all(s->base_values);
         if (s->chans)
             for (guint i = 0; i < s->chans->len; i++) {
                 ns_anim_chan *ch = s->chans->pdata[i];
-                if (ch->active && ch->current)
+                if (ch->active && ch->current) {
                     apply_animated_value(styles, s, st, ch->prop, ch->current);
+                    wrote = TRUE;
+                }
             }
         for (int w = 0; w < 2; w++) {
             GPtrArray *runs = state_runs(s, w);
@@ -1133,10 +1145,13 @@ ns_anim_apply(ns_anim *a, GHashTable *styles)
                 GHashTableIter vit;
                 gpointer vk, vv;
                 g_hash_table_iter_init(&vit, r->values);
-                while (g_hash_table_iter_next(&vit, &vk, &vv))
+                while (g_hash_table_iter_next(&vit, &vk, &vv)) {
                     apply_animated_value(styles, s, st, GPOINTER_TO_INT(vk), vv);
+                    wrote = TRUE;
+                }
             }
         }
+        anim_sync_exclusion(s, wrote);
     }
 }
 

@@ -29722,6 +29722,7 @@ ns_css_compute(ns_node *doc,
                               g_state_has_active);
     }
 
+    guint incr_marked = g_incr_dirty ? g_hash_table_size(g_incr_dirty) : 0;
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, NULL,
                  &root_px, layer_ranks, out, FALSE);
 
@@ -29743,8 +29744,9 @@ ns_css_compute(ns_node *doc,
         g_incr_prev_hover = g_css_hover_node;
         g_incr_prev_active = g_css_active_node;
         if (g_getenv("NS_PROFILE"))
-            g_printerr("[incr] active=%d reused=%u recomputed=%u\n",
-                       g_incr_pass_active, g_incr_reused, g_incr_recomputed);
+            g_printerr("[incr] active=%d marked=%u reused=%u recomputed=%u\n",
+                       g_incr_pass_active, incr_marked, g_incr_reused,
+                       g_incr_recomputed);
     } else if (g_incr_prev_styles && !incr_usable) {
         g_hash_table_destroy(g_incr_prev_styles);
         g_incr_prev_styles = NULL;
