@@ -9476,21 +9476,6 @@ ns_window_find(JSContext *ctx, JSValueConst this_val,
     return JS_NewBool(ctx, found);
 }
 
-static JSValue
-ns_cache_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    JSValue cache = JS_NewObject(ctx);
-    ns_bind_fn(ctx, cache, "match",    ns_returns_resolved_undefined, 1);
-    ns_bind_fn(ctx, cache, "matchAll", ns_returns_resolved_empty_array, 1);
-    ns_bind_fn(ctx, cache, "put",      ns_returns_resolved_undefined, 2);
-    ns_bind_fn(ctx, cache, "add",      ns_returns_resolved_undefined, 1);
-    ns_bind_fn(ctx, cache, "addAll",   ns_returns_resolved_undefined, 1);
-    ns_bind_fn(ctx, cache, "delete",   ns_returns_resolved_false, 1);
-    ns_bind_fn(ctx, cache, "keys",     ns_returns_resolved_empty_array, 1);
-    return ns_promise_resolve_take(ctx, cache);
-}
-
 static void
 ns_chrome_version_from_ua(const char *ua, char *major, size_t major_sz,
                           char *full, size_t full_sz)
@@ -22728,13 +22713,6 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
     ns_bind_fn(ctx, clients, "openWindow", ns_returns_resolved_undefined, 1);
     JS_SetPropertyStr(ctx, global, "clients", clients);
 
-    JSValue caches_obj = JS_NewObject(ctx);
-    ns_bind_fn(ctx, caches_obj, "open",   ns_cache_open, 1);
-    ns_bind_fn(ctx, caches_obj, "has",    ns_returns_resolved_false, 1);
-    ns_bind_fn(ctx, caches_obj, "delete", ns_returns_resolved_false, 1);
-    ns_bind_fn(ctx, caches_obj, "keys",   ns_returns_resolved_empty_array, 0);
-    ns_bind_fn(ctx, caches_obj, "match",  ns_returns_resolved_undefined, 2);
-    JS_SetPropertyStr(ctx, global, "caches", caches_obj);
 
     ns_bind_ctor(ctx, global, "ExtendableEvent",        ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "FetchEvent",             ns_window_event_ctor, 2);
@@ -47725,17 +47703,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     ns_install_abort_signal_interface(ctx, global);
 
-    JSValue caches_obj = JS_NewObject(ctx);
-    ns_bind_fn(ctx, caches_obj, "open",   ns_cache_open, 1);
-    ns_bind_fn(ctx, caches_obj, "has",    ns_returns_resolved_false, 1);
-    ns_bind_fn(ctx, caches_obj, "delete", ns_returns_resolved_false, 1);
-    ns_bind_fn(ctx, caches_obj, "keys",   ns_returns_resolved_empty_array, 0);
-    ns_bind_fn(ctx, caches_obj, "match",  ns_returns_resolved_undefined, 2);
-    {
-        JSValue prev = JS_GetPropertyStr(ctx, global, "caches");
-        JS_FreeValue(ctx, prev);
-        JS_SetPropertyStr(ctx, global, "caches", caches_obj);
-    }
     ns_bind_ctor(ctx, global, "TextEncoder", ns_window_text_encoder_ctor, 0);
     ns_bind_ctor(ctx, global, "TextDecoder", ns_window_text_decoder_ctor, 0);
     ns_bind_ctor(ctx, global, "Response",    ns_window_response_ctor,     0);

@@ -2588,6 +2588,298 @@
         defineCtor('indexedDB', new IDBFactory());
     })();
 
+    (function () {
+        if (!global.indexedDB || typeof global.Response !== 'function' ||
+            typeof global.Request !== 'function') return;
+        var DB_NAME = '__ns_cache_storage';
+        var dbPromise = null;
+
+        function ex(name, message) {
+            try { return new DOMException(message, name); }
+            catch (e) { var err = new Error(message); err.name = name; return err; }
+        }
+        function typeError(message) { return new TypeError(message); }
+        function reqDone(req) {
+            return new Promise(function (resolve, reject) {
+                req.onsuccess = function () { resolve(req.result); };
+                req.onerror = function () { reject(req.error); };
+            });
+        }
+        function txDone(tx) {
+            return new Promise(function (resolve, reject) {
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error); };
+                tx.onabort = function () { reject(tx.error || ex('AbortError', 'Transaction aborted')); };
+            });
+        }
+        function openDb() {
+            if (dbPromise) return dbPromise;
+            dbPromise = new Promise(function (resolve, reject) {
+                var req = global.indexedDB.open(DB_NAME, 1);
+                req.onupgradeneeded = function () {
+                    var db = req.result;
+                    if (!db.objectStoreNames.contains('caches'))
+                        db.createObjectStore('caches', { keyPath: 'name' });
+                    if (!db.objectStoreNames.contains('entries')) {
+                        var entries = db.createObjectStore('entries', { keyPath: 'id', autoIncrement: true });
+                        entries.createIndex('cache', 'cache', { unique: false });
+                    }
+                };
+                req.onsuccess = function () { resolve(req.result); };
+                req.onerror = function () {
+                    dbPromise = null;
+                    reject(req.error || ex('InvalidStateError', 'Cache storage is unavailable'));
+                };
+            });
+            return dbPromise;
+        }
+        function readCaches() {
+            return openDb().then(function (db) {
+                return reqDone(db.transaction('caches', 'readonly').objectStore('caches').getAll());
+            }).then(function (rows) {
+                rows.sort(function (a, b) { return a.created - b.created; });
+                return rows;
+            });
+        }
+        function readEntries(name) {
+            return openDb().then(function (db) {
+                return reqDone(db.transaction('entries', 'readonly').objectStore('entries').index('cache').getAll(name));
+            }).then(function (rows) {
+                rows.sort(function (a, b) { return a.id - b.id; });
+                return rows;
+            });
+        }
+        function writeEntries(fn) {
+            return openDb().then(function (db) {
+                var tx = db.transaction('entries', 'readwrite');
+                fn(tx.objectStore('entries'));
+                return txDone(tx);
+            });
+        }
+
+        function stripFragment(url) { var i = url.indexOf('#'); return i >= 0 ? url.slice(0, i) : url; }
+        function stripSearch(url) { var i = url.indexOf('?'); return i >= 0 ? url.slice(0, i) : url; }
+        function toRequest(input) {
+            return input instanceof global.Request ? input : new global.Request(String(input));
+        }
+        function checkRequest(rq, what) {
+            var scheme = new global.URL(rq.url).protocol;
+            if (scheme !== 'http:' && scheme !== 'https:')
+                throw typeError(what + ': the request URL scheme must be http or https');
+            if (rq.method !== 'GET') throw typeError(what + ': the request method must be GET');
+        }
+        function headerPairs(headers) {
+            var out = [];
+            if (headers && typeof headers.forEach === 'function')
+                headers.forEach(function (value, name) { out.push([name, value]); });
+            return out;
+        }
+        function pairsGet(pairs, name) {
+            name = String(name).toLowerCase();
+            var values = [];
+            for (var i = 0; i < pairs.length; i++)
+                if (pairs[i][0].toLowerCase() === name) values.push(pairs[i][1]);
+            return values.length ? values.join(', ') : null;
+        }
+        function varyNames(pairs) {
+            var vary = pairsGet(pairs, 'vary');
+            if (vary === null) return null;
+            return vary.split(',').map(function (v) { return v.trim(); }).filter(Boolean);
+        }
+        function checkResponse(response, what) {
+            if (!(response instanceof global.Response)) throw typeError(what + ': not a Response');
+            if (response.status === 206) throw typeError(what + ': partial responses cannot be stored');
+            var vary = varyNames(headerPairs(response.headers));
+            if (vary && vary.indexOf('*') >= 0) throw typeError(what + ': responses with Vary: * cannot be stored');
+            if (response.bodyUsed) throw typeError(what + ': the response body is already used');
+            return vary;
+        }
+        function bytesToBase64(buffer) {
+            var bytes = new Uint8Array(buffer), s = '';
+            for (var i = 0; i < bytes.length; i += 0x2000)
+                s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x2000));
+            return btoa(s);
+        }
+        function base64ToBytes(b64) {
+            var s = atob(b64), bytes = new Uint8Array(s.length);
+            for (var i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+            return bytes.buffer;
+        }
+        function nullBodyStatus(status) {
+            return status === 101 || status === 204 || status === 205 || status === 304;
+        }
+        function entryMatches(entry, request, options) {
+            options = options || {};
+            if (!options.ignoreMethod && request.method !== 'GET') return false;
+            var url = stripFragment(request.url);
+            if (options.ignoreSearch ? stripSearch(url) !== stripSearch(entry.url) : url !== entry.url)
+                return false;
+            if (!options.ignoreVary && entry.vary) {
+                if (entry.vary.indexOf('*') >= 0) return false;
+                var pairs = headerPairs(request.headers);
+                for (var i = 0; i < entry.vary.length; i++)
+                    if (pairsGet(pairs, entry.vary[i]) !== pairsGet(entry.reqHeaders, entry.vary[i]))
+                        return false;
+            }
+            return true;
+        }
+        function entryToResponse(entry) {
+            var body = entry.body === null ? null : base64ToBytes(entry.body);
+            var response = new global.Response(body, {
+                status: entry.status, statusText: entry.statusText, headers: entry.resHeaders
+            });
+            try {
+                Object.defineProperty(response, 'url', { value: entry.resUrl, writable: true, configurable: true });
+                Object.defineProperty(response, 'type', { value: entry.resType, writable: true, configurable: true });
+            } catch (e) {}
+            return response;
+        }
+        function entryToRequest(entry) {
+            return new global.Request(entry.url, { method: entry.method, headers: entry.reqHeaders });
+        }
+        function query(name, request, options) {
+            return readEntries(name).then(function (rows) {
+                if (!request) return rows;
+                return rows.filter(function (entry) { return entryMatches(entry, request, options); });
+            });
+        }
+
+        function Cache(name) {
+            Object.defineProperty(this, '__name', { value: name });
+        }
+        Cache.prototype.match = function (request, options) {
+            return this.matchAll(request, options).then(function (list) { return list[0]; });
+        };
+        Cache.prototype.matchAll = function (request, options) {
+            var rq;
+            try { rq = request === undefined ? null : toRequest(request); }
+            catch (e) { return Promise.reject(e); }
+            return query(this.__name, rq, options).then(function (rows) { return rows.map(entryToResponse); });
+        };
+        Cache.prototype.add = function (request) { return this.addAll([request]); };
+        Cache.prototype.addAll = function (requests) {
+            var self = this, list;
+            try {
+                list = Array.prototype.map.call(requests, function (r) {
+                    var rq = toRequest(r);
+                    checkRequest(rq, 'Cache.addAll');
+                    return rq;
+                });
+            } catch (e) { return Promise.reject(e); }
+            return Promise.all(list.map(function (rq) { return global.fetch(rq); })).then(function (responses) {
+                for (var i = 0; i < responses.length; i++) {
+                    if (!responses[i].ok)
+                        throw typeError('Cache.addAll: request failed with status ' + responses[i].status);
+                    checkResponse(responses[i], 'Cache.addAll');
+                }
+                return responses.reduce(function (chain, response, i) {
+                    return chain.then(function () { return self.put(list[i], response); });
+                }, Promise.resolve());
+            }).then(function () { return undefined; });
+        };
+        Cache.prototype.put = function (request, response) {
+            var name = this.__name, rq, vary;
+            try {
+                rq = toRequest(request);
+                checkRequest(rq, 'Cache.put');
+                vary = checkResponse(response, 'Cache.put');
+            } catch (e) { return Promise.reject(e); }
+            var body = nullBodyStatus(response.status) ? Promise.resolve(null) : response.arrayBuffer();
+            return body.then(function (buffer) {
+                var entry = {
+                    cache: name, url: stripFragment(rq.url), method: rq.method,
+                    reqHeaders: headerPairs(rq.headers), status: response.status,
+                    statusText: response.statusText, resHeaders: headerPairs(response.headers),
+                    resType: response.type, resUrl: response.url || stripFragment(rq.url),
+                    body: buffer === null ? null : bytesToBase64(buffer), vary: vary, created: Date.now()
+                };
+                return query(name, rq, {}).then(function (old) {
+                    return writeEntries(function (store) {
+                        for (var i = 0; i < old.length; i++) store.delete(old[i].id);
+                        store.add(entry);
+                    });
+                });
+            });
+        };
+        Cache.prototype['delete'] = function (request, options) {
+            var rq;
+            try { rq = toRequest(request); } catch (e) { return Promise.reject(e); }
+            return query(this.__name, rq, options).then(function (rows) {
+                if (!rows.length) return false;
+                return writeEntries(function (store) {
+                    rows.forEach(function (row) { store.delete(row.id); });
+                }).then(function () { return true; });
+            });
+        };
+        Cache.prototype.keys = function (request, options) {
+            var rq;
+            try { rq = request === undefined ? null : toRequest(request); }
+            catch (e) { return Promise.reject(e); }
+            return query(this.__name, rq, options).then(function (rows) { return rows.map(entryToRequest); });
+        };
+        Object.defineProperty(Cache.prototype, Symbol.toStringTag, { value: 'Cache', configurable: true });
+
+        function CacheStorage() {}
+        CacheStorage.prototype.open = function (name) {
+            name = String(name);
+            return readCaches().then(function (rows) {
+                if (rows.some(function (row) { return row.name === name; })) return undefined;
+                return openDb().then(function (db) {
+                    var tx = db.transaction('caches', 'readwrite');
+                    tx.objectStore('caches').put({ name: name, created: Date.now() });
+                    return txDone(tx);
+                });
+            }).then(function () { return new Cache(name); });
+        };
+        CacheStorage.prototype.has = function (name) {
+            name = String(name);
+            return readCaches().then(function (rows) {
+                return rows.some(function (row) { return row.name === name; });
+            });
+        };
+        CacheStorage.prototype['delete'] = function (name) {
+            name = String(name);
+            return Promise.all([readCaches(), readEntries(name)]).then(function (result) {
+                var exists = result[0].some(function (row) { return row.name === name; });
+                if (!exists) return false;
+                return openDb().then(function (db) {
+                    var tx = db.transaction(['caches', 'entries'], 'readwrite');
+                    tx.objectStore('caches').delete(name);
+                    var entries = tx.objectStore('entries');
+                    result[1].forEach(function (row) { entries.delete(row.id); });
+                    return txDone(tx);
+                }).then(function () { return true; });
+            });
+        };
+        CacheStorage.prototype.keys = function () {
+            return readCaches().then(function (rows) { return rows.map(function (row) { return row.name; }); });
+        };
+        CacheStorage.prototype.match = function (request, options) {
+            options = options || {};
+            var rq;
+            try { rq = toRequest(request); } catch (e) { return Promise.reject(e); }
+            var names = options.cacheName !== undefined ? Promise.resolve([String(options.cacheName)]) : this.keys();
+            return names.then(function (list) {
+                return list.reduce(function (chain, name) {
+                    return chain.then(function (found) {
+                        if (found) return found;
+                        return query(name, rq, options).then(function (rows) {
+                            return rows.length ? entryToResponse(rows[0]) : undefined;
+                        });
+                    });
+                }, Promise.resolve(undefined));
+            });
+        };
+        Object.defineProperty(CacheStorage.prototype, Symbol.toStringTag, { value: 'CacheStorage', configurable: true });
+
+        var storage = new CacheStorage();
+        try {
+            Object.defineProperty(global, 'caches', { value: storage, writable: true, configurable: true, enumerable: true });
+        } catch (e) { global.caches = storage; }
+        replaceCtor('Cache', Cache);
+        replaceCtor('CacheStorage', CacheStorage);
+    })();
+
     if (ndWorkerScope) return;
 
     if (typeof Symbol !== 'undefined') {

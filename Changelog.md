@@ -324,6 +324,19 @@ Significant changes in each release:
   dropped, `min()`, `max()` and `clamp()` compare angles, times and
   resolutions, and a length property no longer accepts `calc(10deg)`
   as zero.
+* The Cache API is real. `caches.open()`, `has()`, `delete()`, `keys()`
+  and `match()` and the `Cache` methods `match()`, `matchAll()`,
+  `add()`, `addAll()`, `put()`, `delete()` and `keys()` store request
+  and response pairs per site partition in IndexedDB and follow the
+  Service Workers specification: URL fragments are ignored,
+  `ignoreSearch`, `ignoreMethod`, `ignoreVary` and `cacheName` are
+  honoured, `Vary` headers are matched against the stored request,
+  a non-GET request, a non-http(s) URL, a 206 response, a `Vary: *`
+  response or a used body rejects with a `TypeError`, and `addAll()`
+  stores nothing when any fetch fails. The same storage is visible from
+  a page and its service worker, so a worker that fills a cache at
+  install time serves it offline. Until now every method resolved with
+  nothing.
 
 1.0.8:
 ======
