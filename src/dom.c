@@ -12,6 +12,7 @@
 #include <string.h>
 
 static void ns_class_set_clear(ns_node *el);
+static void ns_doc_id_index_desync(ns_node *el, const char *name);
 
 static gboolean
 ns_str_is_ascii_lower(const char *s)
@@ -1025,6 +1026,7 @@ ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
     if (el->class_set) ns_class_set_clear(el);
+    ns_doc_id_index_desync(el, name);
     el->attr_bloom = 0;
     el->attr_gen++;
     ns_attr *a = g_new0(ns_attr, 1);
@@ -1302,6 +1304,15 @@ ns_value_dup_len(const char *value, gsize len)
     return v;
 }
 
+static void
+ns_doc_id_index_desync(ns_node *el, const char *name)
+{
+    if (!name || g_ascii_strcasecmp(name, "id") != 0) return;
+    ns_node *root = el;
+    while (root->parent) root = root->parent;
+    root->flags &= ~NS_NODE_ID_INDEX_COMPLETE;
+}
+
 void
 ns_element_set_attr_len(ns_node *el, const char *name,
                         const char *value, gssize len)
@@ -1313,6 +1324,7 @@ ns_element_set_attr_len(ns_node *el, const char *name,
     gsize vlen = len < 0 ? (value ? strlen(value) : 0) : (gsize)len;
     if (el->class_set && g_ascii_strcasecmp(name, "class") == 0)
         ns_class_set_clear(el);
+    ns_doc_id_index_desync(el, name);
     el->attr_bloom = 0;
     el->attr_gen++;
 
@@ -1359,6 +1371,7 @@ ns_element_set_attr_ns(ns_node *el, const char *namespace_uri,
 
     if (el->class_set && !ns && g_ascii_strcasecmp(local_name, "class") == 0)
         ns_class_set_clear(el);
+    ns_doc_id_index_desync(el, qualified);
     el->attr_bloom = 0;
     el->attr_gen++;
 
@@ -1394,6 +1407,7 @@ ns_element_remove_attr(ns_node *el, const char *name)
     if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
     if (el->class_set && g_ascii_strcasecmp(name, "class") == 0)
         ns_class_set_clear(el);
+    ns_doc_id_index_desync(el, name);
     el->attr_bloom = 0;
     el->attr_gen++;
     ns_attr **link = &el->attrs;
@@ -1416,6 +1430,7 @@ ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
     const char *ns = ns_attr_normalize_namespace(namespace_uri);
     if (el->class_set && !ns && g_ascii_strcasecmp(local_name, "class") == 0)
         ns_class_set_clear(el);
+    ns_doc_id_index_desync(el, local_name);
     el->attr_bloom = 0;
     el->attr_gen++;
     ns_attr **link = &el->attrs;
@@ -1726,6 +1741,7 @@ ns_doc_id_index_build(ns_node *doc)
     if (doc->id_counts)
         g_hash_table_remove_all(doc->id_counts);
     ns_doc_id_index_add_subtree(doc, doc, 0);
+    doc->flags |= NS_NODE_ID_INDEX_COMPLETE;
 }
 
 static void
@@ -2110,6 +2126,9 @@ ns_node_find_by_id(const ns_node *root, const char *id)
         ns_node *hit = g_hash_table_lookup(root->id_index, id);
         if (ns_node_id_hit_usable(root, root, hit, id))
             return hit;
+        if (!hit && (root->flags & NS_NODE_ID_INDEX_COMPLETE) &&
+            !(root->id_counts && g_hash_table_contains(root->id_counts, id)))
+            return NULL;
         ns_node *found = ns_node_find_by_id_depth(root, id, 0);
         if (found) {
             g_hash_table_replace(root->id_index, g_strdup(id), found);

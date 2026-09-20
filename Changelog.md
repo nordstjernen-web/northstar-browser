@@ -391,6 +391,19 @@ Significant changes in each release:
   page simply reaches the same answer with a fraction of the string
   work, which is most of what style recalculation was doing on a large
   document.
+* Looking an element up by id no longer walks the document when there is
+  no such element. The document keeps an id index, but a lookup that
+  missed fell through to a full depth-first walk, because nothing
+  recorded whether the index could be trusted to be complete. Every read
+  of a global that a page has not defined goes through this path -- the
+  window object consults its named properties whenever ordinary property
+  lookup fails -- so a single `typeof someGlobal` cost a walk of every
+  element in the document, and feature detection in a loop cost one per
+  test. The document now tracks whether its index is complete, which it
+  is except after an id is written from engine code that does not
+  maintain it, and a miss against a complete index answers immediately.
+  A lookup scoped to a subtree, a duplicated id and an index of unknown
+  provenance all still take the walk.
 
 1.0.8:
 ======

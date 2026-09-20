@@ -66,6 +66,7 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_INPUT_INDETERMINATE (1u << 18)
 #define NS_NODE_HAS_LISTENERS  (1u << 19)
 #define NS_NODE_CONSTRUCTING_ENTRIES (1u << 20)
+#define NS_NODE_ID_INDEX_COMPLETE (1u << 21)
 
 struct ns_node {
     ns_node_kind kind;
