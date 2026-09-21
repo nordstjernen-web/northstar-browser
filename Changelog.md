@@ -4,6 +4,24 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A multi-column block splits a list, not just a run of siblings. The
+  column code distributed a container's own children and gave up when
+  there were fewer than two, so `column-width` on a wrapper holding a
+  single `<ol>` -- which is exactly how a Wikipedia reference list is
+  built -- laid the whole list out in one column. A lone in-flow block
+  child is now looked through and its children are distributed instead,
+  and the balance point is measured from that child's content rather
+  than the wrapper's outer height.
+* A multi-column block establishes a block formatting context, as the
+  spec says it does, so it sits beside a float instead of running
+  underneath it.
+* A block that establishes a formatting context is placed clear of every
+  float it spans, not just the ones beside its top edge. It was narrowed
+  against the float band at its first line and kept that width all the
+  way down, so a taller float lower on the page -- a second stacked
+  thumbnail, say -- ended up overlapping it. Where the finished box turns
+  out to reach such a float it is laid out once more against the widest
+  intrusion over its own height.
 * `content: '[' / ''` renders just the bracket. The alternative text a
   `content` value may carry after a slash, for a screen reader to read in
   place of the glyphs, was being drawn as part of the text, so
