@@ -1,0 +1,209 @@
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build and attach the release files to
+        required: true
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+
+permissions:
+  contents: write
+
+jobs:
+  source:
+    name: source tarballs
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Archive
+        run: |
+          version=$(awk -F"'" '/^[[:space:]]*version[[:space:]]*:/ { print $2; exit }' meson.build)
+          mkdir -p dist
+          git archive --format=tar --prefix="northstar-${version}/" HEAD \
+              | gzip -9 > "dist/northstar-${version}.tar.gz"
+          git archive --format=tar --prefix="northstar-${version}/" HEAD \
+              | xz -9 > "dist/northstar-${version}.tar.xz"
+          ls -lh dist
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" dist/* --clobber
+
+  linux:
+    name: ${{ matrix.distro }}
+    runs-on: ubuntu-24.04
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian
+            image: debian:trixie
+          - distro: ubuntu
+            image: ubuntu:26.04
+          - distro: opensuse
+            image: opensuse/tumbleweed
+          - distro: alpine
+            image: alpine:edge
+    steps:
+      - name: Install bash and git
+        shell: sh
+        run: |
+          if command -v apk >/dev/null 2>&1; then
+              apk add --no-cache bash git tar
+          elif command -v zypper >/dev/null 2>&1; then
+              zypper --non-interactive --gpg-auto-import-keys install -y git tar gzip
+          else
+              apt-get update -qq && apt-get install -y --no-install-recommends git ca-certificates
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+
+      - name: Build and package
+        run: bash scripts/nightly-distro-build.sh ${{ matrix.distro }}
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -- dist/*.zip dist/*.deb dist/*.rpm dist/*.apk
+          files=""
+          for f in "$@"; do [ -f "$f" ] && files="$files $f"; done
+          [ -n "$files" ] || { echo "no artifacts produced" >&2; exit 1; }
+          gh release upload "$RELEASE_TAG" $files --clobber
+
+  windows:
+    name: windows x86_64
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+
+      - name: Set up MSYS2 (mingw64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            git zip
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-lld
+            mingw-w64-x86_64-llvm-tools
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-harfbuzz
+            mingw-w64-x86_64-fribidi
+            mingw-w64-x86_64-cairo
+            mingw-w64-x86_64-fontconfig
+            mingw-w64-x86_64-freetype
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-ca-certificates
+            mingw-w64-x86_64-uchardet
+            mingw-w64-x86_64-libpsl
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-libavif
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-opusfile
+            mingw-w64-x86_64-libvorbis
+            mingw-w64-x86_64-enchant
+
+      - name: Package
+        run: bash scripts/pack-windows.sh
+
+      - name: Attach to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload $env:RELEASE_TAG (Get-ChildItem dist/*.zip) --clobber
+
+  macos:
+    name: macos arm64
+    runs-on: macos-26
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+
+      - name: Install build dependencies (Homebrew)
+        run: |
+          brew install meson ninja pkg-config cmake gtk4 curl \
+              harfbuzz fribidi cairo fontconfig freetype \
+              openssl@3 uchardet libpsl sqlite libavif sdl2 \
+              opusfile libvorbis enchant
+          echo "PKG_CONFIG_PATH=$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          meson setup builddir --buildtype=release -Db_ndebug=true
+          meson compile -C builddir
+
+      - name: Package
+        run: |
+          version=$(awk -F"'" '/^[[:space:]]*version[[:space:]]*:/ { print $2; exit }' meson.build)
+          slug="northstar-${version}-macos-$(uname -m)"
+          mkdir -p "dist/$slug"
+          cp builddir/src/gtk/northstar "dist/$slug/"
+          cp README.md LICENSE THIRD-PARTY-LICENSES.md "dist/$slug/"
+          mkdir -p "dist/$slug/data"
+          cp -R data/icons "dist/$slug/data/"
+          cp data/northstar.desktop data/splash.gif "dist/$slug/data/" 2>/dev/null || true
+          ( cd dist && zip -qr "${slug}.zip" "$slug" )
+          ls -lh dist
+
+      - name: Smoke test
+        run: ./builddir/src/gtk/northstar --headless --dump=text about:start | head -5
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" dist/*.zip --clobber
+
+  checksums:
+    name: checksums
+    needs: [source, linux, windows, macos]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Collect and publish SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p assets && cd assets
+          gh release download "$RELEASE_TAG" --pattern '*' --clobber
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$RELEASE_TAG" SHA256SUMS --clobber

@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Release files are built and attached to a GitHub release by a
+  `release` workflow, which runs the same nightly pack scripts the
+  local orchestrator drives: the per-distro container builds for
+  Debian, Ubuntu, openSUSE and Alpine, `pack-windows.sh` under
+  MSYS2/MINGW64, a macOS bundle, the two source tarballs, and a
+  `SHA256SUMS` covering everything the release ended up with.
+* The Alpine nightly stage no longer calls `scripts/pack-apk.sh`,
+  which does not exist in this edition; the stage aborted after
+  building the portable zip and was reported as a failure.
 * A multi-column block splits a list, not just a run of siblings. The
   column code distributed a container's own children and gave up when
   there were fewer than two, so `column-width` on a wrapper holding a
