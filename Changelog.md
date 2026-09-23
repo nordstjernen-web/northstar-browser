@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Invalid style rules are dropped the way CSS Syntax requires. After a
+  stray `;` or `}` between rules the parser resumed at the next rule,
+  and a selector list with an empty item, a trailing comma or trailing
+  junk (`.a, {`, `.b) {`) was applied from whatever parsed; other
+  browsers read the stray token as the start of the next rule's
+  selector, which then fails, and drop the whole rule. Northstar now
+  does the same, so a stylesheet that relies on those errors to hide a
+  rule from browsers no longer shows it.
 * A comment inside a media query no longer disables it. `@media
   (min-width: 100px) /* desktop */ { ... }` was never applied, and the
   same went for `<link media>`, `<style media>` and `matchMedia()`; the
