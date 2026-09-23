@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Cross-origin images requested with `crossorigin` and served with an
+  `Access-Control-Allow-Origin` header that admits the page no longer
+  taint a canvas. They were treated like any other cross-origin image, so
+  a site that loads its images from a CDN with CORS enabled and reads
+  them back -- image editors, thumbnailers, charting and map libraries --
+  got a `SecurityError` from `getImageData` or `toDataURL`. The header is
+  checked the same way `fetch()` checks it; without the attribute, or
+  with a header naming another origin, the image still taints.
 * An `<img>` in the page's markup whose same-origin address redirects to
   another site now taints a canvas it is drawn into. Images the page loads
   up front were stored without the address the redirect ended at, so they

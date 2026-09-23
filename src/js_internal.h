@@ -504,7 +504,8 @@ ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean);
 gboolean
 ns_js_urls_same_origin(const char *a, const char *b);
 gboolean
-ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im);
+ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im,
+                         gboolean cors_requested);
 double
 ns_ctx_global_alpha(JSContext *ctx, JSValueConst this_val);
 cairo_operator_t

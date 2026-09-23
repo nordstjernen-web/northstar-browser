@@ -2198,7 +2198,8 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
         }
     }
     if (!tex) return NULL;
-    *origin_clean = ns_js_image_origin_clean(js, ctx, source);
+    *origin_clean = ns_js_image_origin_clean(js, ctx, source,
+        ns_element_get_attr(n, "crossorigin") != NULL);
     if (im_cache && im_cache->render_surface) {
         cairo_surface_t *cached = im_cache->render_surface;
         *out_w = cairo_image_surface_get_width(cached);

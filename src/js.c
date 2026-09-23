@@ -40636,14 +40636,18 @@ ns_js_ctx_document_url(ns_js *js, JSContext *ctx)
 }
 
 gboolean
-ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im)
+ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im,
+                         gboolean cors_requested)
 {
     if (!im) return TRUE;
     const char *url = im->final_url ? im->final_url : im->url;
     if (!url || g_str_has_prefix(url, "data:") ||
         g_str_has_prefix(url, "blob:"))
         return TRUE;
-    return ns_js_urls_same_origin(url, ns_js_ctx_document_url(js, ctx));
+    const char *doc_url = ns_js_ctx_document_url(js, ctx);
+    if (ns_js_urls_same_origin(url, doc_url)) return TRUE;
+    return cors_requested && im->cors_allow_origin &&
+           cors_allows(doc_url, url, im->cors_allow_origin);
 }
 
 
