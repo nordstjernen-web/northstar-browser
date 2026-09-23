@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Drawing an image into a canvas is back to its old speed. The
+  cross-origin check parsed the image's URL and the page's URL on every
+  `drawImage` call, which nearly doubled its cost for sprite-heavy pages
+  and games; URLs that share the page's scheme and host now pass without
+  parsing.
 * Cross-origin images requested with `crossorigin` and served with an
   `Access-Control-Allow-Origin` header that admits the page no longer
   taint a canvas. They were treated like any other cross-origin image, so

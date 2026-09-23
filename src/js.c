@@ -40608,10 +40608,23 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
     return NULL;
 }
 
+static gboolean
+ns_js_urls_share_http_authority(const char *a, const char *b)
+{
+    if (!ns_url_is_http_or_https(a)) return FALSE;
+    const char *authority = strstr(a, "://") + 3;
+    size_t authority_len = strcspn(authority, "/?#\\");
+    if (authority_len == 0) return FALSE;
+    size_t n = (size_t)(authority - a) + authority_len;
+    return strncmp(a, b, n) == 0 &&
+           (b[n] == '\0' || b[n] == '/' || b[n] == '?' || b[n] == '#');
+}
+
 gboolean
 ns_js_urls_same_origin(const char *a, const char *b)
 {
     if (!a || !b) return FALSE;
+    if (ns_js_urls_share_http_authority(a, b)) return TRUE;
     if (ns_url_is_http_or_https(a) || ns_url_is_http_or_https(b))
         return ns_url_same_origin(a, b);
     const char *ca = strchr(a, ':'), *cb = strchr(b, ':');
