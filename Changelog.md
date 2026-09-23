@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Scripts that wait for web fonts measure the page in those fonts.
+  `document.fonts.ready` could resolve while an `@font-face` font was
+  still being fetched -- or after it had arrived but before the page was
+  laid out again -- so `offsetWidth` and friends in its callback still
+  reported the fallback font's metrics. A font that finishes loading now
+  makes the next layout query lay the page out again, the fonts the
+  page's stylesheets reference are requested before `ready` is decided,
+  `document.fonts.status` reads `loading` meanwhile, and
+  `document.fonts.load()` and `FontFace.load()` wait the same way.
 * Headless `--wpt`, `--inspect` and image dumps load the document's
   images before its scripts run and fire their `load` events, so tests
   and scripts that measure images at `load` see their real sizes.

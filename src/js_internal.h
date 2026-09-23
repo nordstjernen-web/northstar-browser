@@ -122,6 +122,7 @@ struct ns_js {
     JSValue       pristine_promise;
     GHashTable   *style_table;
     const struct ns_box *layout_root;
+    guint         layout_font_generation;
     GHashTable   *box_lookup_cache;
     const void   *box_lookup_cache_root;
     const void   *box_lookup_pending_root;
