@@ -1207,7 +1207,6 @@
     TextDecoderStream.prototype.constructor = TextDecoderStream;
     defineCtor('TextDecoderStream', TextDecoderStream);
 
-    // Intl (ECMA-402) is implemented natively in C; see src/js_intl.c.
 
     var zlibCreate = global.__ns_zlib_create;
     var zlibPush   = global.__ns_zlib_push;
@@ -4899,13 +4898,6 @@
         }
     })();
 
-    /* CSSOM rule model: document.styleSheets, HTMLStyleElement/LinkElement
-     * .sheet, and a real CSSRule / CSSStyleRule / CSSGroupingRule tree backed
-     * by the owner <style> node. The native bindings exposed an empty
-     * styleSheets list and a null .sheet; the rules are parsed from the node's
-     * text once, then insertRule/deleteRule/replace mutate the tree in place
-     * and rebuild the node's text content, which the engine re-cascades.
-     * Each CSSStyleRule's .style is a live native CSSStyleDeclaration. */
     (function () {
         if (typeof document === 'undefined') return;
 
@@ -6388,7 +6380,6 @@
         } catch (e) {}
     })();
 
-    /* Advertise the spec-required observer entry prototype members. */
     (function () {
         function ensureProto(ctorName, props) {
             var C = global[ctorName];
@@ -6417,11 +6408,6 @@
         });
     })();
 
-    /* WHATWG Geometry: full 3D DOMMatrix/DOMMatrixReadOnly (including CSS
-     * transform-list string parsing) and DOMPoint/DOMPointReadOnly with
-     * matrixTransform. Replaces the native 2D-only DOMMatrix binding and the
-     * argument-less DOMPoint shim; CSS-3D pages (PolyCSS, cssQuake) project
-     * vertices through new DOMPoint(...).matrixTransform(new DOMMatrix(str)). */
     (function () {
         function identity() {
             return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -7908,12 +7894,6 @@
         if (doc) { try { doc.getSelection = getSelectionImpl; } catch (e) {} }
     })();
 
-    /* HTMLImageElement.decode(): the native binding always resolved. Per the
-     * HTML spec the promise rejects with an "EncodingError" when the image
-     * has no usable source, fails to load, or its document is not fully
-     * active, and resolves once a usable source has been decoded. The
-     * active-document check is deferred one microtask so a synchronous adopt
-     * into an inactive document after the call is observed. */
     (function () {
         if (typeof global.HTMLImageElement !== 'function' ||
             !global.HTMLImageElement.prototype) return;
@@ -7968,13 +7948,6 @@
             }
         });
     })();
-    /* Text tracks: addTextTrack() was a no-op and textTracks returned a fresh
-     * empty array. Provide a working TextTrack / TextTrackList / TextTrackCue
-     * model: addTextTrack, a media element's live textTracks list with an async
-     * 'addtrack' TrackEvent, a <track> element's .track and readyState, mode
-     * validation, cue add/remove, and WebVTT loading of a <track src> (fetch +
-     * a minimal cue parser, firing load/error). Cue timing/rendering is not
-     * implemented. */
     (function () {
         if (typeof document === 'undefined') return;
 
@@ -8315,11 +8288,6 @@
             } catch (e) {}
         }
 
-        /* The spec's track processing model runs on connection, not on JS
-         * access, so a <track> appended to a media element (without anyone
-         * touching .track) must still load. A document-wide observer would tax
-         * every page, so it is started lazily only once a track/audio/video
-         * element is created. */
         var observing = false;
         function considerTrack(el) {
             if (!isTrack(el)) return;
