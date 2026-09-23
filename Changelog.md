@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A frame sandboxed without `allow-same-origin` can no longer reach the
+  page that embeds it. A `srcdoc` or same-origin frame sandboxed that way
+  got the embedding page's real window as `parent` and `top`, so its
+  script could read and change the parent's DOM, `document.cookie` and
+  `localStorage`; it now gets the same restricted window proxy as a
+  cross-origin frame, where anything but `postMessage`, the `location`
+  setter and a few navigation properties throws `SecurityError`.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
