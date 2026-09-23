@@ -11912,7 +11912,8 @@ ns_css_specified_canonical(const char *prop, const char *value)
         if (t) return t;
         return NULL;
     }
-    return ns_css_math_canonical(value);
+    char *math = ns_css_math_canonical(value);
+    return math ? math : ns_css_calc_canonical(value);
 }
 
 static gboolean is_font_ligatures_value(const char *s);

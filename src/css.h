@@ -1321,6 +1321,7 @@ char *ns_css_value_serialize(const ns_css_value *v);
 char *ns_css_value_serialize_specified(const ns_css_value *v);
 char *ns_css_individual_transform_serialize(const ns_css_value *v, int prop);
 char *ns_css_math_canonical(const char *value);
+char *ns_css_calc_canonical(const char *text);
 char *ns_css_negative_zero_normalize(char *value);
 char *ns_css_transform_canonical(const char *value);
 char *ns_css_display_canonical(const char *value);

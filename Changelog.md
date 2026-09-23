@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `calc()`, `min()`, `max()` and `clamp()` values set from script read
+  back simplified the way CSS Values 4 serializes them: terms of the
+  same unit are combined, absolute units become `px`, and a sum lists
+  its number, then its percentage, then its dimensions sorted by unit,
+  so `calc(1vh + 2px + 3%)` reads back as `calc(3% + 2px + 1vh)` and
+  `min(1px + 1%)` as `calc(1% + 1px)`. Only a value whose rounded
+  six-digit form is exact is rewritten, so `calc(100% / 3)` keeps its
+  full precision for layout.
 * `grid-template-rows: repeat(auto-fill, ...)` repeats its rows. Only
   columns expanded an automatic repetition; rows kept a single copy of
   the pattern. Rows now repeat as many times as fit the grid's height,
