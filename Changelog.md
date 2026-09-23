@@ -4,6 +4,17 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A `<fieldset>`'s `<legend>` sits in the frame's top border, the way
+  every browser draws it, instead of being a full-width line of text
+  inside the frame. The legend is shrink-wrapped to its text whatever
+  its `display`, its border box is centred on the top border, the
+  border is left out behind it, and the fieldset's content starts below
+  whichever of the two reaches further down. `align="center"` /
+  `"right"` (mapped to `justify-self`), `justify-self` and auto margins
+  place it along the border, and a right-to-left fieldset starts it on
+  the right. Content written before the legend in the source now joins
+  the text after it, and a fieldset, like its rendered legend, contains
+  its floats.
 * A type selector that follows another simple selector in a compound
   (`[foo]i`, `.a*`) is a parse error instead of silently matching, and
   `selectorText` / `cssText` drop comments and write an attribute
