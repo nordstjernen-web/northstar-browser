@@ -92,3 +92,7 @@ Thumbs.db
 !/.claude/skills/
 !/.claude/skills/**
 perf.data
+
+# Python bytecode
+__pycache__/
+*.pyc

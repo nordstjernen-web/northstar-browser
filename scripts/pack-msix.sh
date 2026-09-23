@@ -6,8 +6,7 @@
 # or makemsix (msix-packaging CLI), whichever is found. The result is
 # unsigned: Store submissions are re-signed by Microsoft after
 # certification; for local sideload testing set NS_MSIX_CERT_PFX to a
-# self-signed .pfx and the script signs with signtool. See
-# docs/windows-store.md for the full submission guide.
+# self-signed .pfx and the script signs with signtool.
 #
 # Identity values default to placeholders — override them with the values
 # Partner Center shows under Product identity once the name is reserved:
@@ -37,8 +36,8 @@ fi
 
 VERSION=$(grep -E "^[[:space:]]*version:" "$ROOT/meson.build" \
           | head -1 | sed -E "s/.*'([^']+)'.*/\\1/")
-# The Store reserves the fourth (revision) field — it must be 0 on submission
-# (docs/windows-store.md), so map meson's Major.Minor.Build to X.Y.Z.0 rather
+# The Store reserves the fourth (revision) field — it must be 0 on submission,
+# so map meson's Major.Minor.Build to X.Y.Z.0 rather
 # than passing a fourth field through.
 MSIX_VERSION=${NS_MSIX_VERSION:-$(awk -F. '{printf "%d.%d.%d.0", $1, $2, $3}' <<<"${VERSION%%-*}")}
 IDENTITY_NAME=${NS_MSIX_IDENTITY_NAME:-29567TheFreecivProject.NorthstarWebBrowser}

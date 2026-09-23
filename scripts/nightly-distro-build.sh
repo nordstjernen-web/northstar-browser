@@ -85,9 +85,8 @@ echo "nightly-distro-build($DISTRO): building with -j${NS_BUILD_JOBS} lto=${NS_B
 case "$DISTRO" in
     debian|ubuntu) ./scripts/pack-deb.sh ;;
     opensuse)      ./scripts/pack-rpm.sh ;;
-    alpine)        ./scripts/pack-apk.sh ;;
 esac
 
 echo
 echo "nightly-distro-build($DISTRO): artifacts in dist/:"
-ls -1 dist/*.zip dist/*.deb dist/*.rpm dist/*.apk 2>/dev/null || true
+ls -1 dist/*.zip dist/*.deb dist/*.rpm 2>/dev/null || true

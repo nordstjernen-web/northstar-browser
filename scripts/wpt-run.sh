@@ -8,7 +8,7 @@
 # the browser, and aggregates the results.
 #
 # Only testharness.js tests are supported (no reftests, no wdspec, no
-# *.worker.js). See docs/wpt.md for details and setup.
+# *.worker.js). See docs/compliance.md for details and setup.
 #
 # Build the browser first (scripts/dev.sh build), and clone WPT:
 #   git clone --depth 1 https://github.com/web-platform-tests/wpt.git ~/wpt

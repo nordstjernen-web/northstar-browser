@@ -36,7 +36,6 @@ NIGHTLY_ALPINE_IMAGE=${NIGHTLY_ALPINE_IMAGE:-alpine:edge}
 DO_TARBALL=1
 DO_DOCKER=1
 DO_GHA=1
-DO_JAVA=1
 DATE=""
 
 usage() {
@@ -54,7 +53,6 @@ Options:
   --no-tarball        Skip the source tarball stage.
   --no-docker         Skip the Linux container builds.
   --no-gha            Skip driving Windows/macOS via GitHub Actions.
-  --no-java           Skip the Java API jar/javadoc stage.
   --no-parallel       Build the Linux containers one at a time.
   --no-pull           Don't fast-forward the working tree to origin/main first.
   -h, --help          Show this help.
@@ -72,9 +70,7 @@ Environment overrides: NIGHTLY_ROOT, NIGHTLY_REF, NIGHTLY_PULL,
 NIGHTLY_PULL_BRANCH, NIGHTLY_PARALLEL, NIGHTLY_GHA_TIMEOUT,
 NIGHTLY_GHA_BRANCH, NIGHTLY_GHA_DISPATCH, NIGHTLY_DOCKER_PULL_RETRIES,
 NIGHTLY_GH_RETRIES, NS_DOCKER, the
-NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE,ALPINE}_IMAGE image tags, and the WebGPU
-knobs NS_WEBGPU (0/1/auto) and WGPU_NATIVE_VERSION forwarded to the
-container builds.
+and the NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE,ALPINE}_IMAGE image tags.
 EOF
 }
 
@@ -88,7 +84,6 @@ while [ $# -gt 0 ]; do
         --no-tarball) DO_TARBALL=0; shift ;;
         --no-docker)  DO_DOCKER=0; shift ;;
         --no-gha)     DO_GHA=0; shift ;;
-        --no-java)    DO_JAVA=0; shift ;;
         --no-parallel) NIGHTLY_PARALLEL=0; shift ;;
         --no-pull)    NIGHTLY_PULL=0; shift ;;
         -h|--help)    usage; exit 0 ;;
@@ -130,8 +125,7 @@ OUTDIR="$NIGHTLY_ROOT"
 WORK=$(mktemp -d)
 STATUSDIR="$WORK/status"
 mkdir -p "$OUTDIR" "$STATUSDIR"
-rm -rf "$OUTDIR/source" "$OUTDIR/linux" "$OUTDIR/windows" "$OUTDIR/macos" "$OUTDIR/java" \
-       "$OUTDIR/freebsd" "$OUTDIR/netbsd"
+rm -rf "$OUTDIR/source" "$OUTDIR/linux" "$OUTDIR/windows" "$OUTDIR/macos"
 rm -f "$OUTDIR"/SHA256SUMS "$OUTDIR"/MANIFEST.txt "$OUTDIR"/nightly.log \
       "$OUTDIR"/northstar-*
 LOG="$OUTDIR/nightly.log"
@@ -217,16 +211,11 @@ stage_distro() {
     local -a dargs=( --rm -v "$tree:/build:z" -w /build
         -e "VERSION=$version" -e "NS_BUILD_DATE=$DATE" )
     [ -n "${DISTRO_JOBS:-}" ] && dargs+=( -e "NS_BUILD_JOBS=$DISTRO_JOBS" )
-    # WebGPU: pack-linux.sh fetches wgpu-native inside the container and builds
-    # it in (auto). Forward the operator's overrides so the whole nightly can
-    # force it on/off (NS_WEBGPU) or pin a different wgpu-native release.
-    [ -n "${NS_WEBGPU:-}" ] && dargs+=( -e "NS_WEBGPU=$NS_WEBGPU" )
-    [ -n "${WGPU_NATIVE_VERSION:-}" ] && dargs+=( -e "WGPU_NATIVE_VERSION=$WGPU_NATIVE_VERSION" )
     if $DOCKER run "${dargs[@]}" "$image" \
         sh -c 'command -v bash >/dev/null 2>&1 || apk add --no-cache bash >/dev/null 2>&1 || true; exec bash scripts/nightly-distro-build.sh "$1"' sh "$distro" 2>&1 | tee "$dst/build.log"; then
         local n=0
         shopt -s nullglob
-        for f in "$tree"/dist/*.zip "$tree"/dist/*.deb "$tree"/dist/*.rpm "$tree"/dist/*.apk; do
+        for f in "$tree"/dist/*.zip "$tree"/dist/*.deb "$tree"/dist/*.rpm; do
             cp "$f" "$dst/" && n=$((n+1))
         done
         shopt -u nullglob
@@ -391,109 +380,6 @@ gha_collect() {
     fi
 }
 
-stage_java() {
-    log "Stage: Java (runnable fat jar + sources + javadoc)"
-    local key="java"
-    local jhome="${JAVA_HOME:-}"
-    if [ -z "$jhome" ] && command -v javac >/dev/null 2>&1; then
-        jhome=$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")
-    fi
-    if [ -z "$jhome" ] || [ ! -x "$jhome/bin/javac" ]; then
-        fail "$key" "JDK not found (JAVA_HOME='${JAVA_HOME:-}', no usable javac on PATH); install openjdk-21-jdk or set JAVA_HOME"
-        return
-    fi
-    local dst="$OUTDIR/java"
-    mkdir -p "$dst"
-    local blog="$dst/build.log"
-    local work="$WORK/javabuild"
-    mkdir -p "$work/classes" "$work/stage" "$work/doc"
-
-    {
-        printf 'Northstar Java API build — %s\n' "$NVERSION"
-        printf 'JAVA_HOME=%s\nCC=%s\nengine build dir=%s\n' \
-            "$jhome" "${CC:-cc}" "$WORK/java-engine"
-        "$jhome/bin/javac" -version 2>&1 || true
-        printf -- '----------------------------------------\n'
-    } | tee "$blog"
-
-    log "Java: build native libraries (engine + JNI bridge)"
-    mkdir -p "$work/stage/native"
-    local nativeok=0
-    if command -v "$DOCKER" >/dev/null 2>&1; then
-        local jsrc="$WORK/javanative"
-        mkdir -p "$jsrc"
-        archive_to "$jsrc"
-        local jtree="$jsrc/northstar-${NVERSION}"
-        if ! $DOCKER image inspect "$NIGHTLY_DEBIAN_IMAGE" >/dev/null 2>&1; then
-            docker_pull "$NIGHTLY_DEBIAN_IMAGE" >> "$blog" 2>&1 || true
-        fi
-        if $DOCKER run --rm -v "$jtree:/build:z" -w /build \
-                -e "CC=${CC:-cc}" "$NIGHTLY_DEBIAN_IMAGE" \
-                bash scripts/nightly-java-native.sh >> "$blog" 2>&1 \
-           && [ -d "$jtree/java/src/main/resources/native" ]; then
-            cp -r "$jtree/java/src/main/resources/native/." "$work/stage/native/"
-            nativeok=1
-        fi
-        rm -rf "$jsrc"
-    fi
-    if [ "$nativeok" != 1 ]; then
-        log "Java: container native build unavailable; falling back to host toolchain"
-        if JAVA_HOME="$jhome" BUILDDIR="$WORK/java-engine" CC="${CC:-cc}" \
-                bash "$ROOT/java/scripts/build-native.sh" >> "$blog" 2>&1 \
-           && [ -d "$ROOT/java/src/main/resources/native" ]; then
-            cp -r "$ROOT/java/src/main/resources/native/." "$work/stage/native/"
-            nativeok=1
-        fi
-    fi
-    if [ "$nativeok" != 1 ]; then
-        dump_tail "$blog"
-        fail "$key" "native build failed (engine + JNI bridge) — see $blog"
-        return
-    fi
-    log "Java: javac"
-    if ! "$jhome/bin/javac" -d "$work/classes" \
-            $(find "$ROOT/java/src/main/java" -name '*.java') >> "$blog" 2>&1; then
-        dump_tail "$blog"
-        fail "$key" "javac failed — see $blog"
-        return
-    fi
-
-    cp -r "$work/classes/." "$work/stage/"
-    if [ -d "$ROOT/java/src/main/resources/org" ]; then
-        cp -r "$ROOT/java/src/main/resources/org" "$work/stage/"
-    fi
-    printf 'Automatic-Module-Name: org.northstar\nEnable-Native-Access: ALL-UNNAMED\nMain-Class: org.northstar.app.Browser\nImplementation-Title: Northstar\nImplementation-Version: %s\n' \
-        "$MESON_VERSION" > "$work/mf.txt"
-
-    local base="northstar-java-${NVERSION}"
-    log "Java: fat jar (library API + browser app + icons + native libs)"
-    if ! "$jhome/bin/jar" --create --file "$dst/${base}.jar" \
-             --manifest "$work/mf.txt" -C "$work/stage" . >> "$blog" 2>&1 \
-       || ! "$jhome/bin/jar" --create --file "$dst/${base}-sources.jar" \
-             -C "$ROOT/java/src/main/java" . >> "$blog" 2>&1; then
-        dump_tail "$blog"
-        fail "$key" "jar failed — see $blog"
-        return
-    fi
-
-    log "Java: javadoc"
-    if "$jhome/bin/javadoc" -quiet -Xdoclint:none -d "$work/doc" \
-            -sourcepath "$ROOT/java/src/main/java" org.northstar >> "$blog" 2>&1; then
-        "$jhome/bin/jar" --create --file "$dst/${base}-javadoc.jar" -C "$work/doc" . >> "$blog" 2>&1 || true
-        rm -rf "$dst/apidocs"
-        cp -r "$work/doc" "$dst/apidocs"
-    else
-        dump_tail "$blog"
-        fail "$key" "javadoc failed — see $blog"
-        return
-    fi
-
-    ln -sfn "java/${base}.jar"         "$OUTDIR/northstar-java.jar"
-    ln -sfn "java/${base}-sources.jar" "$OUTDIR/northstar-java-sources.jar"
-    ln -sfn "java/${base}-javadoc.jar" "$OUTDIR/northstar-java-javadoc.jar"
-    ok "$key"
-}
-
 link_stable() {
     local name="$1" pattern="$2" matches
     shopt -s nullglob
@@ -517,9 +403,6 @@ stage_stable_links() {
     link_stable northstar-opensuse-x86_64.rpm 'linux/opensuse/*.rpm'
     link_stable northstar-linux-x86_64.zip    'linux/ubuntu/*-linux-x86_64.zip'
     link_stable northstar-alpine-x86_64.zip   'linux/alpine/*-linux-x86_64.zip'
-    link_stable northstar-alpine-x86_64.apk   'linux/alpine/*.apk'
-    link_stable northstar-freebsd-x86_64.zip  'freebsd/*/*-freebsd-x86_64.zip'
-    link_stable northstar-netbsd-x86_64.zip   'netbsd/*/*-netbsd-x86_64.zip'
     link_stable northstar-src.tar.xz          'source/*.tar.xz'
     link_stable northstar-src.tar.gz          'source/*.tar.gz'
 }
@@ -530,11 +413,8 @@ stage_stable_links() {
 if [ "$DO_GHA" = 1 ]; then
     gha_dispatch windows.yml windows
     gha_dispatch macos.yml   macos
-    gha_dispatch freebsd.yml freebsd
-    gha_dispatch netbsd.yml  netbsd
 else
     skip "gha-windows"; skip "gha-macos"
-    skip "gha-freebsd"; skip "gha-netbsd"
 fi
 
 [ "$DO_TARBALL" = 1 ] && stage_tarball || skip "source-tarball"
@@ -556,11 +436,7 @@ fi
 if [ "$DO_GHA" = 1 ]; then
     gha_collect windows
     gha_collect macos
-    gha_collect freebsd
-    gha_collect netbsd
 fi
-
-[ "$DO_JAVA" = 1 ] && stage_java || skip "java"
 
 stage_stable_links
 

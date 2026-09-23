@@ -202,7 +202,7 @@ for p in "${PATHS[@]}"; do
         printf "%-44s %10.1f %10.1f %10.1f %10.1f %8s\n" "${name}" "$med" "${add:-0}" "${comp:-0}" "${del:-0}" "${dom:-?}"
     else
         short=$(echo "$p" | sed -E 's#/dist/index.html##; s#.*/##')
-        printf "%-44s %10s   (does not load — see docs/Benchmarking.md)\n" "$short" "n/a"
+        printf "%-44s %10s   (does not load)\n" "$short" "n/a"
     fi
 done
 
