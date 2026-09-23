@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Popover and dialog light dismiss runs before the page receives the
+  `pointerdown`/`pointerup` that triggers it, so `beforetoggle` reaches
+  the page ahead of its `pointerup` listeners and a listener that
+  rearranges the page cannot change which popover was clicked.
 * A popover opened inside a modal `<dialog>` can be clicked. Hit
   testing only looked inside the dialog's own box and missed the
   popover drawn above it, so clicks on it landed on the dialog.
