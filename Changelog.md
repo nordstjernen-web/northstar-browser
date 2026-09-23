@@ -9,6 +9,8 @@ Significant changes in each release:
   instead of inheriting them, forms keep a 1em bottom margin, stray list
   items put their marker inside, text inputs and textareas size with
   `border-box`, and left- or right-aligned images get a 3px gap.
+* In quirks mode a `<td nowrap>` or `<th nowrap>` that also has a
+  fixed pixel `width` wraps normally, as HTML says legacy pages expect.
 * `getComputedStyle().transform` resolves only the `transform`
   property; the individual `translate`, `rotate` and `scale` properties
   stay separate as CSS Transforms 2 says, instead of being folded into
