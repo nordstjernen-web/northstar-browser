@@ -51,6 +51,7 @@ static void
 render_request_fonts(const ns_render_ctx *c)
 {
     if (!ns_font_available()) return;
+    ns_fetch_policy *policy = ns_js_fetch_policy(c->js, NULL);
     for (guint i = 0; i < c->n_sheets; i++) {
         const ns_css_stylesheet *sh = c->sheets[i];
         if (!sh || !sh->font_faces) continue;
@@ -62,11 +63,12 @@ render_request_fonts(const ns_render_ctx *c)
                 ? c->resolve_url(ff->src_url, c->cb_ud)
                 : ns_url_resolve(c->base_url, ff->src_url);
             if (!abs) continue;
-            if (c->font_allowed && !c->font_allowed(abs, c->cb_ud)) {
+            if (ns_fetch_verdict_blocks(ns_fetch_policy_check(
+                    policy, NS_FETCH_DEST_FONT, c->base_url, abs, NULL))) {
                 g_free(abs);
                 continue;
             }
-            ns_font_request(ff->family, abs, c->base_url);
+            ns_font_request(ff->family, abs, c->base_url, policy);
             g_free(abs);
         }
     }

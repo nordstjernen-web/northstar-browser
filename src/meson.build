@@ -55,6 +55,7 @@ northstar_engine_sources = files(
   'mainctx.c',
   'eventsource.c',
   'ext.c',
+  'fetch_policy.c',
   'forms.c',
   'camera.c',
   'mic.c',
@@ -73,6 +74,7 @@ northstar_engine_sources = files(
   'js_intl.c',
   'js_date.c',
   'js_encoding.c',
+  'js_media.c',
   'js_perf.c',
   'js_realm.c',
   'js_webcrypto.c',
@@ -224,7 +226,7 @@ if sdl2_dep.found()
   )
 
   northstar_audio_sources = files('audio/audio.c')
-  northstar_audio_deps = [dependency('libcurl'), sdl2_dep, libplmpeg]
+  northstar_audio_deps = [sdl2_dep, libplmpeg]
   northstar_audio_libs = [libminimp3]
   if libvorbisfile.found()
     northstar_audio_deps += [libvorbisfile]

@@ -13,6 +13,7 @@
 #include <quickjs.h>
 
 #include "js.h"
+#include "audio/audio.h"
 #include "dom.h"
 #include "image.h"
 #include "layout.h"
@@ -71,9 +72,12 @@ struct ns_js {
     gpointer      nav_user_data;
     ns_js_download_cb download_cb;
     gpointer      download_user_data;
-    ns_js_audio_cb audio_cb;
-    gpointer      audio_user_data;
     guint         next_audio_token;
+    NsAudioContext *audio_context;
+    GHashTable   *media_players;
+    GPtrArray    *media_tasks;
+    guint         media_poll_source;
+    guint         media_task_source;
     ns_js_scroll_to_cb scroll_to_cb;
     gpointer      scroll_to_user_data;
     ns_js_fragment_nav_cb fragment_nav_cb;
@@ -233,6 +237,8 @@ struct ns_js {
     int           iframe_doc_set;
     ns_csp *csp;
     GHashTable   *doc_csp;
+    ns_fetch_policy *fetch_policy;
+    GHashTable   *doc_fetch_policy;
     char         *selection_text;
     gboolean      selection_has_range;
     double        selection_x, selection_y, selection_w, selection_h;
@@ -241,6 +247,8 @@ struct ns_js {
     gboolean      module_load_capped;
     GPtrArray    *import_map;
     gint64        time_origin_us;
+    gint64        frame_time_us;
+    gint64        last_raf_time_us;
     double        time_origin_real_ms;
     ns_js_navigation_timing navigation_timing;
     GPtrArray    *perf_entries;
@@ -348,6 +356,56 @@ gboolean ns_webaudio_render_offline(JSContext *ctx, JSValueConst destination,
 void ns_js_promise_reject(JSContext *ctx, JSValue resolvers[2], const char *message);
 JSValue ns_make_element(JSContext *ctx, const ns_node *cnode);
 const ns_node *ns_unwrap_element(JSValueConst val);
+void ns_drain_microtasks(ns_js *js);
+void ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj,
+                               const char *iface);
+JSValue ns_returns_resolved_undefined(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv);
+JSValue ns_promise_reject_dom(JSContext *ctx, const char *name,
+                              const char *message);
+JSValue ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
+                               const char *message);
+JSValue ns_media_time_ranges_for(JSContext *ctx, double dur);
+
+gboolean ns_node_is_media_element(const ns_node *n);
+char    *ns_media_resolve_src(JSContext *ctx, ns_node *node);
+ns_image *ns_media_animation_for(JSContext *ctx, JSValueConst this_val);
+double   ns_media_position(JSContext *ctx, JSValueConst this_val);
+void     ns_media_attr_changed(ns_js *js, ns_node *el, const char *name);
+void     ns_media_subtree_connected(ns_js *js, ns_node *root);
+void     ns_media_subtree_disconnected(ns_js *js, ns_node *root);
+void     ns_media_node_released(ns_js *js, ns_node *n);
+void     ns_media_blob_updated(ns_js *js, const char *url);
+void     ns_media_teardown(ns_js *js);
+JSValue ns_media_play(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv);
+JSValue ns_media_pause(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv);
+JSValue ns_media_load(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv);
+JSValue ns_media_fast_seek(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv);
+JSValue ns_media_get_current_time(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
+                                  JSValueConst val);
+JSValue ns_media_get_duration(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_paused(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_ended(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_seeking(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_readyState(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_networkState(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_error(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_volume(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_set_volume(JSContext *ctx, JSValueConst this_val,
+                            JSValueConst val);
+JSValue ns_media_get_muted(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_set_muted(JSContext *ctx, JSValueConst this_val,
+                           JSValueConst val);
+JSValue ns_media_get_seekable_ranges(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_buffered_ranges(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_played_ranges(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_video_width(JSContext *ctx, JSValueConst this_val);
+JSValue ns_media_get_video_height(JSContext *ctx, JSValueConst this_val);
 
 void
 ns_path2d_finalizer(JSRuntime *rt, JSValue val);

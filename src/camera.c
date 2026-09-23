@@ -34,6 +34,12 @@ ns_camera_record_decision(const char *origin, gboolean allow)
                         GINT_TO_POINTER(allow ? 1 : 2));
 }
 
+gboolean
+ns_camera_has_pending_origin(void)
+{
+    return g_camera_pending != NULL;
+}
+
 char *
 ns_camera_take_pending_origin(void)
 {

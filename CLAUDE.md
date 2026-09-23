@@ -49,10 +49,10 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `musl.yml`
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (`subprojects/plmpeg/`)
   for MP2, and, when the optional `opusfile`/`vorbisfile` libraries are
   present, Ogg Opus/Vorbis — and outputs through SDL2's audio device
-  (WASAPI/CoreAudio/ALSA), mixing and resampling itself. The engine
-  emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands that
-  come back with each rendered frame to the shell, which queues them to
-  the in-process mixer (`src/gtk/procview.c`).
+  (WASAPI/CoreAudio/ALSA), mixing and resampling itself. The
+  `HTMLMediaElement` state machine lives in `src/js_media.c`: it sends
+  commands straight to the page's audio context or the video's frame
+  timeline and polls them for load, position, end and errors.
 - Images decode in-tree: PNG (including animated APNG), GIF, BMP
   and JPEG through
   [Wuffs](https://github.com/google/wuffs), which also covers still WebP

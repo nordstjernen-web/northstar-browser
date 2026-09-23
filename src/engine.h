@@ -55,12 +55,12 @@ void ns_engine_load_keyframes(ns_anim *anim, ns_node *doc, const char *base_url,
 void ns_engine_anim_observe(ns_anim *anim, GHashTable *styles, gint64 now_us);
 
 void ns_engine_fetch_images(ns_box *root, const char *base_url,
-                            ns_image_cache *cache);
+                            ns_image_cache *cache, ns_js *js);
 
 typedef struct ns_engine_img_session ns_engine_img_session;
 
 ns_engine_img_session *ns_engine_fetch_images_start(
-    ns_box *root, const char *base_url, ns_image_cache *cache,
+    ns_box *root, const char *base_url, ns_image_cache *cache, ns_js *js,
     GHashTable *requested, double scroll_y, double viewport_h,
     gboolean *deferred_any,
     void (*arrived_cb)(gpointer user_data), gpointer user_data);

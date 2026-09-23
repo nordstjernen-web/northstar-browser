@@ -70,7 +70,6 @@ char *ns_browser_console_drain(ns_browser *browser);
 char *ns_browser_eval(ns_browser *browser, const char *src);
 char *ns_browser_media_at(ns_browser *browser, int x, int y,
                           int *out_is_video, int *out_stream);
-char *ns_browser_take_pending_audio(ns_browser *browser);
 char *ns_browser_take_pending_nav(ns_browser *browser);
 int ns_browser_take_pending_scroll_y(ns_browser *browser, int *out_scroll_y);
 char *ns_browser_take_pending_camera(ns_browser *browser);
@@ -82,6 +81,10 @@ char *ns_browser_take_pending_clipboard(ns_browser *browser);
 
 int ns_browser_tick(ns_browser *browser, int budget_ms);
 int ns_browser_animating(ns_browser *browser);
+int ns_browser_continuous(ns_browser *browser);
+int ns_browser_needs_frame(ns_browser *browser);
+gint64 ns_browser_next_wake_us(ns_browser *browser);
+void ns_browser_set_frame_time(ns_browser *browser, gint64 frame_time_us);
 int ns_browser_set_caret_blink_active(ns_browser *browser, int active);
 int ns_browser_caret_blinking(ns_browser *browser);
 char *ns_browser_title(ns_browser *browser);

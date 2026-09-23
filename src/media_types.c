@@ -192,3 +192,25 @@ ns_media_answer_string(ns_media_answer answer)
     }
     return "";
 }
+
+const char *
+ns_media_select_source(const ns_node *element)
+{
+    if (!element) return NULL;
+    const char *src = ns_element_get_attr(element, "src");
+    if (src) return *src ? src : NULL;
+    ns_media_element kind = ns_node_is_element_named(element, "audio")
+        ? NS_MEDIA_ELEMENT_AUDIO : NS_MEDIA_ELEMENT_VIDEO;
+    for (const ns_node *c = element->first_child; c; c = c->next_sibling) {
+        if (!ns_node_is_element_named(c, "source")) continue;
+        const char *csrc = ns_element_get_attr(c, "src");
+        if (!csrc || !*csrc) continue;
+        const char *type = ns_element_get_attr(c, "type");
+        if (type && *type &&
+            ns_media_type_support(type, kind, NS_MEDIA_SOURCE_FILE) ==
+                NS_MEDIA_CANNOT)
+            continue;
+        return csrc;
+    }
+    return NULL;
+}

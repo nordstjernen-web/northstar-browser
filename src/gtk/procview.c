@@ -5,7 +5,6 @@
 
 #include "procview.h"
 #include "i18n.h"
-#include "audio/audio.h"
 
 #include "proc_limits.h"
 #include "trace.h"
@@ -89,6 +88,7 @@ typedef struct {
     gboolean history;
     gboolean user_activated;
     gboolean caret_active;
+    gint64  frame_time_us;
 } Req;
 
 typedef enum {
@@ -111,8 +111,6 @@ typedef struct {
     char            *remote_ip;
     char            *camera;
     char            *download;
-    char            *audio;
-    GPtrArray       *audio_blobs;
     char            *clipboard;
     cairo_surface_t *surface;
     gboolean         surface_borrowed;
@@ -137,7 +135,7 @@ typedef struct {
 } Res;
 
 struct NsProcView {
-    grefcount   rc;
+    gatomicrefcount rc;
 
     GtkWidget     *root;
     GtkWidget     *area;
@@ -151,7 +149,6 @@ struct NsProcView {
     ns_page_session *session;
     gboolean    private_mode;
 
-    NsAudioContext *audio;
 
     NsProcNotify notify;
     gpointer     notify_ud;
@@ -168,6 +165,14 @@ struct NsProcView {
 
     gboolean    render_inflight;
     gboolean    render_pending;
+
+    gboolean    viewport_inflight;
+    gboolean    viewport_pending;
+
+    gboolean    scroll_inflight;
+    gboolean    scroll_pending;
+    int         scroll_seq;
+    double      scroll_pending_dx, scroll_pending_dy;
 
     gboolean    link_inflight;
     gboolean    link_pending;
@@ -251,7 +256,7 @@ enum {
     NS_PV_ZOOM_MAX_PERMILLE = (int)(NS_PROC_ZOOM_MAX * 1000.0 + 0.5)
 };
 
-static NsProcView *pv_ref(NsProcView *v) { g_ref_count_inc(&v->rc); return v; }
+static NsProcView *pv_ref(NsProcView *v) { g_atomic_ref_count_inc(&v->rc); return v; }
 
 static void
 set_accessible_label(GtkWidget *w, const char *label)
@@ -464,7 +469,6 @@ static void print_run(NsProcView *v, GPtrArray *pages,
 static void
 pv_free(NsProcView *v)
 {
-    ns_audio_context_destroy(v->audio);
     if (v->frame)
         cairo_surface_destroy(v->frame);
     v->frame = NULL;
@@ -485,108 +489,7 @@ pv_free(NsProcView *v)
     g_free(v);
 }
 
-static void pv_unref(NsProcView *v) { if (g_ref_count_dec(&v->rc)) pv_free(v); }
-
-typedef struct {
-    char    *token;
-    GBytes  *bytes;
-    gboolean reload;
-} AudioBlob;
-
-static void
-audio_blob_free(gpointer data)
-{
-    AudioBlob *b = data;
-    g_free(b->token);
-    g_bytes_unref(b->bytes);
-    g_free(b);
-}
-
-static gboolean
-media_blob_line(const char *line, char **out_token, const char **out_url,
-                gboolean *out_reload)
-{
-    const char *cursor;
-    if (g_str_has_prefix(line, "open ")) {
-        *out_reload = FALSE;
-        cursor = line + 5;
-    } else if (g_str_has_prefix(line, "reload ")) {
-        *out_reload = TRUE;
-        cursor = line + 7;
-    } else {
-        return FALSE;
-    }
-    while (*cursor == ' ') cursor++;
-    const char *token_end = strchr(cursor, ' ');
-    if (!token_end) return FALSE;
-    const char *url = token_end + 1;
-    while (*url == ' ') url++;
-    if (!g_str_has_prefix(url, "blob:")) return FALSE;
-    *out_token = g_strndup(cursor, token_end - cursor);
-    *out_url = url;
-    return TRUE;
-}
-
-static void
-res_take_audio(Res *res, char *commands)
-{
-    if (!commands) return;
-    GString *rest = g_string_new(NULL);
-    char **lines = g_strsplit(commands, "\n", -1);
-    for (int i = 0; lines[i]; i++) {
-        if (!*lines[i]) continue;
-        char *token = NULL;
-        const char *url = NULL;
-        gboolean reload = FALSE;
-        if (media_blob_line(lines[i], &token, &url, &reload)) {
-            GBytes *bytes = ns_net_resolve_blob(url, NULL);
-            if (bytes) {
-                AudioBlob *b = g_new0(AudioBlob, 1);
-                b->token = token;
-                b->bytes = bytes;
-                b->reload = reload;
-                if (!res->audio_blobs)
-                    res->audio_blobs =
-                        g_ptr_array_new_with_free_func(audio_blob_free);
-                g_ptr_array_add(res->audio_blobs, b);
-            } else {
-                g_free(token);
-            }
-            continue;
-        }
-        g_string_append(rest, lines[i]);
-        g_string_append_c(rest, '\n');
-    }
-    g_strfreev(lines);
-    free(commands);
-    res->audio = g_string_free(rest, FALSE);
-}
-
-static void
-pv_media_pump(NsProcView *v, Res *res)
-{
-    gboolean has_lines = res->audio && *res->audio;
-    if (!res->audio_blobs && !has_lines) return;
-    if (!v->audio)
-        v->audio = ns_audio_context_new();
-    ns_audio_context_set_local_files(v->audio,
-        v->current_url && g_ascii_strncasecmp(v->current_url, "file:", 5) == 0);
-    if (res->audio_blobs)
-        for (guint i = 0; i < res->audio_blobs->len; i++) {
-            AudioBlob *b = g_ptr_array_index(res->audio_blobs, i);
-            ns_audio_context_dispatch_blob(v->audio, b->token, b->bytes,
-                                           b->reload);
-        }
-    if (!has_lines) return;
-    char **lines = g_strsplit(res->audio, "\n", -1);
-    for (int i = 0; lines[i]; i++) {
-        if (!*lines[i]) continue;
-        if (g_getenv("NS_DBG_AUDIO"))
-            g_printerr("[audio-pump] cmd: %s\n", lines[i]);
-        ns_audio_context_dispatch(v->audio, lines[i]);
-    }
-    g_strfreev(lines);
-}
+static void pv_unref(NsProcView *v) { if (g_atomic_ref_count_dec(&v->rc)) pv_free(v); }
 
 static cairo_surface_t *
 stage_fill(NsProcView *v, const unsigned char *px, int w, int h, int stride)
@@ -712,6 +615,7 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
 {
     Res *res = res_new(v, RES_FRAME, req->seq);
     ns_page_frame fr;
+    ns_page_session_set_frame_time(s, req->frame_time_us);
     if (ns_page_session_render(s, req->w, req->h, req->sx, req->sy,
                                req->scale, req->caret_active, &fr) == 0) {
         res->ok = TRUE;
@@ -730,13 +634,32 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
         res->nav = fr.nav;
         res->camera = fr.camera;
         res->download = fr.download;
-        res_take_audio(res, fr.audio);
-        fr.nav = fr.camera = fr.download = fr.audio = NULL;
+        fr.nav = fr.camera = fr.download = NULL;
         if (fr.clipboard)
             res->clipboard = ns_page_session_clipboard(s);
     }
     ns_page_frame_clear(&fr);
     post(res);
+}
+
+static void arm_anim(NsProcView *v);
+
+static gboolean
+pv_wake_idle(gpointer data)
+{
+    NsProcView *v = data;
+    if (!v->closed && v->opened) {
+        v->last_anim_frame_us = 0;
+        arm_anim(v);
+    }
+    pv_unref(v);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+pv_session_wake(gpointer data)
+{
+    g_idle_add(pv_wake_idle, pv_ref(data));
 }
 
 static void
@@ -751,9 +674,11 @@ run_req(gpointer data)
         g_idle_add(pv_unref_idle, v);
         return;
     }
-    if (!v->session)
+    if (!v->session) {
         v->session = ns_page_session_new(NS_PROC_MAX_WIDTH,
                                          NS_PROC_MAX_HEIGHT);
+        ns_page_session_set_wake(v->session, pv_session_wake, v);
+    }
     ns_page_session *s = v->session;
     Res *res;
     switch (req->type) {
@@ -1007,6 +932,8 @@ start_render(NsProcView *v)
     req->sy = v->scroll_y;
     req->scale = cur_scale(v);
     req->caret_active = gtk_widget_has_focus(v->area);
+    GdkFrameClock *clock = gtk_widget_get_frame_clock(v->area);
+    req->frame_time_us = clock ? gdk_frame_clock_get_frame_time(clock) : 0;
     push_req(v, req);
 }
 
@@ -1061,6 +988,7 @@ disarm_anim(NsProcView *v)
 }
 
 static void start_link(NsProcView *v, int x, int y, LinkAct action);
+static void start_scroll(NsProcView *v, double dx, double dy);
 static void show_context_menu(NsProcView *v, const char *href);
 static void build_search_bar(NsProcView *v);
 static void console_append(NsProcView *v, const char *text);
@@ -1345,6 +1273,11 @@ start_viewport(NsProcView *v, int width, int height)
 {
     if (!v->opened)
         return;
+    if (v->viewport_inflight) {
+        v->viewport_pending = TRUE;
+        return;
+    }
+    v->viewport_inflight = TRUE;
     Req *req = g_new0(Req, 1);
     req->type = REQ_VIEWPORT;
     req->seq = ++v->viewport_seq;
@@ -1394,7 +1327,6 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     if (!url || !*url)
         return;
     pv_perm_resolve(v, FALSE);
-    ns_audio_context_reset(v->audio);
     v->pending_record = record;
     int seq = ++v->load_seq;
     ++v->render_seq;
@@ -1406,6 +1338,12 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     ++v->hover_seq;
     v->render_pending = FALSE;
     v->render_inflight = FALSE;
+    v->viewport_inflight = FALSE;
+    v->viewport_pending = FALSE;
+    ++v->scroll_seq;
+    v->scroll_inflight = FALSE;
+    v->scroll_pending = FALSE;
+    v->scroll_pending_dx = v->scroll_pending_dy = 0.0;
     v->link_inflight = FALSE;
     v->link_pending = FALSE;
     v->link_pending_action = ACT_HOVER;
@@ -1719,8 +1657,6 @@ on_result(gpointer data)
             pv_perm_bar_show(v, REQ_CAMERA, res->camera);
         if (current && res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
-        if (current && res->ok)
-            pv_media_pump(v, res);
         if (current && res->ok && res->clipboard && v->area) {
             gdk_clipboard_set_text(gtk_widget_get_clipboard(v->area),
                                    res->clipboard);
@@ -1737,11 +1673,16 @@ on_result(gpointer data)
     } else if (res->type == RES_VIEWPORT) {
         if (res->seq != v->viewport_seq)
             goto done;
+        v->viewport_inflight = FALSE;
         if (res->ok) {
             v->page_w = res->pw;
             v->page_h = res->ph;
             configure_adjustments(v);
             request_render(v);
+        }
+        if (v->viewport_pending) {
+            v->viewport_pending = FALSE;
+            start_viewport(v, v->last_vp_w, v->last_vp_h);
         }
     } else if (res->type == RES_SELECT) {
         if (res->seq == v->select_seq)
@@ -1835,6 +1776,9 @@ on_result(gpointer data)
         if (res->ok)
             request_render(v);
     } else if (res->type == RES_SCROLL) {
+        if (res->seq != v->scroll_seq)
+            goto done;
+        v->scroll_inflight = FALSE;
         if (res->ok)
             request_render(v);
         else {
@@ -1844,6 +1788,12 @@ on_result(gpointer data)
             gtk_adjustment_set_value(
                 v->vadj,
                 gtk_adjustment_get_value(v->vadj) + res->fallback_y * 60.0);
+        }
+        if (v->scroll_pending && v->opened) {
+            double dx = v->scroll_pending_dx, dy = v->scroll_pending_dy;
+            v->scroll_pending = FALSE;
+            v->scroll_pending_dx = v->scroll_pending_dy = 0.0;
+            start_scroll(v, dx, dy);
         }
     } else if (res->type == RES_SCROLLBAR) {
         if (res->kind == 0) {
@@ -1964,9 +1914,6 @@ done:
     g_free(res->remote_ip);
     g_free(res->camera);
     g_free(res->download);
-    g_free(res->audio);
-    if (res->audio_blobs)
-        g_ptr_array_unref(res->audio_blobs);
     free(res->clipboard);
     free(res->href);
     free(res->cursor);
@@ -2021,6 +1968,29 @@ on_resize(GtkDrawingArea *area, int width, int height, gpointer data)
     }
 }
 
+static void
+start_scroll(NsProcView *v, double dx, double dy)
+{
+    if (v->scroll_inflight) {
+        v->scroll_pending = TRUE;
+        v->scroll_pending_dx += dx;
+        v->scroll_pending_dy += dy;
+        return;
+    }
+    v->scroll_inflight = TRUE;
+    double s = cur_scale(v);
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_SCROLL;
+    req->seq = v->scroll_seq;
+    req->x = v->scroll_x + (int)(v->pointer_x / s);
+    req->y = v->scroll_y + (int)(v->pointer_y / s);
+    req->dx = (int)(dx * 60.0 / s);
+    req->dy = (int)(dy * 60.0 / s);
+    req->fallback_x = dx;
+    req->fallback_y = dy;
+    push_req(v, req);
+}
+
 static gboolean
 on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
 {
@@ -2043,16 +2013,7 @@ on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
         return TRUE;
     }
     if (v->opened) {
-        double s = cur_scale(v);
-        Req *req = g_new0(Req, 1);
-        req->type = REQ_SCROLL;
-        req->x = v->scroll_x + (int)(v->pointer_x / s);
-        req->y = v->scroll_y + (int)(v->pointer_y / s);
-        req->dx = (int)(dx * 60.0 / s);
-        req->dy = (int)(dy * 60.0 / s);
-        req->fallback_x = dx;
-        req->fallback_y = dy;
-        push_req(v, req);
+        start_scroll(v, dx, dy);
         return TRUE;
     }
     gtk_adjustment_set_value(v->hadj,
@@ -3198,7 +3159,7 @@ NsProcView *
 ns_proc_view_new(void)
 {
     NsProcView *v = g_new0(NsProcView, 1);
-    g_ref_count_init(&v->rc);
+    g_atomic_ref_count_init(&v->rc);
     v->history = g_ptr_array_new_with_free_func(g_free);
     v->hist_index = -1;
     v->link_pending_action = ACT_HOVER;

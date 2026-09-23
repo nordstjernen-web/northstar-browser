@@ -32,6 +32,7 @@ typedef struct ns_csp ns_csp;
 
 ns_csp *ns_csp_parse(const char *header_value);
 void    ns_csp_free(ns_csp *csp);
+ns_csp *ns_csp_copy(const ns_csp *csp);
 void    ns_csp_merge(ns_csp *dst, ns_csp *src);
 
 gboolean ns_csp_allows(const ns_csp *csp, ns_csp_kind kind,

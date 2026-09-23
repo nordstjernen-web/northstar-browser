@@ -30,6 +30,7 @@
 
 #include <ns-pango/ns-pango-cache.h>
 
+#include "audio/audio.h"
 #include "bytecode_cache.h"
 #include "cache.h"
 #include "config.h"
@@ -417,7 +418,9 @@ ns_run_headless(ns_headless_opts *hopts)
         g_free(abs_path);
         if (file_url) hopts->url = file_url;
     }
+    ns_audio_set_silent(TRUE);
     int rc = ns_headless_run(hopts);
+    ns_audio_shutdown();
     if (hopts->debug_levels & (1u << NS_DLOG_NET)) {
         guint64 fetches = 0, bytes = 0, relayouts = 0;
         double sum_ms = 0, span_ms = 0, layout_ms = 0;

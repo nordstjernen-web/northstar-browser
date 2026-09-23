@@ -111,6 +111,34 @@ ns_csp_free(ns_csp *csp)
     g_free(csp);
 }
 
+static ns_csp_policy *
+policy_copy(const ns_csp_policy *src)
+{
+    ns_csp_policy *p = g_new0(ns_csp_policy, 1);
+    for (int k = 0; k < NS_CSP_KIND_COUNT; k++) {
+        p->set[k] = src->set[k];
+        if (!src->sources[k]) continue;
+        p->sources[k] = g_ptr_array_new_full(src->sources[k]->len, g_free);
+        for (guint i = 0; i < src->sources[k]->len; i++)
+            g_ptr_array_add(p->sources[k],
+                            g_strdup(g_ptr_array_index(src->sources[k], i)));
+    }
+    return p;
+}
+
+ns_csp *
+ns_csp_copy(const ns_csp *csp)
+{
+    if (!csp || !csp->policies) return NULL;
+    ns_csp *copy = g_new0(ns_csp, 1);
+    copy->policies =
+        g_ptr_array_new_with_free_func((GDestroyNotify)policy_free);
+    for (guint i = 0; i < csp->policies->len; i++)
+        g_ptr_array_add(copy->policies,
+                        policy_copy(g_ptr_array_index(csp->policies, i)));
+    return copy;
+}
+
 void
 ns_csp_merge(ns_csp *dst, ns_csp *src)
 {

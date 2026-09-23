@@ -81,13 +81,13 @@ on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 }
 
 static ns_response *
-ns_engine_fetch_blocking_with_headers(const char *url, const char *top_url,
-                                      const char *const *headers,
-                                      GError **error)
+ns_engine_fetch_blocking_for(const char *url, const char *top_url,
+                             ns_fetch_destination dest, GError **error)
 {
     fetch_state st = {0};
     st.loop = g_main_loop_new(ns_engine_context(), FALSE);
-    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers,
+    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL,
+                         ns_net_accept_headers_for(dest), dest, NULL,
                          NULL, on_fetch_done, &st);
     g_engine_blocking_depth++;
     g_main_loop_run(st.loop);
@@ -101,7 +101,8 @@ ns_engine_fetch_blocking_with_headers(const char *url, const char *top_url,
 ns_response *
 ns_engine_fetch_blocking(const char *url, const char *top_url, GError **error)
 {
-    return ns_engine_fetch_blocking_with_headers(url, top_url, NULL, error);
+    return ns_engine_fetch_blocking_for(url, top_url, NS_FETCH_DEST_DOCUMENT,
+                                        error);
 }
 
 ns_response *
@@ -178,8 +179,8 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
             if (attempts >= 3) return NULL;
         }
     }
-    ns_response *resp = ns_engine_fetch_blocking_with_headers(
-        url, top_url, ns_net_accept_headers_for(NS_FETCH_DEST_STYLE), NULL);
+    ns_response *resp = ns_engine_fetch_blocking_for(
+        url, top_url, NS_FETCH_DEST_STYLE, NULL);
     GBytes *bytes = NULL;
     gboolean enforce_mime = strict_mime ||
         (resp && ns_net_header_is_nosniff(resp->x_content_type_options));
@@ -350,7 +351,8 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
             g_free(key);
         }
         ns_net_request_async(target->url, base_url, "GET", NULL, 0, NULL,
-                             headers, NULL, on_preload_fetched, NULL);
+                             headers, target->dest, NULL, NULL,
+                             on_preload_fetched, NULL);
     }
     g_ptr_array_free(urls, TRUE);
     g_ptr_array_free(connects, TRUE);
@@ -894,16 +896,30 @@ engine_image_is_lazy(const ns_box *box)
     return l && g_ascii_strcasecmp(l, "lazy") == 0;
 }
 
+typedef struct {
+    ns_fetch_destination dest;
+    ns_fetch_policy     *policy;
+} wanted_image;
+
+static void
+wanted_image_free(gpointer data)
+{
+    wanted_image *w = data;
+    ns_fetch_policy_unref(w->policy);
+    g_free(w);
+}
+
 static GHashTable *
 engine_collect_wanted_images(ns_box *root, const char *base_url,
-                             ns_image_cache *cache, double scroll_y,
-                             double viewport_h, gboolean *deferred_any)
+                             ns_image_cache *cache, ns_js *js,
+                             double scroll_y, double viewport_h,
+                             gboolean *deferred_any)
 {
     GPtrArray *imgs = g_ptr_array_new();
     ns_layout_collect_images(root, imgs);
     ns_layout_collect_videos(root, imgs);
     GHashTable *wanted = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                               g_free, NULL);
+                                               g_free, wanted_image_free);
     double lazy_limit = (viewport_h > 0.0)
         ? scroll_y + viewport_h + NS_LAZY_IMAGE_MARGIN_PX : G_MAXDOUBLE;
     for (guint i = 0; i < imgs->len; i++) {
@@ -940,7 +956,11 @@ engine_collect_wanted_images(ns_box *root, const char *base_url,
                 g_free(abs);
                 continue;
             }
-            g_hash_table_add(wanted, abs);
+            wanted_image *w = g_new0(wanted_image, 1);
+            w->dest = src == box->media->video_src ? NS_FETCH_DEST_MEDIA
+                                                    : NS_FETCH_DEST_IMAGE;
+            w->policy = ns_fetch_policy_ref(ns_js_fetch_policy(js, box->dom));
+            g_hash_table_insert(wanted, abs, w);
         }
         g_ptr_array_free(srcs, TRUE);
     }
@@ -1041,7 +1061,7 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
 
 ns_engine_img_session *
 ns_engine_fetch_images_start(ns_box *root, const char *base_url,
-                             ns_image_cache *cache,
+                             ns_image_cache *cache, ns_js *js,
                              GHashTable *requested,
                              double scroll_y, double viewport_h,
                              gboolean *deferred_any,
@@ -1050,7 +1070,7 @@ ns_engine_fetch_images_start(ns_box *root, const char *base_url,
 {
     if (!root || !base_url || !cache) return NULL;
     GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache,
-                                                      scroll_y, viewport_h,
+                                                      js, scroll_y, viewport_h,
                                                       deferred_any);
     if (requested) {
         GHashTableIter rit;
@@ -1077,17 +1097,18 @@ ns_engine_fetch_images_start(ns_box *root, const char *base_url,
     s->user_data = user_data;
 
     GHashTableIter it;
-    gpointer key;
+    gpointer key, value;
     g_hash_table_iter_init(&it, wanted);
-    while (g_hash_table_iter_next(&it, &key, NULL)) {
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        const wanted_image *w = value;
         img_async_item *item = g_new0(img_async_item, 1);
         item->session = s;
         item->abs = g_strdup(key);
         s->refs++;
         ns_net_request_async(
             item->abs, base_url, "GET", NULL, 0, NULL,
-            ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL,
-            on_image_fetch_async_done, item);
+            ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), w->dest,
+            w->policy, NULL, on_image_fetch_async_done, item);
     }
     g_hash_table_destroy(wanted);
     return s;
@@ -1110,11 +1131,11 @@ ns_engine_img_session_close(ns_engine_img_session *s)
 
 void
 ns_engine_fetch_images(ns_box *root, const char *base_url,
-                       ns_image_cache *cache)
+                       ns_image_cache *cache, ns_js *js)
 {
     if (!root || !base_url || !cache) return;
     GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache,
-                                                      0.0, 0.0, NULL);
+                                                      js, 0.0, 0.0, NULL);
 
     guint n = g_hash_table_size(wanted);
     if (n == 0) {
@@ -1128,16 +1149,17 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
     st.cache = cache;
 
     GHashTableIter it;
-    gpointer key;
+    gpointer key, value;
     g_hash_table_iter_init(&it, wanted);
-    while (g_hash_table_iter_next(&it, &key, NULL)) {
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        const wanted_image *w = value;
         img_fetch_item *item = g_new0(img_fetch_item, 1);
         item->st = &st;
         item->abs = g_strdup(key);
         ns_net_request_async(
             item->abs, base_url, "GET", NULL, 0, NULL,
-            ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL,
-            on_image_fetch_done, item);
+            ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), w->dest,
+            w->policy, NULL, on_image_fetch_done, item);
     }
     g_engine_blocking_depth++;
     g_main_loop_run(st.loop);

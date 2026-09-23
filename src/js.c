@@ -238,7 +238,6 @@ static JSValue ns_document_element_from_point(JSContext *ctx,
 static JSValue ns_document_elements_from_point(JSContext *ctx,
                                                JSValueConst this_val,
                                                int argc, JSValueConst *argv);
-static void ns_js_emit_audio(ns_js *js, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 static ns_worker_host *ns_sw_controller_for(ns_js *js, const char *abs_url);
 static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
                                      const char *url, const char *method,
@@ -282,7 +281,6 @@ static void ns_text_selection_set_state(JSContext *ctx,
                                         const char *direction);
 static void ns_js_process_pending_iframes(ns_js *js);
 static GBytes *ns_js_blob_url_lookup(ns_js *js, const char *url, char **out_type);
-static void ns_media_blob_updated(ns_js *js, const char *url);
 static void ns_js_record_child_change(ns_js *js, ns_node *parent,
                                       ns_node *added, ns_node *removed,
                                       ns_node *previous_sibling, ns_node *next_sibling);
@@ -361,8 +359,6 @@ static JSValue ns_window_url_create_object(JSContext *ctx, JSValueConst this_val
 static JSValue ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
 static const char *ns_http_status_text(int status);
-static gboolean ns_node_is_media_element(const ns_node *n);
-static char *ns_media_resolve_src(JSContext *ctx, ns_node *node);
 static void ns_attach_body_consumers(JSContext *ctx, JSValueConst obj);
 static void ns_set_instance_proto(JSContext *ctx, JSValueConst object,
                                   const char *constructor_name);
@@ -578,15 +574,17 @@ ns_js_pumped_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 
 static ns_response *
 ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
-                     const char *const *headers, GError **error)
+                     const char *const *headers, ns_fetch_destination dest,
+                     ns_fetch_policy *policy, GError **error)
 {
     if (!js || js->worker_host)
         return ns_net_request_blocking(url, top_url, "GET", NULL, 0, NULL,
-                                       headers, NULL, error);
+                                       headers, dest, policy, NULL, error);
 
     ns_js_pumped_fetch pf = {0};
     pf.loop = g_main_loop_new(ns_engine_context(), FALSE);
-    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers, NULL,
+    ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, headers, dest,
+                         policy, NULL,
                          ns_js_pumped_fetch_done, &pf);
     gboolean saved = js->in_pump;
     js->in_pump = TRUE;
@@ -1097,7 +1095,6 @@ ns_js_attach_idle(ns_js *js, GSourceFunc func, gpointer data)
 static void ns_storage_drain_deferred_events(ns_js *js);
 static void ns_js_report_pending_rejections(ns_js *js);
 static void ns_js_drop_pending_rejections(ns_js *js);
-static void ns_drain_microtasks(ns_js *js);
 
 #define NS_MICROTASK_SLICE_US 8000
 #define NS_MICROTASK_SLICE_JOBS 256
@@ -1121,7 +1118,7 @@ ns_schedule_microtask_drain(ns_js *js)
         ns_js_attach_idle(js, ns_microtask_drain_idle, js);
 }
 
-static void
+void
 ns_drain_microtasks(ns_js *js)
 {
     if (!js || js->halted || js->draining_microtasks) return;
@@ -1930,8 +1927,6 @@ class_attr_contains(const char *cls, const char *token, gsize tlen,
     return FALSE;
 }
 
-static JSValue ns_throw_dom_exception(JSContext *ctx, const char *name,
-                                      int code, const char *message);
 
 static int
 ns_tlist_validate(JSContext *ctx, const char *token)
@@ -3354,6 +3349,8 @@ ns_invalidate_wrapper(ns_node *n)
     if (js && js->js_image_loads)
         g_hash_table_remove(js->js_image_loads, n);
     ns_popover_forget_node(js, n);
+    if (js && js->media_players)
+        ns_media_node_released(js, n);
     n->js_invalidate = NULL;
 
     if (js && js->listeners) {
@@ -8161,17 +8158,34 @@ ns_headers_init_add_raw(JSContext *ctx, JSValueConst init, const char *raw)
     }
 }
 
-static gboolean
-ns_final_url_connect_blocked(ns_js *js, const char *final_url)
+static void
+ns_js_console_policy_refusal(ns_js *js, const char *message)
 {
-    if (!js || !final_url || !*final_url) return FALSE;
-    const char *page = js->current_url;
-    gboolean mixed = page &&
-        g_ascii_strncasecmp(page, "https://", 8) == 0 &&
-        g_ascii_strncasecmp(final_url, "http://", 7) == 0;
-    gboolean csp = js->csp &&
-        !ns_csp_allows(js->csp, NS_CSP_CONNECT, final_url, page);
-    return mixed || csp;
+    if (js && js->log_cb && message) js->log_cb(message, js->log_user_data);
+}
+
+static char *
+ns_js_policy_refusal(ns_js *js, ns_fetch_destination dest, const char *url)
+{
+    ns_fetch_verdict verdict = ns_fetch_policy_check(
+        js ? ns_js_fetch_policy(js, NULL) : NULL, dest,
+        js ? js->current_url : NULL, url, NULL);
+    if (!ns_fetch_verdict_blocks(verdict)) return NULL;
+    char *message = ns_fetch_verdict_message(verdict, dest, url);
+    ns_js_console_policy_refusal(js, message);
+    return message;
+}
+
+static char *
+ns_js_connect_refusal(ns_js *js, const char *url)
+{
+    return ns_js_policy_refusal(js, NS_FETCH_DEST_CONNECT, url);
+}
+
+static char *
+ns_js_worker_refusal(ns_js *js, const char *url)
+{
+    return ns_js_policy_refusal(js, NS_FETCH_DEST_WORKER, url);
 }
 
 static void
@@ -8201,10 +8215,6 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
                              end_ms - start_ms,
                              resp && resp->body ? (gint64)resp->body->len : 0);
     }
-    if (resp && !resp->error &&
-        ns_final_url_connect_blocked(st->js, resp->final_url))
-        resp->error = g_strdup(
-            "blocked after redirect (mixed content or connect-src CSP)");
     if (!resp || resp->error) {
         const char *msg = resp ? resp->error :
                                 (err ? err->message : "fetch failed");
@@ -8867,17 +8877,16 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     const char *send_url = abs_url ? abs_url : url;
     const char *use_method = method ? method : "GET";
 
-    gboolean blocked_mixed = top &&
-        g_ascii_strncasecmp(top, "https://", 8) == 0 &&
-        g_ascii_strncasecmp(send_url, "http://", 7) == 0;
-    gboolean blocked_csp = !g_str_has_prefix(send_url, "northstar-extension:") &&
-        st->js && st->js->csp &&
-        !ns_csp_allows(st->js->csp, NS_CSP_CONNECT, send_url, top);
-    if (blocked_mixed || blocked_csp) {
+    ns_fetch_policy *policy = st->js ? ns_js_fetch_policy(st->js, NULL) : NULL;
+    ns_fetch_verdict verdict =
+        g_str_has_prefix(send_url, "northstar-extension:") ? NS_FETCH_ALLOWED
+        : ns_fetch_policy_check(policy, NS_FETCH_DEST_CONNECT, top, send_url,
+                                NULL);
+    if (ns_fetch_verdict_blocks(verdict)) {
         ns_response *resp = g_new0(ns_response, 1);
-        resp->error = g_strdup(blocked_mixed
-            ? "blocked as mixed content (http resource on https page)"
-            : "blocked by Content-Security-Policy connect-src");
+        resp->error = ns_fetch_verdict_message(verdict, NS_FETCH_DEST_CONNECT,
+                                               send_url);
+        ns_js_console_policy_refusal(st->js, resp->error);
         ns_js_fetch_delivery *d = g_new0(ns_js_fetch_delivery, 1);
         d->st = st;
         d->resp = resp;
@@ -8919,6 +8928,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
                          body, body_len,
                          content_type,
                          (const char *const *)extras->pdata,
+                         NS_FETCH_DEST_CONNECT, policy,
                          st->cancellable, ns_on_js_fetch_done, st);
     g_ptr_array_free(extras, TRUE);
     g_free(abs_url);
@@ -9225,7 +9235,7 @@ ns_event_composed_path(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
 static void ns_js_emit(ns_js *js, const char *prefix, JSContext *ctx,
                        int argc, JSValueConst *argv);
 
-static JSValue
+JSValue
 ns_returns_resolved_undefined(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
@@ -9518,7 +9528,7 @@ ns_navigator_get_battery(JSContext *ctx, JSValueConst this_val,
     return ns_promise_resolve_take(ctx, battery);
 }
 
-static JSValue
+JSValue
 ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
                        const char *message)
 {
@@ -9541,7 +9551,7 @@ ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
     return JS_Throw(ctx, err);
 }
 
-static JSValue
+JSValue
 ns_promise_reject_dom(JSContext *ctx, const char *name, const char *message)
 {
     JSValue resolvers[2];
@@ -16860,9 +16870,7 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     gboolean response_allowed = FALSE;
     if (resp && !err) {
         gboolean allow = cors_allows(js_from_ctx(ctx) ? js_from_ctx(ctx)->current_url : NULL,
-                                     resp->final_url, resp->cors_allow_origin)
-                         && !ns_final_url_connect_blocked(js_from_ctx(ctx),
-                                                          resp->final_url);
+                                     resp->final_url, resp->cors_allow_origin);
         response_allowed = allow;
         int code = allow ? (int)resp->status : 0;
         JS_SetPropertyStr(ctx, st->obj, "status", JS_NewInt32(ctx, code));
@@ -17392,12 +17400,17 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         else if (auto_content_type)        effective_ct = auto_content_type;
         else                               effective_ct = "application/x-www-form-urlencoded";
     }
-    gboolean blocked_mixed = st->js && st->js->current_url &&
-        g_ascii_strncasecmp(st->js->current_url, "https://", 8) == 0 &&
-        g_ascii_strncasecmp(st->url, "http://", 7) == 0;
-    gboolean blocked_csp = st->js && st->js->csp &&
-        !ns_csp_allows(st->js->csp, NS_CSP_CONNECT, st->url,
-                       st->js->current_url);
+    ns_fetch_policy *policy = st->js ? ns_js_fetch_policy(st->js, NULL) : NULL;
+    ns_fetch_verdict verdict = ns_fetch_policy_check(
+        policy, NS_FETCH_DEST_CONNECT, st->js ? st->js->current_url : NULL,
+        st->url, NULL);
+    gboolean blocked = ns_fetch_verdict_blocks(verdict);
+    if (blocked) {
+        char *message = ns_fetch_verdict_message(verdict, NS_FETCH_DEST_CONNECT,
+                                                 st->url);
+        ns_js_console_policy_refusal(st->js, message);
+        g_free(message);
+    }
     JS_SetPropertyStr(ctx, this_val, "_sendFlag", JS_TRUE);
     JSValue loadstart = ns_target_make_event(ctx, this_val, "loadstart");
     JS_SetPropertyStr(ctx, loadstart, "lengthComputable", JS_FALSE);
@@ -17422,7 +17435,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         }
         JS_FreeValue(ctx, upload);
     }
-    if (blocked_mixed || blocked_csp) {
+    if (blocked) {
         ns_js_attach_idle(st->js, ns_xhr_emit_blocked_idle, st);
         g_ptr_array_free(hdr_terminated, TRUE);
         g_free(body);
@@ -17438,6 +17451,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
                          body, body_len,
                          effective_ct,
                          (const char *const *)hdr_terminated->pdata,
+                         NS_FETCH_DEST_CONNECT, policy,
                          NULL, ns_on_xhr_done, st);
     g_ptr_array_free(hdr_terminated, TRUE);
     g_free(body);
@@ -19729,19 +19743,12 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
         g_free(host);
     }
 
-    if (js && js->current_url &&
-        g_ascii_strncasecmp(js->current_url, "https://", 8) == 0 &&
-        g_ascii_strncasecmp(target, "ws://", 5) == 0) {
+    char *refusal = ns_js_connect_refusal(js, target);
+    if (refusal) {
         g_free(target);
-        return JS_ThrowTypeError(ctx,
-            "WebSocket: mixed content (ws:// not allowed from https://)");
-    }
-
-    if (js && js->csp &&
-        !ns_csp_allows(js->csp, NS_CSP_CONNECT, target, js->current_url)) {
-        g_free(target);
-        return JS_ThrowTypeError(ctx,
-            "WebSocket: blocked by Content-Security-Policy connect-src");
+        JSValue thrown = JS_ThrowTypeError(ctx, "WebSocket: %s", refusal);
+        g_free(refusal);
+        return thrown;
     }
 
     if (!ns_ws_available()) {
@@ -19972,18 +19979,12 @@ ns_window_eventsource_ctor(JSContext *ctx, JSValueConst this_val,
         g_free(target);
         return JS_ThrowTypeError(ctx, "EventSource URL must use http: or https:");
     }
-    if (js && js->current_url &&
-        g_ascii_strncasecmp(js->current_url, "https://", 8) == 0 &&
-        g_ascii_strncasecmp(target, "http://", 7) == 0) {
+    char *refusal = ns_js_connect_refusal(js, target);
+    if (refusal) {
         g_free(target);
-        return JS_ThrowTypeError(ctx,
-            "EventSource: mixed content (http:// not allowed from https://)");
-    }
-    if (js && js->csp &&
-        !ns_csp_allows(js->csp, NS_CSP_CONNECT, target, js->current_url)) {
-        g_free(target);
-        return JS_ThrowTypeError(ctx,
-            "EventSource: blocked by Content-Security-Policy connect-src");
+        JSValue thrown = JS_ThrowTypeError(ctx, "EventSource: %s", refusal);
+        g_free(refusal);
+        return thrown;
     }
 
     gboolean with_credentials = FALSE;
@@ -20734,9 +20735,12 @@ ns_worker_script_url_allowed(ns_worker_host *host, const char *url,
         return FALSE;
     }
     const char *base = host ? host->base_url : NULL;
-    if (base && g_str_has_prefix(base, "https://") &&
-        g_str_has_prefix(url, "http://")) {
-        if (out_error) *out_error = g_strdup("Worker script blocked as mixed content");
+    ns_fetch_verdict verdict =
+        ns_fetch_policy_check(NULL, NS_FETCH_DEST_WORKER, base, url, NULL);
+    if (ns_fetch_verdict_blocks(verdict)) {
+        if (out_error)
+            *out_error = ns_fetch_verdict_message(verdict, NS_FETCH_DEST_WORKER,
+                                                  url);
         return FALSE;
     }
     if (base && g_str_has_prefix(base, "file:"))
@@ -20776,7 +20780,9 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
     };
     ns_response *resp = ns_net_request_blocking(url, host ? host->base_url : NULL,
                                                 "GET", NULL, 0, NULL,
-                                                script_headers, NULL, &err);
+                                                script_headers,
+                                                NS_FETCH_DEST_WORKER, NULL,
+                                                NULL, &err);
     char *body = NULL;
     if (resp && resp->status == 200 && resp->body &&
         resp->body->len <= NS_WORKER_SCRIPT_BYTES_MAX) {
@@ -21398,6 +21404,8 @@ ns_sw_fetch_result_on_owner(gpointer data)
             ns_net_request_async(st->fb_send_url, st->fb_top, st->fb_method,
                                  st->fb_body, st->fb_body_len, st->fb_content_type,
                                  (const char *const *)st->fb_headers,
+                                 NS_FETCH_DEST_CONNECT,
+                                 ns_js_fetch_policy(st->js, NULL),
                                  st->cancellable, ns_on_js_fetch_done, st);
         }
     }
@@ -22069,10 +22077,13 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
             return ret;
         }
     }
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs_url, js->current_url)) {
+    char *refusal = ns_js_worker_refusal(js, abs_url);
+    if (refusal) {
         g_free(abs_url);
         g_free(inline_script);
-        return JS_ThrowTypeError(ctx, "Worker: blocked by Content-Security-Policy worker-src");
+        JSValue thrown = JS_ThrowTypeError(ctx, "Worker: %s", refusal);
+        g_free(refusal);
+        return thrown;
     }
 
     ns_new_class_id(&ns_worker_class_id);
@@ -22427,11 +22438,13 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         g_free(scope);
         return ret;
     }
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs_url, js->current_url)) {
+    char *refusal = ns_js_worker_refusal(js, abs_url);
+    if (refusal) {
         g_free(abs_url);
         g_free(scope);
-        return ns_sw_reject(ctx, "SecurityError",
-                            "blocked by Content-Security-Policy worker-src");
+        JSValue rejected = ns_sw_reject(ctx, "SecurityError", refusal);
+        g_free(refusal);
+        return rejected;
     }
 
     JSValue existing = ns_sw_registration_for_scope(ctx, this_val, scope);
@@ -26936,6 +26949,16 @@ ns_js_flush_scrollend(ns_js *js)
     }
 }
 
+static gint64
+ns_js_animation_frame_time(ns_js *js)
+{
+    gint64 t = js->frame_time_us > 0 ? js->frame_time_us
+                                     : g_get_monotonic_time();
+    if (t < js->last_raf_time_us) t = js->last_raf_time_us;
+    js->last_raf_time_us = t;
+    return t;
+}
+
 gboolean
 ns_js_run_animation_frame(ns_js *js)
 {
@@ -26956,7 +26979,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
     ns_drain_microtasks(js);
     if (!js->raf_pending || js->raf_pending->len == 0)
         return js->mutated ? TRUE : FALSE;
-    gint64 now_us = g_get_monotonic_time();
+    gint64 now_us = ns_js_animation_frame_time(js);
     GArray *fired = js->raf_pending;
     js->raf_pending = g_array_new(FALSE, FALSE, sizeof(ns_raf_entry));
     double ts_ms = ns_perf_relative_ms(now_us, js->time_origin_us);
@@ -27045,6 +27068,25 @@ gboolean
 ns_js_has_pending_animation_frame(const ns_js *js)
 {
     return js && js->raf_pending && js->raf_pending->len > 0;
+}
+
+gboolean
+ns_js_wants_frame(const ns_js *js)
+{
+    if (!js || js->halted) return FALSE;
+    if (js->mutated) return TRUE;
+    if (js->raf_pending && js->raf_pending->len > 0) return TRUE;
+    if (js->pending_scrollend_doc ||
+        (js->pending_scrollend && js->pending_scrollend->len > 0))
+        return TRUE;
+    return js->pending_iframe_loads && js->pending_iframe_loads->len > 0 &&
+           js->iframe_load_depth == 0 && js->eval_depth == 0;
+}
+
+void
+ns_js_set_frame_time(ns_js *js, gint64 frame_time_us)
+{
+    if (js) js->frame_time_us = frame_time_us;
 }
 
 gboolean
@@ -40401,6 +40443,19 @@ ns_js_on_image_ready(ns_image *img, gpointer user_data)
         r->ready_idle = ns_engine_idle_add(ns_js_image_ready_idle, r);
 }
 
+static gboolean
+ns_js_image_refused_idle(gpointer data)
+{
+    ns_js_image_load *r = data;
+    r->ready_idle = 0;
+    ns_js *js = r->js;
+    if (!js || js->halted ||
+        g_hash_table_lookup(js->js_image_loads, r->el) != r)
+        return G_SOURCE_REMOVE;
+    ns_js_fire_img_load_once(js, r->el, TRUE);
+    return G_SOURCE_REMOVE;
+}
+
 static void
 ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
 {
@@ -40425,8 +40480,19 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
     r->requested_url = abs_url;
     r->start_ms = ns_perf_now_ms(js);
     g_hash_table_insert(js->js_image_loads, el, r);
+    ns_fetch_policy *policy = ns_js_fetch_policy(js, el);
+    ns_fetch_verdict verdict = ns_fetch_policy_check(
+        policy, NS_FETCH_DEST_IMAGE, base, abs_url, NULL);
+    if (ns_fetch_verdict_blocks(verdict)) {
+        char *message = ns_fetch_verdict_message(verdict, NS_FETCH_DEST_IMAGE,
+                                                 abs_url);
+        ns_js_console_policy_refusal(js, message);
+        g_free(message);
+        r->ready_idle = ns_engine_idle_add(ns_js_image_refused_idle, r);
+        return;
+    }
     r->img = ns_image_cache_get(js->image_cache, abs_url,
-                                base ? base : abs_url,
+                                base ? base : abs_url, policy,
                                 ns_js_on_image_ready, r);
     if (r->img && (r->img->loaded || r->img->failed) && !r->ready_idle)
         r->ready_idle = ns_engine_idle_add(ns_js_image_ready_idle, r);
@@ -40498,22 +40564,6 @@ ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im)
         g_str_has_prefix(url, "blob:"))
         return TRUE;
     return ns_js_urls_same_origin(url, ns_js_ctx_document_url(js, ctx));
-}
-
-static ns_image *
-ns_media_animation_for(JSContext *ctx, JSValueConst this_val)
-{
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (!ns_node_is_media_element(el)) return NULL;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->image_cache) return NULL;
-    ns_image *img = (ns_image *)ns_js_image_for_node(js, el);
-    if (!ns_image_is_animation(img)) {
-        char *url = ns_media_resolve_src(ctx, el);
-        img = url ? ns_image_cache_peek(js->image_cache, url) : NULL;
-        g_free(url);
-    }
-    return ns_image_is_animation(img) ? img : NULL;
 }
 
 
@@ -41594,187 +41644,6 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
 
 
 static JSValue
-ns_media_get_paused(JSContext *ctx, JSValueConst this_val)
-{
-    const ns_image *anim = ns_media_animation_for(ctx, this_val);
-    if (anim) return JS_NewBool(ctx, anim->anim_paused);
-    JSValue playing_v = JS_GetPropertyStr(ctx, this_val, "_nd_playing");
-    gboolean playing = JS_ToBool(ctx, playing_v);
-    JS_FreeValue(ctx, playing_v);
-    return JS_NewBool(ctx, !playing);
-}
-
-static JSValue
-ns_media_get_readyState(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_readyState");
-    int32_t rs = 0;
-    if (!JS_IsUndefined(v)) JS_ToInt32(ctx, &rs, v);
-    JS_FreeValue(ctx, v);
-    if (rs == 0 && ns_media_animation_for(ctx, this_val)) rs = 4;
-    return JS_NewInt32(ctx, rs);
-}
-
-static JSValue
-ns_media_get_networkState(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_networkState");
-    int32_t nst = 0;
-    if (!JS_IsUndefined(v)) JS_ToInt32(ctx, &nst, v);
-    JS_FreeValue(ctx, v);
-    return JS_NewInt32(ctx, nst);
-}
-
-static char *
-ns_media_resolve_src(JSContext *ctx, ns_node *node)
-{
-    if (!node) return NULL;
-    const char *src = ns_element_get_attr(node, "src");
-    if (!src || !*src) {
-        for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
-            if (ns_node_is_element_named(c, "source")) {
-                const char *ss = ns_element_get_attr(c, "src");
-                if (ss && *ss) { src = ss; break; }
-            }
-        }
-    }
-    if (!src || !*src) return NULL;
-    ns_js *js = js_from_ctx(ctx);
-    char *abs = (js && js->current_url) ? ns_url_resolve(js->current_url, src)
-                                        : g_strdup(src);
-    if (abs && g_str_has_prefix(abs, "file:") &&
-        (!js || !js->current_url ||
-         !g_str_has_prefix(js->current_url, "file:"))) {
-        g_free(abs);
-        return NULL;
-    }
-    return abs;
-}
-
-static void
-ns_media_blob_updated_node(ns_js *js, ns_node *node, const char *url,
-                           int depth)
-{
-    if (!node || depth >= 512) return;
-    if (ns_node_is_element_named(node, "audio")) {
-        char *src = ns_media_resolve_src(js->ctx, node);
-        gboolean matches = src && strcmp(src, url) == 0;
-        g_free(src);
-        if (matches) {
-            JSValue element = ns_make_element(js->ctx, node);
-            JSValue opened = JS_GetPropertyStr(js->ctx, element,
-                                               "_nd_audio_opened");
-            if (JS_ToBool(js->ctx, opened)) {
-                JSValue token = JS_GetPropertyStr(js->ctx, element,
-                                                  "_nd_audio_token");
-                if (JS_IsString(token)) {
-                    const char *value = JS_ToCString(js->ctx, token);
-                    if (value) {
-                        ns_js_emit_audio(js, "reload %s %s", value, url);
-                        JS_FreeCString(js->ctx, value);
-                    }
-                }
-                JS_FreeValue(js->ctx, token);
-            }
-            JS_FreeValue(js->ctx, opened);
-            JS_FreeValue(js->ctx, element);
-        }
-    }
-    for (ns_node *child = node->first_child; child;
-         child = child->next_sibling)
-        ns_media_blob_updated_node(js, child, url, depth + 1);
-}
-
-static void
-ns_media_blob_updated(ns_js *js, const char *url)
-{
-    if (!js || !js->current_doc || !url) return;
-    ns_media_blob_updated_node(js, js->current_doc, url, 0);
-}
-
-static char *
-ns_media_token(JSContext *ctx, ns_node *node)
-{
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !node) return NULL;
-    JSValue v = ns_make_element(ctx, node);
-    JSValue tv = JS_GetPropertyStr(ctx, v, "_nd_audio_token");
-    char *token = NULL;
-    if (JS_IsString(tv)) {
-        const char *s = JS_ToCString(ctx, tv);
-        token = g_strdup(s);
-        JS_FreeCString(ctx, s);
-    } else {
-        token = g_strdup_printf("a%u", ++js->next_audio_token);
-        JS_SetPropertyStr(ctx, v, "_nd_audio_token", JS_NewString(ctx, token));
-    }
-    JS_FreeValue(ctx, tv);
-    JS_FreeValue(ctx, v);
-    return token;
-}
-
-static JSValue
-ns_media_play(JSContext *ctx, JSValueConst this_val,
-              int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_TRUE);
-    JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    ns_js *js = js_from_ctx(ctx);
-    if (el && js) {
-        ns_js_dispatch_event(js, el, "play", NULL);
-        ns_image *anim = ns_media_animation_for(ctx, this_val);
-        if (anim) {
-            ns_image_anim_set_paused(anim, FALSE, g_get_monotonic_time());
-            ns_js_request_repaint(js);
-        }
-        char *url = ns_media_resolve_src(ctx, el);
-        gboolean audio_element = ns_node_is_element_named(el, "audio");
-        if (url && js->audio_cb && audio_element) {
-            char *token = ns_media_token(ctx, el);
-            JSValue opened = JS_GetPropertyStr(ctx, this_val, "_nd_audio_opened");
-            gboolean already = JS_ToBool(ctx, opened);
-            JS_FreeValue(ctx, opened);
-            if (!already) {
-                ns_js_emit_audio(js, "open %s %s", token, url);
-                JS_SetPropertyStr(ctx, this_val, "_nd_audio_opened", JS_TRUE);
-            }
-            ns_js_emit_audio(js, "play %s", token);
-            g_free(token);
-        } else {
-            ns_js_dispatch_event(js, el, "playing", NULL);
-        }
-        g_free(url);
-    }
-    return ns_returns_resolved_undefined(ctx, this_val, 0, NULL);
-}
-
-static JSValue
-ns_media_get_current_time(JSContext *ctx, JSValueConst this_val)
-{
-    const ns_image *anim = ns_media_animation_for(ctx, this_val);
-    if (anim)
-        return JS_NewFloat64(ctx,
-            ns_image_anim_position(anim, g_get_monotonic_time()));
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_pos");
-    if (JS_IsNumber(v)) return v;
-    JS_FreeValue(ctx, v);
-    return JS_NewFloat64(ctx, 0.0);
-}
-
-static JSValue
-ns_media_get_duration(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_duration");
-    if (JS_IsNumber(v)) return v;
-    JS_FreeValue(ctx, v);
-    const ns_image *anim = ns_media_animation_for(ctx, this_val);
-    if (anim) return JS_NewFloat64(ctx, ns_image_anim_duration(anim));
-    return JS_NewFloat64(ctx, NAN);
-}
-
-static JSValue
 ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv, int magic,
                     JSValue *func_data)
@@ -41791,7 +41660,7 @@ ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
     return JS_NewFloat64(ctx, magic == 0 ? 0.0 : dur);
 }
 
-static void
+void
 ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj, const char *iface)
 {
     JSValue global = JS_GetGlobalObject(ctx);
@@ -41805,7 +41674,7 @@ ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj, const char *iface)
     JS_FreeValue(ctx, global);
 }
 
-static JSValue
+JSValue
 ns_media_time_ranges_for(JSContext *ctx, double dur)
 {
     int len = dur > 0 ? 1 : 0;
@@ -41820,65 +41689,6 @@ ns_media_time_ranges_for(JSContext *ctx, double dur)
     JS_FreeValue(ctx, data[0]);
     JS_FreeValue(ctx, data[1]);
     return obj;
-}
-
-static double
-ns_media_prop_number(JSContext *ctx, JSValueConst this_val, const char *name)
-{
-    double out = 0;
-    JSValue v = JS_GetPropertyStr(ctx, this_val, name);
-    if (JS_IsNumber(v)) JS_ToFloat64(ctx, &out, v);
-    JS_FreeValue(ctx, v);
-    if (isnan(out) || out <= 0) out = 0;
-    return out;
-}
-
-static JSValue
-ns_media_get_seekable_ranges(JSContext *ctx, JSValueConst this_val)
-{
-    return ns_media_time_ranges_for(ctx,
-        ns_media_prop_number(ctx, this_val, "_nd_duration"));
-}
-
-static JSValue
-ns_media_get_buffered_ranges(JSContext *ctx, JSValueConst this_val)
-{
-    double end = ns_media_prop_number(ctx, this_val, "_nd_buffered");
-    return ns_media_time_ranges_for(ctx, end);
-}
-
-static JSValue
-ns_media_get_played_ranges(JSContext *ctx, JSValueConst this_val)
-{
-    (void)this_val;
-    return ns_media_time_ranges_for(ctx, 0);
-}
-
-static JSValue
-ns_media_get_ended(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_ended");
-    gboolean ended = JS_ToBool(ctx, v);
-    JS_FreeValue(ctx, v);
-    return JS_NewBool(ctx, ended);
-}
-
-static gboolean
-ns_node_is_media_element(const ns_node *n)
-{
-    return n && n->kind == NS_NODE_ELEMENT && n->name &&
-           (g_ascii_strcasecmp(n->name, "video") == 0 ||
-            g_ascii_strcasecmp(n->name, "audio") == 0);
-}
-
-static JSValue
-ns_media_get_error(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_error");
-    if (JS_IsObject(v)) return v;
-    JS_FreeValue(ctx, v);
-    const ns_node *n = ns_unwrap_element(this_val);
-    return ns_node_is_media_element(n) ? JS_NULL : JS_UNDEFINED;
 }
 
 static JSValue
@@ -41950,173 +41760,12 @@ ns_media_set_defaultPlaybackRate(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_media_load(JSContext *ctx, JSValueConst this_val,
-              int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (!ns_node_is_media_element(el)) return JS_UNDEFINED;
-    JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, 0.0));
-    JS_SetPropertyStr(ctx, this_val, "_nd_duration", JS_UNDEFINED);
-    JS_SetPropertyStr(ctx, this_val, "_nd_buffered", JS_UNDEFINED);
-    JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
-    JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_FALSE);
-    JS_SetPropertyStr(ctx, this_val, "_nd_error", JS_UNDEFINED);
-    JS_SetPropertyStr(ctx, this_val, "_nd_readyState", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, this_val, "_nd_networkState", JS_NewInt32(ctx, 2));
-    JS_DefinePropertyValueStr(ctx, this_val, "readyState",
-                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, this_val, "videoWidth",
-                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, this_val, "videoHeight",
-                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
-    ns_js *js = js_from_ctx(ctx);
-    if (js && el) {
-        ns_js_dispatch_event(js, el, "emptied", NULL);
-        ns_js_dispatch_event(js, el, "loadstart", NULL);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_get_volume(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_volume");
-    if (JS_IsNumber(v)) return v;
-    JS_FreeValue(ctx, v);
-    return JS_NewFloat64(ctx, 1.0);
-}
-
-static JSValue
-ns_media_set_volume(JSContext *ctx, JSValueConst this_val, JSValueConst val)
-{
-    double vol = 1.0;
-    if (JS_ToFloat64(ctx, &vol, val)) return JS_EXCEPTION;
-    if (isnan(vol)) vol = 1.0;
-    if (vol < 0) vol = 0;
-    if (vol > 1) vol = 1;
-    JS_SetPropertyStr(ctx, this_val, "_nd_volume", JS_NewFloat64(ctx, vol));
-    ns_js *js = js_from_ctx(ctx);
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (js && el) {
-        if (js->audio_cb) {
-            JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-            if (JS_IsString(tv)) {
-                const char *token = JS_ToCString(ctx, tv);
-                if (token) {
-                    ns_js_emit_audio(js, "volume %s %.3f", token, vol);
-                    JS_FreeCString(ctx, token);
-                }
-            }
-            JS_FreeValue(ctx, tv);
-        }
-        ns_js_dispatch_event(js, el, "volumechange", NULL);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_get_muted(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_muted");
-    if (!JS_IsUndefined(v)) {
-        gboolean m = JS_ToBool(ctx, v) ? TRUE : FALSE;
-        JS_FreeValue(ctx, v);
-        return JS_NewBool(ctx, m);
-    }
-    JS_FreeValue(ctx, v);
-    const ns_node *n = ns_unwrap_element(this_val);
-    return JS_NewBool(ctx, n && ns_element_get_attr(n, "muted") != NULL);
-}
-
-static JSValue
-ns_media_set_muted(JSContext *ctx, JSValueConst this_val, JSValueConst val)
-{
-    gboolean m = JS_ToBool(ctx, val) ? TRUE : FALSE;
-    JS_SetPropertyStr(ctx, this_val, "_nd_muted", JS_NewBool(ctx, m));
-    ns_js *js = js_from_ctx(ctx);
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (js && el) {
-        if (js->audio_cb) {
-            JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-            if (JS_IsString(tv)) {
-                const char *token = JS_ToCString(ctx, tv);
-                if (token) {
-                    double vol = 0.0;
-                    if (!m) {
-                        JSValue vv = JS_GetPropertyStr(ctx, this_val, "_nd_volume");
-                        if (JS_IsNumber(vv)) JS_ToFloat64(ctx, &vol, vv);
-                        else vol = 1.0;
-                        JS_FreeValue(ctx, vv);
-                    }
-                    ns_js_emit_audio(js, "volume %s %.3f", token, vol);
-                    JS_FreeCString(ctx, token);
-                }
-            }
-            JS_FreeValue(ctx, tv);
-        }
-        ns_js_dispatch_event(js, el, "volumechange", NULL);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
-                          JSValueConst val)
-{
-    double t = 0.0;
-    if (JS_ToFloat64(ctx, &t, val)) return JS_EXCEPTION;
-    if (isnan(t) || t < 0.0) t = 0.0;
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    ns_js *js = js_from_ctx(ctx);
-    if (!el || !js) return JS_UNDEFINED;
-    gboolean handled = FALSE;
-    ns_image *anim = ns_media_animation_for(ctx, this_val);
-    if (anim) {
-        ns_image_anim_seek(anim, t, g_get_monotonic_time());
-        ns_js_request_repaint(js);
-        handled = TRUE;
-    }
-    if (!handled && js->audio_cb) {
-        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-        if (JS_IsString(tv)) {
-            const char *token = JS_ToCString(ctx, tv);
-            if (token) {
-                ns_js_emit_audio(js, "seek %s %.3f", token, t);
-                handled = TRUE;
-                JS_FreeCString(ctx, token);
-            }
-        }
-        JS_FreeValue(ctx, tv);
-    }
-    JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, t));
-    if (handled) {
-        JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
-        ns_js_dispatch_event(js, el, "seeking", NULL);
-        ns_js_dispatch_event(js, el, "timeupdate", NULL);
-        ns_js_dispatch_event(js, el, "seeked", NULL);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_fast_seek(JSContext *ctx, JSValueConst this_val,
-                   int argc, JSValueConst *argv)
-{
-    if (argc < 1) return JS_UNDEFINED;
-    return ns_media_set_current_time(ctx, this_val, argv[0]);
-}
-
-static JSValue
 ns_media_get_video_playback_quality(JSContext *ctx, JSValueConst this_val,
                                     int argc, JSValueConst *argv)
 {
     (void)argc;
     (void)argv;
-    double pos = 0;
-    JSValue pv = JS_GetPropertyStr(ctx, this_val, "_nd_pos");
-    if (JS_IsNumber(pv)) JS_ToFloat64(ctx, &pos, pv);
-    JS_FreeValue(ctx, pv);
+    double pos = ns_media_position(ctx, this_val);
     JSValue q = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, q, "creationTime",
                       JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
@@ -42153,28 +41802,6 @@ ns_media_set_srcObject(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     }
     if (el && js && is_cam)
         ns_js_dispatch_event(js, el, "loadedmetadata", NULL);
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_pause(JSContext *ctx, JSValueConst this_val,
-               int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_FALSE);
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    ns_js *js = js_from_ctx(ctx);
-    if (el && js) {
-        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-        if (JS_IsString(tv)) {
-            const char *token = JS_ToCString(ctx, tv);
-            if (token) { ns_js_emit_audio(js, "pause %s", token); JS_FreeCString(ctx, token); }
-        }
-        JS_FreeValue(ctx, tv);
-        ns_js_dispatch_event(js, el, "pause", NULL);
-        ns_image *anim = ns_media_animation_for(ctx, this_val);
-        if (anim) ns_image_anim_set_paused(anim, TRUE, g_get_monotonic_time());
-    }
     return JS_UNDEFINED;
 }
 
@@ -43257,7 +42884,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("duration",          ns_media_get_duration,            ns_element_noop_set),
     JS_CGETSET_DEF("paused",            ns_media_get_paused,              ns_element_noop_set),
     JS_CGETSET_DEF("ended",             ns_media_get_ended,               ns_element_noop_set),
-    JS_CGETSET_DEF("seeking",           ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("seeking",           ns_media_get_seeking,             ns_element_noop_set),
     JS_CGETSET_DEF("volume",            ns_media_get_volume,              ns_media_set_volume),
     JS_CGETSET_DEF("playbackRate",      ns_media_get_playbackRate,        ns_media_set_playbackRate),
     JS_CGETSET_DEF("defaultPlaybackRate", ns_media_get_defaultPlaybackRate, ns_media_set_defaultPlaybackRate),
@@ -43278,8 +42905,8 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("isContentEditable", ns_element_get_isContentEditable,  ns_element_noop_set),
     JS_CGETSET_DEF("translate",         ns_element_get_translate,         ns_element_set_translate),
     JS_CGETSET_DEF("offsetParent",      ns_element_get_offsetParent,      ns_element_noop_set),
-    JS_CGETSET_DEF("videoWidth",        ns_element_get_zero_int,          ns_element_noop_set),
-    JS_CGETSET_DEF("videoHeight",       ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("videoWidth",        ns_media_get_video_width,         ns_element_noop_set),
+    JS_CGETSET_DEF("videoHeight",       ns_media_get_video_height,        ns_element_noop_set),
     JS_CGETSET_DEF("srcObject",         ns_media_get_srcObject,           ns_media_set_srcObject),
     JS_CGETSET_DEF("clientInformation", ns_element_get_null,              ns_element_noop_set),
     JS_CFUNC_DEF("decode",            0, ns_returns_resolved_undefined),
@@ -45937,6 +45564,7 @@ static void
 ns_ce_disconnect_subtree(ns_js *js, ns_node *root)
 {
     ns_ce_disconnect_subtree_rec(js, root, 0);
+    ns_media_subtree_disconnected(js, root);
 }
 
 static JSValue
@@ -46018,6 +45646,7 @@ ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root)
 {
     if (!ns_ce_node_connected(js, root)) return;
     ns_ce_upgrade_subtree_all_rec(js, root, 0);
+    ns_media_subtree_connected(js, root);
 }
 
 static void
@@ -46032,6 +45661,8 @@ ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
 {
     if (js && node && attr && js->ctx && !js->halted)
         ns_popover_attr_changed(js, node, attr, old_value, new_value);
+    if (js && node && attr && ns_node_is_media_element(node))
+        ns_media_attr_changed(js, node, attr);
     if (!js || !node || !node->js_wrapper || !attr) return;
     if (js->ce_in_attr_callback) return;
     JSContext *ctx = js->ctx;
@@ -46387,12 +46018,23 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
         }
     }
 
-    ns_net_request_async(abs_url,
-                         js ? js->current_url : NULL,
-                         "POST", body, body_len,
-                         content_type,
-                         NULL, NULL,
-                         ns_beacon_done, NULL);
+    ns_fetch_policy *policy = js ? ns_js_fetch_policy(js, NULL) : NULL;
+    ns_fetch_verdict verdict = ns_fetch_policy_check(
+        policy, NS_FETCH_DEST_CONNECT, js ? js->current_url : NULL, abs_url,
+        NULL);
+    if (ns_fetch_verdict_blocks(verdict)) {
+        char *message = ns_fetch_verdict_message(verdict, NS_FETCH_DEST_CONNECT,
+                                                 abs_url);
+        ns_js_console_policy_refusal(js, message);
+        g_free(message);
+    } else {
+        ns_net_request_async(abs_url,
+                             js ? js->current_url : NULL,
+                             "POST", body, body_len,
+                             content_type,
+                             NULL, NS_FETCH_DEST_CONNECT, policy, NULL,
+                             ns_beacon_done, NULL);
+    }
     g_free(abs_url);
     g_free(body);
     g_free(content_type);
@@ -52633,6 +52275,7 @@ ns_js_free(ns_js *js)
 {
     if (!js) return;
     ns_popover_state_clear(js);
+    ns_media_teardown(js);
     ns_font_remove_idle_cb(ns_js_fonts_idle, js);
     if (js->font_ready_resolvers) {
         for (guint i = 0; i < js->font_ready_resolvers->len; i++)
@@ -52658,6 +52301,8 @@ ns_js_free(ns_js *js)
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);
     if (js->csp) { ns_csp_free(js->csp); js->csp = NULL; }
     if (js->doc_csp) { g_hash_table_destroy(js->doc_csp); js->doc_csp = NULL; }
+    g_clear_pointer(&js->fetch_policy, ns_fetch_policy_unref);
+    g_clear_pointer(&js->doc_fetch_policy, g_hash_table_destroy);
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
     g_free(js->local_storage_path);
@@ -53692,7 +53337,8 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         : (js->worker_host ? js->worker_host->base_url : js->current_url);
     ns_response *resp = ns_js_fetch_resource(js, module_name, top_url,
         json_module ? NULL : ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT),
-        &err);
+        json_module ? NS_FETCH_DEST_CONNECT : NS_FETCH_DEST_SCRIPT,
+        ns_js_fetch_policy(js, NULL), &err);
     if (!resp || resp->error || !resp->body || resp->body->len == 0 ||
         resp->body->len > NS_MAX_SCRIPT_BYTES) {
         const char *why = err ? err->message :
@@ -54117,7 +53763,8 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         ns_response *resp =
             ns_js_fetch_resource(js, abs_url, origin,
                                  ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT),
-                                 &err);
+                                 NS_FETCH_DEST_SCRIPT,
+                                 ns_js_fetch_policy(js, n), &err);
         if (resp && ns_net_header_is_nosniff(resp->x_content_type_options) &&
             !content_type_is_javascript(resp->content_type)) {
             if (js->log_cb) {
@@ -54429,7 +54076,10 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
         }
     } else {
         GError *err = NULL;
-        ns_response *resp = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+        ns_response *resp = ns_js_fetch_resource(js, abs_url, origin, NULL,
+                                                 NS_FETCH_DEST_STYLE,
+                                                 ns_js_fetch_policy(js, n),
+                                                 &err);
         if (resp && resp->status == 200)
             loaded = TRUE;
         else if (js->log_cb) {
@@ -55416,7 +55066,9 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             char *abs_url = ns_url_resolve(origin, src);
             if (abs_url) {
                 GError *err = NULL;
-                ns_response *r = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+                ns_response *r = ns_js_fetch_resource(
+                    js, abs_url, origin, NULL, NS_FETCH_DEST_SCRIPT,
+                    ns_js_fetch_policy(js, n), &err);
                 gboolean nosniff_blocked = r &&
                     ns_net_header_is_nosniff(r->x_content_type_options) &&
                     !content_type_is_javascript(r->content_type);
@@ -55649,6 +55301,42 @@ ns_iframe_framing_blocked(const char *embedder_url, const char *framed_url,
     return FALSE;
 }
 
+static const ns_node *
+ns_js_csp_owner(ns_js *js, const ns_node *n)
+{
+    if (!js || !js->doc_csp) return NULL;
+    for (const ns_node *p = n; p; p = p->parent)
+        if (g_hash_table_contains(js->doc_csp, p)) return p;
+    return NULL;
+}
+
+ns_fetch_policy *
+ns_js_fetch_policy(ns_js *js, const ns_node *node)
+{
+    if (!js) return NULL;
+    const ns_node *owner = ns_js_csp_owner(js, node);
+    if (!owner) {
+        if (!js->fetch_policy ||
+            g_strcmp0(ns_fetch_policy_document_url(js->fetch_policy),
+                      js->current_url) != 0) {
+            ns_fetch_policy_unref(js->fetch_policy);
+            js->fetch_policy = ns_fetch_policy_new(js->current_url, js->csp);
+        }
+        return js->fetch_policy;
+    }
+    if (!js->doc_fetch_policy)
+        js->doc_fetch_policy = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL,
+            (GDestroyNotify)ns_fetch_policy_unref);
+    ns_fetch_policy *policy = g_hash_table_lookup(js->doc_fetch_policy, owner);
+    if (!policy) {
+        policy = ns_fetch_policy_new(ns_js_node_doc_base(js, owner),
+                                     g_hash_table_lookup(js->doc_csp, owner));
+        g_hash_table_insert(js->doc_fetch_policy, (gpointer)owner, policy);
+    }
+    return policy;
+}
+
 static const ns_csp *
 ns_js_csp_for_node(ns_js *js, const ns_node *n)
 {
@@ -55695,6 +55383,8 @@ ns_js_frame_register_csp(ns_js *js, ns_node *content_doc, const char *header)
     ns_csp *frame_csp = js->csp;
     js->csp = outer;
     g_hash_table_replace(js->doc_csp, content_doc, frame_csp);
+    if (js->doc_fetch_policy)
+        g_hash_table_remove(js->doc_fetch_policy, content_doc);
 }
 
 static void
@@ -55779,7 +55469,10 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         }
         if (abs_url) {
             GError *err = NULL;
-            resp = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+            resp = ns_js_fetch_resource(
+                js, abs_url, origin, NULL,
+                is_object ? NS_FETCH_DEST_DEFAULT : NS_FETCH_DEST_FRAME,
+                ns_js_fetch_policy(js, iframe), &err);
             if (resp && ns_iframe_framing_blocked(origin, abs_url, resp)) {
                 if (js->log_cb) {
                     char *line = g_strdup_printf(
@@ -56325,14 +56018,6 @@ ns_js_set_download_cb(ns_js *js, ns_js_download_cb cb, gpointer user_data)
 }
 
 void
-ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->audio_cb = cb;
-    js->audio_user_data = user_data;
-}
-
-void
 ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
                              gpointer user_data)
 {
@@ -56389,18 +56074,6 @@ ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb, gpointer user_data)
     js->soft_nav_user_data = user_data;
 }
 
-static void
-ns_js_emit_audio(ns_js *js, const char *fmt, ...)
-{
-    if (!js || !js->audio_cb || !fmt) return;
-    va_list ap;
-    va_start(ap, fmt);
-    char *cmd = g_strdup_vprintf(fmt, ap);
-    va_end(ap);
-    js->audio_cb(cmd, js->audio_user_data);
-    g_free(cmd);
-}
-
 void
 ns_js_set_early_inject_src(ns_js *js, const char *src)
 {
@@ -56421,6 +56094,7 @@ ns_js_add_csp_header(ns_js *js, const char *header_value)
     } else {
         js->csp = parsed;
     }
+    g_clear_pointer(&js->fetch_policy, ns_fetch_policy_unref);
 }
 
 gboolean
@@ -56437,6 +56111,14 @@ ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_dat
     if (!js) return;
     js->layout_flush_cb = cb;
     js->layout_flush_user_data = user_data;
+}
+
+void
+ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->repaint_cb = cb;
+    js->repaint_user_data = user_data;
 }
 
 void

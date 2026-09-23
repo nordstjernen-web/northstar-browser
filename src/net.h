@@ -9,6 +9,7 @@
 #include <gio/gio.h>
 #include <glib.h>
 
+#include "fetch_policy.h"
 #include "version.h"
 
 G_BEGIN_DECLS
@@ -129,19 +130,13 @@ void ns_net_request_async(const char         *url,
                           gsize               body_len,
                           const char         *content_type,
                           const char *const  *extra_headers,
+                          ns_fetch_destination dest,
+                          ns_fetch_policy    *policy,
                           GCancellable       *cancellable,
                           GAsyncReadyCallback callback,
                           gpointer            user_data);
 
 ns_response *ns_net_fetch_finish(GAsyncResult *result, GError **error);
-
-typedef enum {
-    NS_FETCH_DEST_DEFAULT = 0,
-    NS_FETCH_DEST_SCRIPT,
-    NS_FETCH_DEST_STYLE,
-    NS_FETCH_DEST_IMAGE,
-    NS_FETCH_DEST_FONT,
-} ns_fetch_destination;
 
 const char *const *ns_net_accept_headers_for(ns_fetch_destination dest);
 
@@ -164,6 +159,8 @@ ns_response *ns_net_request_blocking(const char        *url,
                                      gsize              body_len,
                                      const char        *content_type,
                                      const char *const *extra_headers,
+                                     ns_fetch_destination dest,
+                                     ns_fetch_policy   *policy,
                                      GCancellable      *cancellable,
                                      GError           **error);
 
@@ -179,6 +176,7 @@ char *ns_url_host_from(const char *url);
 char *ns_url_origin_from(const char *url);
 gboolean ns_url_same_origin(const char *a, const char *b);
 gboolean ns_url_is_http_or_https(const char *url);
+gboolean ns_url_host_is_loopback(const char *host);
 
 gboolean ns_net_parse_refresh(const char *input, double *time_out,
                               char **url_out);
@@ -220,6 +218,7 @@ void  ns_net_site_storage_clear(void);
 
 void  ns_net_set_proxy_override(const char *proxy_url);
 void  ns_net_set_allow_file_urls(gboolean allow);
+gboolean ns_net_file_urls_allowed(void);
 void  ns_net_set_log_fetches(gboolean on);
 void  ns_net_perf_snapshot(guint64 *fetches, guint64 *bytes,
                            double *sum_ms, double *span_ms);

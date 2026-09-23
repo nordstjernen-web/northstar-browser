@@ -13,6 +13,8 @@
 
 typedef struct ns_page_session ns_page_session;
 
+typedef void (*ns_page_session_wake_cb)(gpointer user_data);
+
 typedef struct {
     int   ok;
     int   page_width;
@@ -40,12 +42,14 @@ typedef struct {
     char                *nav;
     char                *camera;
     char                *download;
-    char                *audio;
     int                  clipboard;
 } ns_page_frame;
 
 ns_page_session *ns_page_session_new(int max_width, int max_height);
 void ns_page_session_free(ns_page_session *s);
+void ns_page_session_set_wake(ns_page_session *s, ns_page_session_wake_cb cb,
+                              gpointer user_data);
+void ns_page_session_set_frame_time(ns_page_session *s, gint64 frame_time_us);
 
 int  ns_page_session_open(ns_page_session *s, const char *url, int width,
                           int height, int settle_ms, int history,

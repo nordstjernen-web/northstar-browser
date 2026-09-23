@@ -57,8 +57,8 @@ space.
   It turns input into typed requests (`REQ_LOAD`, `REQ_RENDER`,
   `REQ_CLICK`, `REQ_KEY`, `REQ_SCROLL`, `REQ_PRINT`, …), posts each as a
   job to the engine thread (`enginethread.c`), and receives the matching
-  response — a frame surface plus title, URL, cursor, download, camera and
-  audio side information — back on the GTK main loop. Both ends are in
+  response — a frame surface plus title, URL, cursor, download and camera
+  side information — back on the GTK main loop. Both ends are in
   this process; nothing is serialised.
 - **Engine thread** (`src/gtk/enginethread.c`) — one dedicated thread
   with its own `GMainContext`, so page timers, fetch completions and
@@ -68,16 +68,40 @@ space.
 - **Page session** (`page_session.c`) — owns the open page, a
   back/forward cache of up to four suspended pages, the pending POST body
   and the last frame. The view drives it on the engine thread.
+- **Frame scheduling.** The view does not poll. A wake source on the
+  engine context asks the view for a frame only when the page has
+  something to show: a DOM mutation, a pending `requestAnimationFrame`, a
+  loaded image, a canvas draw, a scroll or a navigation.
+  The view then renders at the next GTK frame-clock tick, and it keeps a
+  per-tick callback only while the page animates continuously (CSS
+  animations, animated images or video, `requestAnimationFrame` loops,
+  layout the dampener deferred) or a caret blinks. `requestAnimationFrame`
+  and CSS animations are sampled at the frame clock's time. Canvas
+  drawing repaints without a relayout, and wheel scrolls and resizes that
+  arrive while one is in flight are merged into the next request.
 - **Page host** (`libnorthstar.c`) — the `ns_browser` object beneath the
   session: one document, its QuickJS runtime, input dispatch, the settle
   loop, find-in-page, printing and viewport scroll snapping. It is an
   internal interface; the embeddable library API of the full Nordstjernen
   edition is not part of this one.
-- **Audio mixer** (`src/audio/audio.c`) — downloads and decodes `<audio>`
-  on its own worker thread and outputs through SDL2. The engine returns
-  `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands with each
-  rendered frame, and the view queues them to a per-view audio context.
-  Without SDL2 the build uses `src/audio/stub.c` and plays nothing.
+- **Media controller** (`js_media.c`) — the `HTMLMediaElement` state
+  machine: resource selection, `networkState`/`readyState`, `paused`,
+  `ended`, `seeking`, `error`, the event sequence from `loadstart` to
+  `ended`, the promise `play()` returns, `loop`, `muted`, `volume` and
+  `autoplay` (muted, video, or after a user gesture). Each element gets a
+  player whose backend is the audio mixer for `<audio>` and the decoded
+  frame timeline for `<video>`. Commands go straight to the backend; the
+  controller polls it every 50 ms while something loads or plays and
+  turns what it reports into events, `timeupdate` every 250 ms. An
+  element removed from the document pauses, a new `src` starts over,
+  and a page parked in the back/forward cache pauses everything.
+- **Audio mixer** (`src/audio/audio.c`) — one worker thread per process
+  fetches `<audio>` through `net.c`, decodes it into memory and mixes
+  every player into the SDL2 device; headless runs use a silent
+  clock-driven output instead. Each page owns an `NsAudioContext`, and
+  `ns_audio_context_status` reports a player's load state, error,
+  duration, position and end synchronously. Without SDL2 the build uses
+  `src/audio/stub.c`, and every player fails as having no device.
 
 ### Headless drivers
 
@@ -99,7 +123,7 @@ drivers both call.
 | Stage | File(s) | Job |
 |-------|---------|-----|
 | 1. Fetch | `net.c`, `cache.c`, `engine.c` | libcurl on a shared multi handle (HTTP/1.1, HTTP/2; HTTP/3 through Alt-Svc when libcurl supports it), TLS verification, redirect clamp, response-size cap, HSTS, Alt-Svc, per-site cookie jars and HTTP cache. `engine.c` scans a parsed document for its scripts and stylesheets and preloads them; a preload map, an in-flight coalescer and the HTTP cache then answer in that order, keyed on request identity rather than bare URL, so a subresource is fetched once. `netutil.c` holds Accept-Language, search-URL and proxy helpers. |
-| 2. Safety gate | `safebrowsing.c`, `csp.c`, `security.c` | Top-level host checked against the local SHA-256 blocklist; Content-Security-Policy parsed and enforced; Subresource Integrity (`ns_security_sri_check`) verified for scripts. |
+| 2. Safety gate | `safebrowsing.c`, `fetch_policy.c`, `csp.c`, `security.c` | Top-level host checked against the local SHA-256 blocklist. Every subresource request carries its destination and its document's policy, and `ns_fetch_policy_check` applies the `file:` rule, mixed-content blocking or upgrade, and Content-Security-Policy by destination before the request and at each redirect hop. Subresource Integrity (`ns_security_sri_check`) verified for scripts. |
 | 3. Parse | `html.c`, `encoding.c`, `html_lexbor.c`, `xml.c` | Charset detection (BOM, header, `<meta>` prescan, then uchardet), decoding through the WHATWG Encoding Standard decoders in `encoding.c`, and bytes → DOM via lexbor (WHATWG HTML). `xml.c` parses XHTML and other namespaced XML documents. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
 | 5. Style | `css.c`, `css_syntax.c`, `css_media.c`, `css_prop_syntax.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_media.c` the Media Queries Level 4 parser and evaluator, and `css_prop_syntax.c` the `<syntax>` grammar behind `@property` and `CSS.registerProperty`. `anim.c` runs transitions and `@keyframes` animations; `font.c` loads `@font-face` web fonts. |
@@ -216,16 +240,19 @@ GIF produces, so the image cache's fetch, frame timing, repaint
 scheduling and eviction serve video unchanged, and `paint_video` draws
 the current frame (or a dark placeholder for a source it cannot decode).
 
-The media element API drives that timeline rather than sitting beside it.
-`ns_image_anim_duration`, `ns_image_anim_position`,
-`ns_image_anim_set_paused` and `ns_image_anim_seek` are the whole of the
-playback surface, and `duration`, `readyState`, `paused`, `play()`,
-`pause()` and `currentTime` in `src/js.c` resolve through them by looking
-the element's source up in the image cache. Because that cache is keyed by
-URL, two `<video>` elements with the same source share one timeline. A
-clip starts playing and loops whatever its `autoplay` and `loop`
-attributes say; its audio track is not decoded, so this is the muted
-autoplay browsers already permit, and there is no controls UI.
+The media controller (`js_media.c`) drives that timeline rather than
+sitting beside it. `ns_image_anim_duration`, `ns_image_anim_position`,
+`ns_image_anim_set_paused`, `ns_image_anim_seek`,
+`ns_image_anim_set_loop` and `ns_image_anim_ended` are the whole of the
+playback surface, found by looking the element's source up in the image
+cache. Because that cache is keyed by URL, two `<video>` elements with the
+same source share one timeline. A decoded clip waits paused on its first
+frame; the controller starts it when `autoplay` is set or the page calls
+`play()`, and it plays once unless `loop` is set, then fires `ended`. Its
+audio track is not decoded, so video autoplay is always the muted
+autoplay browsers permit, and there is no controls UI. A `<source>` whose
+`type` the build cannot play is skipped, in layout and in the
+controller alike.
 
 Decoding up front bounds a clip rather than streaming it: a clip larger
 than `NS_VIDEO_MAX_DIMENSION` (4096) on either side is rejected, and
@@ -281,6 +308,7 @@ the page as one long unpaginated sheet.
 |------|------|
 | `security.c` | Refuse privileged startup, Linux Landlock + seccomp sandbox, macOS Seatbelt profile, Windows process mitigations, Subresource Integrity, the CSPRNG, allocator hardening and download-origin marking. |
 | `csp.c` | Content-Security-Policy parse and enforcement, per document. |
+| `fetch_policy.c` | The request policy every subresource passes: `file:` access, mixed content and CSP by destination. |
 | `safebrowsing.c` | Local phishing/malware blocklist + interstitial. |
 | `watchdog.c` | Supervisor that restarts the browser on crash or hang. |
 

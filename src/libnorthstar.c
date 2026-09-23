@@ -73,11 +73,13 @@ struct ns_browser {
     GHashTable     *img_requested;
     gboolean        dirty;
     gboolean        cascade_dirty;
+    gboolean        repaint_pending;
+    gint64          frame_time_us;
+    gint64          last_frame_now_us;
     gboolean        relaying;
     char           *pending_nav;
     char           *pending_download;
     char           *pending_clipboard;
-    GString        *pending_audio;
     char           *refresh_url;
     gint64          refresh_due_us;
     char           *pending_post_body;
@@ -127,6 +129,7 @@ struct ns_browser {
 #define NS_LAYOUT_EXPENSIVE_US (1000 * 1000)
 #define NS_LAYOUT_DAMP_MAX_US (1 * G_USEC_PER_SEC)
 #define NS_CARET_BLINK_US (530 * 1000)
+#define NS_FRAME_TIME_MAX_LAG_US (100 * 1000)
 
 static gboolean
 browser_doc_has_node(const ns_node *root, const ns_node *target)
@@ -401,6 +404,7 @@ browser_image_arrived(gpointer user_data)
     if (!b) return;
     b->images_arrived_since_layout = TRUE;
     b->image_arrivals_since_layout++;
+    b->repaint_pending = TRUE;
     if (b->image_arrivals_since_layout >= NS_IMAGE_RELAYOUT_BATCH ||
         browser_images_outstanding(b) == 0) {
         b->image_arrivals_since_layout = 0;
@@ -441,7 +445,8 @@ browser_ensure_images(ns_browser *browser)
     gboolean deferred = FALSE;
     ns_engine_img_session *s =
         ns_engine_fetch_images_start(browser->layout, browser->base_url,
-                                     browser->images, browser->img_requested,
+                                     browser->images, browser->js,
+                                     browser->img_requested,
                                      browser->cur_scroll_y, vp_h, &deferred,
                                      browser_image_arrived, browser);
     if (s) g_ptr_array_add(browser->img_sessions, s);
@@ -733,6 +738,13 @@ browser_js_log(const char *line, gpointer ud)
     g_string_append_c(b->console_buf, '\n');
 }
 static void
+browser_js_repaint(gpointer user_data)
+{
+    ns_browser *browser = user_data;
+    if (browser) browser->repaint_pending = TRUE;
+}
+
+static void
 browser_js_mutated(gpointer user_data)
 {
     ns_browser *browser = user_data;
@@ -818,32 +830,6 @@ browser_js_selection_cmd(const char *command, gpointer ud)
     return ok;
 }
 
-#define NS_PENDING_AUDIO_MAX 15000
-
-static void
-browser_js_audio(const char *command, gpointer ud)
-{
-    ns_browser *b = ud;
-    if (!b || !command || !*command) return;
-    if (g_getenv("NS_DBG_AUDIO"))
-        g_printerr("[audio-cmd] %s\n", command);
-    if (!b->pending_audio) b->pending_audio = g_string_new(NULL);
-    if (b->pending_audio->len + strlen(command) + 1 > NS_PENDING_AUDIO_MAX)
-        return;
-    g_string_append(b->pending_audio, command);
-    g_string_append_c(b->pending_audio, '\n');
-}
-
-char *
-ns_browser_take_pending_audio(ns_browser *browser)
-{
-    if (!browser || !browser->pending_audio ||
-        browser->pending_audio->len == 0)
-        return NULL;
-    char *out = g_strdup(browser->pending_audio->str);
-    g_string_truncate(browser->pending_audio, 0);
-    return out;
-}
 
 int
 ns_browser_init(void)
@@ -1077,12 +1063,12 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_anim(b->js, b->anim);
         ns_js_set_form_submit_cb(b->js, browser_js_form_submit, b);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
+        ns_js_set_repaint_cb(b->js, browser_js_repaint, b);
         ns_js_set_style_flush_cb(b->js, browser_flush_style, b);
         ns_js_set_scroll_to_cb(b->js, browser_js_scroll_to, b);
         ns_js_set_fragment_nav_cb(b->js, browser_js_fragment_navigate, b);
         ns_js_set_soft_nav_cb(b->js, browser_js_soft_navigate, b);
         ns_js_set_download_cb(b->js, browser_js_download, b);
-        ns_js_set_audio_cb(b->js, browser_js_audio, b);
         ns_js_set_clipboard_write_cb(b->js, browser_js_clipboard_write, b);
         ns_js_set_selection_cmd_cb(b->js, browser_js_selection_cmd, b);
         ns_js_add_csp_header(b->js, csp_header);
@@ -1091,6 +1077,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         if (!run_cfg || run_cfg->javascript_enabled)
             ns_js_run_scripts_in_doc(b->js, doc, base, b->doc_charset,
                                      content_type);
+        ns_media_scan(b->js, doc, base);
     }
     g_free(csp_header);
 
@@ -1498,6 +1485,17 @@ ns_browser_print_pages(ns_browser *browser, ns_print_setup *out_setup)
     return pages;
 }
 
+static gint64
+browser_frame_now(ns_browser *browser)
+{
+    gint64 now = g_get_monotonic_time();
+    gint64 t = browser->frame_time_us;
+    if (t <= 0 || t > now || now - t > NS_FRAME_TIME_MAX_LAG_US) t = now;
+    if (t < browser->last_frame_now_us) t = browser->last_frame_now_us;
+    browser->last_frame_now_us = t;
+    return t;
+}
+
 int
 ns_browser_tick(ns_browser *browser, int budget_ms)
 {
@@ -1512,7 +1510,10 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     }
 
     gint64 deadline = g_get_monotonic_time() + (gint64)budget_ms * 1000;
-    gboolean changed = FALSE;
+    gboolean changed = browser->repaint_pending;
+    browser->repaint_pending = FALSE;
+    if (browser->js)
+        ns_js_set_frame_time(browser->js, browser_frame_now(browser));
     gboolean video_changed = FALSE;
     gboolean other_changed = FALSE;
     int guard = 0;
@@ -1537,7 +1538,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         }
     }
     for (;;) {
-        gint64 now = g_get_monotonic_time();
+        gint64 now = browser_frame_now(browser);
         if (browser->images && ns_image_cache_tick(browser->images, now)) {
             changed = TRUE;
             other_changed = TRUE;
@@ -1577,9 +1578,60 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     }
     browser_follow_scroll_anchor(browser);
     if (browser->pending_scroll) changed = TRUE;
+    if (browser->repaint_pending) {
+        browser->repaint_pending = FALSE;
+        changed = TRUE;
+    }
+    browser->frame_time_us = 0;
+    if (browser->js) ns_js_set_frame_time(browser->js, 0);
     (void)video_changed;
     (void)other_changed;
     return changed ? 1 : 0;
+}
+
+void
+ns_browser_set_frame_time(ns_browser *browser, gint64 frame_time_us)
+{
+    if (browser) browser->frame_time_us = frame_time_us;
+}
+
+int
+ns_browser_continuous(ns_browser *browser)
+{
+    if (!browser) return 0;
+    if (browser->dirty || browser->hover_restyle_pending) return 1;
+    if (browser->js && ns_js_has_pending_animation_frame(browser->js))
+        return 1;
+    if (browser->anim && ns_anim_has_active(browser->anim)) return 1;
+    if (browser->images && ns_image_cache_animating(browser->images))
+        return 1;
+    return 0;
+}
+
+int
+ns_browser_needs_frame(ns_browser *browser)
+{
+    if (!browser) return 0;
+    if (browser->dirty || browser->repaint_pending ||
+        browser->hover_restyle_pending || browser->pending_scroll)
+        return 1;
+    if (browser->pending_nav || browser->pending_download ||
+        browser->pending_clipboard)
+        return 1;
+    if (ns_camera_has_pending_origin()) return 1;
+    if (browser->refresh_url && browser->refresh_due_us &&
+        g_get_monotonic_time() >= browser->refresh_due_us)
+        return 1;
+    if (browser->js && ns_js_wants_frame(browser->js)) return 1;
+    if (browser->anim && ns_anim_has_active(browser->anim)) return 1;
+    return 0;
+}
+
+gint64
+ns_browser_next_wake_us(ns_browser *browser)
+{
+    if (!browser || !browser->refresh_url) return 0;
+    return browser->refresh_due_us;
 }
 
 int
@@ -3214,8 +3266,10 @@ void
 ns_browser_bfcache_park(ns_browser *browser)
 {
     if (!browser) return;
-    if (browser->js)
+    if (browser->js) {
         ns_js_fire_page_transition(browser->js, "pagehide", TRUE);
+        ns_js_suspend_media(browser->js);
+    }
 }
 
 void
@@ -3261,7 +3315,6 @@ ns_browser_close(ns_browser *browser)
     g_free(browser->pending_nav);
     g_free(browser->pending_download);
     g_free(browser->pending_clipboard);
-    if (browser->pending_audio) g_string_free(browser->pending_audio, TRUE);
     g_free(browser->refresh_url);
     g_free(browser->pending_post_body);
     g_free(browser->pending_post_ct);

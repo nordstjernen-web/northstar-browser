@@ -1257,6 +1257,12 @@ ns_host_is_loopback(const char *host)
            strcmp(host, "[::1]") == 0;
 }
 
+gboolean
+ns_url_host_is_loopback(const char *host)
+{
+    return host && ns_host_is_loopback(host);
+}
+
 char *
 ns_net_https_first_upgrade(const char *url)
 {
@@ -2042,6 +2048,12 @@ ns_net_set_proxy_override(const char *proxy_url)
 }
 
 static gboolean g_allow_file_urls = FALSE;
+
+gboolean
+ns_net_file_urls_allowed(void)
+{
+    return g_allow_file_urls;
+}
 
 void
 ns_net_set_allow_file_urls(gboolean allow)
@@ -4923,7 +4935,9 @@ synthesize_view_source_response(const char *url, const char *top_url,
     }
     GError *err = NULL;
     ns_response *in = ns_net_request_blocking(inner, NULL, "GET", NULL, 0,
-                                              NULL, NULL, cancellable, &err);
+                                              NULL, NULL,
+                                              NS_FETCH_DEST_DOCUMENT, NULL,
+                                              cancellable, &err);
     if (!in || in->error || (in->status != 0 && in->status >= 400 &&
                              (!in->body || in->body->len == 0))) {
         const char *msg = in && in->error ? in->error
@@ -5733,10 +5747,66 @@ ns_fetch_is_navigation(const char *top_url, GPtrArray *extra_headers)
     return FALSE;
 }
 
+static void
+ns_fetch_refuse(ns_response *resp, ns_fetch_verdict verdict,
+                ns_fetch_destination dest, const char *url)
+{
+    char *message = ns_fetch_verdict_message(verdict, dest, url);
+    ns_debug_log_emit(NS_DLOG_NET, "policy", "%s", message);
+    g_free(resp->error);
+    resp->error = message;
+    resp->status = 0;
+    if (resp->body) g_byte_array_set_size(resp->body, 0);
+}
+
+static ns_response *
+ns_fetch_refused(ns_fetch_verdict verdict, ns_fetch_destination dest,
+                 const char *url)
+{
+    ns_response *resp = g_new0(ns_response, 1);
+    resp->body = g_byte_array_new();
+    resp->final_url = g_strdup(url);
+    ns_fetch_refuse(resp, verdict, dest, url);
+    return resp;
+}
+
+static gboolean
+ns_headers_mark_navigation(const char *const *extra_headers)
+{
+    for (int i = 0; extra_headers && extra_headers[i]; i++)
+        if (g_ascii_strncasecmp(extra_headers[i], "X-ND-Navigate:", 14) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_request_is_gated(const char *top_url, const char *const *extra_headers,
+                    ns_fetch_destination dest)
+{
+    return top_url && dest != NS_FETCH_DEST_DOCUMENT &&
+           !ns_headers_mark_navigation(extra_headers);
+}
+
+static void
+ns_fetch_gate_final_url(ns_response *resp, const char *url,
+                        const char *top_url, ns_fetch_destination dest,
+                        ns_fetch_policy *policy)
+{
+    if (!resp || resp->error || !resp->final_url || !url ||
+        strcmp(resp->final_url, url) == 0)
+        return;
+    ns_fetch_verdict verdict =
+        ns_fetch_policy_check(policy, dest, top_url, resp->final_url, NULL);
+    if (verdict == NS_FETCH_UPGRADED) verdict = NS_FETCH_BLOCKED_MIXED;
+    if (ns_fetch_verdict_blocks(verdict))
+        ns_fetch_refuse(resp, verdict, dest, resp->final_url);
+}
+
 static ns_response *
 ns_fetch_sync(const char *url, const char *top_url, const char *method,
               const void *body, gsize body_len, const char *content_type,
-              GPtrArray *extra_headers,
+              GPtrArray *extra_headers, ns_fetch_destination dest,
+              ns_fetch_policy *policy,
               GCancellable *cancellable, GError **error,
               gboolean navigation, gboolean user_activated)
 {
@@ -5825,6 +5895,20 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             g_free(next);
             break;
         }
+        if (ns_request_is_gated(top_url, NULL, dest)) {
+            char *upgraded = NULL;
+            ns_fetch_verdict verdict =
+                ns_fetch_policy_check(policy, dest, top_url, next, &upgraded);
+            if (ns_fetch_verdict_blocks(verdict)) {
+                ns_fetch_refuse(resp, verdict, dest, next);
+                g_free(next);
+                break;
+            }
+            if (upgraded) {
+                g_free(next);
+                next = upgraded;
+            }
+        }
         if (resp->status == 303 ||
             ((resp->status == 301 || resp->status == 302) &&
              g_ascii_strcasecmp(cur_method, "GET") != 0)) {
@@ -5867,6 +5951,8 @@ typedef struct ns_fetch_ctx {
     char *coalesce_key;
     gboolean navigation;
     gboolean user_activated;
+    ns_fetch_destination dest;
+    ns_fetch_policy *policy;
 } ns_fetch_ctx;
 
 static void
@@ -5880,7 +5966,20 @@ ns_fetch_ctx_free(gpointer data)
     g_free(ctx->body);
     if (ctx->extra_headers) g_ptr_array_free(ctx->extra_headers, TRUE);
     g_free(ctx->coalesce_key);
+    ns_fetch_policy_unref(ctx->policy);
     g_free(ctx);
+}
+
+static ns_fetch_ctx *
+ns_fetch_gate_ctx_new(const char *url, const char *top_url,
+                      ns_fetch_destination dest, ns_fetch_policy *policy)
+{
+    ns_fetch_ctx *ctx = g_new0(ns_fetch_ctx, 1);
+    ctx->url = g_strdup(url);
+    ctx->top_url = g_strdup(top_url);
+    ctx->dest = dest;
+    ctx->policy = ns_fetch_policy_ref(policy);
+    return ctx;
 }
 
 #define NS_PRELOAD_MAX_ENTRIES 64
@@ -6009,7 +6108,8 @@ ns_fetch_claim_locked(const char *key, ns_response **preloaded,
 }
 
 static ns_response *
-ns_fetch_join_async(const char *key, GAsyncReadyCallback callback,
+ns_fetch_join_async(const char *key, ns_fetch_ctx *gate,
+                    GAsyncReadyCallback callback,
                     gpointer user_data, gboolean *joined)
 {
     ns_response *preloaded = NULL;
@@ -6020,11 +6120,14 @@ ns_fetch_join_async(const char *key, GAsyncReadyCallback callback,
     if (claim == NS_FETCH_JOINED) {
         GTask *joiner = g_task_new(NULL, NULL, callback, user_data);
         g_task_set_source_tag(joiner, ns_net_fetch_async);
+        g_task_set_task_data(joiner, gate, ns_fetch_ctx_free);
+        gate = NULL;
         if (!grp->tasks) grp->tasks = g_ptr_array_new();
         g_ptr_array_add(grp->tasks, joiner);
         *joined = TRUE;
     }
     g_mutex_unlock(&g_fetch_mutex);
+    if (gate) ns_fetch_ctx_free(gate);
     if (claim == NS_FETCH_PRELOADED) *joined = TRUE;
     return preloaded;
 }
@@ -6212,7 +6315,8 @@ ns_fetch_thread(GTask        *task,
     gint64 trace_start = ns_trace_now();
     ns_response *resp = ns_fetch_sync(ctx->url, ctx->top_url, ctx->method,
                                       ctx->body, ctx->body_len, ctx->content_type,
-                                      ctx->extra_headers,
+                                      ctx->extra_headers, ctx->dest,
+                                      ctx->policy,
                                       cancellable, &err, ctx->navigation,
                                       ctx->user_activated);
     ns_trace_complete("net", ctx->navigation ? "navigation fetch" : "fetch",
@@ -6346,6 +6450,7 @@ ns_net_fetch_async(const char        *url,
                    gpointer            user_data)
 {
     ns_net_request_async(url, top_url, "GET", NULL, 0, NULL, NULL,
+                         NS_FETCH_DEST_DOCUMENT, NULL,
                          cancellable, callback, user_data);
 }
 
@@ -6360,7 +6465,20 @@ ns_net_post_async(const char         *url,
                   gpointer            user_data)
 {
     ns_net_request_async(url, top_url, "POST", body, body_len, content_type, NULL,
+                         NS_FETCH_DEST_DOCUMENT, NULL,
                          cancellable, callback, user_data);
+}
+
+static void
+ns_net_return_response(ns_response *resp, ns_fetch_ctx *gate,
+                       GCancellable *cancellable,
+                       GAsyncReadyCallback callback, gpointer user_data)
+{
+    GTask *task = g_task_new(NULL, cancellable, callback, user_data);
+    g_task_set_source_tag(task, ns_net_fetch_async);
+    if (gate) g_task_set_task_data(task, gate, ns_fetch_ctx_free);
+    g_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
+    g_object_unref(task);
 }
 
 void
@@ -6371,11 +6489,26 @@ ns_net_request_async(const char         *url,
                      gsize               body_len,
                      const char         *content_type,
                      const char *const  *extra_headers,
+                     ns_fetch_destination dest,
+                     ns_fetch_policy    *policy,
                      GCancellable       *cancellable,
                      GAsyncReadyCallback callback,
                      gpointer            user_data)
 {
     g_return_if_fail(url != NULL);
+
+    gboolean navigation = g_navigation_fetch;
+    g_autofree char *upgraded = NULL;
+    if (ns_request_is_gated(top_url, extra_headers, dest)) {
+        ns_fetch_verdict verdict =
+            ns_fetch_policy_check(policy, dest, top_url, url, &upgraded);
+        if (ns_fetch_verdict_blocks(verdict)) {
+            ns_net_return_response(ns_fetch_refused(verdict, dest, url), NULL,
+                                   cancellable, callback, user_data);
+            return;
+        }
+        if (upgraded) url = upgraded;
+    }
 
     if (ns_net_complete_blob(url, cancellable, callback, user_data)) return;
 
@@ -6383,14 +6516,13 @@ ns_net_request_async(const char         *url,
         ? ns_net_request_key(url, top_url, method, extra_headers) : NULL;
     if (key) {
         gboolean joined = FALSE;
-        ns_response *preloaded = ns_fetch_join_async(key, callback, user_data,
-                                                     &joined);
+        ns_response *preloaded = ns_fetch_join_async(
+            key, ns_fetch_gate_ctx_new(url, top_url, dest, policy),
+            callback, user_data, &joined);
         if (preloaded) {
-            GTask *task = g_task_new(NULL, cancellable, callback, user_data);
-            g_task_set_source_tag(task, ns_net_fetch_async);
-            g_task_return_pointer(task, preloaded,
-                                  (GDestroyNotify)ns_response_free);
-            g_object_unref(task);
+            ns_net_return_response(
+                preloaded, ns_fetch_gate_ctx_new(url, top_url, dest, policy),
+                cancellable, callback, user_data);
             g_free(key);
             return;
         }
@@ -6400,11 +6532,9 @@ ns_net_request_async(const char         *url,
         }
     }
 
-    ns_fetch_ctx *ctx = g_new0(ns_fetch_ctx, 1);
-    ctx->url = g_strdup(url);
-    ctx->top_url = top_url ? g_strdup(top_url) : NULL;
+    ns_fetch_ctx *ctx = ns_fetch_gate_ctx_new(url, top_url, dest, policy);
     ctx->coalesce_key = key;
-    ctx->navigation = g_navigation_fetch;
+    ctx->navigation = navigation;
     ctx->user_activated = g_navigation_user_activated;
     if (method && *method) ctx->method = g_strdup(method);
     if (content_type && *content_type) ctx->content_type = g_strdup(content_type);
@@ -6432,9 +6562,21 @@ ns_net_request_blocking(const char        *url,
                         gsize              body_len,
                         const char        *content_type,
                         const char *const *extra_headers,
+                        ns_fetch_destination dest,
+                        ns_fetch_policy   *policy,
                         GCancellable      *cancellable,
                         GError           **error)
 {
+    gboolean navigation = g_navigation_fetch;
+    gboolean gated = ns_request_is_gated(top_url, extra_headers, dest);
+    g_autofree char *upgraded = NULL;
+    if (gated) {
+        ns_fetch_verdict verdict =
+            ns_fetch_policy_check(policy, dest, top_url, url, &upgraded);
+        if (ns_fetch_verdict_blocks(verdict))
+            return ns_fetch_refused(verdict, dest, url);
+        if (upgraded) url = upgraded;
+    }
     char *key = (!cancellable && !body)
         ? ns_net_request_key(url, top_url, method, extra_headers) : NULL;
     if (key) {
@@ -6442,6 +6584,8 @@ ns_net_request_blocking(const char        *url,
         ns_response *shared = ns_fetch_join_sync(key, &joined, error);
         if (joined) {
             g_free(key);
+            if (gated)
+                ns_fetch_gate_final_url(shared, url, top_url, dest, policy);
             return shared;
         }
     }
@@ -6452,11 +6596,10 @@ ns_net_request_blocking(const char        *url,
             g_ptr_array_add(hdrs, g_strdup(extra_headers[i]));
     }
     GError *failure = NULL;
-    gboolean navigation = g_navigation_fetch;
     gboolean user_activated = g_navigation_user_activated;
     ns_response *resp = ns_fetch_sync(url, top_url, method,
                                       body, body_len, content_type,
-                                      hdrs, cancellable, &failure,
+                                      hdrs, dest, policy, cancellable, &failure,
                                       navigation, user_activated);
     if (key) {
         ns_fetch_coalesce_deliver(key, resp, failure);
@@ -6471,6 +6614,7 @@ ns_response *
 ns_net_fetch_blocking(const char *url, GCancellable *cancellable, GError **error)
 {
     return ns_net_request_blocking(url, NULL, "GET", NULL, 0, NULL, NULL,
+                                   NS_FETCH_DEST_DOCUMENT, NULL,
                                    cancellable, error);
 }
 
@@ -6478,7 +6622,15 @@ ns_response *
 ns_net_fetch_finish(GAsyncResult *result, GError **error)
 {
     g_return_val_if_fail(g_task_is_valid(result, NULL), NULL);
-    return g_task_propagate_pointer(G_TASK(result), error);
+    ns_response *resp = g_task_propagate_pointer(G_TASK(result), error);
+    gpointer tag = g_task_get_source_tag(G_TASK(result));
+    const ns_fetch_ctx *gate =
+        tag == ns_net_request_async || tag == ns_net_fetch_async
+            ? g_task_get_task_data(G_TASK(result)) : NULL;
+    if (gate && ns_request_is_gated(gate->top_url, NULL, gate->dest))
+        ns_fetch_gate_final_url(resp, gate->url, gate->top_url, gate->dest,
+                                gate->policy);
+    return resp;
 }
 
 char *

@@ -11,6 +11,7 @@
 #include <cairo.h>
 
 #include "csp.h"
+#include "fetch_policy.h"
 #include "dom.h"
 
 G_BEGIN_DECLS
@@ -24,7 +25,6 @@ typedef void (*ns_js_log_cb)(const char *line, gpointer user_data);
 typedef void (*ns_js_mutated_cb)(gpointer user_data);
 typedef void (*ns_js_navigate_cb)(const char *url, gboolean reload, gpointer user_data);
 typedef void (*ns_js_download_cb)(const char *url, const char *filename, gpointer user_data);
-typedef void (*ns_js_audio_cb)(const char *command, gpointer user_data);
 typedef void (*ns_js_scroll_to_cb)(const ns_node *target, gpointer user_data);
 typedef void (*ns_js_fragment_nav_cb)(const char *url, gpointer user_data);
 typedef void (*ns_js_form_submit_cb)(const ns_node *form, const ns_node *submitter,
@@ -76,7 +76,6 @@ void   ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
                                     gpointer user_data);
 void   ns_js_set_selection_cmd_cb(ns_js *js, ns_js_selection_cmd_cb cb,
                                   gpointer user_data);
-void   ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data);
 void   ns_js_set_scroll_to_cb(ns_js *js, ns_js_scroll_to_cb cb,
                               gpointer user_data);
 void   ns_js_set_fragment_nav_cb(ns_js *js, ns_js_fragment_nav_cb cb,
@@ -84,6 +83,7 @@ void   ns_js_set_fragment_nav_cb(ns_js *js, ns_js_fragment_nav_cb cb,
 void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb,
                              gpointer user_data);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
+void   ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data);
 void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data);
 void   ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);
@@ -156,6 +156,11 @@ gboolean ns_js_run_animation_frame(ns_js *js);
 
 gboolean ns_js_has_pending_animation_frame(const ns_js *js);
 gboolean ns_js_has_pending_work(const ns_js *js);
+gboolean ns_js_wants_frame(const ns_js *js);
+ns_fetch_policy *ns_js_fetch_policy(ns_js *js, const ns_node *node);
+void     ns_media_scan(ns_js *js, ns_node *doc, const char *base_url);
+void     ns_js_suspend_media(ns_js *js);
+void     ns_js_set_frame_time(ns_js *js, gint64 frame_time_us);
 
 void ns_js_dump_stats(ns_js *js, GString *out);
 
