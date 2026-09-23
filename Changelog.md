@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A frame's `window` event listeners hear only its own document's
+  events. Listeners added through any window were kept in one list and
+  every one of them ran for every window-level event, so a frame --
+  cross-origin included -- that listened for `click` or `keydown` on its
+  window received the embedding page's clicks and key presses, with the
+  page's elements as `event.target`. Each listener now belongs to the
+  document of the window (or document) it was added to, window-level
+  dispatch runs only the listeners of the event's document with that
+  document's window as `currentTarget`, and a frame's window gets its own
+  `load` event when the frame finishes loading.
 * A cross-origin frame no longer reaches the embedding page through what
   the two share in the one QuickJS runtime. Its global object received a
   copy of every global on the parent's window, the page's own variables
