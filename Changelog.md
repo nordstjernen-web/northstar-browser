@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `text-shadow` is inherited, as CSS Text Decoration specifies, so a
+  shadow set on a container reaches the text of the paragraphs, list
+  items and inline-blocks inside it rather than only the container's
+  own loose text. `orphans`, `widows` and `dominant-baseline` are
+  inherited too, as their specs say.
 * Every layer of a multi-image `background` in an external stylesheet
   is fetched relative to that stylesheet. Only the first `url()` was
   resolved against the sheet's address and the rest against the page,
