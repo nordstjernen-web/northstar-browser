@@ -4,6 +4,19 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Setting `meta.content`, `textarea.rows` or `frameset.rows` from script
+  changes the attribute; the assignments were silently ignored.
+  `role`, `ariaLabel`, `ariaBusy` and the other ARIA properties read
+  `null` when the attribute is absent (as in other browsers) instead of
+  an empty string or a default such as `"false"`, setting them to
+  `null` removes the attribute, and the numeric and text ARIA
+  properties such as `ariaValueNow` and `ariaLevel` exist at all.
+  `font.size` is a string, `textarea.cols = 0` falls back to the
+  default, `progress.max` ignores non-positive values and parses its
+  attribute with the HTML number rules (`"5%"` is 5), assigning `null`
+  to the legacy colour and margin attributes clears them, `object.data`
+  resolves an empty value against the base URL, and setting `label` or
+  `defaultValue` is seen by mutation observers.
 * `innerText` and `textContent` of a shadow host no longer include the
   shadow tree's text, text inside an inline `<svg>`'s `<text>` elements
   is part of `innerText`, a `visibility: hidden` paragraph or `<br>`
