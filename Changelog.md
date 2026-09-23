@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Grid items that span several `auto`, `min-content` or `max-content`
+  columns size those columns. Only single-column items were measured,
+  so a heading spanning two content-sized columns could overflow them;
+  a spanning item's minimum and maximum content widths are now spread
+  over the columns it crosses (narrower spans first, respecting each
+  column's maximum), as the grid sizing algorithm specifies.
 * `grid-template-columns/-rows: subgrid` checks its line-name list:
   only `[names]` groups and `repeat(N | auto-fill, [names]...)` may
   follow `subgrid` (so `subgrid 1px` or `subgrid repeat(2, 1px)` is
