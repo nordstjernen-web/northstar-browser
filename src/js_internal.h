@@ -221,6 +221,8 @@ struct ns_js {
     int           iframe_doc_set;
     ns_csp *csp;
     GHashTable   *doc_csp;
+    ns_fetch_policy *fetch_policy;
+    GHashTable   *doc_fetch_policy;
     char         *selection_text;
     gboolean      selection_has_range;
     double        selection_x, selection_y, selection_w, selection_h;

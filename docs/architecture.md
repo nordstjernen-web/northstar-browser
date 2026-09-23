@@ -84,8 +84,9 @@ space.
   loop, find-in-page, printing and viewport scroll snapping. It is an
   internal interface; the embeddable library API of the full Nordstjernen
   edition is not part of this one.
-- **Audio mixer** (`src/audio/audio.c`) — downloads and decodes `<audio>`
-  on its own worker thread and outputs through SDL2. The engine returns
+- **Audio mixer** (`src/audio/audio.c`) — fetches `<audio>` through
+  `net.c` and decodes it on its own worker thread, and outputs through
+  SDL2. The engine returns
   `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands with each
   rendered frame, and the view queues them to a per-view audio context.
   Without SDL2 the build uses `src/audio/stub.c` and plays nothing.
@@ -110,7 +111,7 @@ drivers both call.
 | Stage | File(s) | Job |
 |-------|---------|-----|
 | 1. Fetch | `net.c`, `cache.c`, `engine.c` | libcurl on a shared multi handle (HTTP/1.1, HTTP/2; HTTP/3 through Alt-Svc when libcurl supports it), TLS verification, redirect clamp, response-size cap, HSTS, Alt-Svc, per-site cookie jars and HTTP cache. `engine.c` scans a parsed document for its scripts and stylesheets and preloads them; a preload map, an in-flight coalescer and the HTTP cache then answer in that order, keyed on request identity rather than bare URL, so a subresource is fetched once. `netutil.c` holds Accept-Language, search-URL and proxy helpers. |
-| 2. Safety gate | `safebrowsing.c`, `csp.c`, `security.c` | Top-level host checked against the local SHA-256 blocklist; Content-Security-Policy parsed and enforced; Subresource Integrity (`ns_security_sri_check`) verified for scripts. |
+| 2. Safety gate | `safebrowsing.c`, `fetch_policy.c`, `csp.c`, `security.c` | Top-level host checked against the local SHA-256 blocklist. Every subresource request carries its destination and its document's policy, and `ns_fetch_policy_check` applies the `file:` rule, mixed-content blocking or upgrade, and Content-Security-Policy by destination before the request and at each redirect hop. Subresource Integrity (`ns_security_sri_check`) verified for scripts. |
 | 3. Parse | `html.c`, `encoding.c`, `html_lexbor.c`, `xml.c` | Charset detection (BOM, header, `<meta>` prescan, then uchardet), decoding through the WHATWG Encoding Standard decoders in `encoding.c`, and bytes → DOM via lexbor (WHATWG HTML). `xml.c` parses XHTML and other namespaced XML documents. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
 | 5. Style | `css.c`, `css_syntax.c`, `css_media.c`, `css_prop_syntax.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_media.c` the Media Queries Level 4 parser and evaluator, and `css_prop_syntax.c` the `<syntax>` grammar behind `@property` and `CSS.registerProperty`. `anim.c` runs transitions and `@keyframes` animations; `font.c` loads `@font-face` web fonts. |
@@ -292,6 +293,7 @@ the page as one long unpaginated sheet.
 |------|------|
 | `security.c` | Refuse privileged startup, Linux Landlock + seccomp sandbox, macOS Seatbelt profile, Windows process mitigations, Subresource Integrity, the CSPRNG, allocator hardening and download-origin marking. |
 | `csp.c` | Content-Security-Policy parse and enforcement, per document. |
+| `fetch_policy.c` | The request policy every subresource passes: `file:` access, mixed content and CSP by destination. |
 | `safebrowsing.c` | Local phishing/malware blocklist + interstitial. |
 | `watchdog.c` | Supervisor that restarts the browser on crash or hang. |
 

@@ -177,10 +177,12 @@ unconfined.
   rendered frame, and the GTK view (`src/gtk/procview.c`) queues them to a
   per-view audio context. A dedicated worker thread fetches and decodes
   media without blocking GTK; URLs are never handed to a shell or an
-  external binary. The worker fetches with its own libcurl handle —
-  `http`, `https` and `data:` only, TLS verification on, a size cap and a
-  30-second timeout — which does not share the page's cookie partition or
-  HSTS state. The mixer decodes MP3 (vendored minimp3), MP2 (vendored
+  external binary. The worker fetches through `net.c` like any other
+  subresource of the page — the page's cookie partition, HSTS, the
+  request policy below and the response-size cap all apply — and decodes
+  from memory, so nothing is written to disk. The engine has already
+  checked the source against `media-src` before the command is sent. The
+  mixer decodes MP3 (vendored minimp3), MP2 (vendored
   pl_mpeg) and, when `opusfile`/`vorbisfile` are present, Ogg
   Opus/Vorbis, and outputs through SDL2. On Linux the worker inherits the
   browser's Landlock + seccomp restrictions, but codec memory corruption
@@ -282,10 +284,29 @@ Top-level navigations try HTTPS first (`https_first`, on by default).
 The `tls_allow_insecure_override` setting, off by default, lets the user
 proceed past a certificate error, never for an HSTS host.
 
-Mixed content — an `http:` resource inside an `https:` document — is
-blocked for scripts, `fetch()`/`XMLHttpRequest`, WebSocket, EventSource
-and workers. Images, stylesheets, fonts, media and frames are not
-checked; see *Known gaps*.
+Every subresource request passes one policy check,
+`ns_fetch_policy_check` (`src/fetch_policy.c`), before it is sent and
+again at every redirect hop. The request carries its destination
+(script, stylesheet, image, font, media, frame, worker, connection) and
+the policy of the document that made it: that document's URL and a
+snapshot of its Content-Security-Policy. The check applies, in order:
+
+- **Local files.** A `file:` URL is refused unless the requesting
+  document is itself a `file:` document.
+- **Mixed content.** An `http:` or `ws:` URL requested by an `https:`
+  document is refused, except that images and media are upgraded to
+  `https:` (with no fallback if the upgrade fails), and a loopback host
+  (`localhost`, `127.0.0.1`, `::1`) counts as secure.
+- **CSP by destination.** `img-src`, `media-src`, `font-src`,
+  `connect-src`, `worker-src` and `frame-src`, each with its CSP
+  fallback chain, are checked against the (possibly upgraded) URL.
+  Scripts and stylesheets are checked where the element is, because a
+  nonce, a hash or `'strict-dynamic'` decides them.
+
+Requests that share an in-flight fetch or a preloaded response have the
+final URL checked against their own policy when the response arrives.
+WebSocket, EventSource, `sendBeacon`, worker scripts and the audio
+worker use the same check.
 
 ### Origin isolation
 
@@ -311,11 +332,11 @@ checked; see *Known gaps*.
 - CSP (`src/csp.c`) is parsed from headers and `<meta>` and enforced for
   `default-src` (as the fallback), `script-src` (inline and external,
   with nonces, hashes and `'strict-dynamic'`), `connect-src`,
-  `frame-src`/`child-src`, `worker-src`, `frame-ancestors`, `object-src`,
-  `base-uri` and `form-action`. `style-src`, `img-src`, `media-src` and
-  `font-src` are parsed but not yet enforced when stylesheets, images,
-  media and fonts load (`style-src` only withholds a `<link>` element's
-  `load` event). Host
+  `frame-src`/`child-src`, `worker-src`, `img-src`, `media-src`,
+  `font-src`, `frame-ancestors`, `object-src`, `base-uri` and
+  `form-action`, including on redirects. `style-src` is parsed but not
+  enforced when parser-inserted stylesheets load (it only withholds a
+  `<link>` element's `load` event). Host
   source expressions match scheme, host (with `*.` wildcard), port
   (defaulting to the scheme's default), and path (left-anchored if the
   source ends in `/`, exact otherwise). `*` follows CSP3 semantics — it
@@ -520,9 +541,8 @@ The `document.cookie` setter:
   `document.cookie`, so the third-party blocking that applies to network
   requests does not apply to script, and the `cookie_policy` setting is
   not consulted for script writes.
-- **Mixed content outside scripts and connections, CSP for stylesheets,
-  images, media and fonts, and stylesheet SRI are not enforced**, as
-  described under *Network* and *Origin isolation*.
+- **`style-src` for parser-inserted stylesheets and stylesheet SRI are
+  not enforced**, as described under *Origin isolation*.
 - **In-process codecs.** MPEG-1 video, MP2/MP3/Ogg audio, AVIF (when
   built) and WebAssembly are ordinary C parsing attacker-controlled bytes
   in the browser process (see *Media*). They are bounded, but nothing

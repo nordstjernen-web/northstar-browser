@@ -8,6 +8,7 @@
 
 #include <glib.h>
 
+#include "fetch_policy.h"
 #include "texture.h"
 
 G_BEGIN_DECLS
@@ -62,6 +63,7 @@ void            ns_image_cache_free(ns_image_cache *cache);
 ns_image       *ns_image_cache_get(ns_image_cache *cache,
                                    const char     *url,
                                    const char     *top_url,
+                                   ns_fetch_policy *policy,
                                    ns_image_ready_cb cb,
                                    gpointer        user_data);
 

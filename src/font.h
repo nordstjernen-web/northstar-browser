@@ -8,6 +8,8 @@
 
 #include <glib.h>
 
+#include "fetch_policy.h"
+
 G_BEGIN_DECLS
 
 void     ns_font_init(void);
@@ -19,7 +21,7 @@ gboolean ns_font_family_loaded(const char *family);
 guint    ns_font_generation(void);
 
 void     ns_font_request(const char *family, const char *src_url,
-                         const char *base_url);
+                         const char *base_url, ns_fetch_policy *policy);
 
 guint    ns_font_pending_count(void);
 

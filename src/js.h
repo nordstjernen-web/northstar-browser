@@ -11,6 +11,7 @@
 #include <cairo.h>
 
 #include "csp.h"
+#include "fetch_policy.h"
 #include "dom.h"
 
 G_BEGIN_DECLS
@@ -153,6 +154,7 @@ gboolean ns_js_run_animation_frame(ns_js *js);
 gboolean ns_js_has_pending_animation_frame(const ns_js *js);
 gboolean ns_js_has_pending_work(const ns_js *js);
 gboolean ns_js_wants_frame(const ns_js *js);
+ns_fetch_policy *ns_js_fetch_policy(ns_js *js, const ns_node *node);
 void     ns_js_set_frame_time(ns_js *js, gint64 frame_time_us);
 
 void ns_js_dump_stats(ns_js *js, GString *out);

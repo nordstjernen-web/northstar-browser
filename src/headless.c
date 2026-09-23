@@ -1855,7 +1855,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_style_flush_cb(js, headless_flush_style, &flush_ctx);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
         headless_relayout(&flush_ctx);
-        ns_engine_fetch_images(layout, flush_base, image_cache);
+        ns_engine_fetch_images(layout, flush_base, image_cache, js);
         ns_js_run_scripts_in_doc(js, doc, resp->final_url,
                                  g_headless_doc_charset, resp->content_type);
         headless_relayout(&flush_ctx);
@@ -1959,7 +1959,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     case NS_DUMP_PRINT: {
         const char *base = resp->final_url ? resp->final_url : opts->url;
         if (!image_cache) image_cache = ns_image_cache_new();
-        ns_engine_fetch_images(layout, base, image_cache);
+        ns_engine_fetch_images(layout, base, image_cache, js);
         headless_relayout(&flush_ctx);
         if (opts->dump == NS_DUMP_PRINT) {
             ns_print_setup_apply_page_rule(&g_headless_print_setup,

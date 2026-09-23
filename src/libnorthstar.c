@@ -446,7 +446,8 @@ browser_ensure_images(ns_browser *browser)
     gboolean deferred = FALSE;
     ns_engine_img_session *s =
         ns_engine_fetch_images_start(browser->layout, browser->base_url,
-                                     browser->images, browser->img_requested,
+                                     browser->images, browser->js,
+                                     browser->img_requested,
                                      browser->cur_scroll_y, vp_h, &deferred,
                                      browser_image_arrived, browser);
     if (s) g_ptr_array_add(browser->img_sessions, s);

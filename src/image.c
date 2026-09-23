@@ -624,6 +624,7 @@ ns_image_cache_start_request(ns_image_cache *cache,
                              ns_image *img,
                              const char *url,
                              const char *top_url,
+                             ns_fetch_policy *policy,
                              ns_image_ready_cb cb,
                              gpointer user_data)
 {
@@ -636,14 +637,15 @@ ns_image_cache_start_request(ns_image_cache *cache,
     img->attempts++;
     ns_net_request_async(
         url, top_url, "GET", NULL, 0, NULL,
-        ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NULL,
-        on_image_fetched, pending);
+        ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), NS_FETCH_DEST_IMAGE,
+        policy, NULL, on_image_fetched, pending);
 }
 
 ns_image *
 ns_image_cache_get(ns_image_cache *cache,
                    const char *url,
                    const char *top_url,
+                   ns_fetch_policy *policy,
                    ns_image_ready_cb cb,
                    gpointer user_data)
 {
@@ -660,7 +662,7 @@ ns_image_cache_get(ns_image_cache *cache,
         if (cached->purged && !ns_image_has_pending(cache, cached)) {
             cached->purged = FALSE;
             ns_image_cache_start_request(cache, cached, url, top_url,
-                                         cb, user_data);
+                                         policy, cb, user_data);
             return cached;
         }
         if (ns_image_should_retry(cached, g_get_monotonic_time())) {
@@ -669,7 +671,7 @@ ns_image_cache_get(ns_image_cache *cache,
             cached->failed_at_us = 0;
             g_clear_pointer(&cached->error, g_free);
             ns_image_cache_start_request(cache, cached, url, top_url,
-                                         cb, user_data);
+                                         policy, cb, user_data);
             return cached;
         }
         if (cached->loaded || cached->failed) {
@@ -706,7 +708,8 @@ ns_image_cache_get(ns_image_cache *cache,
         return img;
     }
 
-    ns_image_cache_start_request(cache, img, url, top_url, cb, user_data);
+    ns_image_cache_start_request(cache, img, url, top_url, policy, cb,
+                                 user_data);
     return img;
 }
 

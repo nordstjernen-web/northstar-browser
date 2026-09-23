@@ -34,7 +34,6 @@ typedef struct ns_render_ctx {
     gsize                           caret_byte;
     gsize                           sel_anchor_byte;
     char     *(*resolve_url)(const char *href, gpointer ud);
-    gboolean  (*font_allowed)(const char *abs_url, gpointer ud);
     gpointer                        cb_ud;
 } ns_render_ctx;
 

@@ -4,6 +4,23 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Every subresource request now passes one policy check, in the network
+  layer, before it is sent and again at each redirect. The request
+  carries what it is for (image, stylesheet, font, media, frame, worker,
+  script or connection) and the policy of the page that asked for it, and
+  the check applies the `file:` rule, mixed content and
+  Content-Security-Policy together. What this changes for pages:
+  `img-src`, `media-src` and `font-src` are enforced (they were parsed and
+  ignored); an `https:` page's `http:` stylesheets, fonts and frames are
+  blocked and its `http:` images and media are upgraded to `https:`, where
+  before all of them loaded over plain HTTP; `connect-src` and mixed
+  content are checked at every redirect hop instead of after the whole
+  response had been downloaded; `sendBeacon` obeys `connect-src`; and
+  `http://localhost` is no longer treated as mixed content. `<audio>` is
+  now fetched through the same network stack as the rest of the page,
+  with the page's cookie partition, HSTS and the policy check, instead of
+  a separate libcurl handle with its own User-Agent, and it is decoded
+  from memory instead of being written to `~/.cache/northstar/msaudio`.
 * An idle page no longer costs a frame every 16 ms. The window used to
   ask the engine for a frame at 60 Hz whenever the page had any timer,
   fetch or socket outstanding, and most of those frames came back
