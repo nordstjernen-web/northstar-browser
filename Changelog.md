@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `<fieldset>` has the rendering section's default style -- a 2px
+  groove border, 2px inline margins, `0.35em 0.625em` block and `0.75em`
+  inline padding and a `min-content` minimum inline size -- instead of a
+  1px solid border and 8px margins, and the deprecated `ThreeDFace`
+  system colour resolves to `ButtonBorder` as CSS Color 4 maps it.
 * Form controls compute `appearance: auto` as the HTML rendering rules
   give them (`none` for hidden, file and image inputs), and
   `getComputedStyle` answers for prefixed aliases such as
