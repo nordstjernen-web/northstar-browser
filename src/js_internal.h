@@ -87,6 +87,8 @@ struct ns_js {
     ns_js_soft_nav_cb soft_nav_cb;
     gpointer      soft_nav_user_data;
     ns_js_repaint_cb repaint_cb;
+    ns_js_viewport_scroll_cb viewport_scroll_cb;
+    gpointer      viewport_scroll_user_data;
     gpointer      repaint_user_data;
     ns_js_layout_flush_cb layout_flush_cb;
     gpointer      layout_flush_user_data;

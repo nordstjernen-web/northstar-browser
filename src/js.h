@@ -31,6 +31,8 @@ typedef void (*ns_js_form_submit_cb)(const ns_node *form, const ns_node *submitt
                                      gpointer user_data);
 typedef void (*ns_js_soft_nav_cb)(const char *url, gboolean replace, gpointer user_data);
 typedef void (*ns_js_repaint_cb)(gpointer user_data);
+typedef void (*ns_js_viewport_scroll_cb)(double *x, double *y,
+                                         gpointer user_data);
 typedef void (*ns_js_layout_flush_cb)(gpointer user_data);
 typedef gboolean (*ns_js_clipboard_write_cb)(const char *text, gpointer user_data);
 typedef gboolean (*ns_js_selection_cmd_cb)(const char *command, gpointer user_data);
@@ -84,6 +86,8 @@ void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb,
                              gpointer user_data);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data);
+void   ns_js_set_viewport_scroll_cb(ns_js *js, ns_js_viewport_scroll_cb cb,
+                                    gpointer user_data);
 void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data);
 void   ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);
