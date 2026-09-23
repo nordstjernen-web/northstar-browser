@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The user-agent sheet hides `area` and `base`, leaves `source` and
+  `track` at `display: inline`, keeps `input type=hidden` and a `form`
+  the parser left inside a table part hidden even against author
+  `!important`, and lays out `embed[hidden]` as a 0x0 inline box, as
+  HTML's rendering section lists.
 * Setting `document.title` on a page without a `<title>` creates one
   that later reads (and `getElementsByTagName`) can find, reports the
   change to mutation observers, and does nothing when there is no
