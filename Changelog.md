@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `structuredClone()` and `postMessage()` keep a `DOMException`: the
+  copy is a `DOMException` with the same `name`, `message` and `code`,
+  where it used to arrive as an empty plain object.
 * A media query containing `/*` inside a quoted string no longer crashes
   the browser. Stripping comments from a query called the matcher again
   on the result, and a `/*` inside quotes survives the stripping, so

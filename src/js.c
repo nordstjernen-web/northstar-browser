@@ -11707,7 +11707,7 @@ typedef struct {
     JSValue    date_ctor, regexp_ctor, map_ctor, set_ctor;
     JSValue    blob_ctor, file_ctor, dataview_ctor;
     JSValue    number_ctor, string_ctor, boolean_ctor, bigint_ctor;
-    JSValue    array_buffer_ctor;
+    JSValue    array_buffer_ctor, dom_exception_ctor;
 } ns_sc;
 
 static JSValue ns_sc_clone(ns_sc *s, JSValueConst v);
@@ -11993,6 +11993,17 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
+    if (ns_sc_isa(ctx, v, s->dom_exception_ctor)) {
+        JSValue message = JS_GetPropertyStr(ctx, v, "message");
+        JSValue name = JS_GetPropertyStr(ctx, v, "name");
+        JSValueConst args[2] = { message, name };
+        JSValue clone = JS_CallConstructor(ctx, s->dom_exception_ctor, 2, args);
+        JS_FreeValue(ctx, message);
+        JS_FreeValue(ctx, name);
+        if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
+        return clone;
+    }
+
     if (JS_IsError(v)) {
         static const char *const known[] = {
             "Error", "EvalError", "RangeError", "ReferenceError",
@@ -12161,6 +12172,7 @@ ns_sc_run(JSContext *ctx, JSValueConst value, GPtrArray *transfer_ports,
     s.boolean_ctor  = JS_GetPropertyStr(ctx, g, "Boolean");
     s.bigint_ctor   = JS_GetPropertyStr(ctx, g, "BigInt");
     s.array_buffer_ctor = JS_GetPropertyStr(ctx, g, "ArrayBuffer");
+    s.dom_exception_ctor = JS_GetPropertyStr(ctx, g, "DOMException");
     JS_FreeValue(ctx, g);
 
     JSValue out = ns_sc_clone(&s, value);
@@ -12180,6 +12192,7 @@ ns_sc_run(JSContext *ctx, JSValueConst value, GPtrArray *transfer_ports,
     JS_FreeValue(ctx, s.boolean_ctor);
     JS_FreeValue(ctx, s.bigint_ctor);
     JS_FreeValue(ctx, s.array_buffer_ctor);
+    JS_FreeValue(ctx, s.dom_exception_ctor);
     return out;
 }
 
