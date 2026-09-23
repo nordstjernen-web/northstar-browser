@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A `<script>` that is inserted empty runs once it gets text or a
+  `src`, as HTML's "prepare the script element" requires: a script
+  created, attached and only then filled through `textContent`,
+  `appendChild` or `src` used to be marked as already started and
+  never ran. A `src=""` now fires `error` instead of being ignored.
 * The `autofocus` attribute works on page load: the first focusable
   element carrying it in the document gets focus at the next rendering
   update (or before `load` at the latest), unless something is

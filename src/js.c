@@ -251,6 +251,7 @@ static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_schedule_pending_script_drain(ns_js *js);
 static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
+static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_subtree_scan_special(const ns_node *n, int depth,
                                     gboolean *script, gboolean *link,
                                     gboolean *frame);
@@ -6984,7 +6985,10 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
     ns_node *added = len > 0 ? ns_node_new_text_len(g_memdup2(s, len + 1), (guint32)len) : NULL;
     ns_element_replace_all_recorded(_j, n, added);
     if (free_s) JS_FreeCString(ctx, s);
-    if (_j) _j->mutated = TRUE;
+    if (_j) {
+        _j->mutated = TRUE;
+        if (added) ns_js_script_needs_prepare(_j, n);
+    }
     return JS_UNDEFINED;
 }
 
@@ -7118,6 +7122,7 @@ ns_element_set_outerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
 }
 
 #define NS_SCRIPT_ALREADY_STARTED "data-nd-script-already-started"
+#define NS_SCRIPT_EMPTY_SOURCE "data-nd-script-empty-source"
 
 static void
 ns_mark_scripts_already_started_rec(ns_node *root, int depth)
@@ -39563,6 +39568,11 @@ static void
 ns_popover_attr_changed(ns_js *js, ns_node *el, const char *attr,
                         const char *old_value, const char *new_value)
 {
+    if (!old_value && new_value && g_ascii_strcasecmp(attr, "src") == 0 &&
+        ns_node_is_script_element(el) && ns_node_is_html_element(el)) {
+        ns_js_script_needs_prepare(js, el);
+        return;
+    }
     if (g_ascii_strcasecmp(attr, "open") == 0 &&
         ns_node_is_element_named(el, "dialog")) {
         if (!new_value && old_value)
@@ -54856,18 +54866,35 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
     js->current_doc = previous_doc;
 }
 
+static gboolean
+ns_script_source_is_empty(const ns_node *n)
+{
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_TEXT && c->text && *c->text) return FALSE;
+    return TRUE;
+}
+
 static void
 ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
 {
     if (!js || !n || ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED)) return;
+    const char *src = ns_element_get_attr(n, "src");
     ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
+    if (!src && ns_script_source_is_empty(n)) {
+        n->flags |= NS_NODE_NOT_PARSER_INSERTED;
+        ns_element_set_attr(n, NS_SCRIPT_EMPTY_SOURCE, "1");
+        return;
+    }
     if (!ns_script_type_supported(n) || ns_script_skipped_by_nomodule(n))
         return;
     const char *nonce = ns_element_get_attr(n, "nonce");
     const char *integrity = ns_element_get_attr(n, "integrity");
-    const char *src = ns_element_get_attr(n, "src");
     gboolean is_module = ns_script_type_is_module(n);
-    if (src && *src) {
+    if (src && !*src) {
+        ns_queue_event_task(js, n, "error");
+        return;
+    }
+    if (src) {
         if (g_str_has_prefix(src, "data:")) {
             gsize blen = 0;
             char *body = ns_js_decode_data_url(src, &blen);
@@ -55339,9 +55366,26 @@ ns_js_drain_async_script_roots(ns_js *js)
 }
 
 static void
+ns_js_script_needs_prepare(ns_js *js, ns_node *script)
+{
+    if (!js || !ns_node_is_script_element(script) ||
+        !(script->flags & NS_NODE_NOT_PARSER_INSERTED) ||
+        !ns_element_get_attr(script, NS_SCRIPT_EMPTY_SOURCE) ||
+        !ns_js_root_connected(js, script))
+        return;
+    ns_element_remove_attr(script, NS_SCRIPT_EMPTY_SOURCE);
+    ns_element_remove_attr(script, NS_SCRIPT_ALREADY_STARTED);
+    ns_js_run_inserted_scripts(js, script);
+}
+
+static void
 ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
 {
     if (!js || !root || !js->current_doc || js->halted) return;
+    if (root->parent && ns_node_is_script_element(root->parent)) {
+        ns_js_script_needs_prepare(js, root->parent);
+        if (root->kind != NS_NODE_ELEMENT) return;
+    }
     if (js->js_image_loads && g_hash_table_size(js->js_image_loads) > 0)
         ns_js_rescan_subtree_images(js, root, 0);
     if (js->in_pump) return;
