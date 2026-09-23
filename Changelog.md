@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A float in a column too narrow for it is as wide as its longest word
+  or widest unbreakable child, like in other browsers, instead of being
+  squeezed below it so that its content spills out of its border. A
+  child with `width: 0` also counts as zero wide when its parent shrinks
+  to fit, rather than as wide as its content.
 * `min-content`, `max-content`, `fit-content` and `stretch` work in
   `min-width`/`max-width` and `min-height`/`max-height` as well as in
   `width`/`height`, on inline-blocks, floats, flex items and absolutely
