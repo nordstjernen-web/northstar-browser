@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The Windows process mitigations are the ones intended. The policies
+  were passed as bare numbers, and two were wrong: the call meant for
+  ASLR set DEP (always on for 64-bit) and the one meant for the
+  dynamic-code ban set Control Flow Guard (which cannot be enabled after
+  start), so neither took effect. The policies are now named, forced
+  image relocation applies everywhere, and headless and tooling runs --
+  which load no GPU driver or shell extension -- also refuse to create
+  executable memory.
 * Images and MPEG-1 video that a page fetches are decoded on a worker
   thread. They were decoded on the engine thread as each download
   finished, so a video clip froze the page's scripts, timers and

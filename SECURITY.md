@@ -25,8 +25,9 @@ allow-list are trusted.
   allow-list and the seccomp-bpf syscall allow-list.
 - macOS Seatbelt write-confinement bypass.
 - Windows process-mitigation bypass — the policies set via
-  `SetProcessMitigationPolicy` at startup (strict handle checks,
-  extension-point disable, image-load restrictions, child-process block).
+  `SetProcessMitigationPolicy` at startup (forced image relocation, strict
+  handle checks, extension-point disable, image-load restrictions,
+  child-process block, and in headless runs the dynamic-code ban).
 - Same-origin, iframe-sandbox, cookie, and HTTP-cache partitioning bypass.
 - HSTS, mixed-content, and CSP enforcement bypass, for the parts this
   document says are enforced.
@@ -77,9 +78,10 @@ PIE, full RELRO, non-executable stack, separate-code segments,
 (`=2` fallback), `-Wformat=2 -Wformat-security`. No JIT is used or
 linked — JavaScript runs on the QuickJS interpreter and WebAssembly on
 WAMR's classic interpreter — so the browser never needs
-writable-and-executable memory. That is a property of the code, not a
-policy the kernel enforces: neither the Linux seccomp filter nor the
-Windows mitigations below refuse an executable mapping.
+writable-and-executable memory. Only headless runs on Windows have the
+kernel enforce that (see *Windows process mitigations*); elsewhere it is
+a property of the code, and neither the Linux seccomp filter nor the
+Windows GUI's mitigations refuse an executable mapping.
 
 On glibc, `mallopt(M_PERTURB)` fills freed and freshly allocated heap
 memory with a pattern (`src/security.c`), so a use-after-free or an
@@ -220,9 +222,16 @@ user-space GTK process can apply to itself. Instead the browser hardens
 itself at startup via `SetProcessMitigationPolicy`, called from
 `ns_security_win32_mitigations_init` in `src/security.c` before any page
 is loaded. Each call is best-effort: a policy the running Windows does not
-support returns `FALSE` and is skipped. The browser and headless/tooling
+support returns `FALSE` and is skipped. The policies are named by their
+`PROCESS_MITIGATION_POLICY` constants. The browser and headless/tooling
 modes apply:
 
+- **ASLR** (`ProcessASLRPolicy`, `EnableForceRelocateImages`) — relocate
+  every image that carries relocations, even one built without
+  `/DYNAMICBASE`, so no DLL loads at a predictable address. Stripped
+  images are still allowed, since refusing them could stop a system or
+  third-party DLL loading; bottom-up and high-entropy randomisation come
+  from the executable's own PE header.
 - **StrictHandleCheck** (`ProcessStrictHandleCheckPolicy`, flags
   `0x03`) — raise an exception on invalid handle use and lock the
   setting permanently. Catches double-close, UAF-of-handle bugs.
@@ -243,13 +252,14 @@ modes apply:
   binary. The watchdog launches the browser before this policy is applied;
   the browser process itself has no legitimate child-process requirement.
 
-The same function also passes `ProcessDEPPolicy` and
-`ProcessControlFlowGuardPolicy`. Neither changes anything at runtime: DEP
-is always on for a 64-bit process, and Control Flow Guard cannot be
-switched on after the process has started. The ASLR policy (forced
-relocation, bottom-up and high-entropy randomisation) and the
-dynamic-code prohibition are **not** applied; the executable's PE header
-still requests ASLR (`DYNAMIC_BASE`).
+Headless and tooling runs also apply **DisableDynamicCode**
+(`ProcessDynamicCodePolicy`, `ProhibitDynamicCode`): the kernel refuses
+any request for executable memory that was not mapped from an image, so
+an exploit cannot allocate a writable-and-executable buffer. The
+interactive browser does not, because it loads code it does not control
+— GPU drivers that compile shaders at run time, and the shell extensions
+and input methods that native file dialogs and text input bring in — and
+that code may need executable memory of its own.
 
 There is no per-path filesystem sandbox; Windows AppContainer
 would provide one but requires a manifest and code-signing
@@ -521,15 +531,15 @@ The `document.cookie` setter:
   config, data and cache directories are readable, and so is the
   directory holding `$XAUTHORITY` — `$HOME` itself on systems that keep
   `~/.Xauthority`.
-- **Windows: no per-path filesystem sandbox, no ASLR or dynamic-code
-  policy.** The mitigation suite restricts the *process* (no remote DLL
+- **Windows: no per-path filesystem sandbox, and no dynamic-code ban in
+  the GUI.** The mitigation suite restricts the *process* (no remote DLL
   loads, no child processes, etc.) but does not allow-list the files the
   process can read or write the way Landlock does on Linux, and the
-  process-level ASLR and dynamic-code policies are not applied (see
-  *Windows process mitigations*). AppContainer or a Low-Integrity-Level
-  drop would close the first; both require additional integration work
-  (manifest / capability declarations / re-routed config paths) and are
-  tracked as future work.
+  interactive browser leaves executable memory allowed for GPU drivers
+  and shell extensions (see *Windows process mitigations*). AppContainer
+  or a Low-Integrity-Level drop would close the first; both require
+  additional integration work (manifest / capability declarations /
+  re-routed config paths) and are tracked as future work.
 - **The cookie jar is not locked between browser instances.** Within one
   process, script and network cookie writes are serialised; two
   Northstar processes sharing a profile can still lose each other's

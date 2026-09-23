@@ -518,7 +518,7 @@ main(int argc, char **argv)
         }
     }
 
-    ns_security_win32_mitigations_init(FALSE);
+    ns_security_win32_mitigations_init(proc_mode);
     ns_add_screenshot_writable_dirs(argc, argv);
 
     if (proc_mode)
