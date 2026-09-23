@@ -4,6 +4,18 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `crypto.subtle` supports Ed448 and X448 from the Secure Curves draft,
+  which used to reject with NotSupportedError. Both generate keys,
+  import and export them as `raw`, `spki`, `pkcs8` and JWK (`kty`
+  "OKP", `crv` "Ed448"/"X448", `alg` "Ed448"), and follow the usage and
+  extractable rules of Ed25519 and X25519. Ed448 signs and verifies with
+  114-byte signatures and, like Ed25519, refuses small-order public keys
+  and signature points, which OpenSSL alone would accept. Its optional
+  `context` must be a BufferSource of at most 255 bytes (an
+  OperationError otherwise); a non-empty context needs OpenSSL 3.2 or
+  newer and is a NotSupportedError with older libraries, rather than
+  being dropped. X448 `deriveBits` and `deriveKey` reject an all-zero
+  shared secret with OperationError.
 * `<audio>` and `<video>` are real media elements now. Each has a player
   object (`src/js_media.c`) with the HTML state machine: `networkState`
   and `readyState` move through loading, metadata and playable,

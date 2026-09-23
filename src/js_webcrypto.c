@@ -70,6 +70,7 @@ typedef enum {
     NS_P_ECDH,
     NS_P_HKDF,
     NS_P_PBKDF2,
+    NS_P_ED448,
 } ns_wc_params;
 
 typedef enum {
@@ -117,6 +118,15 @@ static const struct {
     { "X25519", NS_OP_GENERATE_KEY, NS_P_NONE },
     { "X25519", NS_OP_IMPORT_KEY, NS_P_NONE },
     { "X25519", NS_OP_EXPORT_KEY, NS_P_NONE },
+    { "Ed448", NS_OP_SIGN, NS_P_ED448 },
+    { "Ed448", NS_OP_VERIFY, NS_P_ED448 },
+    { "Ed448", NS_OP_GENERATE_KEY, NS_P_NONE },
+    { "Ed448", NS_OP_IMPORT_KEY, NS_P_NONE },
+    { "Ed448", NS_OP_EXPORT_KEY, NS_P_NONE },
+    { "X448", NS_OP_DERIVE_BITS, NS_P_ECDH },
+    { "X448", NS_OP_GENERATE_KEY, NS_P_NONE },
+    { "X448", NS_OP_IMPORT_KEY, NS_P_NONE },
+    { "X448", NS_OP_EXPORT_KEY, NS_P_NONE },
     { "AES-CTR", NS_OP_ENCRYPT, NS_P_AES_CTR },
     { "AES-CTR", NS_OP_DECRYPT, NS_P_AES_CTR },
     { "AES-CTR", NS_OP_GENERATE_KEY, NS_P_AES_LENGTH },
@@ -185,6 +195,7 @@ typedef struct {
     ns_wc_buf label;
     ns_wc_buf salt;
     ns_wc_buf info;
+    ns_wc_buf context;
     ns_crypto_key *public_key;
 } ns_wc_alg;
 
@@ -331,6 +342,7 @@ ns_wc_alg_clear(ns_wc_alg *a)
     ns_wc_buf_clear(&a->label);
     ns_wc_buf_clear(&a->salt);
     ns_wc_buf_clear(&a->info);
+    ns_wc_buf_clear(&a->context);
     ns_crypto_key_unref(a->public_key);
     memset(a, 0, sizeof *a);
 }
@@ -373,6 +385,26 @@ ns_wc_is_kdf(const char *name)
     return !strcmp(name, "HKDF") || !strcmp(name, "PBKDF2");
 }
 
+static gboolean
+ns_wc_is_eddsa(const char *name)
+{
+    return !strcmp(name, "Ed25519") || !strcmp(name, "Ed448");
+}
+
+static gboolean
+ns_wc_is_xdh(const char *name)
+{
+    return !strcmp(name, "X25519") || !strcmp(name, "X448");
+}
+
+static gsize
+ns_wc_okp_key_bytes(const char *name)
+{
+    if (!strcmp(name, "Ed448")) return 57;
+    if (!strcmp(name, "X448")) return 56;
+    return 32;
+}
+
 static guint32
 ns_wc_secret_usages(const char *name)
 {
@@ -386,7 +418,7 @@ static guint32
 ns_wc_public_usages(const char *name)
 {
     if (!strcmp(name, "RSA-OAEP")) return NS_USAGE_ENCRYPT | NS_USAGE_WRAP;
-    if (!strcmp(name, "ECDH") || !strcmp(name, "X25519")) return 0;
+    if (!strcmp(name, "ECDH") || ns_wc_is_xdh(name)) return 0;
     return NS_USAGE_VERIFY;
 }
 
@@ -394,7 +426,7 @@ static guint32
 ns_wc_private_usages(const char *name)
 {
     if (!strcmp(name, "RSA-OAEP")) return NS_USAGE_DECRYPT | NS_USAGE_UNWRAP;
-    if (!strcmp(name, "ECDH") || !strcmp(name, "X25519")) return NS_USAGES_DERIVE;
+    if (!strcmp(name, "ECDH") || ns_wc_is_xdh(name)) return NS_USAGES_DERIVE;
     return NS_USAGE_SIGN;
 }
 
@@ -634,6 +666,9 @@ ns_wc_convert_params(JSContext *ctx, JSValueConst obj, int params, ns_wc_alg *a)
             r = ns_wc_member_uint(ctx, obj, "iterations", TRUE, 4294967295.0,
                                   &a->iterations, NULL);
         if (r >= 0) r = ns_wc_member_buffer(ctx, obj, "salt", TRUE, &a->salt);
+        break;
+    case NS_P_ED448:
+        r = ns_wc_member_buffer(ctx, obj, "context", FALSE, &a->context);
         break;
     default:
         break;
@@ -1390,7 +1425,7 @@ static ns_crypto_key *
 ns_wc_import_okp_jwk(JSContext *ctx, const ns_wc_jwk *jwk, const ns_wc_alg *a,
                      gboolean extractable, guint32 usages)
 {
-    gboolean ed = !strcmp(a->name, "Ed25519");
+    gboolean ed = ns_wc_is_eddsa(a->name);
     if (!jwk->kty || strcmp(jwk->kty, "OKP") != 0) {
         ns_wc_throw(ctx, "DataError", "JWK: kty must be OKP");
         return NULL;
@@ -1399,7 +1434,7 @@ ns_wc_import_okp_jwk(JSContext *ctx, const ns_wc_jwk *jwk, const ns_wc_alg *a,
         ns_wc_throw(ctx, "DataError", "JWK: crv does not match the algorithm");
         return NULL;
     }
-    if (ed && jwk->alg && strcmp(jwk->alg, "Ed25519") != 0 &&
+    if (ed && jwk->alg && strcmp(jwk->alg, a->name) != 0 &&
         strcmp(jwk->alg, "EdDSA") != 0) {
         ns_wc_throw(ctx, "DataError", "JWK: alg does not match the algorithm");
         return NULL;
@@ -1407,11 +1442,12 @@ ns_wc_import_okp_jwk(JSContext *ctx, const ns_wc_jwk *jwk, const ns_wc_alg *a,
     if (!ns_wc_jwk_check(ctx, jwk, "OKP", ed ? "sig" : "enc", extractable,
                          usages))
         return NULL;
+    gsize size = ns_wc_okp_key_bytes(a->name);
     ns_wc_buf x = { 0 }, d = { 0 };
     gboolean ok = jwk->x && ns_wc_b64url_decode(jwk->x, &x) == 0 &&
-                  x.len == 32 &&
+                  x.len == size &&
                   (!jwk->d || (ns_wc_b64url_decode(jwk->d, &d) == 0 &&
-                               d.len == 32));
+                               d.len == size));
     ns_crypto_key *k = NULL;
     if (ok) {
         char *err = NULL;
@@ -1455,7 +1491,7 @@ ns_wc_import_okp(JSContext *ctx, ns_wc_format fmt, const ns_wc_buf *data,
         return ns_wc_import_okp_jwk(ctx, jwk, a, extractable, usages);
     if (fmt == NS_FMT_RAW) {
         char *err = NULL;
-        ns_crypto_key *k = data->len == 32
+        ns_crypto_key *k = data->len == ns_wc_okp_key_bytes(a->name)
             ? ns_crypto_import_raw("raw", data->data, data->len, a->name, NULL,
                                    NULL, extractable, usages, &err)
             : NULL;
@@ -1637,8 +1673,8 @@ ns_wc_export_jwk(JSContext *ctx, const ns_crypto_key *k)
         if (ok) {
             JS_SetPropertyStr(ctx, o, "kty", JS_NewString(ctx, "OKP"));
             JS_SetPropertyStr(ctx, o, "crv", JS_NewString(ctx, k->algo));
-            if (!strcmp(k->algo, "Ed25519"))
-                JS_SetPropertyStr(ctx, o, "alg", JS_NewString(ctx, "Ed25519"));
+            if (ns_wc_is_eddsa(k->algo))
+                JS_SetPropertyStr(ctx, o, "alg", JS_NewString(ctx, k->algo));
             ns_wc_set_b64(ctx, o, "x", x, xl);
             ns_wc_set_b64(ctx, o, "d", d, dl);
         }
@@ -1884,6 +1920,21 @@ ns_wc_ecdsa_signature_len(const ns_crypto_key *k)
     return 2 * ns_wc_curve_bytes(k->curve);
 }
 
+static gboolean
+ns_wc_check_context(JSContext *ctx, const ns_wc_alg *a)
+{
+    if (a->context.len > 255) {
+        ns_wc_throw(ctx, "OperationError", "the context is longer than 255 bytes");
+        return FALSE;
+    }
+    if (a->context.len && !ns_crypto_eddsa_context_supported()) {
+        ns_wc_throw(ctx, "NotSupportedError",
+                    "this OpenSSL cannot sign or verify with an Ed448 context");
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static JSValue
 ns_wc_sign_verify(JSContext *ctx, int argc, JSValueConst *argv, gboolean sign)
 {
@@ -1905,10 +1956,12 @@ ns_wc_sign_verify(JSContext *ctx, int argc, JSValueConst *argv, gboolean sign)
     ns_ck_type type = strcmp(a.name, "HMAC") == 0 ? NS_CK_SECRET
                     : sign ? NS_CK_PRIVATE : NS_CK_PUBLIC;
     if (ns_wc_check_key(ctx, &a, k, sign ? NS_USAGE_SIGN : NS_USAGE_VERIFY) &&
-        ns_wc_check_type(ctx, k, type)) {
+        ns_wc_check_type(ctx, k, type) && ns_wc_check_context(ctx, &a)) {
         ns_crypto_params p = { 0 };
         p.sign_hash = a.hash;
         p.pss_salt_len = !strcmp(a.name, "RSA-PSS") ? (int)a.salt_length : -1;
+        p.context = a.context.data;
+        p.context_len = a.context.len;
         char *err = NULL;
         if (sign) {
             gsize out_len = 0;
@@ -1923,7 +1976,8 @@ ns_wc_sign_verify(JSContext *ctx, int argc, JSValueConst *argv, gboolean sign)
             }
         } else if ((!strcmp(a.name, "ECDSA") &&
                     signature.len != ns_wc_ecdsa_signature_len(k)) ||
-                   (!strcmp(a.name, "Ed25519") && signature.len != 64)) {
+                   (ns_wc_is_eddsa(a.name) &&
+                    signature.len != 2 * ns_wc_okp_key_bytes(a.name))) {
             r = JS_FALSE;
         } else {
             int v = ns_crypto_verify(k, &p, signature.data, signature.len,
@@ -1955,7 +2009,7 @@ ns_wc_derive(JSContext *ctx, const ns_wc_alg *a, const ns_crypto_key *k,
     char *err = NULL;
     gsize n = 0;
     guint8 *bits = NULL;
-    if (!strcmp(a->name, "ECDH") || !strcmp(a->name, "X25519")) {
+    if (!strcmp(a->name, "ECDH") || ns_wc_is_xdh(a->name)) {
         const ns_crypto_key *peer = a->public_key;
         if (peer->type != NS_CK_PUBLIC || strcmp(peer->algo, k->algo) != 0 ||
             (!strcmp(a->name, "ECDH") && g_strcmp0(peer->curve, k->curve) != 0)) {

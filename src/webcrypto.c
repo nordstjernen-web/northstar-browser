@@ -20,6 +20,10 @@
 #include <openssl/rsa.h>
 #include <openssl/bn.h>
 
+#ifndef OSSL_SIGNATURE_PARAM_CONTEXT_STRING
+#define OSSL_SIGNATURE_PARAM_CONTEXT_STRING "context-string"
+#endif
+
 static void *
 ns_crypto_err(char **err, const char *prefix)
 {
@@ -90,6 +94,8 @@ ns_crypto_key_kind(const ns_crypto_key *k)
     if (EVP_PKEY_is_a(k->pkey, "EC")) return "EC";
     if (EVP_PKEY_is_a(k->pkey, "ED25519")) return "Ed25519";
     if (EVP_PKEY_is_a(k->pkey, "X25519")) return "X25519";
+    if (EVP_PKEY_is_a(k->pkey, "ED448")) return "Ed448";
+    if (EVP_PKEY_is_a(k->pkey, "X448")) return "X448";
     return NULL;
 }
 
@@ -183,7 +189,33 @@ ns_crypto_okp_name(const char *algo)
     if (!algo) return NULL;
     if (!g_ascii_strcasecmp(algo, "Ed25519")) return "ED25519";
     if (!g_ascii_strcasecmp(algo, "X25519"))  return "X25519";
+    if (!g_ascii_strcasecmp(algo, "Ed448"))   return "ED448";
+    if (!g_ascii_strcasecmp(algo, "X448"))    return "X448";
     return NULL;
+}
+
+static gboolean
+ns_crypto_is_eddsa(const char *algo)
+{
+    return !g_strcmp0(algo, "Ed25519") || !g_strcmp0(algo, "Ed448");
+}
+
+static gboolean
+ns_crypto_is_xdh(const char *algo)
+{
+    return !g_strcmp0(algo, "X25519") || !g_strcmp0(algo, "X448");
+}
+
+gboolean
+ns_crypto_eddsa_context_supported(void)
+{
+    EVP_SIGNATURE *sig = EVP_SIGNATURE_fetch(NULL, "ED448", NULL);
+    gboolean ok = sig && OSSL_PARAM_locate_const(
+        EVP_SIGNATURE_settable_ctx_params(sig),
+        OSSL_SIGNATURE_PARAM_CONTEXT_STRING) != NULL;
+    EVP_SIGNATURE_free(sig);
+    ERR_clear_error();
+    return ok;
 }
 
 ns_crypto_key *
@@ -825,6 +857,27 @@ ns_crypto_pkey_sign_setup(EVP_PKEY_CTX *pctx, const ns_crypto_key *k,
     return 1;
 }
 
+static int
+ns_crypto_eddsa_init(EVP_MD_CTX *mdctx, const ns_crypto_key *k,
+                     const ns_crypto_params *p, gboolean sign)
+{
+    if (!p->context_len)
+        return sign ? EVP_DigestSignInit(mdctx, NULL, NULL, NULL, k->pkey)
+                    : EVP_DigestVerifyInit(mdctx, NULL, NULL, NULL, k->pkey);
+    if (g_strcmp0(k->algo, "Ed448") != 0 || p->context_len > 255 ||
+        !ns_crypto_eddsa_context_supported())
+        return 0;
+    OSSL_PARAM params[2] = {
+        OSSL_PARAM_construct_octet_string(OSSL_SIGNATURE_PARAM_CONTEXT_STRING,
+                                          (void *)p->context, p->context_len),
+        OSSL_PARAM_construct_end(),
+    };
+    return sign ? EVP_DigestSignInit_ex(mdctx, NULL, NULL, NULL, NULL, k->pkey,
+                                        params)
+                : EVP_DigestVerifyInit_ex(mdctx, NULL, NULL, NULL, NULL, k->pkey,
+                                          params);
+}
+
 guint8 *
 ns_crypto_sign(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *data,
                gsize len, gsize *out_len, char **err)
@@ -832,12 +885,12 @@ ns_crypto_sign(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *
     if (!g_strcmp0(k->algo, "HMAC"))
         return ns_crypto_hmac(k, data, len, out_len, err);
 
-    if (!g_strcmp0(k->algo, "Ed25519")) {
+    if (ns_crypto_is_eddsa(k->algo)) {
         if (!k->pkey) { if (err) *err = g_strdup("NotSupportedError: sign"); return NULL; }
         EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
         size_t n = 0;
         if (!mdctx ||
-            EVP_DigestSignInit(mdctx, NULL, NULL, NULL, k->pkey) <= 0 ||
+            ns_crypto_eddsa_init(mdctx, k, p, TRUE) <= 0 ||
             EVP_DigestSign(mdctx, NULL, &n, data, len) <= 0) {
             EVP_MD_CTX_free(mdctx);
             return ns_crypto_err(err, "OperationError: sign");
@@ -921,17 +974,44 @@ ns_crypto_ed25519_small_order(const guint8 *point)
 }
 
 static gboolean
-ns_crypto_ed25519_weak(const ns_crypto_key *k, const guint8 *sig, gsize sig_len)
+ns_crypto_ed448_small_order(const guint8 *point)
 {
-    guint8 pub[32];
+    static const struct {
+        guint8 low, low_fill, high, high_fill;
+    } blocked[] = {
+        { 0x00, 0x00, 0x00, 0x00 },
+        { 0x01, 0x00, 0x00, 0x00 },
+        { 0xfe, 0xff, 0xfe, 0xff },
+        { 0xff, 0xff, 0xfe, 0xff },
+        { 0x00, 0x00, 0xff, 0xff },
+    };
+    if (point[56] & 0x7f) return FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(blocked); i++) {
+        guint8 y[56];
+        y[0] = blocked[i].low;
+        memset(y + 1, blocked[i].low_fill, 27);
+        y[28] = blocked[i].high;
+        memset(y + 29, blocked[i].high_fill, 27);
+        if (memcmp(point, y, sizeof y) == 0) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_crypto_eddsa_weak(const ns_crypto_key *k, const guint8 *sig, gsize sig_len)
+{
+    gboolean ed448 = !g_strcmp0(k->algo, "Ed448");
+    gsize point_len = ed448 ? 57 : 32;
+    gboolean (*small_order)(const guint8 *) =
+        ed448 ? ns_crypto_ed448_small_order : ns_crypto_ed25519_small_order;
+    guint8 pub[57];
     size_t n = sizeof pub;
-    if (sig_len != 64 ||
-        EVP_PKEY_get_raw_public_key(k->pkey, pub, &n) <= 0 || n != 32) {
+    if (sig_len != 2 * point_len ||
+        EVP_PKEY_get_raw_public_key(k->pkey, pub, &n) <= 0 || n != point_len) {
         ERR_clear_error();
         return TRUE;
     }
-    return ns_crypto_ed25519_small_order(pub) ||
-           ns_crypto_ed25519_small_order(sig);
+    return small_order(pub) || small_order(sig);
 }
 
 int
@@ -948,12 +1028,12 @@ ns_crypto_verify(const ns_crypto_key *k, const ns_crypto_params *p, const guint8
         return ok ? 1 : 0;
     }
 
-    if (!g_strcmp0(k->algo, "Ed25519")) {
+    if (ns_crypto_is_eddsa(k->algo)) {
         if (!k->pkey) { if (err) *err = g_strdup("NotSupportedError: verify"); return -1; }
-        if (ns_crypto_ed25519_weak(k, sig, sig_len)) return 0;
+        if (ns_crypto_eddsa_weak(k, sig, sig_len)) return 0;
         EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
         int rc = -1;
-        if (mdctx && EVP_DigestVerifyInit(mdctx, NULL, NULL, NULL, k->pkey) > 0) {
+        if (mdctx && ns_crypto_eddsa_init(mdctx, k, p, FALSE) > 0) {
             int v = EVP_DigestVerify(mdctx, sig, sig_len, data, len);
             rc = v == 1 ? 1 : 0;
             if (v < 0) { ERR_clear_error(); rc = 0; }
@@ -1247,6 +1327,14 @@ ns_crypto_decrypt(const ns_crypto_key *k, const ns_crypto_params *p,
     return NULL;
 }
 
+static gboolean
+ns_crypto_all_zero(const guint8 *data, gsize len)
+{
+    guint8 any = 0;
+    for (gsize i = 0; i < len; i++) any |= data[i];
+    return any == 0;
+}
+
 static guint8 *
 ns_crypto_ecdh(const ns_crypto_key *k, const ns_crypto_params *p, int length_bits,
                gsize *out_len, char **err)
@@ -1271,6 +1359,11 @@ ns_crypto_ecdh(const ns_crypto_key *k, const ns_crypto_params *p, int length_bit
     }
     EVP_PKEY_CTX_free(ctx);
     if (!out) return ns_crypto_err(err, "OperationError: ECDH");
+    if (ns_crypto_is_xdh(k->algo) && ns_crypto_all_zero(out, n)) {
+        g_free(out);
+        if (err) *err = g_strdup("OperationError: all-zero shared secret");
+        return NULL;
+    }
     if (length_bits > 0) {
         gsize want = (gsize)length_bits / 8;
         if (want > n) {
@@ -1353,7 +1446,7 @@ ns_crypto_derive_bits(const ns_crypto_key *k, const ns_crypto_params *p,
         if (err) *err = g_strdup("OperationError: deriveBits length too large");
         return NULL;
     }
-    if (!g_strcmp0(k->algo, "ECDH") || !g_strcmp0(k->algo, "X25519"))
+    if (!g_strcmp0(k->algo, "ECDH") || ns_crypto_is_xdh(k->algo))
         return ns_crypto_ecdh(k, p, length_bits, out_len, err);
     if (!g_strcmp0(k->algo, "PBKDF2"))
         return ns_crypto_pbkdf2(k, p, length_bits, out_len, err);
