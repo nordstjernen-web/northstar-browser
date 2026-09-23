@@ -1027,10 +1027,9 @@ ns_html_fragment_parser_free(ns_html_fragment_parser *stream)
     g_free(stream);
 }
 
-ns_node *
-ns_html_parse_fragment_with_scripting(const char *context_tag,
-                                      const char *input, gssize len,
-                                      gboolean scripting)
+static ns_node *
+parse_fragment_in_namespace(const char *context_tag, lxb_ns_id_t context_ns,
+                            const char *input, gssize len, gboolean scripting)
 {
     if (!input) return NULL;
     size_t n = (len < 0) ? strlen(input) : (size_t)len;
@@ -1047,9 +1046,11 @@ ns_html_parse_fragment_with_scripting(const char *context_tag,
         return NULL;
     }
     lxb_html_document_scripting_set(doc, scripting);
-    lxb_tag_id_t tag_id = lxb_tag_id_from_name(doc, context_tag);
+    char *lower = context_tag ? g_ascii_strdown(context_tag, -1) : NULL;
+    lxb_tag_id_t tag_id = lxb_tag_id_from_name(doc, lower);
+    g_free(lower);
     lxb_dom_node_t *frag = lxb_html_parse_fragment_by_tag_id(
-        parser, doc, tag_id, LXB_NS_HTML,
+        parser, doc, tag_id, context_ns,
         (const lxb_char_t *)input, n);
     lxb_html_parser_destroy(parser);
     if (!frag) {
@@ -1061,6 +1062,27 @@ ns_html_parse_fragment_with_scripting(const char *context_tag,
     lxb_walk_into(frag, out);
     ns_node_attach_backing(out, doc, lxb_doc_destroy_void);
     return out;
+}
+
+ns_node *
+ns_html_parse_fragment_with_scripting(const char *context_tag,
+                                      const char *input, gssize len,
+                                      gboolean scripting)
+{
+    return parse_fragment_in_namespace(context_tag, LXB_NS_HTML, input, len,
+                                       scripting);
+}
+
+ns_node *
+ns_html_parse_fragment_in(const ns_node *context, const char *input,
+                          gssize len, gboolean scripting)
+{
+    const char *tag = context && context->kind == NS_NODE_ELEMENT
+        ? context->name : NULL;
+    lxb_ns_id_t ns = LXB_NS_HTML;
+    if (tag && (context->flags & NS_NODE_SVG_NS)) ns = LXB_NS_SVG;
+    else if (tag && (context->flags & NS_NODE_FOREIGN_NS)) ns = LXB_NS_MATH;
+    return parse_fragment_in_namespace(tag, ns, input, len, scripting);
 }
 
 void

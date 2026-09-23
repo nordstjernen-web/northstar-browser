@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `innerHTML`, `outerHTML`, `insertAdjacentHTML` and
+  `Range.createContextualFragment` parse markup in the context
+  element's namespace. Inside an `<svg>` every element came out as an
+  HTML element with a lower-cased name -- `<linearGradient>` became an
+  HTMLUnknownElement called `lineargradient` -- so gradients, filters and
+  shapes that D3, icon libraries and chart code insert that way were
+  never drawn.
 * `:focus-visible` is its own pseudo-class instead of another name for
   `:focus`. Clicking a button or link no longer puts it in the
   `:focus-visible` state, so pages that draw focus rings only for
