@@ -35671,6 +35671,31 @@ ns_js_doc_base_url(ns_js *js)
 }
 
 static char *
+ns_js_document_encoding(ns_js *js)
+{
+    if (!js || !js->ctx) return NULL;
+    JSContext *ctx = js->ctx;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue doc = JS_GetPropertyStr(ctx, global, "document");
+    JSValue cs = JS_IsObject(doc) ? JS_GetPropertyStr(ctx, doc, "characterSet")
+                                  : JS_UNDEFINED;
+    char *out = NULL;
+    if (JS_IsString(cs)) {
+        const char *str = JS_ToCString(ctx, cs);
+        if (str) {
+            out = g_strdup(str);
+            JS_FreeCString(ctx, str);
+        }
+    } else if (JS_IsException(cs) || JS_IsException(doc)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, cs);
+    JS_FreeValue(ctx, doc);
+    JS_FreeValue(ctx, global);
+    return out;
+}
+
+static char *
 ns_element_anchor_resolved_href(const ns_node *n, ns_js *js)
 {
     if (!n) return NULL;
@@ -35678,7 +35703,8 @@ ns_element_anchor_resolved_href(const ns_node *n, ns_js *js)
     if (!raw) return NULL;
     g_autofree char *base = ns_js_doc_base_url(js);
     if (base && *base) {
-        char *r = ns_url_resolve(base, raw);
+        g_autofree char *encoding = ns_js_document_encoding(js);
+        char *r = ns_url_resolve_encoded(base, raw, encoding);
         if (r) return r;
     }
     return g_strdup(raw);

@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Links in pages that use a legacy encoding put non-ASCII query text
+  into the URL in that encoding, as HTML's URL parsing requires: on a
+  windows-1252 page `<a href="?q=é">` now reads back and navigates as
+  `?q=%E9` rather than `?q=%C3%A9`, Shift_JIS, EUC-KR or Big5 pages
+  send their own multi-byte sequences, and a character the encoding
+  cannot represent becomes `%26%23NNNN%3B`. The fragment and every
+  other part of the URL stay UTF-8.
 * `crypto.subtle` follows the Web Cryptography API's algorithm
   normalization and error rules. Algorithm dictionaries are read the
   WebIDL way (a missing member or an out-of-range length is a
