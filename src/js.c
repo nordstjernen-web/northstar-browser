@@ -4987,11 +4987,15 @@ ns_element_get_type(JSContext *ctx, JSValueConst this_val)
         return ns_reflect_enum(ctx, n, &d);
     }
     if (strcmp(n->name, "button") == 0) {
-        if (ns_node_is_submit_trigger(n)) return JS_NewString(ctx, "submit");
         ns_enum_attr_def d = { "type", kw_button_types,
-                               G_N_ELEMENTS(kw_button_types), "button", "button",
+                               G_N_ELEMENTS(kw_button_types), NULL, NULL,
                                FALSE };
-        return ns_reflect_enum(ctx, n, &d);
+        JSValue state = ns_reflect_enum(ctx, n, &d);
+        if (!JS_IsNull(state)) return state;
+        gboolean submits = !ns_element_get_attr(n, "command") &&
+                           !ns_element_get_attr(n, "commandfor") &&
+                           !ns_node_is_element_named(n->parent, "select");
+        return JS_NewString(ctx, submits ? "submit" : "button");
     }
     if (strcmp(n->name, "select") == 0)
         return JS_NewString(ctx, ns_element_get_attr(n, "multiple")
