@@ -79,6 +79,20 @@ space.
   and CSS animations are sampled at the frame clock's time. Canvas
   drawing repaints without a relayout, and wheel scrolls and resizes that
   arrive while one is in flight are merged into the next request.
+- **Damage tracking** (`damage.c`, `page_session.c`). A canvas draw, an
+  element scroll, an animated image or video frame and a caret blink
+  report the element they changed, and the frame repaints only those
+  boxes' rectangles; a scroll of the page shifts the previous frame and
+  paints the rows that came into view plus the `position: fixed`
+  elements. Anything else — a relayout, a restyle, a CSS animation, a
+  generic repaint request — repaints the whole viewport, and so does a
+  change under a transform or a sticky or multi-column ancestor, or on a
+  page with 3D transforms; scrolling repaints everything on pages with
+  sticky elements or `background-attachment: fixed`. Every frame is
+  painted with 48 rows of margin beyond the viewport and each damaged
+  band with the same margin, so text crossing a clip edge renders the
+  same whether a pixel came from a full or a partial repaint. The view
+  copies only the changed rectangles into its frame.
 - **Page host** (`libnorthstar.c`) — the `ns_browser` object beneath the
   session: one document, its QuickJS runtime, input dispatch, the settle
   loop, find-in-page, printing and viewport scroll snapping. It is an
@@ -128,7 +142,7 @@ drivers both call.
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
 | 5. Style | `css.c`, `css_syntax.c`, `css_media.c`, `css_prop_syntax.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_media.c` the Media Queries Level 4 parser and evaluator, and `css_prop_syntax.c` the `<syntax>` grammar behind `@property` and `CSS.registerProperty`. `anim.c` runs transitions and `@keyframes` animations; `font.c` loads `@font-face` web fonts. |
 | 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. Text is itemized, shaped and broken into lines by ns-pango. `mathml.c` lays out presentation MathML. |
-| 7. Paint | `paint.c`, `svg.c`, `image.c`, `texture.c`, `selection.c`, `spellcheck.c` | `ns_paint` walks the box tree in stacking order and draws straight into a Cairo context; there is no intermediate display list. `svg.c` renders inline and image SVG, `image.c` decodes images on demand into the `texture.c` pixel abstraction, and paint draws the text selection (`selection.c`) and misspelling marks (`spellcheck.c`, over Enchant) over the text. |
+| 7. Paint | `paint.c`, `svg.c`, `image.c`, `texture.c`, `selection.c`, `spellcheck.c` | `ns_paint` walks the box tree in stacking order and draws straight into a Cairo context; there is no intermediate display list, and the retained box tree plays that part when only part of the viewport is repainted. Blurred box shadows are cached by size, corner radii, blur and colour, so a page of identical cards blurs one shadow. `svg.c` renders inline and image SVG, `image.c` decodes images on demand into the `texture.c` pixel abstraction, and paint draws the text selection (`selection.c`) and misspelling marks (`spellcheck.c`, over Enchant) over the text. |
 | 8. Present | `src/gtk/procview.c`, `headless.c`, `print.c` | The GUI draws the frame surface into the GTK widget; headless writes it to PNG or PDF or dumps a text/DOM/layout tree; printing paginates the same box tree onto sheets. |
 
 Most computed values stay as parsed `ns_css_value`s, but `display` is
@@ -346,12 +360,19 @@ again and compares the two, warning on any difference;
 - **`--trace=FILE`** (GUI and headless, `trace.c`) writes a Chrome
   trace-event JSON array that Perfetto (ui.perfetto.dev) or
   `chrome://tracing` opens. Each frame on the engine thread shows as
-  `frame` with its `tick`, `paint` and `copy frame` phases (or as
+  `frame` with its `tick`, `paint` and `copy frame` phases (`paint
+  (damage)` and `copy damage` when only part of the viewport changed, or
   `frame (unchanged)` when nothing needed repainting), relayouts as
   `cascade`, `style pass` and `layout`, and scripts, fetches, image
   decodes and the GTK thread's `present` as their own spans. The file is
   flushed after every event and the closing bracket is optional in that
   format, so a trace survives a crash or a kill.
+- **`NS_DAMAGE=verify`** repaints the whole viewport after every partial
+  frame, compares the two and reports any pixel that differs, with the
+  largest channel difference; `NS_DAMAGE=0` turns partial repaints and
+  scroll shifting off. Scaled images can differ by one level after a
+  scroll, because pixman's filter sampling depends on the absolute
+  offset.
 - **`--debug`** (headless only) streams engine events to stderr.
   `--debug=info,warn,error,render,net,js` selects levels and `--debug`
   alone selects all of them. With `net` selected, a headless run ends with

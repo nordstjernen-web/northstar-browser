@@ -38,6 +38,10 @@ typedef struct {
     int                  scroll_y;
     int                  scroll_x;
     int                  unchanged;
+    int                  n_damage;
+    int                 *damage;
+    guint64              gen;
+    guint64              base_gen;
     const unsigned char *pixels;
     char                *nav;
     char                *camera;
@@ -62,6 +66,7 @@ int  ns_page_session_render(ns_page_session *s, int width, int height,
                             int scroll_x, int scroll_y, double scale,
                             int caret_active, ns_page_frame *out);
 void ns_page_frame_clear(ns_page_frame *frame);
+void ns_page_session_invalidate_frame(ns_page_session *s);
 
 char *ns_page_session_link_at(ns_page_session *s, int x, int y,
                               char **out_cursor);

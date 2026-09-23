@@ -923,6 +923,48 @@ paint_inline_css_chrome(cairo_t *cr, const ns_inline_attr *r, double x, double y
 
 static gboolean g_paint_have_viewport;
 static double g_paint_vp_x0, g_paint_vp_y0;
+static gboolean g_paint_have_device_vp;
+static double g_paint_device_vp[4];
+
+void
+ns_paint_set_device_viewport(double x0, double y0, double x1, double y1)
+{
+    g_paint_device_vp[0] = x0;
+    g_paint_device_vp[1] = y0;
+    g_paint_device_vp[2] = x1;
+    g_paint_device_vp[3] = y1;
+    g_paint_have_device_vp = TRUE;
+}
+
+void
+ns_paint_clear_device_viewport(void)
+{
+    g_paint_have_device_vp = FALSE;
+}
+
+static void
+paint_viewport_user_extents(cairo_t *cr, double *x0, double *y0,
+                            double *x1, double *y1)
+{
+    if (!g_paint_have_device_vp) {
+        cairo_clip_extents(cr, x0, y0, x1, y1);
+        return;
+    }
+    double xs[4] = { g_paint_device_vp[0], g_paint_device_vp[2],
+                     g_paint_device_vp[0], g_paint_device_vp[2] };
+    double ys[4] = { g_paint_device_vp[1], g_paint_device_vp[1],
+                     g_paint_device_vp[3], g_paint_device_vp[3] };
+    for (int i = 0; i < 4; i++)
+        cairo_device_to_user(cr, &xs[i], &ys[i]);
+    *x0 = *x1 = xs[0];
+    *y0 = *y1 = ys[0];
+    for (int i = 1; i < 4; i++) {
+        *x0 = MIN(*x0, xs[i]);
+        *x1 = MAX(*x1, xs[i]);
+        *y0 = MIN(*y0, ys[i]);
+        *y1 = MAX(*y1, ys[i]);
+    }
+}
 
 static const char *
 bg_layer_keyword(const ns_style *s, ns_css_prop prop, int li)
@@ -5422,7 +5464,7 @@ compute_sticky_offset(const ns_box *b, cairo_t *cr,
     }
     if (!keyword_is(b->style->values[NS_CSS_POSITION], "sticky")) return;
     double clip_x1, clip_y1, clip_x2, clip_y2;
-    cairo_clip_extents(cr, &clip_x1, &clip_y1, &clip_x2, &clip_y2);
+    paint_viewport_user_extents(cr, &clip_x1, &clip_y1, &clip_x2, &clip_y2);
     ns_box_sticky_offset(b, clip_x1, clip_y1, clip_x2, clip_y2,
                          out_dx, out_dy);
 }
@@ -5508,11 +5550,14 @@ paint_cache_clip(cairo_t *cr)
 {
     double x0, x1;
     cairo_clip_extents(cr, &x0, &g_paint_clip_y0, &x1, &g_paint_clip_y1);
+    double vx0 = x0, vy0 = g_paint_clip_y0, vx1 = x1, vy1 = g_paint_clip_y1;
+    if (g_paint_have_device_vp)
+        paint_viewport_user_extents(cr, &vx0, &vy0, &vx1, &vy1);
     g_paint_have_clip = TRUE;
-    g_paint_vp_x0 = x0;
-    g_paint_vp_y0 = g_paint_clip_y0;
-    g_paint_have_viewport = isfinite(x0) && isfinite(g_paint_clip_y0) &&
-                            (x0 != 0 || g_paint_clip_y0 != 0);
+    g_paint_vp_x0 = vx0;
+    g_paint_vp_y0 = vy0;
+    g_paint_have_viewport = isfinite(vx0) && isfinite(vy0) &&
+                            (vx0 != 0 || vy0 != 0);
     g_paint_anchor_dx = 0;
     g_paint_anchor_dy = 0;
 }

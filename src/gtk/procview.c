@@ -88,6 +88,7 @@ typedef struct {
     gboolean history;
     gboolean user_activated;
     gboolean caret_active;
+    gboolean force_full;
     gint64  frame_time_us;
 } Req;
 
@@ -114,6 +115,11 @@ typedef struct {
     char            *clipboard;
     cairo_surface_t *surface;
     gboolean         surface_borrowed;
+    cairo_surface_t *patch;
+    int              patch_x, patch_y;
+    int             *damage;
+    int              n_damage;
+    guint64          gen, base_gen;
     char            *href;
     char            *cursor;
     LinkAct          action;
@@ -162,6 +168,8 @@ struct NsProcView {
     gboolean    opened;
 
     cairo_surface_t *frame;
+    guint64          frame_gen;
+    gboolean         frame_force_full;
 
     gboolean    render_inflight;
     gboolean    render_pending;
@@ -514,6 +522,41 @@ stage_fill(NsProcView *v, const unsigned char *px, int w, int h, int stride)
     return s;
 }
 
+static cairo_surface_t *
+stage_patch(const unsigned char *px, int stride, const int *rects, int n,
+            int *out_x, int *out_y)
+{
+    int x0 = G_MAXINT, y0 = G_MAXINT, x1 = G_MININT, y1 = G_MININT;
+    for (int i = 0; i < n; i++) {
+        x0 = MIN(x0, rects[4 * i]);
+        y0 = MIN(y0, rects[4 * i + 1]);
+        x1 = MAX(x1, rects[4 * i] + rects[4 * i + 2]);
+        y1 = MAX(y1, rects[4 * i + 1] + rects[4 * i + 3]);
+    }
+    if (x1 <= x0 || y1 <= y0)
+        return NULL;
+    cairo_surface_t *s =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, x1 - x0, y1 - y0);
+    if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(s);
+        return NULL;
+    }
+    cairo_surface_flush(s);
+    unsigned char *dst = cairo_image_surface_get_data(s);
+    int dstride = cairo_image_surface_get_stride(s);
+    for (int i = 0; i < n; i++) {
+        int rx = rects[4 * i], ry = rects[4 * i + 1];
+        size_t row = (size_t)rects[4 * i + 2] * 4u;
+        for (int y = ry; y < ry + rects[4 * i + 3]; y++)
+            memcpy(dst + (size_t)(y - y0) * dstride + (size_t)(rx - x0) * 4u,
+                   px + (size_t)y * stride + (size_t)rx * 4u, row);
+    }
+    cairo_surface_mark_dirty(s);
+    *out_x = x0;
+    *out_y = y0;
+    return s;
+}
+
 static void
 post_emit(NsProcView *v, NsProcEvent evt, const char *text)
 {
@@ -553,6 +596,31 @@ ns_proc_view_stop(NsProcView *v)
 }
 
 static gboolean on_result(gpointer data);
+
+static gboolean
+apply_patch(NsProcView *v, const Res *res)
+{
+    if (!v->frame || v->frame_gen != res->base_gen)
+        return FALSE;
+    int fw = cairo_image_surface_get_width(v->frame);
+    int fh = cairo_image_surface_get_height(v->frame);
+    cairo_t *cr = cairo_create(v->frame);
+    for (int i = 0; i < res->n_damage; i++) {
+        const int *r = res->damage + 4 * i;
+        if (r[0] < 0 || r[1] < 0 || r[0] + r[2] > fw || r[1] + r[3] > fh) {
+            cairo_destroy(cr);
+            return FALSE;
+        }
+        cairo_rectangle(cr, r[0], r[1], r[2], r[3]);
+    }
+    cairo_clip(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_set_source_surface(cr, res->patch, res->patch_x, res->patch_y);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    v->frame_gen = res->gen;
+    return TRUE;
+}
 
 static void
 post(Res *res)
@@ -616,6 +684,8 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
     Res *res = res_new(v, RES_FRAME, req->seq);
     ns_page_frame fr;
     ns_page_session_set_frame_time(s, req->frame_time_us);
+    if (req->force_full)
+        ns_page_session_invalidate_frame(s);
     if (ns_page_session_render(s, req->w, req->h, req->sx, req->sy,
                                req->scale, req->caret_active, &fr) == 0) {
         res->ok = TRUE;
@@ -627,9 +697,22 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
         res->requested_scroll_x = fr.scroll_x;
         if (!fr.unchanged) {
             gint64 trace_start = ns_trace_now();
-            res->surface = stage_fill(v, fr.pixels, fr.width, fr.height,
-                                      fr.stride);
-            ns_trace_complete("frame", "copy frame", trace_start, NULL);
+            if (fr.n_damage > 0) {
+                res->patch = stage_patch(fr.pixels, fr.stride, fr.damage,
+                                         fr.n_damage, &res->patch_x,
+                                         &res->patch_y);
+                res->damage = fr.damage;
+                res->n_damage = fr.n_damage;
+                fr.damage = NULL;
+                fr.n_damage = 0;
+            }
+            if (!res->patch)
+                res->surface = stage_fill(v, fr.pixels, fr.width, fr.height,
+                                          fr.stride);
+            res->gen = fr.gen;
+            res->base_gen = fr.base_gen;
+            ns_trace_complete("frame", res->patch ? "copy damage" : "copy frame",
+                              trace_start, NULL);
         }
         res->nav = fr.nav;
         res->camera = fr.camera;
@@ -932,6 +1015,8 @@ start_render(NsProcView *v)
     req->sy = v->scroll_y;
     req->scale = cur_scale(v);
     req->caret_active = gtk_widget_has_focus(v->area);
+    req->force_full = v->frame_force_full;
+    v->frame_force_full = FALSE;
     GdkFrameClock *clock = gtk_widget_get_frame_clock(v->area);
     req->frame_time_us = clock ? gdk_frame_clock_get_frame_time(clock) : 0;
     push_req(v, req);
@@ -1644,9 +1729,17 @@ on_result(gpointer data)
             if (v->frame)
                 cairo_surface_destroy(v->frame);
             v->frame = res->surface;
+            v->frame_gen = res->gen;
             res->surface = NULL;
             gtk_widget_queue_draw(v->area);
             clear_busy_cursor(v);
+        } else if (res->ok && res->patch) {
+            if (apply_patch(v, res)) {
+                gtk_widget_queue_draw(v->area);
+            } else {
+                v->frame_force_full = TRUE;
+                request_render(v);
+            }
         }
         if (current && res->ok && res->nav && *res->nav &&
             v->js_redirects < NS_PROC_MAX_JS_REDIRECTS) {
@@ -1908,6 +2001,9 @@ on_result(gpointer data)
 done:
     if (res->surface && !res->surface_borrowed)
         cairo_surface_destroy(res->surface);
+    if (res->patch)
+        cairo_surface_destroy(res->patch);
+    free(res->damage);
     g_free(res->title);
     g_free(res->url);
     g_free(res->nav);

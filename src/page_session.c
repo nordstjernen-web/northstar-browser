@@ -5,16 +5,21 @@
  */
 
 #include "page_session.h"
+#include "damage.h"
 #include "libnorthstar.h"
 #include "mainctx.h"
 #include "net.h"
 #include "trace.h"
 
+#include <cairo.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define NS_BFCACHE_MAX 4
+#define NS_DAMAGE_MAX_FRACTION 0.6
+#define NS_DAMAGE_EDGE_PX 48
+#define NS_DAMAGE_MAX_RECTS 8
 
 struct ns_page_session {
     unsigned char *fb;
@@ -30,6 +35,9 @@ struct ns_page_session {
     int            frame_w;
     int            frame_h;
     double         frame_scale;
+    guint64        frame_gen;
+    unsigned char *scratch_fb;
+    unsigned char *verify_fb;
     char          *post_url;
     char          *post_body;
     size_t         post_len;
@@ -235,7 +243,8 @@ ns_page_session_new(int max_width, int max_height)
     ns_page_session *s = calloc(1, sizeof *s);
     if (!s)
         return NULL;
-    s->fb = malloc((size_t)max_width * 4u * (size_t)max_height);
+    s->fb = malloc((size_t)max_width * 4u *
+                   (size_t)(max_height + 2 * NS_DAMAGE_EDGE_PX));
     if (!s->fb) {
         free(s);
         return NULL;
@@ -266,6 +275,8 @@ ns_page_session_free(ns_page_session *s)
         ns_browser_close(cur);
     }
     free(s->fb);
+    free(s->scratch_fb);
+    free(s->verify_fb);
     free(s);
 }
 
@@ -366,6 +377,13 @@ ns_page_session_set_viewport(ns_page_session *s, int width, int height,
 }
 
 void
+ns_page_session_invalidate_frame(ns_page_session *s)
+{
+    if (s)
+        s->frame_valid = 0;
+}
+
+void
 ns_page_frame_clear(ns_page_frame *frame)
 {
     if (!frame)
@@ -373,7 +391,258 @@ ns_page_frame_clear(ns_page_frame *frame)
     free(frame->nav);
     free(frame->camera);
     free(frame->download);
+    free(frame->damage);
     memset(frame, 0, sizeof *frame);
+}
+
+static int
+session_damage_mode(void)
+{
+    static gint mode = -1;
+    if (G_UNLIKELY(mode < 0)) {
+        const char *v = g_getenv("NS_DAMAGE");
+        mode = v && strcmp(v, "0") == 0 ? 0
+             : v && strcmp(v, "verify") == 0 ? 2 : 1;
+    }
+    return mode;
+}
+
+static void
+region_add_css_rect(cairo_region_t *region, double x, double y, double w,
+                    double h, double scale, int vw, int vh)
+{
+    double x0 = floor(x * scale), y0 = floor(y * scale);
+    double x1 = ceil((x + w) * scale), y1 = ceil((y + h) * scale);
+    x0 = MAX(x0, 0);
+    y0 = MAX(y0, 0);
+    x1 = MIN(x1, vw);
+    y1 = MIN(y1, vh);
+    if (!(x1 > x0) || !(y1 > y0)) return;
+    cairo_rectangle_int_t r = { (int)x0, (int)y0, (int)(x1 - x0),
+                                (int)(y1 - y0) };
+    cairo_region_union_rectangle(region, &r);
+}
+
+static unsigned char *
+session_view(unsigned char *padded, int vw)
+{
+    return padded + (size_t)NS_DAMAGE_EDGE_PX * (size_t)vw * 4u;
+}
+
+static void
+session_blit(ns_page_session *s, int dx, int dy, int vw, int vh)
+{
+    unsigned char *view = session_view(s->fb, vw);
+    size_t stride = (size_t)vw * 4u;
+    int w = vw - abs(dx);
+    int src_x = dx > 0 ? dx : 0;
+    int dst_x = dx > 0 ? 0 : -dx;
+    for (int i = 0; i < vh - abs(dy); i++) {
+        int y = dy > 0 ? i : vh - 1 - i;
+        unsigned char *dst = view + (size_t)y * stride + (size_t)dst_x * 4u;
+        const unsigned char *src = view + (size_t)(y + dy) * stride +
+                                   (size_t)src_x * 4u;
+        memmove(dst, src, (size_t)w * 4u);
+    }
+}
+
+static gboolean
+session_scroll_blit(ns_page_session *s, long sx, long sy, int vw, int vh,
+                    double scale, cairo_region_t *region)
+{
+    double ddx = (double)(sx - s->frame_sx) * scale;
+    double ddy = (double)(sy - s->frame_sy) * scale;
+    if (fabs(ddx - round(ddx)) > 1e-6 || fabs(ddy - round(ddy)) > 1e-6)
+        return FALSE;
+    int dx = (int)lround(ddx), dy = (int)lround(ddy);
+    if (abs(dx) >= vw || abs(dy) >= vh) return FALSE;
+    GArray *bands = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
+    if (!ns_browser_scroll_blit_bands(s->cur, bands)) {
+        g_array_free(bands, TRUE);
+        return FALSE;
+    }
+    session_blit(s, dx, dy, vw, vh);
+    cairo_rectangle_int_t exposed[2] = {
+        { dx > 0 ? vw - dx : 0, 0, abs(dx), vh },
+        { 0, dy > 0 ? vh - dy : 0, vw, abs(dy) },
+    };
+    for (int i = 0; i < 2; i++)
+        if (exposed[i].width > 0 && exposed[i].height > 0)
+            cairo_region_union_rectangle(region, &exposed[i]);
+    for (guint i = 0; i < bands->len; i++) {
+        const ns_damage_rect *b = &g_array_index(bands, ns_damage_rect, i);
+        region_add_css_rect(region, b->x, b->y, b->w, b->h, scale, vw, vh);
+        region_add_css_rect(region, b->x - dx / scale, b->y - dy / scale,
+                            b->w, b->h, scale, vw, vh);
+    }
+    g_array_free(bands, TRUE);
+    return TRUE;
+}
+
+static cairo_region_t *
+session_damage_region(ns_page_session *s, GArray *damage, long sx, long sy,
+                      int vw, int vh, double scale)
+{
+    cairo_region_t *region = cairo_region_create();
+    if ((sx != s->frame_sx || sy != s->frame_sy) &&
+        !session_scroll_blit(s, sx, sy, vw, vh, scale, region)) {
+        cairo_region_destroy(region);
+        return NULL;
+    }
+    for (guint i = 0; i < damage->len; i++) {
+        const ns_damage_rect *d = &g_array_index(damage, ns_damage_rect, i);
+        region_add_css_rect(region, d->x, d->y, d->w, d->h, scale, vw, vh);
+    }
+    if (cairo_region_num_rectangles(region) > NS_DAMAGE_MAX_RECTS) {
+        cairo_rectangle_int_t box;
+        cairo_region_get_extents(region, &box);
+        cairo_region_destroy(region);
+        region = cairo_region_create_rectangle(&box);
+    }
+    double area = 0;
+    int n = cairo_region_num_rectangles(region);
+    for (int i = 0; i < n; i++) {
+        cairo_rectangle_int_t r;
+        cairo_region_get_rectangle(region, i, &r);
+        area += (double)r.width * r.height;
+    }
+    if (area > NS_DAMAGE_MAX_FRACTION * vw * vh) {
+        cairo_region_destroy(region);
+        return NULL;
+    }
+    return region;
+}
+
+static unsigned char *
+session_scratch(ns_page_session *s, unsigned char **buf)
+{
+    if (!*buf)
+        *buf = malloc((size_t)s->max_w * 4u *
+                      (size_t)(s->max_h + 2 * NS_DAMAGE_EDGE_PX));
+    return *buf;
+}
+
+static int
+session_paint_band(ns_page_session *s, unsigned char *scratch, int y0, int y1,
+                   long sx, long sy, int vw, int vh, double scale)
+{
+    y0 = MAX(y0 - NS_DAMAGE_EDGE_PX, -NS_DAMAGE_EDGE_PX);
+    y1 = MIN(y1 + NS_DAMAGE_EDGE_PX, vh + NS_DAMAGE_EDGE_PX);
+    int band[4] = { 0, y0, vw, y1 - y0 };
+    return ns_browser_render_argb32_rects(s->cur, (int)sx, (int)sy, vw, vh,
+                                          NS_DAMAGE_EDGE_PX, scale, scratch,
+                                          vw * 4, band, 1);
+}
+
+static void
+session_verify_region(ns_page_session *s, long sx, long sy, int vw, int vh,
+                      double scale)
+{
+    size_t size = (size_t)vw * 4u * (size_t)vh;
+    if (!session_scratch(s, &s->verify_fb) ||
+        session_paint_band(s, s->verify_fb, 0, vh, sx, sy, vw, vh, scale) != 0)
+        return;
+    const unsigned char *reference = session_view(s->verify_fb, vw);
+    unsigned char *view = session_view(s->fb, vw);
+    const guint32 *a = (const guint32 *)(const void *)view;
+    const guint32 *b = (const guint32 *)(const void *)reference;
+    int x0 = vw, y0 = vh, x1 = -1, y1 = -1, delta = 0;
+    long diff = 0;
+    for (int y = 0; y < vh; y++)
+        for (int x = 0; x < vw; x++) {
+            guint32 pa = a[(size_t)y * vw + x], pb = b[(size_t)y * vw + x];
+            if (pa == pb) continue;
+            diff++;
+            x0 = MIN(x0, x);
+            y0 = MIN(y0, y);
+            x1 = MAX(x1, x);
+            y1 = MAX(y1, y);
+            for (int shift = 0; shift < 32; shift += 8)
+                delta = MAX(delta, abs((int)((pa >> shift) & 0xff) -
+                                       (int)((pb >> shift) & 0xff)));
+        }
+    if (diff > 0) {
+        g_printerr("[damage] %ld pixels differ from a full repaint by up to "
+                   "%d in %d,%d %dx%d (scroll %ld,%ld)\n", diff, delta, x0,
+                   y0, x1 - x0 + 1, y1 - y0 + 1, sx, sy);
+        memcpy(view, reference, size);
+    }
+}
+
+static int
+rect_row_cmp(const void *pa, const void *pb)
+{
+    const cairo_rectangle_int_t *a = pa, *b = pb;
+    return a->y < b->y ? -1 : a->y > b->y;
+}
+
+static int
+session_paint_rows(ns_page_session *s, const cairo_rectangle_int_t *rects,
+                   int n, int y0, int y1, long sx, long sy, int vw, int vh,
+                   double scale)
+{
+    if (session_paint_band(s, s->scratch_fb, y0, y1, sx, sy, vw, vh,
+                           scale) != 0)
+        return -1;
+    size_t stride = (size_t)vw * 4u;
+    const unsigned char *origin = session_view(s->scratch_fb, vw);
+    unsigned char *view = session_view(s->fb, vw);
+    for (int i = 0; i < n; i++) {
+        size_t row = (size_t)rects[i].width * 4u;
+        for (int y = rects[i].y; y < rects[i].y + rects[i].height; y++) {
+            size_t off = (size_t)y * stride + (size_t)rects[i].x * 4u;
+            memcpy(view + off, origin + off, row);
+        }
+    }
+    return 0;
+}
+
+static int
+session_paint_region(ns_page_session *s, cairo_region_t *region, long sx,
+                     long sy, int vw, int vh, double scale)
+{
+    int n = cairo_region_num_rectangles(region);
+    if (n == 0) return 0;
+    if (!session_scratch(s, &s->scratch_fb)) return -1;
+    cairo_rectangle_int_t *rects = g_new(cairo_rectangle_int_t, n);
+    for (int i = 0; i < n; i++)
+        cairo_region_get_rectangle(region, i, &rects[i]);
+    qsort(rects, (size_t)n, sizeof *rects, rect_row_cmp);
+    int rc = 0;
+    for (int first = 0; first < n && rc == 0;) {
+        int y0 = rects[first].y;
+        int y1 = rects[first].y + rects[first].height;
+        int last = first + 1;
+        while (last < n && rects[last].y <= y1 + 2 * NS_DAMAGE_EDGE_PX) {
+            y1 = MAX(y1, rects[last].y + rects[last].height);
+            last++;
+        }
+        rc = session_paint_rows(s, rects + first, last - first, y0, y1, sx,
+                                sy, vw, vh, scale);
+        first = last;
+    }
+    g_free(rects);
+    if (rc == 0 && session_damage_mode() == 2)
+        session_verify_region(s, sx, sy, vw, vh, scale);
+    return rc;
+}
+
+static void
+session_frame_damage(ns_page_frame *out, cairo_region_t *region)
+{
+    int n = cairo_region_num_rectangles(region);
+    if (n <= 0) return;
+    out->damage = malloc(sizeof(int) * 4u * (size_t)n);
+    if (!out->damage) return;
+    for (int i = 0; i < n; i++) {
+        cairo_rectangle_int_t r;
+        cairo_region_get_rectangle(region, i, &r);
+        out->damage[4 * i] = r.x;
+        out->damage[4 * i + 1] = r.y;
+        out->damage[4 * i + 2] = r.width;
+        out->damage[4 * i + 3] = r.height;
+    }
+    out->n_damage = n;
 }
 
 int
@@ -439,12 +708,37 @@ ns_page_session_render(ns_page_session *s, int width, int height,
                     sx == s->frame_sx && sy == s->frame_sy &&
                     vw == s->frame_w && vh == s->frame_h &&
                     scale == s->frame_scale;
+    GArray *damage = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
+    int damage_full = ns_browser_take_damage(s->cur, (int)sx, (int)sy, damage);
+    cairo_region_t *region = NULL;
+    if (!unchanged && !damage_full && session_damage_mode() > 0 &&
+        s->frame_valid && vw == s->frame_w && vh == s->frame_h &&
+        scale == s->frame_scale)
+        region = session_damage_region(s, damage, sx, sy, vw, vh, scale);
+    g_array_free(damage, TRUE);
+    gboolean scrolled = sx != s->frame_sx || sy != s->frame_sy;
+    if (region && cairo_region_is_empty(region) && !scrolled) {
+        cairo_region_destroy(region);
+        region = NULL;
+        unchanged = 1;
+    }
     if (!unchanged) {
         phase_start = ns_trace_now();
-        int painted = ns_browser_render_argb32(s->cur, (int)sx, (int)sy, vw, vh,
-                                               scale, s->fb, stride);
-        ns_trace_complete("frame", "paint", phase_start, NULL);
+        int painted;
+        if (region) {
+            painted = session_paint_region(s, region, sx, sy, vw, vh, scale);
+            if (!scrolled)
+                session_frame_damage(out, region);
+        } else {
+            painted = session_paint_band(s, s->fb, 0, vh, sx, sy, vw, vh,
+                                         scale);
+        }
+        ns_trace_complete("frame", region ? "paint (damage)" : "paint",
+                          phase_start, NULL);
+        if (region) cairo_region_destroy(region);
         if (painted == 0) {
+            out->base_gen = s->frame_gen;
+            s->frame_gen++;
             s->frame_valid = 1;
             s->frame_sx = sx;
             s->frame_sy = sy;
@@ -452,10 +746,14 @@ ns_page_session_render(ns_page_session *s, int width, int height,
             s->frame_h = vh;
             s->frame_scale = scale;
         } else {
-            memset(s->fb, 0xff, (size_t)stride * (size_t)vh);
+            memset(session_view(s->fb, vw), 0xff,
+                   (size_t)stride * (size_t)vh);
             s->frame_valid = 0;
+            out->n_damage = 0;
+            g_clear_pointer(&out->damage, free);
         }
     }
+    out->gen = s->frame_gen;
     out->ok = 1;
     out->width = vw;
     out->height = vh;
@@ -465,7 +763,7 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     out->scroll_y = requested_scroll_y;
     out->scroll_x = requested_scroll_x;
     out->unchanged = unchanged;
-    out->pixels = s->fb;
+    out->pixels = session_view(s->fb, vw);
     out->nav = empty_to_null(ns_browser_take_pending_nav(s->cur));
     scrub_line_breaks(out->nav);
     if (out->nav)

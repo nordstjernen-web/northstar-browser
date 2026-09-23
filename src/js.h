@@ -31,6 +31,7 @@ typedef void (*ns_js_form_submit_cb)(const ns_node *form, const ns_node *submitt
                                      gpointer user_data);
 typedef void (*ns_js_soft_nav_cb)(const char *url, gboolean replace, gpointer user_data);
 typedef void (*ns_js_repaint_cb)(gpointer user_data);
+typedef void (*ns_js_repaint_node_cb)(const ns_node *node, gpointer user_data);
 typedef void (*ns_js_viewport_scroll_cb)(double *x, double *y,
                                          gpointer user_data);
 typedef void (*ns_js_layout_flush_cb)(gpointer user_data);
@@ -86,6 +87,7 @@ void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb,
                              gpointer user_data);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data);
+void   ns_js_set_repaint_node_cb(ns_js *js, ns_js_repaint_node_cb cb);
 void   ns_js_set_viewport_scroll_cb(ns_js *js, ns_js_viewport_scroll_cb cb,
                                     gpointer user_data);
 void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data);
@@ -185,6 +187,7 @@ void     ns_js_fire_page_transition(ns_js *js, const char *type,
 cairo_surface_t *ns_js_canvas_surface(ns_js *js, const ns_node *n);
 
 void ns_js_request_repaint(ns_js *js);
+void ns_js_request_repaint_node(ns_js *js, const ns_node *node);
 
 struct ns_image_cache;
 struct ns_anim;

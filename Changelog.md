@@ -4,10 +4,22 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Animated images, canvas drawing, video frames, element scrolling and
+  the blinking caret repaint only the part of the page they change, and
+  scrolling the page shifts the previous frame and paints only the rows
+  that came into view. Every one of these used to repaint and copy the
+  whole viewport: a 64-pixel animated GIF on a long page of cards kept
+  the engine thread busy 80% of the time. The window copies only the
+  changed rectangles too. Changes the engine cannot place -- relayouts,
+  restyles, CSS animations, content under a transform -- still repaint
+  everything, and `NS_DAMAGE=verify` checks each partial frame against a
+  full repaint.
 * Blurred `box-shadow`s are cached, so a page of cards with the same
   shadow blurs it once instead of once per card per frame, and shadows
   outside the repainted area are skipped. Painting such a page fell from
   72 ms to 3 ms a frame.
+* Text crossing the top or bottom edge of the window no longer loses the
+  outermost row of its glyphs' antialiasing.
 * A cross-origin frame can no longer read the embedding site's images
   through a canvas. Whether an image was cross-origin was judged against
   the top-level page even when a frame's script had loaded it, because

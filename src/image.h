@@ -123,6 +123,8 @@ ns_texture *ns_image_decode_ico(const guchar *data, gsize len,
                                 int *out_w, int *out_h);
 
 gboolean ns_image_cache_tick(ns_image_cache *cache, gint64 now_us);
+gboolean ns_image_cache_tick_collect(ns_image_cache *cache, gint64 now_us,
+                                     GPtrArray *changed);
 
 gboolean ns_image_is_animation(const ns_image *img);
 double   ns_image_anim_duration(const ns_image *img);

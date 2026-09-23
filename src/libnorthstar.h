@@ -44,6 +44,13 @@ int ns_browser_set_viewport(ns_browser *browser, int css_width,
 int ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
                              int width, int height, double scale,
                              unsigned char *out, int stride);
+int ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x,
+                                   int scroll_y, int width, int height,
+                                   int pad, double scale, unsigned char *out,
+                                   int stride, const int *rects, int n_rects);
+int ns_browser_take_damage(ns_browser *browser, int scroll_x, int scroll_y,
+                           GArray *out_rects);
+int ns_browser_scroll_blit_bands(ns_browser *browser, GArray *out_bands);
 
 char *ns_browser_link_at(ns_browser *browser, int x, int y);
 char *ns_browser_cursor_at(ns_browser *browser, int x, int y);

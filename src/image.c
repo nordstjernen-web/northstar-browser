@@ -842,6 +842,13 @@ ns_image_apply_phase(ns_image *img, int phase)
 gboolean
 ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
 {
+    return ns_image_cache_tick_collect(cache, now_us, NULL);
+}
+
+gboolean
+ns_image_cache_tick_collect(ns_image_cache *cache, gint64 now_us,
+                            GPtrArray *changed)
+{
     if (!cache) return FALSE;
     gboolean any = FALSE;
     GHashTableIter it;
@@ -850,8 +857,10 @@ ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
     while (g_hash_table_iter_next(&it, &key, &value)) {
         ns_image *img = value;
         if (!ns_image_is_animation(img)) continue;
-        if (ns_image_apply_phase(img, ns_image_anim_phase_ms(img, now_us)))
+        if (ns_image_apply_phase(img, ns_image_anim_phase_ms(img, now_us))) {
             any = TRUE;
+            if (changed) g_ptr_array_add(changed, img);
+        }
     }
     return any;
 }

@@ -29967,8 +29967,8 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         if (changed && _j) {
             if (!img_src_paint_only && ns_css_attr_may_affect_style(n, name))
                 _j->mutated = TRUE;
-            if (img_src_paint_only && _j->repaint_cb)
-                _j->repaint_cb(_j->repaint_user_data);
+            if (img_src_paint_only)
+                ns_js_request_repaint_node(_j, n);
         }
         if (_j) ns_js_record_attr_change(_j, n, name, old_copy);
         if (_j) ns_ce_attr_changed(_j, n, name, old_copy, val);
@@ -34888,8 +34888,8 @@ ns_element_set_scrollTop(JSContext *ctx, JSValueConst this_val, JSValueConst val
     ns_box_scroll_snap(b);
     ns_js *js = js_from_ctx(ctx);
     if (js) {
-        if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
         const ns_node *el = ns_unwrap_element(this_val);
+        ns_js_request_repaint_node(js, el);
         if (el) {
             ns_js_dispatch_event(js, el, "scroll", NULL);
             ns_js_queue_scrollend(js, el);
@@ -34920,8 +34920,8 @@ ns_element_set_scrollLeft(JSContext *ctx, JSValueConst this_val, JSValueConst va
     ns_box_scroll_snap(b);
     ns_js *js = js_from_ctx(ctx);
     if (js) {
-        if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
         const ns_node *el = ns_unwrap_element(this_val);
+        ns_js_request_repaint_node(js, el);
         if (el) {
             ns_js_dispatch_event(js, el, "scroll", NULL);
             ns_js_queue_scrollend(js, el);
@@ -40339,6 +40339,16 @@ void
 ns_js_request_repaint(ns_js *js)
 {
     if (js && js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+}
+
+void
+ns_js_request_repaint_node(ns_js *js, const ns_node *node)
+{
+    if (!js) return;
+    if (node && js->repaint_node_cb)
+        js->repaint_node_cb(node, js->repaint_user_data);
+    else if (js->repaint_cb)
+        js->repaint_cb(js->repaint_user_data);
 }
 
 typedef struct ns_js_image_load {
@@ -56420,6 +56430,12 @@ ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data)
     if (!js) return;
     js->repaint_cb = cb;
     js->repaint_user_data = user_data;
+}
+
+void
+ns_js_set_repaint_node_cb(ns_js *js, ns_js_repaint_node_cb cb)
+{
+    if (js) js->repaint_node_cb = cb;
 }
 
 void

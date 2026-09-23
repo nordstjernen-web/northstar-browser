@@ -16,6 +16,7 @@
 #include "anim.h"
 #include "bytecode_cache.h"
 #include "cache.h"
+#include "damage.h"
 #include "debuglog.h"
 #include "history.h"
 #include "config.h"
@@ -75,6 +76,12 @@ struct ns_browser {
     gboolean        dirty;
     gboolean        cascade_dirty;
     gboolean        repaint_pending;
+    gboolean        damage_full;
+    GHashTable     *damage_nodes;
+    GHashTable     *damage_images;
+    guint           layout_gen;
+    guint           hazards_gen;
+    ns_paint_hazards hazards;
     gint64          frame_time_us;
     gint64          last_frame_now_us;
     gboolean        relaying;
@@ -286,6 +293,8 @@ browser_relayout(ns_browser *b)
                                    &b->layout);
     b->cascade_dirty = FALSE;
     b->relaying = FALSE;
+    b->damage_full = TRUE;
+    b->layout_gen++;
     if (g_hash_table_size(scroll_save) > 0)
         browser_restore_scroll(b->layout, scroll_save);
     g_hash_table_destroy(scroll_save);
@@ -406,6 +415,7 @@ browser_image_arrived(gpointer user_data)
     b->images_arrived_since_layout = TRUE;
     b->image_arrivals_since_layout++;
     b->repaint_pending = TRUE;
+    b->damage_full = TRUE;
     if (b->image_arrivals_since_layout >= NS_IMAGE_RELAYOUT_BATCH ||
         browser_images_outstanding(b) == 0) {
         b->image_arrivals_since_layout = 0;
@@ -502,6 +512,7 @@ browser_flush_style(gpointer user_data)
     ns_css_set_viewport((double)b->vw, b->vh);
     ns_css_set_doc_language(b->doc_language);
     b->styles = ns_engine_compute_cascade(b->doc, b->base_url, b->css_cache, b->anim);
+    b->damage_full = TRUE;
     if (b->anim)
         ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
     ns_js_set_style_table(b->js, b->styles);
@@ -763,7 +774,35 @@ static void
 browser_js_repaint(gpointer user_data)
 {
     ns_browser *browser = user_data;
-    if (browser) browser->repaint_pending = TRUE;
+    if (!browser) return;
+    browser->repaint_pending = TRUE;
+    browser->damage_full = TRUE;
+}
+
+static gboolean
+browser_node_in_document(const ns_browser *browser, const ns_node *node)
+{
+    const ns_node *n = node;
+    while (n->parent) n = n->parent;
+    return n == browser->doc;
+}
+
+static void
+browser_damage_node(ns_browser *browser, const ns_node *node)
+{
+    if (!node || !browser_node_in_document(browser, node)) return;
+    browser->repaint_pending = TRUE;
+    if (browser->damage_full) return;
+    if (!browser->damage_nodes)
+        browser->damage_nodes = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_add(browser->damage_nodes, (gpointer)node);
+}
+
+static void
+browser_js_repaint_node(const ns_node *node, gpointer user_data)
+{
+    ns_browser *browser = user_data;
+    if (browser) browser_damage_node(browser, node);
 }
 
 static void
@@ -1087,6 +1126,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_form_submit_cb(b->js, browser_js_form_submit, b);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_repaint_cb(b->js, browser_js_repaint, b);
+        ns_js_set_repaint_node_cb(b->js, browser_js_repaint_node);
         ns_js_set_viewport_scroll_cb(b->js, browser_js_viewport_scroll, b);
         ns_js_set_style_flush_cb(b->js, browser_flush_style, b);
         ns_js_set_scroll_to_cb(b->js, browser_js_scroll_to, b);
@@ -1561,15 +1601,18 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             changed = TRUE;
         }
     }
+    GPtrArray *frames_changed = g_ptr_array_new();
     for (;;) {
         gint64 now = browser_frame_now(browser);
-        if (browser->images && ns_image_cache_tick(browser->images, now)) {
+        if (browser->images &&
+            ns_image_cache_tick_collect(browser->images, now, frames_changed)) {
             changed = TRUE;
             other_changed = TRUE;
         }
         if (browser->anim && ns_anim_tick(browser->anim, now)) {
             changed = TRUE;
             other_changed = TRUE;
+            browser->damage_full = TRUE;
             browser->cascade_dirty = TRUE;
             if (ns_anim_needs_layout(browser->anim)) browser->dirty = TRUE;
         }
@@ -1600,6 +1643,15 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             browser->dirty = FALSE;
         }
     }
+    if (frames_changed->len > 0 && !browser->damage_full) {
+        if (!browser->damage_images)
+            browser->damage_images =
+                g_hash_table_new(g_direct_hash, g_direct_equal);
+        for (guint i = 0; i < frames_changed->len; i++)
+            g_hash_table_add(browser->damage_images,
+                             g_ptr_array_index(frames_changed, i));
+    }
+    g_ptr_array_free(frames_changed, TRUE);
     browser_follow_scroll_anchor(browser);
     if (browser->pending_scroll) changed = TRUE;
     if (browser->repaint_pending) {
@@ -1758,10 +1810,97 @@ ns_browser_snap_document(ns_browser *browser, double viewport_w,
     return 1;
 }
 
+static void
+browser_scan_hazards(ns_browser *browser)
+{
+    if (browser->hazards.fixed_bands &&
+        browser->hazards_gen == browser->layout_gen)
+        return;
+    ns_paint_hazards_scan(browser->layout, browser->anim, &browser->hazards);
+    browser->hazards_gen = browser->layout_gen;
+}
+
+int
+ns_browser_take_damage(ns_browser *browser, int scroll_x, int scroll_y,
+                       GArray *out_rects)
+{
+    if (!browser) return 1;
+    gboolean full = browser->damage_full || !browser->layout;
+    GHashTable *nodes = browser->damage_nodes;
+    GHashTable *images = browser->damage_images;
+    browser->damage_nodes = NULL;
+    browser->damage_images = NULL;
+    browser->damage_full = FALSE;
+    if (full) {
+        browser->layout_gen++;
+    } else {
+        browser_scan_hazards(browser);
+        full = browser->hazards.three_d;
+    }
+    if (!full) {
+        GArray *rects = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
+        full = !ns_damage_resolve(browser->layout, browser->js, browser->anim,
+                                  nodes, images, rects);
+        for (guint i = 0; !full && i < rects->len; i++) {
+            ns_damage_rect r = g_array_index(rects, ns_damage_rect, i);
+            if (!r.fixed) {
+                r.x -= scroll_x;
+                r.y -= scroll_y;
+            }
+            g_array_append_val(out_rects, r);
+        }
+        g_array_free(rects, TRUE);
+    }
+    if (nodes) g_hash_table_destroy(nodes);
+    if (images) g_hash_table_destroy(images);
+    return full ? 1 : 0;
+}
+
+int
+ns_browser_scroll_blit_bands(ns_browser *browser, GArray *out_bands)
+{
+    if (!browser || !browser->layout) return 0;
+    browser_scan_hazards(browser);
+    const ns_paint_hazards *h = &browser->hazards;
+    if (h->three_d || h->sticky || h->fixed_background) return 0;
+    g_array_append_vals(out_bands, h->fixed_bands->data, h->fixed_bands->len);
+    return 1;
+}
+
 int
 ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
                          int width, int height, double scale,
                          unsigned char *out, int stride)
+{
+    return ns_browser_render_argb32_rects(browser, scroll_x, scroll_y, width,
+                                          height, 0, scale, out, stride, NULL,
+                                          0);
+}
+
+static void
+browser_paint_rect(ns_browser *browser, cairo_surface_t *surf, int scroll_x,
+                   int scroll_y, double scale, int x, int y, int w, int h)
+{
+    cairo_t *cr = cairo_create(surf);
+    cairo_set_tolerance(cr, scale > 0 ? 0.5 / scale : 0.5);
+    cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
+    cairo_rectangle(cr, x, y, w, h);
+    cairo_clip(cr);
+    cairo_scale(cr, scale, scale);
+    cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
+    if (ns_selection_has_range(&browser->selection))
+        ns_paint_with_selection(cr, browser->layout, browser->search_query,
+                                &browser->selection);
+    else
+        ns_paint(cr, browser->layout, browser->search_query);
+    cairo_destroy(cr);
+}
+
+int
+ns_browser_render_argb32_rects(ns_browser *browser, int scroll_x, int scroll_y,
+                               int width, int height, int pad, double scale,
+                               unsigned char *out, int stride,
+                               const int *rects, int n_rects)
 {
     if (!browser || !browser->layout || !out) return -1;
     if (width <= 0 || height <= 0 || stride < width * 4) return -1;
@@ -1775,32 +1914,27 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
 
     cairo_surface_t *surf =
         cairo_image_surface_create_for_data(out, CAIRO_FORMAT_ARGB32,
-                                            width, height, stride);
+                                            width, height + 2 * pad, stride);
     if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surf);
         return -1;
     }
-    cairo_t *cr = cairo_create(surf);
-    cairo_set_tolerance(cr, scale > 0 ? 0.5 / scale : 0.5);
-    cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
-    cairo_rectangle(cr, 0, 0, width, height);
-    cairo_clip(cr);
-    cairo_scale(cr, scale, scale);
-    cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
-
-
-
+    cairo_surface_set_device_offset(surf, 0, pad);
+    ns_paint_set_device_viewport(0, 0, width, height);
     ns_paint_set_js(browser->js);
     ns_paint_set_anim(browser->anim);
     ns_paint_set_search(browser->search_case, browser->search_active);
     ns_paint_set_caret_visible(browser->caret_paint_visible);
-    const char *highlight = browser->search_query;
     gint64 paint_t0 = g_get_monotonic_time();
-    if (ns_selection_has_range(&browser->selection))
-        ns_paint_with_selection(cr, browser->layout, highlight,
-                                &browser->selection);
-    else
-        ns_paint(cr, browser->layout, highlight);
+    if (rects && n_rects > 0) {
+        for (int i = 0; i < n_rects; i++)
+            browser_paint_rect(browser, surf, scroll_x, scroll_y, scale,
+                               rects[4 * i], rects[4 * i + 1],
+                               rects[4 * i + 2], rects[4 * i + 3]);
+    } else {
+        browser_paint_rect(browser, surf, scroll_x, scroll_y, scale,
+                           0, 0, width, height);
+    }
     if (g_getenv("NS_PROFILE"))
         g_printerr("[profile] paint %6.1fms %dx%d\n",
                    (double)(g_get_monotonic_time() - paint_t0) / 1000.0,
@@ -1808,8 +1942,8 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     ns_paint_set_search(FALSE, NULL);
     ns_paint_set_anim(NULL);
     ns_paint_set_js(NULL);
+    ns_paint_clear_device_viewport();
 
-    cairo_destroy(cr);
     cairo_surface_flush(surf);
     const char *dump_dir = g_getenv("NS_FRAME_DUMP");
     if (dump_dir) {
@@ -3147,6 +3281,8 @@ ns_browser_set_caret_blink_active(ns_browser *browser, int active)
     gsize caret = focused ? browser->caret_byte : 0;
     gsize anchor = focused ? browser->sel_anchor_byte : 0;
     gint64 now = g_get_monotonic_time();
+    if (focused != browser->caret_blink_node)
+        browser->damage_full = TRUE;
     if (focused != browser->caret_blink_node ||
         caret != browser->caret_blink_byte ||
         anchor != browser->caret_blink_anchor) {
@@ -3162,6 +3298,7 @@ ns_browser_set_caret_blink_active(ns_browser *browser, int active)
     browser->caret_blink_active = focused != NULL;
     browser->caret_paint_visible = visible;
     if (!focused) browser->caret_blink_epoch_us = 0;
+    if (changed && focused) browser_damage_node(browser, focused);
     return changed ? 1 : 0;
 }
 
@@ -3323,6 +3460,9 @@ ns_browser_close(ns_browser *browser)
         g_ptr_array_free(browser->img_sessions, TRUE);
     }
     if (browser->img_requested) g_hash_table_destroy(browser->img_requested);
+    if (browser->damage_nodes) g_hash_table_destroy(browser->damage_nodes);
+    if (browser->damage_images) g_hash_table_destroy(browser->damage_images);
+    ns_paint_hazards_clear(&browser->hazards);
     ns_css_set_active_node(NULL);
     ns_paint_set_anim(NULL);
     if (browser->js) {
