@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A build configured with `-Daudio=disabled` links again. The audio stub
+  that replaces the SDL2 mixer lacked `ns_audio_context_dispatch_blob`,
+  which the page view calls for `blob:` media, so the final link failed.
 * A frame sandboxed without `allow-same-origin` can no longer reach the
   page that embeds it. A `srcdoc` or same-origin frame sandboxed that way
   got the embedding page's real window as `parent` and `top`, so its
