@@ -1070,3 +1070,368 @@ ns_encoding_mime_charset(const char *mime)
     }
     return NULL;
 }
+
+typedef enum {
+    NS_REV_JIS0208,
+    NS_REV_SHIFT_JIS,
+    NS_REV_EUC_KR,
+    NS_REV_GB18030,
+    NS_REV_BIG5,
+    NS_REV_COUNT
+} ns_rev_id;
+
+typedef struct {
+    guint32 code_point;
+    guint32 pointer;
+} ns_rev_entry;
+
+typedef struct {
+    ns_rev_entry *entries;
+    gsize len;
+} ns_rev_map;
+
+static ns_rev_map ns_rev_maps[NS_REV_COUNT];
+static gsize ns_rev_ready[NS_REV_COUNT];
+
+static int
+rev_entry_cmp(const void *a, const void *b)
+{
+    const ns_rev_entry *x = a, *y = b;
+    if (x->code_point != y->code_point)
+        return x->code_point < y->code_point ? -1 : 1;
+    return x->pointer < y->pointer ? -1 : x->pointer > y->pointer;
+}
+
+static gboolean
+big5_prefers_last(guint32 cp)
+{
+    return cp == 0x2550 || cp == 0x255E || cp == 0x2561 || cp == 0x256A ||
+           cp == 0x5341 || cp == 0x5345;
+}
+
+static gboolean
+rev_pointer_excluded(ns_rev_id id, guint32 pointer)
+{
+    if (id == NS_REV_SHIFT_JIS) return pointer >= 8272 && pointer <= 8835;
+    if (id == NS_REV_BIG5) return pointer < (0xA1 - 0x81) * 157;
+    return FALSE;
+}
+
+static void
+rev_map_build(ns_rev_id id, ns_rev_map *map)
+{
+    static const ns_index_id sources[NS_REV_COUNT] = {
+        [NS_REV_JIS0208] = NS_INDEX_JIS0208,
+        [NS_REV_SHIFT_JIS] = NS_INDEX_JIS0208,
+        [NS_REV_EUC_KR] = NS_INDEX_EUC_KR,
+        [NS_REV_GB18030] = NS_INDEX_GB18030,
+        [NS_REV_BIG5] = NS_INDEX_BIG5,
+    };
+    ns_index_id src = sources[id];
+    gsize size = ns_indexes[src].size;
+    ns_rev_entry *all = g_new(ns_rev_entry, size);
+    gsize n = 0;
+    for (guint32 p = 0; p < size; p++) {
+        guint32 cp = index_code_point(src, p);
+        if (!cp || rev_pointer_excluded(id, p)) continue;
+        all[n].code_point = cp;
+        all[n].pointer = p;
+        n++;
+    }
+    qsort(all, n, sizeof *all, rev_entry_cmp);
+    gsize kept = 0;
+    for (gsize i = 0; i < n; i++) {
+        gboolean same = kept > 0 &&
+                        all[kept - 1].code_point == all[i].code_point;
+        if (!same) all[kept++] = all[i];
+        else if (id == NS_REV_BIG5 && big5_prefers_last(all[i].code_point))
+            all[kept - 1] = all[i];
+    }
+    map->entries = g_renew(ns_rev_entry, all, kept ? kept : 1);
+    map->len = kept;
+}
+
+static gboolean
+rev_pointer(ns_rev_id id, guint32 cp, guint32 *pointer)
+{
+    if (g_once_init_enter(&ns_rev_ready[id])) {
+        rev_map_build(id, &ns_rev_maps[id]);
+        g_once_init_leave(&ns_rev_ready[id], 1);
+    }
+    const ns_rev_map *map = &ns_rev_maps[id];
+    gsize lo = 0, hi = map->len;
+    while (lo < hi) {
+        gsize mid = lo + (hi - lo) / 2;
+        if (map->entries[mid].code_point < cp) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo >= map->len || map->entries[lo].code_point != cp) return FALSE;
+    *pointer = map->entries[lo].pointer;
+    return TRUE;
+}
+
+typedef struct {
+    const ns_encoding *enc;
+    guint8 iso_state;
+} ns_encoder;
+
+enum {
+    NS_ENCODE_ERROR = -1,
+    NS_ENCODE_ERROR_FFFD = -2,
+};
+
+static int
+encode_byte(guint32 value, guint8 *out)
+{
+    out[0] = (guint8)value;
+    return 1;
+}
+
+static int
+encode_two(guint32 lead, guint32 trail, guint8 *out)
+{
+    out[0] = (guint8)lead;
+    out[1] = (guint8)trail;
+    return 2;
+}
+
+static int
+encode_single_byte(const ns_encoder *e, guint32 cp, guint8 *out)
+{
+    for (guint b = 0; b < 128; b++)
+        if (e->enc->single[b].codepoint == cp) return encode_byte(b + 0x80, out);
+    return NS_ENCODE_ERROR;
+}
+
+static guint32
+gb18030_ranges_pointer(guint32 cp)
+{
+    if (cp == 0xE7C7) return 7457;
+    const lxb_encoding_range_index_t *ranges = lxb_encoding_range_index_gb18030;
+    gsize lo = 0, hi = LXB_ENCODING_RANGE_INDEX_GB18030_SIZE;
+    while (hi - lo > 1) {
+        gsize mid = lo + (hi - lo) / 2;
+        if (ranges[mid].codepoint <= cp) lo = mid;
+        else hi = mid;
+    }
+    return ranges[lo].index + cp - ranges[lo].codepoint;
+}
+
+static int
+encode_gb18030(const ns_encoder *e, guint32 cp, guint8 *out)
+{
+    static const struct { guint16 code_point; guint8 lead, trail; } fixed[] = {
+        { 0xE78D, 0xA6, 0xD9 }, { 0xE78E, 0xA6, 0xDA }, { 0xE78F, 0xA6, 0xDB },
+        { 0xE790, 0xA6, 0xDC }, { 0xE791, 0xA6, 0xDD }, { 0xE792, 0xA6, 0xDE },
+        { 0xE793, 0xA6, 0xDF }, { 0xE794, 0xA6, 0xEC }, { 0xE795, 0xA6, 0xED },
+        { 0xE796, 0xA6, 0xF3 }, { 0xE81E, 0xFE, 0x59 }, { 0xE826, 0xFE, 0x61 },
+        { 0xE82B, 0xFE, 0x66 }, { 0xE82C, 0xFE, 0x67 }, { 0xE832, 0xFE, 0x6D },
+        { 0xE843, 0xFE, 0x7E }, { 0xE854, 0xFE, 0x90 }, { 0xE864, 0xFE, 0xA0 },
+    };
+    gboolean gbk = e->enc->id == LXB_ENCODING_GBK;
+    if (cp == 0xE5E5) return NS_ENCODE_ERROR;
+    if (gbk && cp == 0x20AC) return encode_byte(0x80, out);
+    for (gsize i = 0; i < G_N_ELEMENTS(fixed); i++)
+        if (fixed[i].code_point == cp)
+            return encode_two(fixed[i].lead, fixed[i].trail, out);
+    guint32 pointer;
+    if (rev_pointer(NS_REV_GB18030, cp, &pointer)) {
+        guint32 trail = pointer % 190;
+        return encode_two(pointer / 190 + 0x81,
+                          trail + (trail < 0x3F ? 0x40 : 0x41), out);
+    }
+    if (gbk) return NS_ENCODE_ERROR;
+    pointer = gb18030_ranges_pointer(cp);
+    out[0] = (guint8)(pointer / (10 * 126 * 10) + 0x81);
+    pointer %= 10 * 126 * 10;
+    out[1] = (guint8)(pointer / (10 * 126) + 0x30);
+    pointer %= 10 * 126;
+    out[2] = (guint8)(pointer / 10 + 0x81);
+    out[3] = (guint8)(pointer % 10 + 0x30);
+    return 4;
+}
+
+static int
+encode_big5(guint32 cp, guint8 *out)
+{
+    guint32 pointer;
+    if (!rev_pointer(NS_REV_BIG5, cp, &pointer)) return NS_ENCODE_ERROR;
+    guint32 trail = pointer % 157;
+    return encode_two(pointer / 157 + 0x81,
+                      trail + (trail < 0x3F ? 0x40 : 0x62), out);
+}
+
+static int
+encode_euc_jp(guint32 cp, guint8 *out)
+{
+    if (cp == 0xA5) return encode_byte(0x5C, out);
+    if (cp == 0x203E) return encode_byte(0x7E, out);
+    if (cp >= 0xFF61 && cp <= 0xFF9F)
+        return encode_two(0x8E, cp - 0xFF61 + 0xA1, out);
+    if (cp == 0x2212) cp = 0xFF0D;
+    guint32 pointer;
+    if (!rev_pointer(NS_REV_JIS0208, cp, &pointer)) return NS_ENCODE_ERROR;
+    return encode_two(pointer / 94 + 0xA1, pointer % 94 + 0xA1, out);
+}
+
+static int
+iso_2022_jp_switch(ns_encoder *e, guint8 state, guint8 *out, gboolean *again)
+{
+    *again = TRUE;
+    e->iso_state = state;
+    out[0] = 0x1B;
+    out[1] = state == NS_ISO_LEAD ? 0x24 : 0x28;
+    out[2] = state == NS_ISO_ROMAN ? 0x4A : 0x42;
+    return 3;
+}
+
+static int
+encode_iso_2022_jp(ns_encoder *e, guint32 cp, guint8 *out, gboolean *again)
+{
+    guint8 state = e->iso_state;
+    gboolean ascii = cp < 0x80;
+    if ((state == NS_ISO_ASCII || state == NS_ISO_ROMAN) &&
+        (cp == 0x0E || cp == 0x0F || cp == 0x1B))
+        return NS_ENCODE_ERROR_FFFD;
+    if (state == NS_ISO_ASCII && ascii) return encode_byte(cp, out);
+    if (state == NS_ISO_ROMAN &&
+        ((ascii && cp != 0x5C && cp != 0x7E) || cp == 0xA5 || cp == 0x203E))
+        return encode_byte(cp == 0xA5 ? 0x5C : cp == 0x203E ? 0x7E : cp, out);
+    if (ascii) return iso_2022_jp_switch(e, NS_ISO_ASCII, out, again);
+    if (cp == 0xA5 || cp == 0x203E)
+        return iso_2022_jp_switch(e, NS_ISO_ROMAN, out, again);
+    guint32 mapped = cp == 0x2212 ? 0xFF0D : cp;
+    if (mapped >= 0xFF61 && mapped <= 0xFF9F)
+        mapped = lxb_encoding_multi_iso_2022_jp_katakana_map[mapped - 0xFF61];
+    guint32 pointer;
+    if (!rev_pointer(NS_REV_JIS0208, mapped, &pointer)) {
+        if (state == NS_ISO_LEAD)
+            return iso_2022_jp_switch(e, NS_ISO_ASCII, out, again);
+        return NS_ENCODE_ERROR;
+    }
+    if (state != NS_ISO_LEAD)
+        return iso_2022_jp_switch(e, NS_ISO_LEAD, out, again);
+    return encode_two(pointer / 94 + 0x21, pointer % 94 + 0x21, out);
+}
+
+static int
+encode_shift_jis(guint32 cp, guint8 *out)
+{
+    if (cp == 0x80) return encode_byte(0x80, out);
+    if (cp == 0xA5) return encode_byte(0x5C, out);
+    if (cp == 0x203E) return encode_byte(0x7E, out);
+    if (cp >= 0xFF61 && cp <= 0xFF9F) return encode_byte(cp - 0xFF61 + 0xA1, out);
+    if (cp == 0x2212) cp = 0xFF0D;
+    guint32 pointer;
+    if (!rev_pointer(NS_REV_SHIFT_JIS, cp, &pointer)) return NS_ENCODE_ERROR;
+    guint32 lead = pointer / 188, trail = pointer % 188;
+    return encode_two(lead + (lead < 0x1F ? 0x81 : 0xC1),
+                      trail + (trail < 0x3F ? 0x40 : 0x41), out);
+}
+
+static int
+encode_euc_kr(guint32 cp, guint8 *out)
+{
+    guint32 pointer;
+    if (!rev_pointer(NS_REV_EUC_KR, cp, &pointer)) return NS_ENCODE_ERROR;
+    return encode_two(pointer / 190 + 0x81, pointer % 190 + 0x41, out);
+}
+
+static int
+encode_step(ns_encoder *e, guint32 cp, guint8 *out, gboolean *again)
+{
+    *again = FALSE;
+    ns_encoding_kind kind = e->enc->kind;
+    if (kind == NS_KIND_ISO_2022_JP)
+        return encode_iso_2022_jp(e, cp, out, again);
+    if (cp < 0x80) return encode_byte(cp, out);
+    switch (kind) {
+    case NS_KIND_SINGLE_BYTE: return encode_single_byte(e, cp, out);
+    case NS_KIND_GB18030:     return encode_gb18030(e, cp, out);
+    case NS_KIND_BIG5:        return encode_big5(cp, out);
+    case NS_KIND_EUC_JP:      return encode_euc_jp(cp, out);
+    case NS_KIND_SHIFT_JIS:   return encode_shift_jis(cp, out);
+    case NS_KIND_EUC_KR:      return encode_euc_kr(cp, out);
+    case NS_KIND_X_USER_DEFINED:
+        if (cp < 0xF780 || cp > 0xF7FF) return NS_ENCODE_ERROR;
+        return encode_byte(cp - 0xF780 + 0x80, out);
+    default:
+        return g_unichar_to_utf8(cp, (gchar *)out);
+    }
+}
+
+static int
+encode_end(ns_encoder *e, guint8 *out)
+{
+    gboolean again;
+    if (e->enc->kind != NS_KIND_ISO_2022_JP || e->iso_state == NS_ISO_ASCII)
+        return 0;
+    return iso_2022_jp_switch(e, NS_ISO_ASCII, out, &again);
+}
+
+const ns_encoding *
+ns_encoding_output(const ns_encoding *enc)
+{
+    if (!enc || ns_encoding_is_utf16(enc) || ns_encoding_is_replacement(enc))
+        return ns_encoding_utf8();
+    return enc;
+}
+
+static gboolean
+percent_encode_byte(guint8 b, ns_percent_set set)
+{
+    if (b < 0x20 || b > 0x7E) return TRUE;
+    if (set == NS_PERCENT_SPECIAL_QUERY)
+        return b == ' ' || b == '"' || b == '#' || b == '<' || b == '>' ||
+               b == '\'';
+    return !g_ascii_isalnum(b) && b != '*' && b != '-' && b != '.' &&
+           b != '_';
+}
+
+static void
+percent_append(GString *out, const guint8 *bytes, int n, ns_percent_set set,
+               gboolean space_as_plus)
+{
+    for (int i = 0; i < n; i++) {
+        guint8 b = bytes[i];
+        if (space_as_plus && b == ' ')
+            g_string_append_c(out, '+');
+        else if (percent_encode_byte(b, set))
+            g_string_append_printf(out, "%%%02X", b);
+        else
+            g_string_append_c(out, (char)b);
+    }
+}
+
+void
+ns_encoding_percent_encode(const ns_encoding *enc, const char *input,
+                           gsize len, ns_percent_set set,
+                           gboolean space_as_plus, GString *out)
+{
+    ns_encoder e = { ns_encoding_output(enc), NS_ISO_ASCII };
+    const char *p = input, *end = input + len;
+    guint8 bytes[8];
+    while (p < end) {
+        gunichar cp = g_utf8_get_char_validated(p, end - p);
+        if (cp == (gunichar)-1 || cp == (gunichar)-2) {
+            cp = 0xFFFD;
+            p++;
+            for (int k = 0; k < 2 && p < end && ((guint8)*p & 0xC0) == 0x80; k++)
+                p++;
+        } else {
+            p = g_utf8_next_char(p);
+        }
+        gboolean again;
+        do {
+            int n = encode_step(&e, cp, bytes, &again);
+            if (n < 0) {
+                g_string_append_printf(out, "%%26%%23%u%%3B",
+                    n == NS_ENCODE_ERROR_FFFD ? 0xFFFDu : (unsigned)cp);
+                break;
+            }
+            percent_append(out, bytes, n, set, space_as_plus);
+        } while (again);
+    }
+    int n = encode_end(&e, bytes);
+    percent_append(out, bytes, n, set, space_as_plus);
+}

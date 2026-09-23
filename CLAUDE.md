@@ -256,8 +256,10 @@ Decoding itself goes through `src/encoding.c`: one streaming decoder per
 WHATWG Encoding Standard encoding, following the spec's state machines
 and reading the index tables lexbor already ships in the binary, so the
 result does not depend on the platform's iconv. The same decoders back
-`TextDecoder`/`TextEncoder` (`src/js_encoding.c`), XHR `responseText`,
-and the document-encoding query of `<a>`/`<area>` hrefs.
+`TextDecoder`/`TextEncoder` (`src/js_encoding.c`) and XHR
+`responseText`. The spec's encoders live beside them (code point →
+pointer maps built lazily from those tables); they percent-encode the
+document-encoding query of `<a>`/`<area>` hrefs and form submissions.
 
 ### Web Cryptography: OpenSSL libcrypto
 

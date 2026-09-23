@@ -13,6 +13,11 @@ G_BEGIN_DECLS
 typedef struct ns_encoding ns_encoding;
 typedef struct ns_decoder ns_decoder;
 
+typedef enum {
+    NS_PERCENT_SPECIAL_QUERY,
+    NS_PERCENT_URLENCODED,
+} ns_percent_set;
+
 const ns_encoding *ns_encoding_for_label(const char *label);
 const ns_encoding *ns_encoding_for_name(const char *name);
 const ns_encoding *ns_encoding_utf8(void);
@@ -32,6 +37,11 @@ char *ns_encoding_decode(const ns_encoding *enc, const char *data, gsize len,
 char *ns_encoding_decode_sniffed(const ns_encoding *enc, const char *data,
                                  gsize len, gsize *out_len);
 char *ns_encoding_mime_charset(const char *mime);
+
+const ns_encoding *ns_encoding_output(const ns_encoding *enc);
+void ns_encoding_percent_encode(const ns_encoding *enc, const char *input,
+                                gsize len, ns_percent_set set,
+                                gboolean space_as_plus, GString *out);
 
 G_END_DECLS
 

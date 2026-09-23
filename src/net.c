@@ -8,6 +8,7 @@
 #include "config.h"
 #include "history.h"
 #include "debuglog.h"
+#include "encoding.h"
 #include "ext.h"
 #include "html.h"
 #include "image.h"
@@ -670,9 +671,8 @@ ns_url_parser_close(lxb_url_parser_t *parser)
     lxb_url_parser_clean(parser);
 }
 
-static char *
-ns_url_resolve_in(const char *base, const char *href, size_t href_len,
-                  lxb_encoding_t encoding)
+char *
+ns_url_resolve_len(const char *base, const char *href, size_t href_len)
 {
     if (!href) return NULL;
     if (href_len == 0 && !(base && *base)) return NULL;
@@ -690,11 +690,8 @@ ns_url_resolve_in(const char *base, const char *href, size_t href_len,
             return NULL;
         }
     }
-    lxb_url_t *resolved = NULL;
-    if (lxb_url_parse_basic(parser, NULL, base_url, (const lxb_char_t *)href,
-                            href_len, LXB_URL_STATE__UNDEF, encoding)
-        == LXB_STATUS_OK)
-        resolved = parser->url;
+    lxb_url_t *resolved = lxb_url_parse(parser, base_url,
+                                        (const lxb_char_t *)href, href_len);
     char *out = NULL;
     if (resolved) {
         GString *s = g_string_new(NULL);
@@ -709,27 +706,62 @@ ns_url_resolve_in(const char *base, const char *href, size_t href_len,
 }
 
 char *
-ns_url_resolve_len(const char *base, const char *href, size_t href_len)
-{
-    return ns_url_resolve_in(base, href, href_len, LXB_ENCODING_AUTO);
-}
-
-char *
 ns_url_resolve(const char *base, const char *href)
 {
     return ns_url_resolve_len(base, href, href ? strlen(href) : 0);
+}
+
+static gboolean
+ns_url_query_uses_encoding(const char *url)
+{
+    static const char *const schemes[] = { "http:", "https:", "ftp:", "file:" };
+    for (gsize i = 0; i < G_N_ELEMENTS(schemes); i++)
+        if (g_str_has_prefix(url, schemes[i])) return TRUE;
+    return FALSE;
+}
+
+static char *
+ns_url_input_query(const char *href)
+{
+    const char *start = href, *end = href + strlen(href);
+    while (start < end && (guchar)*start <= 0x20) start++;
+    while (end > start && (guchar)end[-1] <= 0x20) end--;
+    GString *clean = g_string_sized_new((gsize)(end - start));
+    for (const char *p = start; p < end; p++)
+        if (*p != '\t' && *p != '\n' && *p != '\r')
+            g_string_append_c(clean, *p);
+    const char *q = strchr(clean->str, '?');
+    const char *hash = strchr(clean->str, '#');
+    char *query = NULL;
+    if (q && (!hash || hash > q)) {
+        const char *qend = strchr(q + 1, '#');
+        query = qend ? g_strndup(q + 1, (gsize)(qend - q - 1))
+                     : g_strdup(q + 1);
+    }
+    g_string_free(clean, TRUE);
+    return query;
 }
 
 char *
 ns_url_resolve_encoded(const char *base, const char *href,
                        const char *encoding)
 {
-    const lxb_encoding_data_t *data = encoding
-        ? lxb_encoding_data_by_pre_name((const lxb_char_t *)encoding,
-                                        strlen(encoding))
-        : NULL;
-    return ns_url_resolve_in(base, href, href ? strlen(href) : 0,
-                             data ? data->encoding : LXB_ENCODING_AUTO);
+    char *url = ns_url_resolve(base, href);
+    const ns_encoding *enc = ns_encoding_output(
+        encoding ? ns_encoding_for_label(encoding) : NULL);
+    if (!url || ns_encoding_is_utf8(enc) || !ns_url_query_uses_encoding(url))
+        return url;
+    const char *q = strchr(url, '?');
+    char *query = q ? ns_url_input_query(href) : NULL;
+    if (!query) return url;
+    const char *fragment = strchr(q, '#');
+    GString *out = g_string_new_len(url, q + 1 - url);
+    ns_encoding_percent_encode(enc, query, strlen(query),
+                               NS_PERCENT_SPECIAL_QUERY, FALSE, out);
+    if (fragment) g_string_append(out, fragment);
+    g_free(query);
+    g_free(url);
+    return g_string_free(out, FALSE);
 }
 
 char *
@@ -6388,47 +6420,26 @@ ns_multipart_quote_field(GString *out, const char *s)
     }
 }
 
-static char *g_form_submission_charset;
+static const ns_encoding *g_form_submission_encoding;
 
 void
 ns_form_set_submission_charset(const char *charset)
 {
-    g_free(g_form_submission_charset);
-    g_form_submission_charset = NULL;
+    g_form_submission_encoding = NULL;
     if (!charset || !*charset) return;
-    char *first = g_strdup(charset);
-    g_strstrip(first);
-    for (char *p = first; *p; p++)
-        if (*p == ' ' || *p == ',' || *p == '\t') { *p = '\0'; break; }
-    if (*first && g_ascii_strcasecmp(first, "UTF-8") != 0 &&
-        g_ascii_strcasecmp(first, "UTF8") != 0 &&
-        g_ascii_strcasecmp(first, "UTF-16LE") != 0 &&
-        g_ascii_strcasecmp(first, "UTF-16BE") != 0)
-        g_form_submission_charset = first;
-    else
-        g_free(first);
+    gchar **labels = g_strsplit_set(charset, " \t\n\f\r", -1);
+    for (gchar **l = labels; *l && !g_form_submission_encoding; l++)
+        if (**l) g_form_submission_encoding = ns_encoding_for_label(*l);
+    g_strfreev(labels);
+    g_form_submission_encoding = ns_encoding_output(g_form_submission_encoding);
 }
 
 void
 ns_form_urlencoded_append(GString *out, const char *s)
 {
     if (!out || !s) return;
-    char *converted = NULL;
-    if (g_form_submission_charset) {
-        converted = g_convert(s, -1, g_form_submission_charset, "UTF-8",
-                              NULL, NULL, NULL);
-        if (converted) s = converted;
-    }
-    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
-        unsigned char c = *p;
-        if (g_ascii_isalnum(c) || c == '*' || c == '-' || c == '.' || c == '_')
-            g_string_append_c(out, (char)c);
-        else if (c == ' ')
-            g_string_append_c(out, '+');
-        else
-            g_string_append_printf(out, "%%%02X", c);
-    }
-    g_free(converted);
+    ns_encoding_percent_encode(g_form_submission_encoding, s, strlen(s),
+                               NS_PERCENT_URLENCODED, TRUE, out);
 }
 
 void

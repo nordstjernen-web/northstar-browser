@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Forms submitted from pages in a legacy encoding send their fields in
+  that encoding (or the first valid `accept-charset` label) as the
+  Encoding Standard's encoders produce them. A single character the
+  encoding could not represent -- a snowman on a Shift_JIS page, `Ā` on
+  a windows-1252 page -- made the whole field fall back to UTF-8; it is
+  now sent as `%26%23NNNN%3B` and the rest of the field keeps its
+  encoding. Link queries use the same encoders, which fixes the
+  Shift_JIS NEC/IBM duplicates (U+2170 is `FA40`, not `EEEF`), the
+  GB18030-2022 mappings in gb18030 and GBK, and the ISO-2022-JP escape
+  that must close a JIS X 0208 run before an unencodable character.
 * Links in pages that use a legacy encoding put non-ASCII query text
   into the URL in that encoding, as HTML's URL parsing requires: on a
   windows-1252 page `<a href="?q=é">` now reads back and navigates as
