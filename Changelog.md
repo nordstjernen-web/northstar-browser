@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Removing or inserting children no longer counts the node's position
+  among its siblings when no `Range` exists. The bookkeeping that keeps
+  live ranges pointing at the right offsets measured the index of every
+  moved node by walking its previous siblings, so emptying a 20,000-item
+  list from the end took 13 seconds and 5,000 insertions into the middle
+  of a 10,000-child element took 4; they now take 29 ms and 41 ms. Pages
+  with live ranges keep the exact same range updates.
 * Changing an element's `class` or `id` to a name no style sheet
   mentions no longer restyles everything inside it. Toggling a theme
   class on `<body>` that no selector uses re-ran the whole cascade --
