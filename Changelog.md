@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `initial` on an inherited property means that property's initial
+  value -- black text, a 16px font, normal weight and style,
+  `line-height: normal` and so on -- instead of acting like `inherit`.
+  The cascade stored nothing for the keyword, and an inherited property
+  with nothing stored takes its parent's value, so `color: initial`
+  inside red text stayed red and `all: initial` barely reset anything a
+  reader could see.
 * `rem` in the root element's own `font-size` is measured against the
   initial 16px, as the spec requires, instead of against the size it is
   in the middle of computing. `html { font-size: 1.25rem }` came out at
