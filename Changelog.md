@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Flexible grid tracks honour their fixed minimums. `minmax(40px, 1fr)
+  minmax(0, 1fr)` in a 60px grid gave the second column 30px and
+  overflowed; a track whose share falls below its minimum now keeps the
+  minimum and the others split what is left (40px and 20px). Space that
+  `fr` factors summing below 1 leave over stretches `auto` tracks, and
+  in a grid with a fixed height a `minmax(0, 1fr)` row no longer grows
+  to fit its content, nor does an item spanning several rows including a
+  flexible one stretch them.
 * `calc()`, `min()`, `max()` and `clamp()` values set from script read
   back simplified the way CSS Values 4 serializes them: terms of the
   same unit are combined, absolute units become `px`, and a sum lists
