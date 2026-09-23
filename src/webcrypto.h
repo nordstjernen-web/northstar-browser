@@ -59,6 +59,8 @@ typedef struct {
     ns_crypto_key *peer;
     int           counter_bits;
     int           pss_salt_len;
+    const guint8 *context;
+    gsize         context_len;
 } ns_crypto_params;
 
 void           ns_crypto_key_unref(ns_crypto_key *k);
@@ -70,6 +72,7 @@ const char    *ns_crypto_key_curve(const ns_crypto_key *k);
 guint8        *ns_crypto_rsa_exponent(const ns_crypto_key *k, gsize *len);
 guint8        *ns_crypto_digest(const char *hash, const guint8 *data,
                                 gsize len, gsize *out_len);
+gboolean       ns_crypto_eddsa_context_supported(void);
 
 ns_crypto_key *ns_crypto_generate_secret(const char *algo, const char *hash,
                                          int length_bits, gboolean extractable,
