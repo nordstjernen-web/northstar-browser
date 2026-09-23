@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An absolutely positioned box without `top` sits where it would have
+  flowed, not at the bottom of its parent. Finding that static position
+  only settled when the walk reached the next element after the box, by
+  which point the whole parent had been counted, so a positioned first
+  child of a 30px block landed 30px too low; and boxes inside earlier
+  positioned boxes were counted as if they took up space in the flow.
 * A child's bottom margin stays inside a parent it must not escape. It
   collapsed through any parent without bottom padding or border, so an
   `overflow: hidden` box, a float or an inline-block lost its last
