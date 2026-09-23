@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Submit buttons take part in form validation (`willValidate` is true
+  and a custom validity message on one blocks submission), and a
+  `readonly` input of any type is left out of it, as HTML specifies.
 * Tab continues from where you clicked: after clicking text or any
   other non-focusable spot, Tab moves to the next focusable element
   after it and Shift+Tab to the one before, instead of starting over
