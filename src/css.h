@@ -898,12 +898,14 @@ typedef struct ns_css_decl {
     ns_css_prop prop;
     ns_css_value *value;
     gboolean important;
+    int order;
 } ns_css_decl;
 
 typedef struct ns_css_pending_decl {
     char     *pname;
     char     *raw_vtext;
     gboolean  important;
+    int       order;
 } ns_css_pending_decl;
 
 typedef struct ns_css_rule {

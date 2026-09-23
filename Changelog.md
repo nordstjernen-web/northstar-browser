@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A declaration that uses `var()` keeps its place among the other
+  declarations of its rule. Such declarations are set aside until the
+  element's custom properties are known, and were then ranked after
+  every plain declaration of the rule, so
+  `padding: var(--gap); padding-top: 3px` ended up with the variable's
+  padding on top instead of 3px.
 * An element's own `style` attribute outranks cascade layers, for
   `!important` declarations as well as normal ones. Layers were
   compared before the inline flag, so
