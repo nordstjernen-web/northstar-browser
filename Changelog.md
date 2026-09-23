@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Switching the desktop between light and dark, or turning animations
+  off, now reaches `prefers-color-scheme` and `prefers-reduced-motion`
+  rules in style sheets that were already loaded. Media queries are
+  evaluated when a sheet is parsed, and the parsed-sheet caches were
+  only cleared for print, so a page reloaded after a theme change kept
+  the rules chosen for the old one.
 * Invalid style rules are dropped the way CSS Syntax requires. After a
   stray `;` or `}` between rules the parser resumed at the next rule,
   and a selector list with an empty item, a trailing comma or trailing

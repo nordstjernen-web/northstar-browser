@@ -17081,13 +17081,17 @@ ns_css_get_color_scheme(void)
 void
 ns_css_set_reduced_motion(ns_css_reduced_motion motion)
 {
+    if (g_reduced_motion == motion) return;
     g_reduced_motion = motion;
+    ns_css_stylesheet_cache_drop();
 }
 
 void
 ns_css_set_color_scheme(ns_css_color_scheme scheme)
 {
+    if (g_color_scheme == scheme) return;
     g_color_scheme = scheme;
+    ns_css_stylesheet_cache_drop();
 }
 
 static gboolean

@@ -47,6 +47,7 @@ ns_css_set_media_device(const ns_css_media_device *device)
     if (g_mq_device.color_bits < 0) g_mq_device.color_bits = 0;
     if (g_mq_device.color_index_bits < 0) g_mq_device.color_index_bits = 0;
     if (g_mq_device.monochrome_bits < 0) g_mq_device.monochrome_bits = 0;
+    ns_css_stylesheet_cache_drop();
 }
 
 void
