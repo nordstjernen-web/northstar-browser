@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An `<img>` in the page's markup whose same-origin address redirects to
+  another site now taints a canvas it is drawn into. Images the page loads
+  up front were stored without the address the redirect ended at, so they
+  were judged by the address the markup asked for and their pixels stayed
+  readable through `getImageData` and `toDataURL`. Images created from
+  script already recorded it.
 * `OffscreenCanvas.convertToBlob()` rejects with a `SecurityError` when
   a cross-origin image has been drawn into the canvas. `getImageData`,
   `toDataURL` and `toBlob` already refused a tainted canvas, but

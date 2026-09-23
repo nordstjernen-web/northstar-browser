@@ -854,6 +854,12 @@ typedef struct {
 } img_fetch_item;
 
 static void
+img_record_final_url(ns_image *img, const char *final_url)
+{
+    if (img && !img->final_url) img->final_url = g_strdup(final_url);
+}
+
+static void
 on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 {
     (void)src;
@@ -861,8 +867,10 @@ on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
     if (resp && !resp->error && resp->body && resp->body->len > 0) {
-        ns_image_cache_insert_encoded(it->st->cache, it->abs,
-                                      resp->body->data, resp->body->len);
+        img_record_final_url(
+            ns_image_cache_insert_encoded(it->st->cache, it->abs,
+                                          resp->body->data, resp->body->len),
+            resp->final_url);
     }
     if (resp) ns_response_free(resp);
     g_clear_error(&err);
@@ -987,6 +995,7 @@ img_session_unref(ns_engine_img_session *s)
 typedef struct img_async_item {
     ns_engine_img_session *session;
     char                  *abs;
+    char                  *final_url;
 } img_async_item;
 
 static void
@@ -998,6 +1007,7 @@ img_async_item_finish(img_async_item *it)
         s->arrived_cb(s->user_data);
     img_session_unref(s);
     g_free(it->abs);
+    g_free(it->final_url);
     g_free(it);
 }
 
@@ -1027,7 +1037,9 @@ on_image_decoded_async(GObject *src, GAsyncResult *result, gpointer user_data)
     if (s->dead)
         ns_image_decoding_free(decoding);
     else
-        ns_image_cache_insert_decoding(s->cache, it->abs, decoding);
+        img_record_final_url(
+            ns_image_cache_insert_decoding(s->cache, it->abs, decoding),
+            it->final_url);
     img_async_item_finish(it);
 }
 
@@ -1045,6 +1057,7 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
                       resp->body->len > 0;
     if (usable && ns_config_get()->async_image_decode) {
         GBytes *body = g_bytes_new(resp->body->data, resp->body->len);
+        it->final_url = g_strdup(resp->final_url);
         ns_response_free(resp);
         GTask *task = g_task_new(NULL, NULL, on_image_decoded_async, it);
         g_task_set_task_data(task, body, (GDestroyNotify)g_bytes_unref);
@@ -1053,8 +1066,10 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
         return;
     }
     if (usable)
-        ns_image_cache_insert_encoded(s->cache, it->abs,
-                                      resp->body->data, resp->body->len);
+        img_record_final_url(
+            ns_image_cache_insert_encoded(s->cache, it->abs,
+                                          resp->body->data, resp->body->len),
+            resp->final_url);
     if (resp) ns_response_free(resp);
     img_async_item_finish(it);
 }
