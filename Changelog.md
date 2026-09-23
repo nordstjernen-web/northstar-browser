@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A type selector that follows another simple selector in a compound
+  (`[foo]i`, `.a*`) is a parse error instead of silently matching, and
+  `selectorText` / `cssText` drop comments and write an attribute
+  selector's case flag as ` i]` / ` s]`.
 * A one-line text input (`text`, `search`, `tel`, `url`, `email`,
   `password`) never uses a line height smaller than `normal`, as HTML
   requires, so `input { line-height: 1px }` no longer squashes the field

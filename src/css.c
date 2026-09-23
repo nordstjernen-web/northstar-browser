@@ -3171,6 +3171,10 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                   css_user_action_pseudo_at(p + 1, end)))
                 g_sel_parse_error = TRUE;
             if (cc == '*' || (cc == '|' && !(p + 1 < end && p[1] == '='))) {
+                if (any) {
+                    g_sel_parse_error = TRUE;
+                    cmp->never_match = TRUE;
+                }
                 if (cc == '*') p++;
                 if (p < end && *p == '|' && !(p + 1 < end && p[1] == '=')) {
                     g_clear_pointer(&cmp->namespace_uri, g_free);
@@ -3245,6 +3249,10 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
                 }
                 any = TRUE;
             } else if (is_ident_start(cc) || cc == '\\') {
+                if (any) {
+                    g_sel_parse_error = TRUE;
+                    cmp->never_match = TRUE;
+                }
                 char *type = read_css_ident(&p, end);
                 if (p < end && *p == '|' && !(p + 1 < end && p[1] == '=')) {
                     g_sel_ns_prefix = TRUE;
