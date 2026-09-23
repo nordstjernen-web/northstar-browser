@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A style sheet pulled in with `@import` is parsed once, like a
+  `<link>` sheet, instead of again on every layout. Every relayout
+  re-parsed each imported sheet from its bytes, so a page that imports
+  a 2,000-rule sheet and changes its DOM twenty times spent 4.6 seconds
+  in the parser; it now takes 0.14 seconds, the same as linking the
+  sheet. The cached sheet is keyed by its address, the layer it is
+  imported into and the viewport, and is re-parsed when the fetched
+  bytes change.
 * `:nth-child()`, `:nth-last-child()`, `:nth-of-type()` and
   `:nth-last-of-type()` no longer slow down with the square of the list
   length. Each test counted the element's siblings from scratch, so a
