@@ -1656,20 +1656,7 @@ ns_net_resolve_ca_bundle(void)
         if (g_ca_bundle) return;
     }
 
-#if defined(__ANDROID__)
-    const char *android_paths[] = {
-        "/system/etc/security/cacerts.pem",
-        "/apex/com.android.conscrypt/cacerts.pem",
-        "/data/misc/keychain/cacerts-added/cacert.pem",
-        NULL,
-    };
-    for (int i = 0; android_paths[i]; i++)
-        if (ns_net_try_ca_bundle(android_paths[i])) return;
-    g_info("ns_net: no CA bundle found; the Android host app should set "
-           "CURL_CA_BUNDLE to an extracted cacert.pem before ns_browser_init().");
-#endif
-
-#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__FreeBSD__) || defined(__NetBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__)
     const char *unix_paths[] = {
         "/etc/ssl/certs/ca-certificates.crt",
         "/etc/pki/tls/certs/ca-bundle.crt",
@@ -2716,11 +2703,7 @@ about_diagnostics_html(void)
     diag_kv(s, "Networking", curl_version());
 
     g_string_append(s, "<h3>Features</h3>");
-#ifdef NS_HAVE_LIBAV
-    diag_feature(s, "WebM video (VP8 / VP9 / Opus)", TRUE);
-#else
-    diag_feature(s, "WebM video (VP8 / VP9 / Opus)", FALSE);
-#endif
+    diag_feature(s, "MPEG-1 video", TRUE);
 #ifdef NS_HAVE_AVIF
     diag_feature(s, "AVIF images", TRUE);
 #else
