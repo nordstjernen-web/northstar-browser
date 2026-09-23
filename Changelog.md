@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `min-content`, `max-content`, `fit-content` and `stretch` work in
+  `min-width`/`max-width` and `min-height`/`max-height` as well as in
+  `width`/`height`, on inline-blocks, floats, flex items and absolutely
+  positioned boxes. The width keywords measured a box that had a pixel
+  `width` of its own as that width -- so `width: 0; min-width:
+  min-content` stayed 0 and `width: 500px; max-width: max-content`
+  stayed 500px -- the height keywords were ignored, and a flex item's
+  `width: min-content` or `max-width: fit-content` was sized from its
+  max-content width. A flex item with a `min-content` or `max-content`
+  height is no longer stretched to the line.
 * A `<fieldset>`'s `<legend>` sits in the frame's top border, the way
   every browser draws it, instead of being a full-width line of text
   inside the frame. The legend is shrink-wrapped to its text whatever
