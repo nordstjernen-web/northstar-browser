@@ -331,6 +331,89 @@ fill_outer_shadow(cairo_t *cr, double ox, double oy, double ow, double oh,
 
 static void box_blur_argb(guchar *data, int stride, int w, int h, int radius);
 
+#define NS_SHADOW_CACHE_MAX_BYTES ((gsize)32 << 20)
+
+typedef struct shadow_key {
+    double sw, sh;
+    double radius;
+    double radii_x[4], radii_y[4];
+    double r, g, b, a;
+} shadow_key;
+
+static GHashTable *g_shadow_cache;
+static gsize g_shadow_cache_bytes;
+
+static guint
+shadow_key_hash(gconstpointer v)
+{
+    const guchar *p = v;
+    guint h = 2166136261u;
+    for (gsize i = 0; i < sizeof(shadow_key); i++)
+        h = (h ^ p[i]) * 16777619u;
+    return h;
+}
+
+static gboolean
+shadow_key_equal(gconstpointer a, gconstpointer b)
+{
+    return memcmp(a, b, sizeof(shadow_key)) == 0;
+}
+
+static cairo_surface_t *
+blurred_shadow_surface(double sw, double sh_h, corner_radii radii, int radius,
+                       int pad, int surf_w, int surf_h,
+                       double br, double bg, double bb, double ba)
+{
+    shadow_key key;
+    memset(&key, 0, sizeof key);
+    key.sw = sw;
+    key.sh = sh_h;
+    key.radius = radius;
+    memcpy(key.radii_x, radii.x, sizeof key.radii_x);
+    memcpy(key.radii_y, radii.y, sizeof key.radii_y);
+    key.r = br;
+    key.g = bg;
+    key.b = bb;
+    key.a = ba;
+    if (!g_shadow_cache)
+        g_shadow_cache = g_hash_table_new_full(
+            shadow_key_hash, shadow_key_equal, g_free,
+            (GDestroyNotify)cairo_surface_destroy);
+    cairo_surface_t *hit = g_hash_table_lookup(g_shadow_cache, &key);
+    if (hit) return cairo_surface_reference(hit);
+
+    cairo_surface_t *surf =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return NULL;
+    }
+    cairo_t *scr = cairo_create(surf);
+    rounded_rect_path(scr, pad, pad, sw, sh_h, radii);
+    cairo_set_source_rgba(scr, br, bg, bb, ba);
+    cairo_fill(scr);
+    cairo_destroy(scr);
+    cairo_surface_flush(surf);
+    guchar *data = cairo_image_surface_get_data(surf);
+    int stride = cairo_image_surface_get_stride(surf);
+    box_blur_argb(data, stride, surf_w, surf_h, radius);
+    box_blur_argb(data, stride, surf_w, surf_h, radius);
+    box_blur_argb(data, stride, surf_w, surf_h, radius);
+    cairo_surface_mark_dirty(surf);
+
+    gsize bytes = (gsize)stride * (gsize)surf_h;
+    if (bytes <= NS_SHADOW_CACHE_MAX_BYTES / 4) {
+        if (g_shadow_cache_bytes + bytes > NS_SHADOW_CACHE_MAX_BYTES) {
+            g_hash_table_remove_all(g_shadow_cache);
+            g_shadow_cache_bytes = 0;
+        }
+        g_hash_table_insert(g_shadow_cache, g_memdup2(&key, sizeof key),
+                            cairo_surface_reference(surf));
+        g_shadow_cache_bytes += bytes;
+    }
+    return surf;
+}
+
 static void
 paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh_h,
                          corner_radii radii, double blur,
@@ -347,24 +430,15 @@ paint_blurred_box_shadow(cairo_t *cr, double sx, double sy, double sw, double sh
     if (ish < 1) ish = 1;
     int surf_w = isw + pad * 2, surf_h = ish + pad * 2;
     if (surf_w > 8192 || surf_h > 8192) return;
-    cairo_surface_t *surf =
-        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, surf_w, surf_h);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
+    double cx0, cy0, cx1, cy1;
+    cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+    if (sx - pad >= cx1 || sy - pad >= cy1 ||
+        sx - pad + surf_w <= cx0 || sy - pad + surf_h <= cy0)
         return;
-    }
-    cairo_t *scr = cairo_create(surf);
-    rounded_rect_path(scr, pad, pad, sw, sh_h, radii);
-    cairo_set_source_rgba(scr, br, bg, bb, ba);
-    cairo_fill(scr);
-    cairo_destroy(scr);
-    cairo_surface_flush(surf);
-    guchar *data = cairo_image_surface_get_data(surf);
-    int stride = cairo_image_surface_get_stride(surf);
-    box_blur_argb(data, stride, surf_w, surf_h, radius);
-    box_blur_argb(data, stride, surf_w, surf_h, radius);
-    box_blur_argb(data, stride, surf_w, surf_h, radius);
-    cairo_surface_mark_dirty(surf);
+    cairo_surface_t *surf = blurred_shadow_surface(sw, sh_h, radii, radius,
+                                                   pad, surf_w, surf_h,
+                                                   br, bg, bb, ba);
+    if (!surf) return;
 
     cairo_save(cr);
     cairo_new_path(cr);

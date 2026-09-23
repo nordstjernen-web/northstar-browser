@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Blurred `box-shadow`s are cached, so a page of cards with the same
+  shadow blurs it once instead of once per card per frame, and shadows
+  outside the repainted area are skipped. Painting such a page fell from
+  72 ms to 3 ms a frame.
 * A cross-origin frame can no longer read the embedding site's images
   through a canvas. Whether an image was cross-origin was judged against
   the top-level page even when a frame's script had loaded it, because
