@@ -329,6 +329,104 @@ Significant changes in each release:
   current viewport, where it used to keep the size the window had when
   the stylesheet was first parsed -- so `calc(100vh - 60px)` follows a
   window resize and resolves per frame.
+* Every radio button in a required group reports `valueMissing` while
+  none is checked, not only the one carrying `required`; required
+  checkboxes, file inputs and selects report it even when disabled;
+  and `input.validity` identifies itself as a `ValidityState`.
+* Submit buttons take part in form validation (`willValidate` is true
+  and a custom validity message on one blocks submission), and a
+  `readonly` input of any type is left out of it, as HTML specifies.
+* Tab continues from where you clicked: after clicking text or any
+  other non-focusable spot, Tab moves to the next focusable element
+  after it and Shift+Tab to the one before, instead of starting over
+  at the top of the page.
+* The `--wpt` runner delivers `test_driver` clicks, pointer actions and
+  key presses as trusted input through the same paths as the shell, so
+  light dismiss, Escape, Tab, keyboard activation and click-to-focus
+  are exercised as a user triggers them; WebDriver key codes are no
+  longer typed into text fields as raw characters.
+* Hiding a popover no longer hands focus back to an element that a
+  script moved inside the popover while it was open; that element is
+  hidden along with it.
+* Popover and dialog light dismiss runs before the page receives the
+  `pointerdown`/`pointerup` that triggers it, so `beforetoggle` reaches
+  the page ahead of its `pointerup` listeners and a listener that
+  rearranges the page cannot change which popover was clicked.
+* A popover opened inside a modal `<dialog>` can be clicked. Hit
+  testing only looked inside the dialog's own box and missed the
+  popover drawn above it, so clicks on it landed on the dialog.
+* `:focus` and `:focus-visible` are up to date when a `focus` listener
+  reads styles: `getComputedStyle()` inside the handler described the
+  element as unfocused, a focused button input switched to a text
+  input did not start matching `:focus-visible`, and headless
+  rendering matched `:focus` against the last field it had typed into
+  instead of the page's focused element.
+* Links, buttons, checkboxes, radio buttons and `<summary>` respond to
+  the keyboard: Enter activates a focused link, button or summary, and
+  Space (on release) a focused button, checkbox, radio button or
+  summary, with a trusted `click` like a mouse press. Enter on a
+  focused link or summary used to do nothing, Enter on a button
+  submitted its form without a click, and Space scrolled the page.
+* `String(link)` and `link + ""` give the URL of an `<a>` or `<area>`
+  element, as their `href` stringifier requires, instead of
+  "[object HTMLAnchorElement]".
+* Client-side image maps work. Clicking, hovering or calling
+  `elementFromPoint()` over an `<img usemap>` lands on the `<area>`
+  under the pointer (rectangles, circles, polygons with the even-odd
+  rule and `default`, with `coords` parsed as HTML's list of numbers,
+  garbage and all), and clicking an area follows its link. Areas used
+  to be invisible to the pointer, so the whole image acted as one
+  unlinked picture.
+* A `<script>` that is inserted empty runs once it gets text or a
+  `src`, as HTML's "prepare the script element" requires: a script
+  created, attached and only then filled through `textContent`,
+  `appendChild` or `src` used to be marked as already started and
+  never ran. A `src=""` now fires `error` instead of being ignored.
+* The `autofocus` attribute works on page load: the first focusable
+  element carrying it in the document gets focus at the next rendering
+  update (or before `load` at the latest), unless something is
+  already focused or the URL fragment points at an element. Search
+  boxes and login fields marked `autofocus` used to wait for a click.
+* `<dialog>` follows the HTML standard's show, close and request-close
+  steps. The `close` event fired synchronously and even for a dialog
+  that was never open, `close()` on a closed dialog still changed its
+  `returnValue`, `show()` on a modal dialog did not throw, a modal
+  dialog opened from a document that is not displayed did not throw,
+  the dialog on top was whichever came last in the document rather
+  than the one opened last, and focus went back to whatever was focused
+  before the first modal dialog. Dialogs now fire `beforetoggle` and a
+  queued `toggle`, queue `close`, remember the focus they took and hand
+  it back when they close, pick their initial focus from `autofocus`
+  or the first keyboard-focusable descendant, honour `closedby`
+  (`closedBy` reflects it) for Escape and clicks outside, run
+  `requestClose()` through a cancelable `cancel` event exactly once,
+  hide unrelated popovers when opened, and stop being modal when
+  removed from the document. `:modal` matches every open modal dialog.
+* `srcset` is parsed as the HTML standard describes. The old splitter
+  cut every candidate at its first comma, so a `data:` URL or any URL
+  with a comma in it was truncated, descriptors in parentheses or with
+  junk after them were not rejected, and a `src` lost to a `1x`
+  candidate. An image chosen from a `2x` or `w` candidate is now laid
+  out at its density-corrected size (a `srcset="big.jpg 800w"
+  sizes="400px"` image is 400 pixels wide, not 800), `naturalWidth`
+  and `naturalHeight` report the same corrected size, and a
+  `<picture>` only considers the `<source>` elements before its
+  `<img>`.
+* Popovers and invoker commands work as the HTML standard describes.
+  `showPopover()` only showed an element and never closed anything, a
+  `popover=auto` stayed open when another opened, `popovertarget`
+  buttons toggled even inside a form, and nothing ever dismissed a
+  popover; an open popover also stayed `display: none` until something
+  else restyled the page. Auto and hint popovers now form a stack that
+  closes unrelated popovers, clicking outside or pressing Escape closes
+  the topmost one (Escape also cancels a modal dialog), the `popover`,
+  `popoverTargetAction`, `popoverTargetElement`, `command` and
+  `commandForElement` properties reflect their attributes, removing or
+  retyping an open popover hides it, `beforetoggle` fires synchronously
+  and `toggle` once per task as a `ToggleEvent` with its `source`, and
+  `<button commandfor command>` fires a cancelable `CommandEvent` and
+  runs the popover and dialog commands. An open popover is centred in
+  the viewport with the standard UA popover box style.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs

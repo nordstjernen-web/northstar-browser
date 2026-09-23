@@ -1752,6 +1752,13 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
 
 static const ns_node *browser_hit_node(ns_browser *browser, int x, int y);
 
+static gboolean
+browser_node_is_hyperlink(const ns_node *n)
+{
+    return ns_node_is_element_named(n, "a") ||
+           ns_node_is_element_named(n, "area");
+}
+
 char *
 ns_browser_link_at(ns_browser *browser, int x, int y)
 {
@@ -1768,7 +1775,7 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         const char *href = NULL;
         const ns_node *node = browser_hit_node(browser, px, py);
         for (const ns_node *a = node; a && (!href || !*href); a = a->parent)
-            if (ns_node_is_element_named(a, "a"))
+            if (browser_node_is_hyperlink(a))
                 href = ns_element_get_attr(a, "href");
         if (href && *href) return browser_resolve_navigation(browser, href);
     }
@@ -1814,7 +1821,7 @@ ns_browser_cursor_at(ns_browser *browser, int x, int y)
     if (match) return match;
 
     for (const ns_node *n = node; n; n = n->parent)
-        if (ns_node_is_element_named(n, "a") &&
+        if (browser_node_is_hyperlink(n) &&
             ns_element_get_attr(n, "href")) return NULL;
     for (const ns_node *n = node; n; n = n->parent)
         if (ns_node_is_text_input(n)) return g_strdup("text");
@@ -2506,7 +2513,7 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
         const ns_node *focus = NULL;
         for (const ns_node *a = node; a; a = a->parent)
             if (ns_node_is_focusable(a)) { focus = a; break; }
-        ns_js_set_focus(browser->js, focus);
+        ns_js_focus_from_pointer(browser->js, node);
         const char *val = focus ? ns_node_editable_value(focus) : NULL;
         browser->caret_byte = val ? strlen(val) : 0;
         browser->sel_anchor_byte = browser->caret_byte;
@@ -2687,7 +2694,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     } else if (!prevented && !browser->pending_nav) {
         const char *href = NULL;
         for (const ns_node *a = node; a && !href; a = a->parent) {
-            if (ns_node_is_element_named(a, "a")) {
+            if (browser_node_is_hyperlink(a)) {
                 const char *h = ns_element_get_attr(a, "href");
                 if (h && *h) href = h;
             }
@@ -3011,8 +3018,25 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                 browser_select_key(browser, (ns_node *)f, key, mods)) {
                 browser->dirty = TRUE;
                 if (out_prevented) *out_prevented = 1;
+            } else if (f && !(mods & (2 | 4 | 8)) &&
+                       ns_js_keyboard_activates(f, key)) {
+                if (out_prevented) *out_prevented = 1;
+            } else if (f && !(mods & (2 | 4 | 8)) &&
+                       ns_js_keyboard_activate(browser->js, f, key, FALSE)) {
+                browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
             } else if (f && ns_node_editable_value(f) &&
-                browser_edit_key(browser, (ns_node *)f, key, mods))
+                browser_edit_key(browser, (ns_node *)f, key, mods)) {
+                browser->dirty = TRUE;
+            } else if (key && strcmp(key, "Escape") == 0 &&
+                       ns_js_process_close_request(browser->js)) {
+                browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            }
+        } else if (!prevented && kind == 1) {
+            const ns_node *f = ns_js_focused_node(browser->js);
+            if (f && !(mods & (2 | 4 | 8)) &&
+                ns_js_keyboard_activate(browser->js, f, key, TRUE))
                 browser->dirty = TRUE;
         }
     }

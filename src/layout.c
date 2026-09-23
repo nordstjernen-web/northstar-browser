@@ -3906,106 +3906,230 @@ build_form_control_block(const ns_node *n, const ns_style *s, GHashTable *styles
     return block;
 }
 
-static char *
-first_url_from_srcset_sized(const char *srcset, const char *sizes)
+typedef struct {
+    char    *url;
+    double   density;
+    double   width;
+} srcset_candidate;
+
+static gboolean
+srcset_is_space(char c)
 {
-    if (!srcset) return NULL;
-    const double dpr = 1.0;
+    return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r';
+}
 
-    char *width_url = NULL, *width_fallback = NULL;
-    double width_best = -1.0, width_max = -1.0;
-    char *density_url = NULL, *density_fallback = NULL;
-    double density_best = G_MAXDOUBLE, density_max = -1.0;
-    double target_w = -1.0;
+static gboolean
+srcset_valid_integer(const char *s, gsize n)
+{
+    if (n == 0) return FALSE;
+    for (gsize i = 0; i < n; i++)
+        if (!g_ascii_isdigit(s[i])) return FALSE;
+    return TRUE;
+}
 
-    const char *p = srcset;
-    while (*p) {
-        while (*p && (g_ascii_isspace(*p) || *p == ',')) p++;
+static gboolean
+srcset_valid_float(const char *s, gsize n)
+{
+    gsize i = 0, digits = 0;
+    if (i < n && s[i] == '-') i++;
+    while (i < n && g_ascii_isdigit(s[i])) { i++; digits++; }
+    if (i < n && s[i] == '.') {
+        i++;
+        gsize frac = 0;
+        while (i < n && g_ascii_isdigit(s[i])) { i++; frac++; }
+        if (frac == 0) return FALSE;
+        digits += frac;
+    }
+    if (digits == 0) return FALSE;
+    if (i < n && (s[i] == 'e' || s[i] == 'E')) {
+        i++;
+        if (i < n && (s[i] == '-' || s[i] == '+')) i++;
+        gsize exp = 0;
+        while (i < n && g_ascii_isdigit(s[i])) { i++; exp++; }
+        if (exp == 0) return FALSE;
+    }
+    return i == n;
+}
+
+static double
+srcset_number(const char *s, gsize n)
+{
+    char *copy = g_strndup(s, n);
+    double v = g_ascii_strtod(copy, NULL);
+    g_free(copy);
+    return v;
+}
+
+static gboolean
+srcset_parse_descriptors(GPtrArray *descriptors, double *width, double *density)
+{
+    gboolean has_w = FALSE, has_x = FALSE, has_h = FALSE;
+    for (guint i = 0; i < descriptors->len; i++) {
+        const char *d = g_ptr_array_index(descriptors, i);
+        gsize n = strlen(d);
+        char last = n ? d[n - 1] : '\0';
+        if (last == 'w') {
+            if (has_w || has_x || !srcset_valid_integer(d, n - 1)) return FALSE;
+            double v = srcset_number(d, n - 1);
+            if (v <= 0) return FALSE;
+            has_w = TRUE;
+            *width = v;
+        } else if (last == 'x') {
+            if (has_w || has_x || has_h || !srcset_valid_float(d, n - 1))
+                return FALSE;
+            double v = srcset_number(d, n - 1);
+            if (v < 0) return FALSE;
+            has_x = TRUE;
+            *density = v;
+        } else if (last == 'h') {
+            if (has_h || has_x || !srcset_valid_integer(d, n - 1)) return FALSE;
+            if (srcset_number(d, n - 1) <= 0) return FALSE;
+            has_h = TRUE;
+        } else {
+            return FALSE;
+        }
+    }
+    return !has_h || has_w;
+}
+
+typedef enum {
+    SRCSET_IN_DESCRIPTOR,
+    SRCSET_IN_PARENS,
+    SRCSET_AFTER_DESCRIPTOR,
+} srcset_state;
+
+static const char *
+srcset_tokenize_descriptors(const char *p, GPtrArray *descriptors)
+{
+    while (srcset_is_space(*p)) p++;
+    GString *cur = g_string_new(NULL);
+    srcset_state state = SRCSET_IN_DESCRIPTOR;
+    for (;; p++) {
+        char c = *p;
+        if (state == SRCSET_IN_DESCRIPTOR) {
+            if (srcset_is_space(c)) {
+                if (cur->len) {
+                    g_ptr_array_add(descriptors, g_strdup(cur->str));
+                    g_string_truncate(cur, 0);
+                    state = SRCSET_AFTER_DESCRIPTOR;
+                }
+            } else if (c == ',') {
+                p++;
+                break;
+            } else if (c == '\0') {
+                break;
+            } else {
+                g_string_append_c(cur, c);
+                if (c == '(') state = SRCSET_IN_PARENS;
+            }
+        } else if (state == SRCSET_IN_PARENS) {
+            if (c == '\0') break;
+            g_string_append_c(cur, c);
+            if (c == ')') state = SRCSET_IN_DESCRIPTOR;
+        } else {
+            if (c == '\0') break;
+            if (!srcset_is_space(c)) {
+                state = SRCSET_IN_DESCRIPTOR;
+                p--;
+            }
+        }
+    }
+    if (cur->len) g_ptr_array_add(descriptors, g_strdup(cur->str));
+    g_string_free(cur, TRUE);
+    return p;
+}
+
+static GArray *
+srcset_parse(const char *input)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(srcset_candidate));
+    const char *p = input ? input : "";
+    for (;;) {
+        while (srcset_is_space(*p) || *p == ',') p++;
         if (!*p) break;
         const char *url_s = p;
-        while (*p && *p != ',' && !g_ascii_isspace(*p)) p++;
+        while (*p && !srcset_is_space(*p)) p++;
         gsize url_len = (gsize)(p - url_s);
-        while (url_len > 0 && url_s[url_len - 1] == ',') url_len--;
-        if (url_len == 0) continue;
-        while (*p == ' ' || *p == '\t') p++;
-        const char *desc_s = p;
-        while (*p && *p != ',') p++;
-        gsize desc_len = (gsize)(p - desc_s);
-        while (desc_len > 0 && (g_ascii_isspace(desc_s[desc_len - 1]) ||
-                                desc_s[desc_len - 1] == ',')) desc_len--;
-
-        double num = 0;
-        char unit = 'x';
-        if (desc_len > 0) {
-            char *d = g_strndup(desc_s, desc_len);
-            char *dend = NULL;
-            double v = g_ascii_strtod(d, &dend);
-            if (dend && dend != d && (*dend == 'w' || *dend == 'W' ||
-                                      *dend == 'x' || *dend == 'X')) {
-                num = v;
-                unit = (*dend == 'w' || *dend == 'W') ? 'w' : 'x';
-            }
-            g_free(d);
-        }
-
-        if (unit == 'w') {
-            if (target_w < 0) target_w = ns_css_sizes_resolve(sizes) * dpr;
-            if (num >= target_w && (width_best < 0 || num < width_best)) {
-                g_free(width_url);
-                width_url = g_strndup(url_s, url_len);
-                width_best = num;
-            }
-            if (num > width_max) {
-                g_free(width_fallback);
-                width_fallback = g_strndup(url_s, url_len);
-                width_max = num;
-            }
+        GPtrArray *descriptors = g_ptr_array_new_with_free_func(g_free);
+        if (url_s[url_len - 1] == ',') {
+            while (url_len > 0 && url_s[url_len - 1] == ',') url_len--;
         } else {
-            double d = num > 0 ? num : 1.0;
-            if (d >= dpr && d < density_best) {
-                g_free(density_url);
-                density_url = g_strndup(url_s, url_len);
-                density_best = d;
-            }
-            if (d > density_max) {
-                g_free(density_fallback);
-                density_fallback = g_strndup(url_s, url_len);
-                density_max = d;
-            }
+            p = srcset_tokenize_descriptors(p, descriptors);
         }
-        if (*p == ',') p++;
+        double width = -1, density = -1;
+        if (url_len > 0 &&
+            srcset_parse_descriptors(descriptors, &width, &density)) {
+            srcset_candidate c = { g_strndup(url_s, url_len), density, width };
+            g_array_append_val(out, c);
+        }
+        g_ptr_array_free(descriptors, TRUE);
     }
+    return out;
+}
 
-    if (width_max >= 0) {
-        g_free(density_url);
-        g_free(density_fallback);
-        if (width_url) { g_free(width_fallback); return width_url; }
-        return width_fallback;
+static void
+srcset_candidates_free(GArray *candidates)
+{
+    for (guint i = 0; i < candidates->len; i++)
+        g_free(g_array_index(candidates, srcset_candidate, i).url);
+    g_array_free(candidates, TRUE);
+}
+
+static char *
+srcset_select(const char *srcset, const char *sizes, const char *src,
+              double *density)
+{
+    const double dpr = 1.0;
+    GArray *cands = srcset_parse(srcset);
+    gboolean any_width = FALSE, any_unit_density = FALSE;
+    double source_size = -1;
+    for (guint i = 0; i < cands->len; i++) {
+        srcset_candidate *c = &g_array_index(cands, srcset_candidate, i);
+        if (c->width > 0) {
+            any_width = TRUE;
+            if (source_size < 0) {
+                source_size = ns_css_sizes_resolve(sizes);
+                if (!isfinite(source_size))
+                    source_size = ns_css_sizes_resolve(NULL);
+            }
+            c->density = source_size > 0 ? c->width / source_size : 1.0;
+        } else if (c->density < 0) {
+            c->density = 1.0;
+        }
+        if (c->width <= 0 && c->density == 1.0) any_unit_density = TRUE;
     }
-    g_free(width_url);
-    g_free(width_fallback);
-    if (density_url) { g_free(density_fallback); return density_url; }
-    return density_fallback;
+    if (src && *src && !any_width && !any_unit_density) {
+        srcset_candidate c = { g_strdup(src), 1.0, -1 };
+        g_array_append_val(cands, c);
+    }
+    const srcset_candidate *best = NULL, *largest = NULL;
+    for (guint i = 0; i < cands->len; i++) {
+        const srcset_candidate *c = &g_array_index(cands, srcset_candidate, i);
+        gboolean duplicate = FALSE;
+        for (guint j = 0; j < i && !duplicate; j++)
+            duplicate = g_array_index(cands, srcset_candidate, j).density ==
+                        c->density;
+        if (duplicate) continue;
+        if (c->density >= dpr && (!best || c->density < best->density))
+            best = c;
+        if (!largest || c->density > largest->density) largest = c;
+    }
+    if (!best) best = largest;
+    char *url = best ? g_strdup(best->url) : NULL;
+    if (best && density) *density = best->density;
+    srcset_candidates_free(cands);
+    return url;
 }
 
 static gboolean
 srcset_has_width_descriptor(const char *srcset)
 {
-    if (!srcset) return FALSE;
-    const char *p = srcset;
-    while (*p) {
-        while (*p && (g_ascii_isspace(*p) || *p == ',')) p++;
-        while (*p && *p != ',' && !g_ascii_isspace(*p)) p++;
-        while (*p == ' ' || *p == '\t') p++;
-        const char *desc_s = p;
-        while (*p && *p != ',') p++;
-        const char *desc_e = p;
-        while (desc_e > desc_s && g_ascii_isspace(desc_e[-1])) desc_e--;
-        if (desc_e > desc_s && (desc_e[-1] == 'w' || desc_e[-1] == 'W'))
-            return TRUE;
-        if (*p == ',') p++;
-    }
-    return FALSE;
+    GArray *cands = srcset_parse(srcset);
+    gboolean any = FALSE;
+    for (guint i = 0; i < cands->len && !any; i++)
+        any = g_array_index(cands, srcset_candidate, i).width > 0;
+    srcset_candidates_free(cands);
+    return any;
 }
 
 static gboolean
@@ -4016,11 +4140,14 @@ ns_pixbuf_likely_supports(const char *mime)
 }
 
 static char *
-pick_picture_source_url(const ns_node *picture)
+pick_picture_source_url(const ns_node *picture, const ns_node *img,
+                        double *density)
 {
     if (!picture) return NULL;
     char *data_fallback = NULL;
-    for (const ns_node *c = picture->first_child; c; c = c->next_sibling) {
+    double data_density = 1.0;
+    for (const ns_node *c = picture->first_child; c && c != img;
+         c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         if (strcmp(c->name, "source") != 0) continue;
         const char *type = ns_element_get_attr(c, "type");
@@ -4028,27 +4155,42 @@ pick_picture_source_url(const ns_node *picture)
         const char *media = ns_element_get_attr(c, "media");
         if (media && *media && !ns_css_media_query_matches(media)) continue;
         const char *sizes = ns_element_get_attr(c, "sizes");
-        const char *dsset = ns_element_get_attr(c, "data-srcset");
-        char *u = first_url_from_srcset_sized(dsset, sizes);
-        if (u && !g_str_has_prefix(u, "data:")) { g_free(data_fallback); return u; }
-        if (u && !data_fallback) data_fallback = u;
-        else g_free(u);
-        const char *ss = ns_element_get_attr(c, "srcset");
-        u = first_url_from_srcset_sized(ss, sizes);
-        if (u && !g_str_has_prefix(u, "data:")) { g_free(data_fallback); return u; }
-        if (u && !data_fallback) data_fallback = u;
-        else g_free(u);
+        const char *sets[2] = { ns_element_get_attr(c, "data-srcset"),
+                                ns_element_get_attr(c, "srcset") };
+        for (int i = 0; i < 2; i++) {
+            double d = 1.0;
+            char *u = srcset_select(sets[i], sizes, NULL, &d);
+            if (u && !g_str_has_prefix(u, "data:")) {
+                g_free(data_fallback);
+                *density = d;
+                return u;
+            }
+            if (u && !data_fallback) {
+                data_fallback = u;
+                data_density = d;
+            } else {
+                g_free(u);
+            }
+        }
         const char *s = ns_element_get_attr(c, "src");
         if (s && *s) {
-            if (!g_str_has_prefix(s, "data:")) { g_free(data_fallback); return g_strdup(s); }
-            if (!data_fallback) data_fallback = g_strdup(s);
+            if (!g_str_has_prefix(s, "data:")) {
+                g_free(data_fallback);
+                *density = 1.0;
+                return g_strdup(s);
+            }
+            if (!data_fallback) {
+                data_fallback = g_strdup(s);
+                data_density = 1.0;
+            }
         }
     }
+    *density = data_density;
     return data_fallback;
 }
 
 static char *
-pick_img_url(const ns_node *n)
+pick_img_url(const ns_node *n, double *density)
 {
     if (!n) return NULL;
     const char *src    = ns_element_get_attr(n, "src");
@@ -4060,22 +4202,57 @@ pick_img_url(const ns_node *n)
     if (!dsset || !*dsset) dsset = ns_element_get_attr(n, "data-lazy-srcset");
     const char *sizes  = ns_element_get_attr(n, "sizes");
 
-    char *u = first_url_from_srcset_sized(dsset, sizes);
+    *density = 1.0;
+    char *u = srcset_select(dsset, sizes, NULL, density);
     if (u && (srcset_has_width_descriptor(dsset) || !dsrc || !*dsrc))
         return u;
     g_free(u);
+    *density = 1.0;
     if (dsrc && *dsrc) return g_strdup(dsrc);
 
     gboolean placeholder = src && g_str_has_prefix(src, "data:");
-    u = first_url_from_srcset_sized(srcset, sizes);
-    if (u && (srcset_has_width_descriptor(srcset) || placeholder || !src || !*src))
-        return u;
-    g_free(u);
-    if (src && *src && !placeholder) return g_strdup(src);
+    u = srcset_select(srcset, sizes, placeholder ? NULL : src, density);
+    if (u) return u;
+    *density = 1.0;
     if (src && *src) return g_strdup(src);
     return NULL;
 }
 
+static char *
+choose_img_url(const ns_node *n, const ns_node **img_out, double *density)
+{
+    const ns_node *img = n;
+    char *url = NULL;
+    *density = 1.0;
+    if (ns_node_is_element_named(n, "img") &&
+        ns_node_is_element_named(n->parent, "picture"))
+        n = n->parent;
+    if (n->name && strcmp(n->name, "picture") == 0) {
+        for (const ns_node *c = n->first_child; c && img == n;
+             c = c->next_sibling)
+            if (ns_node_is_element_named(c, "img"))
+                img = c;
+        double source_density = 1.0;
+        char *source_url = pick_picture_source_url(n, img != n ? img : NULL,
+                                                   &source_density);
+        if (source_url && !g_str_has_prefix(source_url, "data:")) {
+            url = source_url;
+            *density = source_density;
+        } else {
+            if (img != n) url = pick_img_url(img, density);
+            if (!url && source_url) {
+                url = source_url;
+                *density = source_density;
+            } else {
+                g_free(source_url);
+            }
+        }
+    } else {
+        url = pick_img_url(n, density);
+    }
+    if (img_out) *img_out = img;
+    return url;
+}
 
 static double
 image_dimension_attr(const ns_node *n, const char *name)
@@ -4116,62 +4293,30 @@ char *
 ns_img_chosen_url(const ns_node *n)
 {
     if (!n) return NULL;
-    const ns_node *img = n;
-    char *url = NULL;
-    if (n->name && strcmp(n->name, "picture") == 0) {
-        for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-            if (ns_node_is_element_named(c, "img")) {
-                img = c;
-                break;
-            }
-        }
-        char *source_url = pick_picture_source_url(n);
-        if (source_url && !g_str_has_prefix(source_url, "data:")) {
-            url = source_url;
-        } else {
-            if (img != n) url = pick_img_url(img);
-            if (!url && source_url) {
-                url = source_url;
-            } else {
-                g_free(source_url);
-            }
-        }
-    } else {
-        url = pick_img_url(n);
-    }
-    return url;
+    double density = 1.0;
+    return choose_img_url(n, NULL, &density);
+}
+
+double
+ns_img_chosen_density(const ns_node *n)
+{
+    if (!n) return 1.0;
+    double density = 1.0;
+    g_free(choose_img_url(n, NULL, &density));
+    return density > 0 ? density : 1.0;
 }
 
 static ns_box *
 build_image_box(const ns_node *n)
 {
     const ns_node *img = n;
-    char *url = NULL;
-    if (n->name && strcmp(n->name, "picture") == 0) {
-        for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-            if (ns_node_is_element_named(c, "img")) {
-                img = c;
-                break;
-            }
-        }
-        char *source_url = pick_picture_source_url(n);
-        if (source_url && !g_str_has_prefix(source_url, "data:")) {
-            url = source_url;
-        } else {
-            if (img != n) url = pick_img_url(img);
-            if (!url && source_url) {
-                url = source_url;
-            } else {
-                g_free(source_url);
-            }
-        }
-    } else {
-        url = pick_img_url(n);
-    }
+    double density = 1.0;
+    char *url = choose_img_url(n, &img, &density);
     ns_box *box = box_new(NS_BOX_IMAGE);
     box->dom = img;
     ns_box_media *m = ns_box_media_ensure(box);
     m->image_src = url;
+    m->image_density = density > 0 ? density : 1.0;
     box->content_width = image_dimension_attr(img, "width");
     box->content_height = image_dimension_attr(img, "height");
     double file_w = image_dimension_attr(img, "data-file-width");
@@ -6889,10 +7034,12 @@ layout_image(ns_box *box, double parent_content_width)
     }
 
     const ns_image *img = box->media ? (const ns_image *)box->media->image : NULL;
+    double density = box->media && box->media->image_density > 0
+        ? box->media->image_density : 1.0;
     double nat_w = (img && img->loaded && img->natural_width > 0)
-                   ? (double)img->natural_width  : -1;
+                   ? (double)img->natural_width / density : -1;
     double nat_h = (img && img->loaded && img->natural_height > 0)
-                   ? (double)img->natural_height : -1;
+                   ? (double)img->natural_height / density : -1;
     if (declared_size) {
         if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
         if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
@@ -7036,7 +7183,8 @@ replaced_box_intrinsic_width(const ns_box *box)
         w = wv->u.length.v;
     const ns_image *img = box->media ? (const ns_image *)box->media->image : NULL;
     if (w < 0 && img && img->loaded && img->natural_width > 0)
-        w = (double)img->natural_width;
+        w = (double)img->natural_width /
+            (box->media->image_density > 0 ? box->media->image_density : 1.0);
     if (w < 0 && box->content_width > 0) w = box->content_width;
     if (w < 0) w = 200;
     const ns_css_value *mxw = box->style
@@ -14846,6 +14994,7 @@ typedef struct {
 static __thread GArray       *g_hit_deferred;
 static __thread int           g_hit_defer_depth;
 static __thread const ns_box *g_hit_flush_box;
+static __thread double        g_hit_local_x, g_hit_local_y;
 static double g_hit_vp_x, g_hit_vp_y;
 
 void
@@ -15164,8 +15313,11 @@ self_test: ;
     gboolean inside_y = y >= y0 &&
         (root->kind == NS_BOX_TABLE_CELL ? y < y1 : y <= y1);
     if (!box_blocks_hit_testing(root) && !box_is_table_hit_internal(root) &&
-        !box_svg_yields_hit(root) && inside_x && inside_y && root->dom)
+        !box_svg_yields_hit(root) && inside_x && inside_y && root->dom) {
+        g_hit_local_x = x;
+        g_hit_local_y = y;
         return root;
+    }
     return NULL;
 }
 
@@ -15204,6 +15356,9 @@ hit_root_for_point(const ns_box *root, double x, double y)
     if (!modal) return root;
     const ns_box *top = box_for_dom_node(root, modal);
     if (!top || top == root) return root;
+    const ns_box *any = box_hit_test_root(root, x, y);
+    for (const ns_node *n = any ? any->dom : NULL; n; n = n->parent)
+        if (n == modal) return root;
     return box_hit_test_root(top, x, y) ? top : root;
 }
 
@@ -15470,11 +15625,175 @@ hit_node_refines(const ns_node *candidate, const ns_node *current)
     return FALSE;
 }
 
+static const ns_node *
+image_map_find(const ns_node *n, const char *name, int depth)
+{
+    if (!n || depth >= 512) return NULL;
+    if (ns_node_is_element_named(n, "map")) {
+        const char *id = ns_element_get_attr(n, "id");
+        const char *nm = ns_element_get_attr(n, "name");
+        if ((id && strcmp(id, name) == 0) || (nm && strcmp(nm, name) == 0))
+            return n;
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || ns_element_get_attr(c, NS_SHADOW_ATTR))
+            continue;
+        const ns_node *m = image_map_find(c, name, depth + 1);
+        if (m) return m;
+    }
+    return NULL;
+}
+
+static const ns_node *
+image_map_for(const ns_node *img)
+{
+    const char *usemap = ns_element_get_attr(img, "usemap");
+    const char *hash = usemap ? strchr(usemap, '#') : NULL;
+    if (!hash || !hash[1]) return NULL;
+    const ns_node *scope = img;
+    while (scope->parent && !ns_element_get_attr(scope, NS_SHADOW_ATTR))
+        scope = scope->parent;
+    return image_map_find(scope, hash + 1, 0);
+}
+
+static gboolean
+image_map_is_delimiter(char c)
+{
+    return c == ',' || c == ';' || c == ' ' || c == '\t' || c == '\n' ||
+           c == '\f' || c == '\r';
+}
+
+static double
+image_map_number(const char *s, const char *end)
+{
+    const char *p = s;
+    double sign = 1.0;
+    if (p < end && (*p == '-' || *p == '+')) {
+        if (*p == '-') sign = -1.0;
+        p++;
+    }
+    const char *digits = p;
+    while (p < end && g_ascii_isdigit(*p)) p++;
+    if (p < end && *p == '.' && p + 1 < end && g_ascii_isdigit(p[1])) {
+        p++;
+        while (p < end && g_ascii_isdigit(*p)) p++;
+    }
+    if (p == digits) return 0;
+    if (p < end && (*p == 'e' || *p == 'E')) {
+        const char *e = p + 1;
+        if (e < end && (*e == '-' || *e == '+')) e++;
+        if (e < end && g_ascii_isdigit(*e)) {
+            p = e;
+            while (p < end && g_ascii_isdigit(*p)) p++;
+        }
+    }
+    char *copy = g_strndup(digits, (gsize)(p - digits));
+    double v = g_ascii_strtod(copy, NULL);
+    g_free(copy);
+    return isfinite(v) ? sign * v : 0;
+}
+
+static GArray *
+image_map_coords(const char *coords)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(double));
+    const char *p = coords ? coords : "";
+    while (*p && image_map_is_delimiter(*p)) p++;
+    while (*p) {
+        while (*p && !image_map_is_delimiter(*p) && !g_ascii_isdigit(*p) &&
+               *p != '.' && *p != '-')
+            p++;
+        const char *start = p;
+        while (*p && !image_map_is_delimiter(*p)) p++;
+        double v = image_map_number(start, p);
+        g_array_append_val(out, v);
+        while (*p && image_map_is_delimiter(*p)) p++;
+    }
+    return out;
+}
+
+static gboolean
+image_map_polygon_contains(const double *c, guint n, double x, double y)
+{
+    gboolean inside = FALSE;
+    guint pts = n / 2;
+    for (guint i = 0, j = pts - 1; i < pts; j = i++) {
+        double xi = c[2 * i], yi = c[2 * i + 1];
+        double xj = c[2 * j], yj = c[2 * j + 1];
+        double cross = (xj - xi) * (y - yi) - (yj - yi) * (x - xi);
+        if (fabs(cross) < 1e-6 && x >= MIN(xi, xj) && x <= MAX(xi, xj) &&
+            y >= MIN(yi, yj) && y <= MAX(yi, yj))
+            return TRUE;
+        if ((yi > y) != (yj > y) &&
+            x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+            inside = !inside;
+    }
+    return inside;
+}
+
+static gboolean
+image_map_area_contains(const ns_node *area, double x, double y,
+                        double width, double height)
+{
+    const char *shape = ns_element_get_attr(area, "shape");
+    GArray *coords = image_map_coords(ns_element_get_attr(area, "coords"));
+    const double *c = &g_array_index(coords, double, 0);
+    guint n = coords->len;
+    gboolean hit = FALSE;
+    if (shape && (g_ascii_strcasecmp(shape, "circle") == 0 ||
+                  g_ascii_strcasecmp(shape, "circ") == 0)) {
+        if (n >= 3 && c[2] > 0)
+            hit = (x - c[0]) * (x - c[0]) + (y - c[1]) * (y - c[1]) <=
+                  c[2] * c[2];
+    } else if (shape && g_ascii_strcasecmp(shape, "default") == 0) {
+        hit = x >= 0 && y >= 0 && x < width && y < height;
+    } else if (shape && (g_ascii_strcasecmp(shape, "poly") == 0 ||
+                         g_ascii_strcasecmp(shape, "polygon") == 0)) {
+        if (n >= 6) hit = image_map_polygon_contains(c, n & ~1u, x, y);
+    } else if (n >= 4) {
+        double x1 = MIN(c[0], c[2]), x2 = MAX(c[0], c[2]);
+        double y1 = MIN(c[1], c[3]), y2 = MAX(c[1], c[3]);
+        hit = x >= x1 && x < x2 && y >= y1 && y < y2;
+    }
+    g_array_free(coords, TRUE);
+    return hit;
+}
+
+static const ns_node *
+image_map_area_in(const ns_node *n, double x, double y, double width,
+                  double height, int depth)
+{
+    if (!n || depth >= 512) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        if (ns_node_is_element_named(c, "area") &&
+            image_map_area_contains(c, x, y, width, height))
+            return c;
+        const ns_node *m = image_map_area_in(c, x, y, width, height, depth + 1);
+        if (m) return m;
+    }
+    return NULL;
+}
+
+static const ns_node *
+image_map_hit(const ns_box *b, double local_x, double local_y)
+{
+    const ns_node *map = image_map_for(b->dom);
+    if (!map) return NULL;
+    double x = local_x - (b->x + b->margin.left + b->border.left +
+                          b->padding.left);
+    double y = local_y - (b->y + b->margin.top + b->border.top +
+                          b->padding.top);
+    return image_map_area_in(map, x, y, b->content_width, b->content_height,
+                             0);
+}
+
 const ns_node *
 ns_box_hit_dom(const ns_box *root, double x, double y)
 {
     const ns_box *from = hit_root_for_point(root, x, y);
     const ns_box *hit = box_hit_test_root(from, x, y);
+    double local_x = g_hit_local_x, local_y = g_hit_local_y;
     const ns_node *target = hit ? hit->dom : NULL;
     const ns_node *inline_target = ns_box_hit_inline_dom(from, x, y);
     if (inline_target && (!target || hit_node_refines(inline_target, target)))
@@ -15482,6 +15801,12 @@ ns_box_hit_dom(const ns_box *root, double x, double y)
     const ns_node *form_target = ns_box_hit_form_dom(from, x, y);
     if (form_target && (!target || hit_node_refines(form_target, target)))
         target = form_target;
+    if (hit && target == hit->dom && hit->kind == NS_BOX_IMAGE &&
+        ns_node_is_element_named(target, "img") &&
+        ns_element_get_attr(target, "usemap")) {
+        const ns_node *area = image_map_hit(hit, local_x, local_y);
+        if (area) target = area;
+    }
     return target;
 }
 

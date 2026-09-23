@@ -526,6 +526,13 @@ typedef struct headless_flush_ctx {
     gsize              anchor;
 } headless_flush_ctx;
 
+static const ns_node *
+headless_focus(const headless_flush_ctx *c)
+{
+    const ns_node *focused = c->js ? ns_js_focused_node(c->js) : NULL;
+    return focused ? focused : c->focused;
+}
+
 static void
 headless_relayout(headless_flush_ctx *c)
 {
@@ -538,8 +545,8 @@ headless_relayout(headless_flush_ctx *c)
 
     *c->styles = ns_engine_relayout(c->doc, c->base, c->vw, c->vh,
                                     c->image_cache, c->anim, c->js,
-                                    c->css_cache, c->focused, NULL, c->caret,
-                                    c->anchor, c->layout);
+                                    c->css_cache, headless_focus(c), NULL,
+                                    c->caret, c->anchor, c->layout);
     g_headless_styles_stale = FALSE;
 }
 
@@ -591,7 +598,9 @@ headless_flush_style(gpointer ud)
         g_hash_table_destroy(*c->styles);
         *c->styles = NULL;
     }
+    const ns_node *prev_focus = ns_css_set_focus_node(headless_focus(c));
     *c->styles = ns_engine_compute_cascade(c->doc, c->base, c->css_cache, c->anim);
+    ns_css_set_focus_node(prev_focus);
     if (c->anim)
         ns_engine_anim_observe(c->anim, *c->styles, g_get_monotonic_time());
     ns_js_set_style_table(c->js, *c->styles);

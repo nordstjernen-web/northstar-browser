@@ -23846,7 +23846,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                     return FALSE;
                 break;
             case NS_CSS_PC_MODAL:
-                if (ns_dom_active_modal() != el) return FALSE;
+                if (!ns_element_get_attr(el, "data-nd-modal")) return FALSE;
                 break;
             case NS_CSS_PC_HEADING: {
                 int level = 0;
@@ -28929,7 +28929,12 @@ static const char *kUa =
     "[hidden=\"until-found\" i]:not(embed) "
     "{ content-visibility: hidden; }\n"
     "embed[hidden] { display: inline; height: 0; width: 0; }\n"
-    "[popover]:not([data-nd-popover-open]) { display: none; }\n"
+    "[popover] { position: fixed; inset: 0; width: fit-content; "
+    "height: fit-content; margin: auto; border: solid; padding: 0.25em; "
+    "overflow: auto; color: CanvasText; background-color: Canvas; }\n"
+    "[popover]:not([data-nd-popover-open]):not(dialog[open]) "
+    "{ display: none; }\n"
+    "dialog[popover][data-nd-popover-open] { display: block; }\n"
     "template { display: none; }\n"
     "marquee { display: inline-block; text-align: initial; "
     "overflow: hidden; }\n"
@@ -30925,6 +30930,8 @@ incr_collect_attr_keys_simple(const ns_css_simple *c, int depth)
                 g_hash_table_add(g_attr_keys, g_strdup("open"));
             } else if (p->kind == NS_CSS_PC_POPOVER_OPEN) {
                 g_hash_table_add(g_attr_keys, g_strdup("data-nd-popover-open"));
+            } else if (p->kind == NS_CSS_PC_MODAL) {
+                g_hash_table_add(g_attr_keys, g_strdup("data-nd-modal"));
             }
             if (p->of_group)
                 for (guint gi = 0; gi < p->of_group->len; gi++)

@@ -129,6 +129,9 @@ gboolean ns_js_select_step(ns_js *js, ns_node *select, int dir);
 gboolean ns_js_select_edge(ns_js *js, ns_node *select, gboolean last);
 gboolean ns_js_select_typeahead(ns_js *js, ns_node *select, const char *key);
 void     ns_js_activate_element(ns_js *js, const ns_node *el);
+gboolean ns_js_keyboard_activate(ns_js *js, const ns_node *el,
+                                 const char *key, gboolean keyup);
+gboolean ns_js_keyboard_activates(const ns_node *el, const char *key);
 gboolean ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
                                      const ns_node *submitter,
                                      gboolean *default_prevented);
@@ -141,9 +144,11 @@ void           ns_js_set_focus(ns_js *js, const ns_node *el);
 void           ns_js_note_pointer_input(ns_js *js, gboolean pointer);
 void           ns_js_set_focused_node(ns_js *js, const ns_node *el);
 const ns_node *ns_js_focused_node(const ns_js *js);
+void           ns_js_focus_from_pointer(ns_js *js, const ns_node *target);
 const ns_node *ns_js_sequential_focus_target(ns_js *js, gboolean backward);
 gboolean       ns_node_is_focusable(const ns_node *el);
 void           ns_js_refresh_top_layer(ns_js *js);
+gboolean       ns_js_process_close_request(ns_js *js);
 
 void ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open);
 
