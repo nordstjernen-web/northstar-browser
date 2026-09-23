@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `:nth-child()`, `:nth-last-child()`, `:nth-of-type()` and
+  `:nth-last-of-type()` no longer slow down with the square of the list
+  length. Each test counted the element's siblings from scratch, so a
+  zebra-striped list of 40,000 rows took 14 seconds to style; the style
+  pass now numbers all the children of a parent in one sweep the first
+  time one of them is asked about, and the same page loads in about a
+  second. `:nth-child(... of S)` still counts the matching siblings each
+  time.
 * A long descendant selector no longer hangs the browser on a deep page.
   Matching `.nomatch div div div span` retried every ancestor at every
   step, so the work grew with the depth of the tree raised to the number

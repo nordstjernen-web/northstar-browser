@@ -20718,10 +20718,94 @@ selector_group_matches_element(const GPtrArray *group, const ns_node *el)
     return FALSE;
 }
 
+typedef struct css_sibling_position {
+    int child;
+    int last_child;
+    int of_type;
+    int last_of_type;
+} css_sibling_position;
+
+static GHashTable *g_sibling_positions;
+static GPtrArray  *g_sibling_position_blocks;
+
+static void
+css_sibling_positions_begin(void)
+{
+    g_sibling_positions = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_sibling_position_blocks = g_ptr_array_new_with_free_func(g_free);
+}
+
+static void
+css_sibling_positions_end(void)
+{
+    g_clear_pointer(&g_sibling_positions, g_hash_table_destroy);
+    g_clear_pointer(&g_sibling_position_blocks, g_ptr_array_unref);
+}
+
+static void
+css_sibling_positions_fill(const ns_node *parent)
+{
+    guint n = 0;
+    for (const ns_node *c = parent->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT) n++;
+    if (n == 0) return;
+    css_sibling_position *block = g_new0(css_sibling_position, n);
+    g_ptr_array_add(g_sibling_position_blocks, block);
+    GHashTable *type_counts = g_hash_table_new(g_str_hash, g_str_equal);
+    guint i = 0;
+    for (const ns_node *c = parent->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        css_sibling_position *pos = &block[i++];
+        pos->child = (int)i;
+        pos->last_child = (int)(n - i + 1);
+        pos->of_type = 1;
+        if (c->name) {
+            guint seen = GPOINTER_TO_UINT(
+                g_hash_table_lookup(type_counts, c->name)) + 1;
+            g_hash_table_insert(type_counts, c->name, GUINT_TO_POINTER(seen));
+            pos->of_type = (int)seen;
+        }
+        g_hash_table_insert(g_sibling_positions, (gpointer)c, pos);
+    }
+    i = 0;
+    for (const ns_node *c = parent->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        css_sibling_position *pos = &block[i++];
+        pos->last_of_type = c->name
+            ? (int)GPOINTER_TO_UINT(g_hash_table_lookup(type_counts, c->name))
+                  - pos->of_type + 1
+            : 1;
+    }
+    g_hash_table_destroy(type_counts);
+}
+
+static const css_sibling_position *
+css_sibling_position_of(const ns_node *el)
+{
+    if (!g_sibling_positions || !el->parent) return NULL;
+    const css_sibling_position *pos =
+        g_hash_table_lookup(g_sibling_positions, el);
+    if (pos) return pos;
+    css_sibling_positions_fill(el->parent);
+    return g_hash_table_lookup(g_sibling_positions, el);
+}
+
 static gboolean
 ns_css_sibling_counts_for_nth(const ns_node *el, const ns_css_pseudo_pred *pc,
                               int *idx_out)
 {
+    if (!pc->of_group) {
+        const css_sibling_position *pos = css_sibling_position_of(el);
+        if (pos) {
+            switch (pc->kind) {
+            case NS_CSS_PC_NTH_CHILD:        *idx_out = pos->child; break;
+            case NS_CSS_PC_NTH_LAST_CHILD:   *idx_out = pos->last_child; break;
+            case NS_CSS_PC_NTH_OF_TYPE:      *idx_out = pos->of_type; break;
+            default:                         *idx_out = pos->last_of_type; break;
+            }
+            return TRUE;
+        }
+    }
     int idx = 1;
     gboolean reverse = pc->kind == NS_CSS_PC_NTH_LAST_CHILD ||
                        pc->kind == NS_CSS_PC_NTH_LAST_OF_TYPE;
@@ -29745,6 +29829,7 @@ ns_css_compute(ns_node *doc,
         (GDestroyNotify)ns_var_map_unref, (GDestroyNotify)ns_var_map_unref);
     g_has_memo = g_hash_table_new_full(has_memo_hash, has_memo_equal,
                                        g_free, NULL);
+    css_sibling_positions_begin();
 
     guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
     if (sig != g_incr_has_sig) {
@@ -29818,6 +29903,7 @@ ns_css_compute(ns_node *doc,
 
     g_hash_table_destroy(g_has_memo);
     g_has_memo = NULL;
+    css_sibling_positions_end();
     g_hash_table_destroy(g_style_share);
     g_style_share = NULL;
     g_hash_table_destroy(g_var_adjust_cache);
