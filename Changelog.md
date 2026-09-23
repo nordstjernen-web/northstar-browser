@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Changing an element's `class` or `id` to a name no style sheet
+  mentions no longer restyles everything inside it. Toggling a theme
+  class on `<body>` that no selector uses re-ran the whole cascade --
+  900 ms on a page of 12,000 elements and 3,000 rules -- and now leaves
+  the styles alone (6 ms). Names that appear anywhere in a selector,
+  including inside `:is()`, `:not()`, `:has()`, `:nth-child(... of S)`
+  and `@scope`, or any `[class]`/`[id]` attribute selector or
+  `:target`, still restyle as before.
 * `getElementById` answers repeat lookups of a duplicated id at once.
   When two elements shared an id every call walked the whole document to
   find the first one, so 2,000 lookups on a 60,000-node page took 4
