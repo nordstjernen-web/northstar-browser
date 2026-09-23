@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Rows repeated by `grid-template-rows: repeat(auto-fit, ...)` that no
+  item occupies collapse to zero height, as auto-fit columns already
+  did, instead of keeping their size like `auto-fill`.
 * Line names inside `repeat(auto-fill, ...)` and `repeat(auto-fit,
   ...)` are repeated with the tracks. They were kept only once and the
   names after the repetition kept their unrepeated line numbers, so
