@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The render pipeline's zoom factor scales every element's font size
+  exactly once. Elements that share one computed style value -- five
+  identical list items, say -- had that value multiplied once per
+  element, so at 150% the fifth sibling's text came out 7.6 times too
+  big. The pipeline is only driven at 100% today, so no page rendered
+  differently yet.
 * Numbering a long ordered list is linear again. Each marker counted
   every `<li>` before it, reading their `value` attributes, so a list of
   4,000 references cost 8 million sibling steps per layout with inside
