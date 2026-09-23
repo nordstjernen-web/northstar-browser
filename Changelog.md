@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An `<img>`, `<video>` or `<input type=image>` with `width` and
+  `height` attributes computes `aspect-ratio: auto W / H`, as the HTML
+  rendering rules map them, so a responsive image styled `width: 100%;
+  height: auto` reserves its height before it loads; once it has loaded
+  its own ratio takes over, as the `auto` says.
 * An `<iframe>` has the 2px inset border the rendering section gives it,
   which `frameborder="0"` (or any value that is not a non-zero integer)
   removes, and `<video>` computes `object-fit: contain`.
