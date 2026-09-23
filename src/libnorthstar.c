@@ -3012,8 +3012,13 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                 browser->dirty = TRUE;
                 if (out_prevented) *out_prevented = 1;
             } else if (f && ns_node_editable_value(f) &&
-                browser_edit_key(browser, (ns_node *)f, key, mods))
+                browser_edit_key(browser, (ns_node *)f, key, mods)) {
                 browser->dirty = TRUE;
+            } else if (key && strcmp(key, "Escape") == 0 &&
+                       ns_js_process_close_request(browser->js)) {
+                browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            }
         }
     }
 

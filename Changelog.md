@@ -4,6 +4,21 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Popovers and invoker commands work as the HTML standard describes.
+  `showPopover()` only showed an element and never closed anything, a
+  `popover=auto` stayed open when another opened, `popovertarget`
+  buttons toggled even inside a form, and nothing ever dismissed a
+  popover; an open popover also stayed `display: none` until something
+  else restyled the page. Auto and hint popovers now form a stack that
+  closes unrelated popovers, clicking outside or pressing Escape closes
+  the topmost one (Escape also cancels a modal dialog), the `popover`,
+  `popoverTargetAction`, `popoverTargetElement`, `command` and
+  `commandForElement` properties reflect their attributes, removing or
+  retyping an open popover hides it, `beforetoggle` fires synchronously
+  and `toggle` once per task as a `ToggleEvent` with its `source`, and
+  `<button commandfor command>` fires a cancelable `CommandEvent` and
+  runs the popover and dialog commands. An open popover is centred in
+  the viewport with the standard UA popover box style.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
