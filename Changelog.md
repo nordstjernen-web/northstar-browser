@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `getComputedStyle()` reads the `grid-area`, `grid-row` and
+  `grid-column` shorthands (they read empty), and `grid-template`
+  reports a declared track list as declared, falling back to the
+  laid-out tracks only when no template is set.
 * `align-self` and `justify-self` values `self-start` and `self-end` on
   a grid item use the item's own writing mode. A `vertical-rl` item
   aligned with `justify-self: self-start` sits at the right edge of its
