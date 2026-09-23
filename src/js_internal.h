@@ -139,6 +139,7 @@ struct ns_js {
     GHashTable    *popover_info;
     ns_node       *popover_hint_parent;
     ns_node       *popover_pointerdown;
+    const ns_node *focus_nav_start;
     gboolean       popover_showing;
     int            popover_hiding_count;
     GArray        *attr_element_refs;

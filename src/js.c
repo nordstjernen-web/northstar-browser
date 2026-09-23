@@ -27964,12 +27964,8 @@ ns_wpt_pointer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     ns_js_note_pointer_input(js, TRUE);
     ns_js_dispatch_mouse_event(js, target, type, x, y, x, y, button, buttons,
                                FALSE, FALSE, FALSE, FALSE, NULL, &prevented);
-    if (!prevented && strcmp(type, "mousedown") == 0) {
-        const ns_node *focus = NULL;
-        for (const ns_node *a = target; a && !focus; a = a->parent)
-            if (ns_node_is_focusable(a)) focus = a;
-        ns_js_set_focus(js, focus);
-    }
+    if (!prevented && strcmp(type, "mousedown") == 0)
+        ns_js_focus_from_pointer(js, target);
     JS_FreeCString(ctx, type);
     return JS_NewBool(ctx, prevented);
 }
@@ -38343,6 +38339,7 @@ ns_js_set_focus(ns_js *js, const ns_node *el)
         ns_js_dispatch_focus_event(js, old, el, "focusout", TRUE);
     }
     js->focused_node = el;
+    if (el) js->focus_nav_start = NULL;
     ns_js_update_focus_visible(js);
     js->mutated = TRUE;
     if (el) {
@@ -38358,6 +38355,19 @@ ns_js_set_focused_node(ns_js *js, const ns_node *el)
     js->focused_node = el;
     ns_js_update_focus_visible(js);
     js->mutated = TRUE;
+}
+
+void
+ns_js_focus_from_pointer(ns_js *js, const ns_node *target)
+{
+    if (!js) return;
+    const ns_node *focus = NULL;
+    for (const ns_node *a = target; a && !focus; a = a->parent)
+        if (ns_node_is_focusable(a)) focus = a;
+    ns_js_set_focus(js, focus);
+    if (focus || !target) return;
+    js->focus_nav_start = target;
+    ns_node_arm_js_invalidate((ns_node *)target);
 }
 
 const ns_node *
@@ -38388,6 +38398,40 @@ collect_focus_candidates(const ns_node *root, GArray *out, guint *order,
         }
         collect_focus_candidates(c, out, order, depth + 1);
     }
+}
+
+static gboolean
+focus_candidates_before(const ns_node *root, const ns_node *target,
+                        guint *count, int depth)
+{
+    if (!root || depth >= 512) return FALSE;
+    for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+        if (c == target) return TRUE;
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        if (ns_node_in_template_content(c)) continue;
+        int ti = 0;
+        gboolean has_ti = ns_node_tabindex(c, &ti);
+        if (ns_node_is_focusable(c) && !(has_ti && ti < 0)) (*count)++;
+        if (focus_candidates_before(c, target, count, depth + 1)) return TRUE;
+    }
+    return FALSE;
+}
+
+static int
+focus_index_from_start(const ns_node *scope, const ns_node *start,
+                       GArray *cands, gboolean backward)
+{
+    guint before = 0;
+    if (!start || !focus_candidates_before(scope, start, &before, 0))
+        return -1;
+    int found = -1;
+    for (guint i = 0; i < cands->len; i++) {
+        const focus_candidate *fc = &g_array_index(cands, focus_candidate, i);
+        if (fc->tabindex > 0) continue;
+        if (!backward && fc->order >= before) return (int)i;
+        if (backward && fc->order < before) found = (int)i;
+    }
+    return found;
 }
 
 static int
@@ -38434,7 +38478,11 @@ ns_js_sequential_focus_target(ns_js *js, gboolean backward)
             cur = (int)i; break;
         }
     int next;
-    if (cur < 0)
+    int from_start = cur < 0 ? focus_index_from_start(scope,
+                                   js->focus_nav_start, cands, backward) : -1;
+    if (from_start >= 0)
+        next = from_start;
+    else if (cur < 0)
         next = backward ? (int)cands->len - 1 : 0;
     else if (backward)
         next = cur == 0 ? (int)cands->len - 1 : cur - 1;
@@ -38883,6 +38931,7 @@ ns_popover_forget_node(ns_js *js, ns_node *n)
     if (js->popover_hint_parent == n) js->popover_hint_parent = NULL;
     if (js->popover_pointerdown == n) js->popover_pointerdown = NULL;
     if (js->dialog_pointerdown == n) js->dialog_pointerdown = NULL;
+    if (js->focus_nav_start == n) js->focus_nav_start = NULL;
     if (js->close_watchers) g_ptr_array_remove(js->close_watchers, n);
     if (js->modal_dialogs && g_ptr_array_remove(js->modal_dialogs, n))
         ns_js_refresh_top_layer(js);

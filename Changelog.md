@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Tab continues from where you clicked: after clicking text or any
+  other non-focusable spot, Tab moves to the next focusable element
+  after it and Shift+Tab to the one before, instead of starting over
+  at the top of the page.
 * The `--wpt` runner delivers `test_driver` clicks, pointer actions and
   key presses as trusted input through the same paths as the shell, so
   light dismiss, Escape, Tab, keyboard activation and click-to-focus
