@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Elements whose interface is plain `HTMLElement` (`article`,
+  `section`, `b`, `abbr`, `nav`, `summary`, ...) and valid custom element
+  names are no longer `HTMLUnknownElement` instances; truly unknown tags
+  report `[object HTMLUnknownElement]`, and `listing` / `xmp` are
+  `HTMLPreElement`s.
 * `relList.supports()` answers per element: `<link>` reports the link
   types it acts on (stylesheet, icon, preload, modulepreload, ...),
   while `<a>`, `<area>` and `<form>` report only `noopener`,

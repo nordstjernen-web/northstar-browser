@@ -3338,6 +3338,30 @@ ns_node_arm_js_invalidate(ns_node *n)
     if (n && !n->js_invalidate) n->js_invalidate = ns_invalidate_wrapper;
 }
 
+static gboolean ns_ce_name_valid(const char *s);
+
+static int
+ns_cmp_tag_name(const void *a, const void *b)
+{
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+static gboolean
+ns_html_tag_has_plain_interface(const char *lower_name)
+{
+    static const char *const plain[] = {
+        "abbr", "acronym", "address", "article", "aside", "b", "basefont",
+        "bdi", "bdo", "big", "center", "cite", "code", "dd", "dfn", "dt",
+        "em", "figcaption", "figure", "footer", "header", "hgroup", "i",
+        "kbd", "main", "mark", "nav", "nobr", "noembed", "noframes",
+        "noscript", "plaintext", "rb", "rp", "rt", "rtc", "ruby", "s",
+        "samp", "search", "section", "small", "strike", "strong", "sub",
+        "summary", "sup", "tt", "u", "var", "wbr",
+    };
+    return bsearch(&lower_name, plain, G_N_ELEMENTS(plain), sizeof plain[0],
+                   ns_cmp_tag_name) != NULL;
+}
+
 static JSValue
 ns_node_kind_proto(ns_js *js, const ns_node *node)
 {
@@ -3361,8 +3385,11 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
                     lower[i] = g_ascii_tolower(node->name[i]);
                 JSValue *slot = g_hash_table_lookup(js->per_tag_protos, lower);
                 if (slot) return *slot;
+                if (ns_html_tag_has_plain_interface(lower))
+                    return js->proto_htmlelement;
             }
-            if (!strchr(node->name, '-') && JS_IsObject(js->proto_htmlunknownelement))
+            if (!ns_ce_name_valid(node->name) &&
+                JS_IsObject(js->proto_htmlunknownelement))
                 return js->proto_htmlunknownelement;
         }
         return js->proto_htmlelement;
@@ -3702,7 +3729,7 @@ static const ns_instof_def ns_instof_table[] = {
     { "HTMLOutputElement",        "output",             NS_INSTOF_TAG },
     { "HTMLParagraphElement",     "p",                  NS_INSTOF_TAG },
     { "HTMLPictureElement",       "picture",            NS_INSTOF_TAG },
-    { "HTMLPreElement",           "pre",                NS_INSTOF_TAG },
+    { "HTMLPreElement",           "pre listing xmp",    NS_INSTOF_TAG },
     { "HTMLProgressElement",      "progress",           NS_INSTOF_TAG },
     { "HTMLQuoteElement",         "q blockquote",       NS_INSTOF_TAG },
     { "HTMLScriptElement",        "script",             NS_INSTOF_TAG },
@@ -3831,7 +3858,9 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
     case NS_INSTOF_UNKNOWN: {
         if (n->kind != NS_NODE_ELEMENT || (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
             return JS_FALSE;
-        if (!n->name || strchr(n->name, '-')) return JS_FALSE;
+        if (!n->name || ns_ce_name_valid(n->name) ||
+            ns_html_tag_has_plain_interface(n->name))
+            return JS_FALSE;
         ns_js *_j = js_from_ctx(ctx);
         if (_j && _j->per_tag_protos && g_hash_table_contains(_j->per_tag_protos, n->name))
             return JS_FALSE;
@@ -46368,7 +46397,8 @@ ns_install_tostringtag(JSContext *ctx, JSValueConst global)
     }
     for (gsize i = 0; i < G_N_ELEMENTS(ns_instof_table); i++) {
         const ns_instof_def *d = &ns_instof_table[i];
-        if (d->special != NS_INSTOF_TAG) continue;
+        if (d->special != NS_INSTOF_TAG && d->special != NS_INSTOF_UNKNOWN)
+            continue;
         JSValue proto = ns_proto_of(ctx, global, d->ctor);
         if (JS_IsObject(proto))
             JS_DefinePropertyValue(ctx, proto, tag_atom,
