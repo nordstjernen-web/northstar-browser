@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `innerText` and `textContent` of a shadow host no longer include the
+  shadow tree's text, text inside an inline `<svg>`'s `<text>` elements
+  is part of `innerText`, a `visibility: hidden` paragraph or `<br>`
+  adds no line breaks of its own, and an `<optgroup>` outside a
+  `<select>` keeps its text. Setting `innerText` or `outerText` to a
+  string with a NUL character keeps the text after it instead of
+  cutting it off there.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
