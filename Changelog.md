@@ -4,6 +4,21 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `<dialog>` follows the HTML standard's show, close and request-close
+  steps. The `close` event fired synchronously and even for a dialog
+  that was never open, `close()` on a closed dialog still changed its
+  `returnValue`, `show()` on a modal dialog did not throw, a modal
+  dialog opened from a document that is not displayed did not throw,
+  the dialog on top was whichever came last in the document rather
+  than the one opened last, and focus went back to whatever was focused
+  before the first modal dialog. Dialogs now fire `beforetoggle` and a
+  queued `toggle`, queue `close`, remember the focus they took and hand
+  it back when they close, pick their initial focus from `autofocus`
+  or the first keyboard-focusable descendant, honour `closedby`
+  (`closedBy` reflects it) for Escape and clicks outside, run
+  `requestClose()` through a cancelable `cancel` event exactly once,
+  hide unrelated popovers when opened, and stop being modal when
+  removed from the document. `:modal` matches every open modal dialog.
 * `srcset` is parsed as the HTML standard describes. The old splitter
   cut every candidate at its first comma, so a `data:` URL or any URL
   with a comma in it was truncated, descriptors in parentheses or with

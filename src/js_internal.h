@@ -130,7 +130,9 @@ struct ns_js {
     const ns_node *focused_node;
     gboolean      pointer_input;
     const ns_node *active_modal;
-    const ns_node *focus_before_modal;
+    GPtrArray     *close_watchers;
+    GPtrArray     *modal_dialogs;
+    ns_node       *dialog_pointerdown;
     GPtrArray     *popover_auto;
     GPtrArray     *popover_hint;
     GHashTable    *popover_info;
