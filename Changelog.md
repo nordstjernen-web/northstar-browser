@@ -4,6 +4,19 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The rest of the default stylesheet follows the HTML rendering rules
+  instead of Northstar's own taste. Text is `CanvasText` (black, not
+  `#1a1a1a`), links are `LinkText`/`VisitedText` (not a Wikipedia blue),
+  `<code>`, `<kbd>` and `<samp>` no longer get a grey background, padding,
+  a border or `pre-wrap` -- the padding also slipped a stray space into
+  the text around every inline code span, and the background showed
+  through dark `pre code` themes -- `<pre>` has 1em margins and a normal
+  line height, `<small>`/`<big>` are `smaller`/`larger`, `<address>` is
+  not grey, `<legend>` is not bold, a non-modal `<dialog open>` is
+  positioned out of flow and centred rather than pushing the page down,
+  and form controls no longer inherit `letter-spacing`, `line-height`,
+  `text-transform`, `text-indent` or `text-shadow` from the text around
+  them.
 * A page can hide its own iframes again, and `<object>` shows its
   fallback content. The default stylesheet hid every frame, object and
   embed with `!important` and forced a loaded iframe to `display: block
