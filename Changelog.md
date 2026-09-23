@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A grid with only a `min-height` grows its `fr` rows to fill it. The
+  common page skeleton `min-height: 100vh; grid-template-rows: auto 1fr
+  auto` sized the middle row to its content and left the footer halfway
+  up the screen; the flexible rows now share the space the minimum
+  height leaves, as they already did for a fixed `height`.
 * Grids that use `grid-template-areas` are laid out by the full grid
   algorithm. They went through a separate, reduced code path that gave
   `fr` rows no share of a fixed container height (a header / `1fr` /
