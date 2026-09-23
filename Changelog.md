@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Line names inside `repeat(auto-fill, ...)` and `repeat(auto-fit,
+  ...)` are repeated with the tracks. They were kept only once and the
+  names after the repetition kept their unrepeated line numbers, so
+  `grid-column: b 3` and names following the `repeat()` placed items on
+  the wrong lines, and the resolved `grid-template-columns` of such a
+  grid dropped every line name.
 * `getComputedStyle()` reports `grid-template-columns` and
   `grid-template-rows` of an element that is not a grid, and
   `grid-auto-columns` and `grid-auto-rows` of any element, as the
