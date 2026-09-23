@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An iframe whose `load` handler navigates it again (for example to
+  `about:blank`) no longer freezes the page. Each reload ran inside the
+  same loop that processed the previous one, so timers and rendering
+  never got a turn; the next load now waits for the following frame.
 * `structuredClone()` and `postMessage()` follow the HTML serialization
   rules more closely. Transferring an `ArrayBuffer` detaches it (a
   detached one, a duplicate, or an object that cannot be transferred
