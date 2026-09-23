@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A table's `width` includes its border and padding, as HTML's default
+  stylesheet makes tables `box-sizing: border-box` and table layout now
+  honours box-sizing. `<table style="width: 100%; border: 1px solid">`
+  no longer sticks out of the page by its border, and a `width="600"`
+  table is 600px wide overall.
 * A percentage height inside a `box-sizing: border-box` parent is a
   share of that parent's content box. It was taken from the border-box
   height instead, so `height: 50%` inside a 100px-tall parent with 10px
