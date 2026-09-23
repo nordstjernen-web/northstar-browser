@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Relayouts no longer redo work on unchanged style sheets. Each one
+  re-resolved every `url()` in every cached sheet, copied every linked
+  sheet to scan it for viewport media queries, and built the lookup key
+  for the page's inline styles by copying all of their text; on a page
+  with 1.5 MB of CSS that was 100 ms per relayout and is now 9 ms. The
+  inline-style cache now also includes the page's base URL, so a page
+  whose `<style>` text matches one visited earlier no longer loads
+  `url()` images relative to the earlier page.
 * A page that declares `container-type` but has no `@container` rules
   and no container units no longer styles itself twice on every layout.
   The second, container-aware style pass ran whenever any element was a
