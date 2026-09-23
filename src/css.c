@@ -26299,7 +26299,7 @@ static const char *kUa =
     "body { display: block; margin: 8px; }\n"
     "div, p, section, article, header, footer, nav, main, aside, "
     "dir, menu, ul, ol, dl, dt, dd, blockquote, pre, address, "
-    "hr, form, fieldset, figure, figcaption, center, "
+    "hr, form, fieldset, figure, figcaption, center, dialog, "
     "legend, search, hgroup { display: block; }\n"
     "li { display: list-item; }\n"
     "address { font-style: italic; }\n"
