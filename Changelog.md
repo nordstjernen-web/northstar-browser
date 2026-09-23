@@ -297,6 +297,87 @@ Significant changes in each release:
   got a 48px line instead of 21px -- the opposite of what the spec (and
   every browser) does, and the reason a percentage is not the same as a
   plain number there.
+* A grid row with a fixed size keeps it. Rows declared as `20px` (or a
+  resolvable percentage, or `minmax()` of two fixed sizes) grew to fit
+  taller content like `auto` rows do, pushing every later row down;
+  now the content overflows the row, and an item spanning a fixed row
+  and an `auto` one grows only the `auto` row.
+* Grid items given both a row and a column claim their cell before the
+  automatically placed items flow in, as the grid placement algorithm
+  orders it. An item pinned to row 1, column 1 that came later in the
+  source used to land on top of whichever auto-placed item had already
+  taken that cell.
+* A `position: fixed` box inside a transformed element belongs to that
+  element: it is placed against it and scrolls with it, as CSS
+  Transforms says, instead of being pinned to the window. Slide-in menus
+  and modals built inside a `transform`ed wrapper now open where the
+  page puts them.
+* `<center>` and `align="center"` (or `"right"`) line up the blocks
+  inside them, not just images and tables: `<center><div
+  style="width: 200px">` is centred, as is a table nested in a
+  `<td align="center">`. A block with a margin of its own or an `auto`
+  margin keeps the position those give it, and plain `text-align:
+  center` still moves only inline content.
+* A table's `width` includes its border and padding, as HTML's default
+  stylesheet makes tables `box-sizing: border-box` and table layout now
+  honours box-sizing. `<table style="width: 100%; border: 1px solid">`
+  no longer sticks out of the page by its border, and a `width="600"`
+  table is 600px wide overall.
+* A percentage height inside a `box-sizing: border-box` parent is a
+  share of that parent's content box. It was taken from the border-box
+  height instead, so `height: 50%` inside a 100px-tall parent with 10px
+  of padding came out 50px rather than 40px.
+* An absolutely positioned box without `top` sits where it would have
+  flowed, not at the bottom of its parent. Finding that static position
+  only settled when the walk reached the next element after the box, by
+  which point the whole parent had been counted, so a positioned first
+  child of a 30px block landed 30px too low; and boxes inside earlier
+  positioned boxes were counted as if they took up space in the flow.
+* A child's bottom margin stays inside a parent it must not escape. It
+  collapsed through any parent without bottom padding or border, so an
+  `overflow: hidden` box, a float or an inline-block lost its last
+  child's bottom margin from its own height, and a parent with a fixed
+  `height` pushed the next block down by that margin as if it were its
+  own. Margins now only collapse through a parent whose height is
+  `auto` and whose `min-height` is zero, and never through one that
+  starts a new formatting context or the root element -- so the
+  document is as tall as the body's margins say, as in other browsers.
+* An absolutely positioned box sized by its content is as wide as that
+  content again: its own padding and border were being taken out of the
+  measured width, so a box with `padding: 10px; border: 5px` around a
+  100px child came out 70px wide inside. Its height now also honours
+  `min-height` and `max-height` -- `top: 0; bottom: 0; max-height: 50px`
+  was as tall as the containing block, and `height: 10px; min-height:
+  60px` stayed 10px.
+* Deeply nested flex rows lay out in a blink instead of seconds. Every
+  row laid each item out once to measure it and again in place, and each
+  of those layouts did the same for the row inside, so the work doubled
+  with every level: 22 nested `display: flex` boxes took three and a
+  half seconds. An item whose size did not change between the two passes
+  is now moved into place rather than laid out again, and a row with a
+  definite height hands its stretched items that height on the first
+  pass, so the same page takes 0.2s. Moving a grid container now also
+  moves its track positions, which absolutely positioned grid children
+  are placed against.
+* Shrink-to-fit boxes -- inline-blocks, floats, flex items sized by
+  their content -- no longer come out wider than what they hold. A
+  child with a pixel `width` and `box-sizing: border-box` was measured
+  at its border-box width and then had its padding and border added a
+  second time, and every float inside was counted as at least 60px
+  wide, so an inline-block around a 16px floated icon was 60px wide.
+* Floated columns with `box-sizing: border-box` sit side by side again.
+  Deciding where a float fits counted its padding and border twice for
+  a border-box width, so the Bootstrap 3 grid -- `*{box-sizing:
+  border-box}` and two `float: left; width: 50%; padding: 0 15px`
+  columns -- dropped its second column below the first.
+* A flex item with a height of its own keeps it in a row. Stretching
+  ignored whether the item's height was `auto`, so two 20px-tall items
+  in a 100px-tall row both came out 100px tall -- and the second layout
+  that stretch triggered sized them from their `width` again instead of
+  the flexed width, so two `width: 200px` items squeezed into 300px
+  overlapped. Only an item with an automatic height stretches now, the
+  stretched height respects its `min-height` and `max-height`, and the
+  flexed width survives the relayout.
 * A multi-column block splits a list, not just a run of siblings. The
   column code distributed a container's own children and gave up when
   there were fewer than two, so `column-width` on a wrapper holding a
