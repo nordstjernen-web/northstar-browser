@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `<meta charset="utf-16">` no longer turns a page into CJK mojibake. A
+  document that declares UTF-16 in a meta tag is necessarily ASCII-
+  compatible, and the HTML encoding sniffing rules read it as UTF-8, but
+  the declaration was handed straight to the converter. Declared labels
+  now go through the WHATWG encoding table for decoding too, so an
+  unknown label is ignored instead of guessed at, `euc-kr` decodes as
+  the Windows-949 superset the web means by it, and `iso-8859-8-i` is
+  understood.
 * The rest of the default stylesheet follows the HTML rendering rules
   instead of Northstar's own taste. Text is `CanvasText` (black, not
   `#1a1a1a`), links are `LinkText`/`VisitedText` (not a Wikipedia blue),

@@ -328,6 +328,8 @@ charset_normalize(const char *name)
         { "windows-31j",     "CP932" },
         { "x-euc-jp",        "EUC-JP" },
         { "eucjp",           "EUC-JP" },
+        { "euc-kr",          "CP949" },
+        { "iso-8859-8-i",    "ISO-8859-8" },
     };
     for (gsize i = 0; i < G_N_ELEMENTS(map); i++)
         if (g_ascii_strcasecmp(name, map[i].label) == 0)
@@ -671,27 +673,24 @@ ns_html_decode_body_full(const char *body, gsize len,
         }
     }
 
-    char *declared = content_type
-        ? charset_value_in(content_type, strlen(content_type)) : NULL;
-    if (!declared)
-        declared = charset_value_in(body, len < 1024 ? len : 1024);
+    char *declared = ns_html_declared_charset(body, len, content_type);
     gboolean declared_utf8 = FALSE;
     if (declared) {
-        const char *canonical = ns_encoding_label_to_name(declared);
         char *cs = charset_normalize(declared);
-        g_free(declared);
         if (g_ascii_strcasecmp(cs, "UTF-8") == 0) {
             declared_utf8 = TRUE;
         } else if (!charset_is_dangerous(cs)) {
             char *out = g_convert(body, (gssize)len, "UTF-8", cs,
                                   NULL, NULL, NULL);
             if (out) {
-                charset_report(charset_out, canonical ? canonical : cs);
+                charset_report(charset_out, declared);
                 g_free(cs);
+                g_free(declared);
                 return out;
             }
         }
         g_free(cs);
+        g_free(declared);
     }
 
     if (g_utf8_validate(body, (gssize)len, NULL)) {
