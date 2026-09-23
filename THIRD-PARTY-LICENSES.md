@@ -189,7 +189,8 @@ non-commercial, without restriction.
 
 ### zlib — zlib License
 
-> DEFLATE compression used by image decoders and HTTP content decoding.
+> DEFLATE compression behind `CompressionStream` and `DecompressionStream`,
+> and a dependency of libcurl, Cairo, FreeType and GLib.
 > <https://zlib.net>
 >
 > Copyright (c) 1995-2024 Jean-loup Gailly and Mark Adler
@@ -302,6 +303,12 @@ them, their notices apply:
 - **Fontconfig** — MIT-style license, © Keith Packard and contributors.
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
   GPL 2.0, at your option, © The FreeType Project.
+- **HarfBuzz** — MIT ("Old MIT") License, © the HarfBuzz contributors.
+  Text shaping, called by ns-pango.
+- **GNU FriBidi** — GNU LGPL 2.1 or later, © the FriBidi contributors.
+  Bidirectional text, called by ns-pango.
+- **libthai** — GNU LGPL 2.1 or later, © the libthai contributors.
+  Optional Thai word breaking in ns-pango, linked when present.
 - **Enchant** — GNU LGPL 2.1 or later, © the AbiSource / Enchant
   contributors. Optional on-screen spell-checking.
 - **opusfile / libopus / vorbisfile / libvorbis / libogg** — BSD 3-Clause,
@@ -329,12 +336,15 @@ Where Northstar changes a third-party source, the change is carried as a
 patch rather than as an edited copy, so what was modified stays legible
 and separable:
 
-- `subprojects/packagefiles/lexbor-conv-buffer-bound.patch`
-- `subprojects/packagefiles/quickjs-ng-windows-link.patch`
-- `subprojects/packagefiles/quickjs-ng-sort-identical.patch`
+- `subprojects/packagefiles/lexbor-conv-buffer-bound.patch` — a bounds
+  check in lexbor's integer-to-string conversion (`core/conv.c`).
+- `subprojects/packagefiles/quickjs-ng-windows-link.patch` — build-only:
+  on Windows, drops the threads dependency and builds the `qjs` and
+  `qjsc` tools without PIE.
 
 Meson applies them to the fetched sources at `meson setup`; the wrap
-files name them under `diff_files`. pl_mpeg carries its local change in
+files name them under `diff_files`. A system lexbor or quickjs-ng, which
+the build prefers when it finds one, does not carry them. pl_mpeg carries its local change in
 the vendored copy directly. ns-pango is a public fork whose full history
 is at the URL in its section above. Northstar's own source is
 GPL-3.0-or-later.

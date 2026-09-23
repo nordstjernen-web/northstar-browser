@@ -12,10 +12,10 @@ assessment of the impact.
 
 ## Threat model
 
-Northstar treats the Internet with the outmost suspicion. The attacker controls fetched
-HTML, CSS, JavaScript, images, fonts, and media. The user, the
-kernel, and the local filesystem outside the sandbox allow-list are
-trusted.
+Northstar treats the Internet with the utmost suspicion. The attacker
+controls fetched HTML, CSS, JavaScript, images, fonts, WebAssembly and
+media. The user, the kernel, and the local filesystem outside the sandbox
+allow-list are trusted.
 
 **In scope**
 
@@ -25,41 +25,49 @@ trusted.
   allow-list and the seccomp-bpf syscall allow-list.
 - macOS Seatbelt write-confinement bypass.
 - Windows process-mitigation bypass — the policies set via
-  `SetProcessMitigationPolicy` at startup (ASLR, strict handle
-  checks, extension-point disable, image-load restrictions,
-  dynamic-code prohibition, child-process block).
-- Same-origin, cookie, and HTTP-cache partitioning bypass.
-- HSTS, mixed-content, and CSP enforcement bypass.
-- URL-bar spoofing (IDN homograph, scheme confusion, etc.).
+  `SetProcessMitigationPolicy` at startup (strict handle checks,
+  extension-point disable, image-load restrictions, child-process block).
+- Same-origin, iframe-sandbox, cookie, and HTTP-cache partitioning bypass.
+- HSTS, mixed-content, and CSP enforcement bypass, for the parts this
+  document says are enforced.
+- URL-bar spoofing (IDN homograph, userinfo, scheme confusion, etc.).
 
 **Out of scope**
 
 - Bugs in third-party libraries (libcurl, GTK 4, GLib, lexbor, QuickJS,
   Wuffs, …). Report upstream; we update when fixes ship.
 - Features we deliberately don't implement: WebGL, WebGPU, WebRTC,
-  video MSE, EME/DRM, JIT, and "AI" web APIs.
+  adaptive streaming, EME/DRM, JIT, and "AI" web APIs.
 - CPU-level side channels (Spectre-class).
 - Attacks that already require local code execution as the same user.
+- The gaps listed under *Known gaps* below, which are known and tracked.
 
 ## Defenses
 
 This minimalist edition runs **single-process**: the HTML/CSS/JS/layout
 engine parses and renders untrusted content in the GTK shell process
-itself (`src/appmain.c`). There is
-no separate `northstar-renderer` executable and no per-tab renderer
-process — every page shares one OS process and one address space. The
-audio decoders and SDL2 mixer also run in that browser process on an
-asynchronous worker thread (see *Media*, below).
+itself, on a dedicated engine thread. There is no separate renderer
+executable and no per-tab renderer process — every page shares one OS
+process and one address space. The audio decoders and SDL2 mixer also run
+in that browser process on a worker thread (see *Media*, below).
 
 Because there is no privilege boundary between pages, the layered
 defenses below are **hardening and containment for the whole process**,
 not an inter-process sandbox around a compromised renderer: they shrink
 what a memory-safety bug in the engine can reach (filesystem, syscalls,
-executable memory, network protocols), but a bug in the engine is not
-confined to a subordinate process the way it would be in a multi-process
-browser. A true per-page/per-origin process sandbox is not part of this
-edition; treat process isolation as **absent**, and the defenses here as
+network protocols), but a bug in the engine is not confined to a
+subordinate process the way it would be in a multi-process browser. A
+true per-page/per-origin process sandbox is not part of this edition;
+treat process isolation as **absent**, and the defenses here as
 defence-in-depth around a single trusted-code / untrusted-data boundary.
+
+A normal GUI launch has one more process: the watchdog supervisor
+(`src/watchdog.c`), which starts the browser as a child and restarts it on
+a crash or hang. The supervisor loads no page content and initialises no
+network or UI, and it is **not** sandboxed — it spawns the browser before
+any Landlock, seccomp or mitigation policy is applied, so that the child
+applies them to itself. `--no-watchdog` or `NS_NO_WATCHDOG` runs the
+browser without it; headless and tooling runs never use it.
 
 ### Compile-time hardening (`meson.build`)
 
@@ -67,20 +75,30 @@ PIE, full RELRO, non-executable stack, separate-code segments,
 `-fstack-protector-strong`, `-fstack-clash-protection`,
 `-fcf-protection=full` (Intel CET / AMD IBT), `_FORTIFY_SOURCE=3`
 (`=2` fallback), `-Wformat=2 -Wformat-security`. No JIT is used or
-linked — W^X holds for the whole process, so any RCE primitive has to
-work without writable executable pages.
+linked — JavaScript runs on the QuickJS interpreter and WebAssembly on
+WAMR's classic interpreter — so the browser never needs
+writable-and-executable memory. That is a property of the code, not a
+policy the kernel enforces: neither the Linux seccomp filter nor the
+Windows mitigations below refuse an executable mapping.
+
+On glibc, `mallopt(M_PERTURB)` fills freed and freshly allocated heap
+memory with a pattern (`src/security.c`), so a use-after-free or an
+uninitialised read sees garbage instead of stale data; the
+`harden_allocator` setting (`NS_NO_HARDEN_ALLOC`) turns it off.
 
 ### Privilege drop (`src/security.c`)
 
 - Linux/macOS: refuses to start as root — prints a diagnostic and exits
-  before any page is loaded.
+  with status 77 before any page is loaded.
 - Windows: when launched elevated it *drops* Administrator rights by
   relaunching itself with the desktop shell's medium-integrity token
   (`CreateProcessWithTokenW`) and exiting the elevated instance, so the
   browsing session runs unprivileged. It verifies the shell token is not
   itself elevated first, so a fully elevated session cannot loop. When
   de-elevation is impossible it falls back to a plain-language dialog
-  offering to quit (default) or run as Administrator anyway.
+  offering to quit (default) or run as Administrator anyway. Elevation is
+  detected with `CheckTokenMembership` against the Built-in
+  Administrators SID.
 - `NS_ALLOW_ROOT=1` overrides on every platform — keep the elevated
   process and skip the de-elevation and the prompt.
 - Sets `PR_SET_NO_NEW_PRIVS` before installing the seccomp filter, so
@@ -88,121 +106,126 @@ work without writable executable pages.
 
 ### Linux sandbox
 
-Two syscall/filesystem confinement layers exist, both default-deny and
-installed from `src/security.c` before any HTML or audio is parsed:
+Two confinement layers exist, both default-deny and installed from
+`main()` in `src/appmain.c` (via `src/security.c`) before any HTML or
+audio is parsed:
 
 | Run mode | Landlock | seccomp-bpf | `PR_SET_NO_NEW_PRIVS` |
 |----------|:--------:|:-----------:|:---------------------:|
 | **Interactive GUI** (the normal browser) | ✅ | ✅ | ✅ |
 | Headless / `--dump` / `--eval` / WPT tooling | ✅ | ✅ | ✅ |
+| Watchdog supervisor (GUI launches only) | — | — | — |
 
-The interactive GUI runs single-process (the engine is in the shell), and
-its startup path (`proc_mode` in `src/appmain.c`) applies both Landlock
-and `ns_security_seccomp_init()`. No renderer or media executable needs
-`fork`/`execve`, so the browser process can use the same no-`execve`
-syscall allow-list as headless/tooling mode.
+Both layers **fail open**: on a kernel without Landlock, or when the
+seccomp filter cannot be loaded, the browser logs the failure and runs
+unconfined.
 
-- **Landlock (filesystem) — applied in every mode.** Read+execute on the
-  system library and binary trees (`/usr`, `/usr/local`, `/lib`,
-  `/lib64`, and the directory the running executable sits in). Read-only
-  on `/etc`, the CA bundle, the fontconfig cache, `/proc`, `/sys`,
-  `/run`, `/dev/shm`, `/dev/dri`, the X11 and Wayland sockets, the
-  Xauthority directory, `/dev/urandom`, the user's font and theme
-  directories (`~/.fonts`, `~/.fontconfig`, `~/.icons`, `~/.themes`),
-  and the XDG config, data and cache directories themselves.
-  Read+write is narrower: the per-user runtime directory and the
-  browser's own state under `~/.config/northstar`,
-  `~/.local/share/northstar` and `~/.cache/northstar`, plus the download
-  directory, which must resolve inside `$HOME`. `/dev/snd` is added when
-  audio is built in, and `/dev/videoN` when a page has been granted the
-  camera. The rest of `$HOME` — `~/.ssh`, `~/.aws`, `~/.netrc`, other
-  browsers' state, shell history — is **not** reachable. No directory the
-  process can write to is also executable, so a bug cannot drop a payload
-  and then map it executable from a writable path. Symbolic-link creation
+- **Landlock (filesystem) — applied in every browser mode.**
+  - *Read + execute:* `/usr`, `/usr/local`, `/lib`, `/lib64`, the
+    directory the running executable sits in, and a `../lib` or
+    `../lib64` beside it.
+  - *Read-only:* `/etc`, the CA-certificate and fontconfig caches,
+    `/proc`, `/sys`, `/run`, `/dev/dri`, `/dev/urandom`, the X11 and ICE
+    socket directories, the user's font and theme directories
+    (`~/.fonts`, `~/.fontconfig`, `~/.icons`, `~/.themes`), the whole
+    XDG config, data and cache directories (`~/.config`,
+    `~/.local/share`, `~/.cache`), the directory that holds
+    `$XAUTHORITY`, and the data directories found near the executable
+    (`../share/northstar`, or `data/` in a build tree — where the source
+    tree itself, the nearest directory holding a `meson.build` up to
+    three levels above the executable, is readable too). `/dev/shm` is
+    read-only in headless mode.
+  - *Read + write:* the per-user runtime directory (which holds the
+    Wayland socket), the browser's own state under
+    `~/.config/northstar`, `~/.local/share/northstar` and
+    `~/.cache/northstar`, the download directory when its path starts
+    with `$HOME`, `/dev/null`, `/dev/shm` in GUI mode, `/dev/snd` and any
+    `/dev/video0`–`/dev/video63` node that exists, and the output
+    directory of a `--dump=png:`, `pdf:` or `print:` run.
+
+  The rest of `$HOME` — `~/.ssh`, `~/.aws`, `~/.netrc`, shell history —
+  is **not** reachable. Two things widen that: other applications' state
+  kept under `~/.config`, `~/.local/share` or `~/.cache` (other browsers'
+  profiles among it) is readable, and when `$XAUTHORITY` is
+  `~/.Xauthority` its directory is `$HOME` itself, which makes the whole
+  home directory readable. No writable directory is granted Landlock's
+  execute right, and `execve` is not in the seccomp allow-list, so a
+  dropped file cannot be run as a program. Symbolic-link creation
   (`LANDLOCK_ACCESS_FS_MAKE_SYM`) is handled by the ruleset and granted
   nowhere, and on Landlock ABI 3+ `truncate(2)` is handled and allowed
   only where file writes are; the ABI is probed at startup so the
   ruleset requests only rights the running kernel knows.
-  `PR_SET_NO_NEW_PRIVS` is set here too, so a setuid binary cannot be
-  used to regain privileges after a compromise.
-- **seccomp-bpf (syscalls) — applied in every Linux mode.** Default-deny
-  allow-list: the filter is built with
+- **seccomp-bpf (syscalls) — applied in every browser mode.**
+  Default-deny allow-list: the filter is built with
   `SCMP_ACT_ERRNO(EPERM)` as the default action and then permits only the
-  ~266 syscalls the browser actually needs (`ns_seccomp_allowed_names[]`
-  in `src/security.c`); every other syscall returns `EPERM`. `execve` /
+  266 syscalls the browser needs (`ns_seccomp_allowed_names[]` in
+  `src/security.c`); every other syscall returns `EPERM`. `execve` /
   `execveat` are not on the list, so a confined process cannot pivot to
   another interpreter or binary even if Landlock would have allowed
   reading it. `ptrace`, `bpf`, `keyctl`, `mount`, `unshare`,
   `userfaultfd`, the `io_uring_*` family, `perf_event_open`, `kexec_load`,
-  and the module syscalls are likewise absent from the allow-list. TSYNC
+  and the module syscalls are likewise absent. The filter matches syscall
+  numbers only, not their arguments: `clone`/`clone3`, `ioctl`, `prctl`,
+  `socket`, `mmap` and `mprotect` are allowed with any flags. TSYNC
   propagates the filter to every thread.
 - **Media / audio.** Northstar decodes audio **in-tree** in the browser
   process (`src/audio/audio.c`), not via an external player. When a page
-  plays an `<audio>` element the engine emits
-  `open`/`play`/`pause`/`seek`/`stop`/`volume` commands that ride the
-  render-response `X-Audio` side-channel to the shell (`src/gtk/procview.c`),
-  which queues them to a per-view audio context. A dedicated worker thread
-  fetches and decodes media without blocking GTK; URLs are never handed to
-  a shell or arbitrary binary. The mixer decodes MP3 (vendored minimp3),
-  MP2 (vendored pl_mpeg) and, when
-  `opusfile`/`vorbisfile` are present, Ogg Opus/Vorbis, and outputs through
-  SDL2. On Linux the worker inherits the browser's Landlock + seccomp
-  restrictions, but codec memory corruption is no longer isolated from
-  the browser address space. Audio Media Source buffers stay in process:
-  the page engine resolves their opaque blob URL to bytes and queues those
-  bytes directly to the same mixer worker.
+  plays an `<audio>` element the engine returns
+  `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands with each
+  rendered frame, and the GTK view (`src/gtk/procview.c`) queues them to a
+  per-view audio context. A dedicated worker thread fetches and decodes
+  media without blocking GTK; URLs are never handed to a shell or an
+  external binary. The worker fetches with its own libcurl handle —
+  `http`, `https` and `data:` only, TLS verification on, a size cap and a
+  30-second timeout — which does not share the page's cookie partition or
+  HSTS state. The mixer decodes MP3 (vendored minimp3), MP2 (vendored
+  pl_mpeg) and, when `opusfile`/`vorbisfile` are present, Ogg
+  Opus/Vorbis, and outputs through SDL2. On Linux the worker inherits the
+  browser's Landlock + seccomp restrictions, but codec memory corruption
+  is not isolated from the browser address space. Script-supplied media
+  bytes (a `MediaSource` buffer, a `blob:` URL) stay in process: the
+  engine resolves them to bytes and queues those to the same worker.
 - **Video.** `<video>` decodes MPEG-1 (`video/mpeg`) and nothing else,
   through the same vendored pl_mpeg that supplies the MP2 audio decoder
   (`src/video.c`). This is a real codec attack surface, in the browser
   process, with no isolation from it — pl_mpeg is ordinary C, not a
   memory-safe decoder like Wuffs. It is deliberately a small one: one
   decoder for one format, no demuxer beyond MPEG-1 Program Stream, no
-  adaptive streaming, no Media Source Extensions and no DRM. Frames are
-  decoded up front rather than streamed, bounded by `NS_VIDEO_MAX_FRAMES`
-  (4096) and `NS_VIDEO_MAX_TOTAL_BYTES` (256 MB of decoded pixels), so a
-  crafted clip cannot drive unbounded allocation; a longer one is
-  truncated. Decoded dimensions are clamped before any `width × height`
-  multiplication, as for images.
+  adaptive streaming and no DRM. Frames are decoded up front rather than
+  streamed, bounded by `NS_VIDEO_MAX_DIMENSION` (4096 pixels a side),
+  `NS_VIDEO_MAX_FRAMES` (4096) and `NS_VIDEO_MAX_TOTAL_BYTES` (256 MB of
+  decoded pixels), so a crafted clip cannot drive unbounded allocation; a
+  longer one is truncated.
 
-The sandbox can be disabled for debugging with `NS_NO_SANDBOX=1` (Landlock)
-/ `NS_NO_SECCOMP=1` (seccomp). Don't use those in normal operation.
+`NS_NO_SANDBOX=1` disables both Landlock and seccomp (and the macOS
+profile); `NS_NO_SECCOMP=1` disables seccomp alone. Both act on the
+variable being set at all, whatever its value. Don't use them in normal
+operation.
 
 ### macOS sandbox
 
-The supported macOS build applies a Seatbelt profile with
-`sandbox_init(3)`. It allows normal reads and system interaction but denies
-filesystem writes by default, then permits writes to the temporary and
-runtime directories, Northstar's config/data/cache directories, Downloads,
-and any directory explicitly selected by the user. This is write
-confinement, not the Linux profile's read allow-list or syscall filter; all
-engine and audio code still shares the browser process. Set
-`NS_NO_SANDBOX=1` only for debugging.
+The macOS build applies a Seatbelt profile with `sandbox_init(3)`. It
+allows reads and system interaction by default but denies filesystem
+writes, then permits writes to the temporary directories, `/dev`, the
+runtime directory, Northstar's config/data/cache directories, Downloads,
+and the output directory of a headless dump. This is write confinement,
+not the Linux profile's read allow-list or syscall filter; all engine and
+audio code still shares the browser process. Set `NS_NO_SANDBOX=1` only
+for debugging.
 
 ### Windows process mitigations
 
 Windows has no direct Landlock or seccomp-bpf equivalent that a
-user-space GTK process can apply to itself. Instead the browser
-hardens itself at startup via `SetProcessMitigationPolicy`, called
-from `ns_security_win32_mitigations_init` in `src/security.c`
-**before** any DLL we don't statically link is touched. Six
-policies, all best-effort (an unsupported policy on an older
-Windows just returns `FALSE` and is skipped). This edition is
-single-process and launches no renderer or media helpers, so the browser
-and headless/tooling modes apply all six policies:
+user-space GTK process can apply to itself. Instead the browser hardens
+itself at startup via `SetProcessMitigationPolicy`, called from
+`ns_security_win32_mitigations_init` in `src/security.c` before any page
+is loaded. Each call is best-effort: a policy the running Windows does not
+support returns `FALSE` and is skipped. The browser and headless/tooling
+modes apply:
 
-- **ASLR** (`ProcessASLRPolicy`, flags `0x0F`) — force relocate
-  images, force bottom-up randomization, high-entropy 64-bit
-  layout, disallow stripped images. Belt-and-braces on top of the
-  PE header's `IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE`.
 - **StrictHandleCheck** (`ProcessStrictHandleCheckPolicy`, flags
   `0x03`) — raise an exception on invalid handle use and lock the
   setting permanently. Catches double-close, UAF-of-handle bugs.
-- **DisableDynamicCode** (`ProcessDynamicCodePolicy`, flags
-  `0x01`) — refuse `VirtualAlloc`/`VirtualProtect` with
-  `PAGE_EXECUTE_*`. Pairs with the no-JIT QuickJS guarantee: the
-  process has no legitimate need for writable-executable memory,
-  so any RCE that depends on allocating one is denied at the
-  kernel boundary.
 - **DisableExtensionPoints**
   (`ProcessExtensionPointDisablePolicy`, flags `0x01`) — block
   `AppInit_DLLs`, WinSock Layered Service Providers, Image File
@@ -220,33 +243,39 @@ and headless/tooling modes apply all six policies:
   binary. The watchdog launches the browser before this policy is applied;
   the browser process itself has no legitimate child-process requirement.
 
+The same function also passes `ProcessDEPPolicy` and
+`ProcessControlFlowGuardPolicy`. Neither changes anything at runtime: DEP
+is always on for a 64-bit process, and Control Flow Guard cannot be
+switched on after the process has started. The ASLR policy (forced
+relocation, bottom-up and high-entropy randomisation) and the
+dynamic-code prohibition are **not** applied; the executable's PE header
+still requests ASLR (`DYNAMIC_BASE`).
+
 There is no per-path filesystem sandbox; Windows AppContainer
 would provide one but requires a manifest and code-signing
 integration we don't have yet. The closest equivalents — Low
 Integrity Level drop and AppContainer — are tracked as future
 work.
 
-Plus `ns_security_refuse_root`: elevation is detected with
-`CheckTokenMembership` against the Built-in Administrators SID.
-Unlike the Linux path it does not merely refuse — it relaunches the
-browser under the desktop shell's token (`CreateProcessWithTokenW`)
-and exits the elevated instance, so the session ends up unprivileged.
-A `MessageBox` with a run-anyway option and a `stderr` diagnostic are
-the fallback when de-elevation cannot be done; `NS_ALLOW_ROOT=1` skips
-both.
-
 The whole mitigation suite can be disabled for debugging with
 `NS_NO_WIN32_MITIGATIONS=1`. Don't use that in normal operation.
 
 ### Network
 
-libcurl drives every fetch with TLS verification enabled
-(`CURLOPT_SSL_VERIFYPEER=1`, `CURLOPT_SSL_VERIFYHOST=2`), `http,https`
-as the only allowed protocols, redirects clamped to HTTPS once the
-initial scheme is HTTPS, max ten redirects, an explicit response-size
-cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
-`CURLOPT_HSTS`; Alt-Svc is honoured. Mixed-content sub-resources
-(http inside an https document) are blocked.
+libcurl drives every page fetch with TLS verification enabled
+(`CURLOPT_SSL_VERIFYPEER=1`, `CURLOPT_SSL_VERIFYHOST=2`), `http`,
+`https` and `ftp` as the only protocols, redirects clamped to HTTPS once
+the initial scheme is HTTPS (and to FTP once it is FTP), at most ten
+redirects, an explicit response-size cap, and `CURLOPT_NOSIGNAL`. HSTS
+state is loaded and persisted via `CURLOPT_HSTS`; Alt-Svc is honoured.
+Top-level navigations try HTTPS first (`https_first`, on by default).
+The `tls_allow_insecure_override` setting, off by default, lets the user
+proceed past a certificate error, never for an HSTS host.
+
+Mixed content — an `http:` resource inside an `https:` document — is
+blocked for scripts, `fetch()`/`XMLHttpRequest`, WebSocket, EventSource
+and workers. Images, stylesheets, fonts, media and frames are not
+checked; see *Known gaps*.
 
 ### Origin isolation
 
@@ -255,10 +284,10 @@ cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
   comes from the Public Suffix List via libpsl. All subdomains within
   the same registrable domain share one cookie jar and one cache
   partition; everything else is isolated. Third-party cookies are
-  blocked by default. A subresource keeps its initiating document
-  through every redirect hop, so a 302 cannot move it into the target's
-  first-party partition or relabel it as a navigation in the
-  `Sec-Fetch-*` headers.
+  blocked on network requests by default (`cookie_policy`). A
+  subresource keeps its initiating document through every redirect hop,
+  so a 302 cannot move it into the target's first-party partition or
+  relabel it as a navigation in the `Sec-Fetch-*` headers.
 - `about:settings`, `about:config` and `about:history` are served only
   to navigations and to requests made by about: pages; the settings
   endpoints accept changes only by POST, validate the URLs they store,
@@ -266,50 +295,67 @@ cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
   `about:blank` and the start page.
 - A `file:` document may embed local files as images, scripts,
   stylesheets and frames, but `fetch()` and `XMLHttpRequest` receive
-  only an opaque response for a `file:` URL, and directory listings are
-  synthesized only for navigations.
-- CSP (`default-src`, `script-src`, `style-src`, `img-src`,
-  `media-src`, `connect-src`, `font-src`, `frame-src`,
-  `frame-ancestors`) is parsed and enforced for both inline and
-  external resources, including nonce and hash matches. Host source
-  expressions match scheme, host (with `*.` wildcard), port (defaulting
-  to the scheme's default), and path (left-anchored if the source ends
-  in `/`, exact otherwise). `*` follows CSP3 semantics — it matches
-  network schemes only, never `data:`, `blob:`, `filesystem:`, or
-  `javascript:`.
+  only an opaque response for a `file:` URL, directory listings are
+  synthesized only for navigations, and an `http(s)` page cannot navigate
+  to, or play media from, a `file:` URL.
+- CSP (`src/csp.c`) is parsed from headers and `<meta>` and enforced for
+  `default-src` (as the fallback), `script-src` (inline and external,
+  with nonces, hashes and `'strict-dynamic'`), `connect-src`,
+  `frame-src`/`child-src`, `worker-src`, `frame-ancestors`, `object-src`,
+  `base-uri` and `form-action`. `style-src`, `img-src`, `media-src` and
+  `font-src` are parsed but not yet enforced when stylesheets, images,
+  media and fonts load (`style-src` only withholds a `<link>` element's
+  `load` event). Host
+  source expressions match scheme, host (with `*.` wildcard), port
+  (defaulting to the scheme's default), and path (left-anchored if the
+  source ends in `/`, exact otherwise). `*` follows CSP3 semantics — it
+  matches network schemes only, never `data:`, `blob:`, `filesystem:`,
+  or `javascript:`.
 - Subresource Integrity (`integrity="sha256-…"` / `sha384-` / `sha512-`)
-  is verified against the response body before scripts or stylesheets
-  are applied.
-- IDN labels are accepted for display only under a Unicode TR-39
-  "Highly Restricted"–style profile: each label must be either pure
-  ASCII, a single non-Latin script, or one of the three standard CJK
-  combinations (Japanese / Traditional Chinese / Korean). Anything
-  else is shown as punycode in the URL bar, defeating most
-  Latin-look-alike homograph attacks.
+  is verified against the response body before a script runs.
+  Stylesheets' `integrity` attributes are not checked.
+- The address bar shows the URL in its WHATWG-serialised form, in which
+  a non-ASCII host always appears as its punycode (`xn--…`) encoding, and
+  drops any `user:password@` part of the authority. A look-alike
+  internationalised domain therefore never displays as the Latin name it
+  imitates.
 - Service-worker registrations and interception are restricted to the
-  script's origin and declared scope; a worker cannot control an unrelated
-  origin or an out-of-scope page.
+  script's origin; a worker cannot control an unrelated origin. The
+  `Service-Worker-Allowed` path restriction on scope is not enforced.
 - WebExtensions are explicitly installed local code, not capabilities
   granted to web pages. Packaged-resource paths are canonicalized beneath
   the extension root before loading, and extension storage is separated by
   extension identity.
+- Safe browsing (`src/safebrowsing.c`) checks a top-level navigation's
+  host against a local SHA-256 blocklist (the bundled
+  `safebrowsing.list`, a user list in the config directory, or
+  `NS_SAFEBROWSING_LIST`) and shows an interstitial. It is a warning, not
+  a boundary: the interstitial's continue link is an ordinary special URL
+  that a page could also link to.
+- Downloads are marked with their origin — the `com.apple.quarantine`
+  attribute on macOS, `user.xdg.origin.url` on Linux, and a
+  `Zone.Identifier` stream on Windows — and an `<a download>` link starts
+  one only after a recent user gesture.
 
 ### On-disk state
 
-Config, cookies, cache, HSTS, Alt-Svc, bookmarks, service-worker
-registrations, and WebExtension local storage live under the application
-data directories with owner-only permissions (`0700` directories, `0600`
-files on Unix; ACL-tightened on Windows). Service-worker registrations are
-keyed by origin and scope and are not persisted in private mode. Extension
-storage is keyed by extension identity and stays memory-only in private
-mode. The HTTP cache is keyed on
-`SHA-256(URL || partition)`, so cache filenames never embed
-attacker-controlled bytes and no path-traversal is possible.
+Config, cookies, cache, HSTS, Alt-Svc, bookmarks, history,
+service-worker registrations, and WebExtension local storage live under
+the application data directories with owner-only permissions (`0700`
+directories, `0600` files on Unix). On Windows the HTTP cache directory
+gets an explicit owner-only ACL; the other files inherit the user
+profile's default ACL. Service-worker registrations are keyed by origin
+and scope and are not persisted in private mode. Extension storage is
+keyed by extension identity and stays memory-only in private mode. The
+HTTP cache is keyed on `SHA-256(URL || partition)`, so cache filenames
+never embed attacker-controlled bytes and no path-traversal is possible.
 
 ### Parsers
 
 - HTML is parsed exclusively by [lexbor](https://github.com/lexbor/lexbor);
-  there is no hand-rolled HTML tokenizer.
+  there is no hand-rolled HTML tokenizer. XML and XHTML go through the
+  engine's own `src/xml.c`, which caps internal-entity expansion at 1 MB
+  per document.
 - URL parsing routes through lexbor's WHATWG URL module.
 - PNG/APNG, GIF, BMP, JPEG and WebP bytes are decoded by
   [Wuffs](https://github.com/google/wuffs) (memory-safe,
@@ -319,67 +365,77 @@ attacker-controlled bytes and no path-traversal is possible.
   in-tree — `-Davif=disabled` removes it. Nothing else decodes images:
   there is no GDK-Pixbuf fallback and no plugin-loaded decoder, so the
   set of parsers exposed to untrusted bytes is fixed at build time.
+- Web fonts, WOFF included, are parsed by FreeType; the engine then
+  re-serialises a WOFF font's tables as a plain SFNT file (`src/font.c`).
+- WebAssembly modules are parsed and run by the vendored WAMR classic
+  interpreter (`src/wamr/`), which is ordinary C parsing untrusted bytes.
 - Charset sniffing is delegated to uchardet, not hand-rolled.
 - The engine's own parsers bound attacker-controlled nesting and sizes.
   The recursive CSS parsers — selectors, `@supports`, `@media` queries,
   `var()` fallbacks, and `color-mix()` — all carry depth caps, the
-  background-layer list is torn down iteratively, and layout's box-tree
-  walkers stop at a fixed depth, so a pathologically nested stylesheet or
-  DOM cannot exhaust the stack. Sizes from untrusted sources — decoded
-  image dimensions and the render layer's `X-W`/`X-H`/`X-Stride` reply
-  headers — are clamped before any `width × height`/`stride × height`
-  multiplication, so a crafted dimension cannot integer-overflow a
-  bounds check or allocation. `filter: blur()` likewise clamps its
-  radius before building the convolution window.
+  background-layer list is torn down iteratively, layout's box-tree
+  walkers stop at a fixed depth, and SVG rendering stops at 256 levels,
+  so a pathologically nested stylesheet or DOM cannot exhaust the stack.
+  Decoded image and video dimensions are clamped before any
+  `width × height` multiplication, so a crafted dimension cannot
+  integer-overflow a bounds check or allocation. `filter: blur()`
+  likewise clamps its radius before building the convolution window.
 
 ### JavaScript
 
 JavaScript runs in [QuickJS](https://github.com/quickjs-ng/quickjs), an
 interpreter — no JIT, no machine-code generation. The DOM/JS bridge
 invalidates opaque pointers on node free and re-validates on every
-call, so DOM mutation cannot dangle a JS-held handle.
+call, so DOM mutation cannot dangle a JS-held handle. A page's runtime
+is created with a memory limit (`js_memory_cap_mb`, 2 GiB by default)
+and a 5 MiB stack limit; a worker's runtime gets 256 MiB, and at most
+512 MiB.
 
 All pages run in **one OS process** (single-process edition) — there is
 no per-page process or address-space isolation, so this is a
-JavaScript-state boundary, not a memory boundary. The current top-level
-page has one QuickJS runtime and context, and navigating across origins (e.g. from
-`news.example.com` to `evil.com`) tears down the runtime and starts a
-fresh one, so attacker-controlled globals (`window.foo = secret;`),
-prototype pollution, leftover module state, and any other in-memory
-JS residue from the previous origin cannot reach the new origin's
-scripts. Same-origin navigation reuses the existing runtime so
-sessionStorage and history work as expected. Because everything shares
-one process, a memory-safety bug in the engine is **not** contained
-between pages the way it would be with separate renderer processes; the runtime
-teardown defends against JS-level state leakage, not against native
-memory corruption.
+JavaScript-state boundary, not a memory boundary. Every top-level
+navigation builds a new document with a fresh QuickJS runtime, whatever
+the origin, so attacker-controlled globals (`window.foo = secret;`),
+prototype pollution, leftover module state, and any other in-memory JS
+residue from a previous page cannot reach the next page's scripts. The
+page being left is freed, or suspended in the back/forward cache (up to
+four pages) with its runtime intact. Because
+everything shares one process, a memory-safety bug in the engine is
+**not** contained between pages the way it would be with separate
+renderer processes; the separate runtimes defend against JS-level state
+leakage, not against native memory corruption.
 
 Iframes are rendered. An `<iframe src>` is fetched through the same
-hardened network pipeline as any other resource (TLS verification,
-`http`/`https` only, mixed-content blocking, redirect clamp, response-size
-cap, CSP `frame-src`); `srcdoc` is parsed inline. The content document is
-parsed by lexbor and laid out in place.
+network pipeline as any other resource (TLS verification, redirect
+clamp, response-size cap, CSP `frame-src`); `srcdoc` is parsed inline.
+The content document is parsed by lexbor and laid out in place.
 
-A loaded frame gets a JavaScript realm, but **within the parent page's
-single QuickJS runtime** — there is no separate runtime, context, or OS
-process per frame. The realm is a synthetic scope: the frame sees its own
-`window`, `document`, `location`, and `history`, and `top`/`parent`/`self`/
-`frames` are redirected to the frame itself rather than exposing the parent's
-real global. This is a best-effort JavaScript-level boundary for ordinary
-content, **not** a hard security boundary the way the cross-origin
-top-level navigation runtime teardown (above) is: a memory-safety bug
-or a Proxy escape in one frame is not contained from the rest of the
-document's origin. Treat frame isolation as defence-in-depth, not as an
-origin sandbox.
+A loaded frame gets its own JavaScript realm (a `JSContext`), but
+**within the parent page's single QuickJS runtime** — there is no
+separate runtime or OS process per frame, and the frame shares the
+parent's DOM class prototypes. The frame sees its own `window`,
+`document`, `location` and `history`. A same-origin frame's `parent` and
+`top` are the embedding page's real window, as the web platform
+requires. A frame whose URL is cross-origin, or one sandboxed without
+`allow-same-origin`, instead gets a restricted window proxy for `parent`
+and `top` — `postMessage`, the `location` setter, `closed`, `length`,
+`window`/`self`/`frames`/`parent`/`top` and `close`/`focus`/`blur`;
+anything else throws `SecurityError` — and the embedding page sees
+`contentDocument` as `null` and a restricted `contentWindow` in the
+other direction. This is a JavaScript-level boundary for ordinary
+content, **not** a hard security boundary: a memory-safety bug or a
+Proxy escape in one frame is not contained from the rest of the page.
+Treat frame isolation as defence-in-depth, not as an origin sandbox.
 
 The `sandbox` attribute is parsed and enforced, with nested frames
 inheriting the intersection of their ancestors' sandboxes:
 
-- No `allow-scripts` (or no `sandbox` allowing it) blocks the frame's
-  scripts from running at all.
-- No `allow-same-origin` makes the frame opaque-origin: `localStorage`
-  and `sessionStorage` throw `SecurityError`, and `document.cookie` reads
-  empty and ignores writes.
+- No `allow-scripts` blocks the frame's scripts from running at all.
+- No `allow-same-origin` makes the frame opaque-origin: `localStorage`,
+  `sessionStorage` and `indexedDB` throw `SecurityError`,
+  `document.cookie` reads empty and ignores writes, and the frame and its
+  embedder reach each other only through the restricted window proxies
+  above.
 - No `allow-forms` blocks form submission; no `allow-modals` neutralises
   `alert`/`confirm`/`prompt`/`print`; no `allow-popups` makes
   `window.open` return `null`.
@@ -387,13 +443,14 @@ inheriting the intersection of their ancestors' sandboxes:
 A plain `<iframe>` with no `sandbox` attribute runs its scripts.
 
 Cross-document `postMessage` is delivered in both directions between a
-frame and its parent. A `targetOrigin` other than `*` or `/` is checked
-against the recipient window's origin and the message is dropped on a
-mismatch; the delivered event's `origin` is the sender's real origin and
-its `source` is the sender's window proxy, so a listener can authenticate
-what it received. Delivery is asynchronous, through the job queue. What
-this is not is a memory boundary: sender and recipient share one QuickJS
-runtime, so `postMessage` is the ordinary channel between frames, not a
+frame and its parent. `targetOrigin` is parsed to scheme, host and port
+and compared for equality with the recipient window's origin (`/` means
+the sender's own origin and `*` matches everything); the message is
+dropped on a mismatch. A message sent through a restricted window proxy
+carries the sender's origin and window proxy as the event's `origin` and
+`source`. Delivery is asynchronous, through the job queue. What this is
+not is a memory boundary: sender and recipient share one QuickJS runtime,
+so `postMessage` is the ordinary channel between frames, not a
 containment mechanism.
 
 ### Cookies and the `document.cookie` surface
@@ -408,7 +465,9 @@ jar (`ns_net_cookie_store_from_js`) — so a cookie set from JS is sent
 on the next request, and a cookie set over the network is visible to a
 later `document.cookie` read. `HttpOnly` cookies are written by libcurl
 with a `#HttpOnly_` line prefix that the JS read path skips, so they
-stay invisible to script.
+stay invisible to script. Script writes and network transfers go through
+one cookie store per site, guarded by a lock; only that store writes the
+jar file.
 
 The `document.cookie` setter:
 
@@ -420,11 +479,13 @@ The `document.cookie` setter:
   `Expires` (HTTP-date, via `curl_getdate`) set the jar expiry;
   `Max-Age<=0` or a past `Expires` deletes the named cookie. `Secure`
   is rejected outright from non-HTTPS origins. `Domain` is range-checked
-  against the document host before it widens scope; absent, the cookie
-  is stored host-only. `Path` defaults to `/`.
+  against the document host before it widens scope, and a public-suffix
+  `Domain` is refused; absent, the cookie is stored host-only. `Path`
+  defaults to the RFC 6265 default-path of the document URL.
+- Enforces the `__Secure-` and `__Host-` name-prefix rules.
 - Refuses a name that collides with an `HttpOnly` cookie for the
-  document host in either jar of the site partition, so script cannot
-  add a second value beside a server session cookie.
+  document host in the site's jar, so script cannot add a second value
+  beside a server session cookie.
 
 ## Known gaps
 
@@ -434,32 +495,42 @@ The `document.cookie` setter:
   A memory-safety bug in the engine is therefore not contained to a
   subordinate process — the origin/cookie/CSP/cache boundaries are
   enforced in-process by the engine's own logic, and the sandbox
-  (Landlock, and seccomp where applied) limits what the whole process can
-  reach, but neither is a substitute for the address-space isolation a
+  (Landlock and seccomp) limits what the whole process can reach, but
+  neither is a substitute for the address-space isolation a
   multi-process browser gives you. A per-page process sandbox is the
   largest single hardening this edition does not have.
 - **Iframe isolation is JS-level, not a runtime or process boundary.**
-  A loaded frame shares the parent page's QuickJS runtime and global
-  prototypes; its separate `window`/`document`/`location` and redirected
-  `top`/`parent` are a synthetic scope, not a true cross-origin sandbox.
-  A per-origin/per-frame runtime would close this and is tracked as future
-  work; until then, do not rely on a cross-origin frame being contained
-  from the embedding origin.
-- **In-process video decode.** MPEG-1 is decoded by pl_mpeg in the browser
-  process (see *Media*). It is a small and bounded surface, but it is
-  ordinary C parsing attacker-controlled bytes with nothing between it and
-  the rest of the process.
-- **No per-path filesystem sandbox on Windows.** The mitigation
-  suite restricts the *process* (no remote DLL loads, no dynamic
-  code, etc.) but does not allow-list the files the process can
-  read or write the way Landlock does on
-  Linux. AppContainer or Low-Integrity-Level drop would close
-  this; both require additional integration work (manifest /
-  capability declarations / re-routed config paths) and are
+  A loaded frame shares the parent page's QuickJS runtime and DOM
+  prototypes; its restricted window proxies are a JavaScript boundary,
+  not a true cross-origin sandbox. A per-origin/per-frame runtime would
+  close this and is tracked as future work; until then, do not rely on
+  a cross-origin frame being contained from the embedding origin.
+- **`document.cookie` in a frame uses the frame's own site.** A
+  cross-site frame reads and writes its site's first-party jar through
+  `document.cookie`, so the third-party blocking that applies to network
+  requests does not apply to script, and the `cookie_policy` setting is
+  not consulted for script writes.
+- **Mixed content outside scripts and connections, CSP for stylesheets,
+  images, media and fonts, and stylesheet SRI are not enforced**, as
+  described under *Network* and *Origin isolation*.
+- **In-process codecs.** MPEG-1 video, MP2/MP3/Ogg audio, AVIF (when
+  built) and WebAssembly are ordinary C parsing attacker-controlled bytes
+  in the browser process (see *Media*). They are bounded, but nothing
+  stands between them and the rest of the process.
+- **Linux read access is wider than the browser needs.** The whole XDG
+  config, data and cache directories are readable, and so is the
+  directory holding `$XAUTHORITY` — `$HOME` itself on systems that keep
+  `~/.Xauthority`.
+- **Windows: no per-path filesystem sandbox, no ASLR or dynamic-code
+  policy.** The mitigation suite restricts the *process* (no remote DLL
+  loads, no child processes, etc.) but does not allow-list the files the
+  process can read or write the way Landlock does on Linux, and the
+  process-level ASLR and dynamic-code policies are not applied (see
+  *Windows process mitigations*). AppContainer or a Low-Integrity-Level
+  drop would close the first; both require additional integration work
+  (manifest / capability declarations / re-routed config paths) and are
   tracked as future work.
-- **`document.cookie` writes to the jar without file locking.** A
-  JS cookie write and a concurrent libcurl jar flush from an
-  in-flight transfer are not serialised against each other, so a
-  write can occasionally be lost to a racing flush. A shared,
-  locked cookie store is the long-term fix; in practice script
-  cookie writes happen between transfers, so the window is small.
+- **The cookie jar is not locked between browser instances.** Within one
+  process, script and network cookie writes are serialised; two
+  Northstar processes sharing a profile can still lose each other's
+  writes.

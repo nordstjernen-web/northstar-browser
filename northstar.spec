@@ -25,7 +25,7 @@ BuildRequires:  update-desktop-files
 BuildRequires:  pkgconfig(enchant-2)
 BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libcrypto)
-BuildRequires:  pkgconfig(libcurl) >= 7.85
+BuildRequires:  pkgconfig(libcurl) >= 8.5
 BuildRequires:  pkgconfig(libpsl)
 BuildRequires:  pkgconfig(libseccomp)
 BuildRequires:  pkgconfig(libavif)

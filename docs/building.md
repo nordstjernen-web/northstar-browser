@@ -1,7 +1,9 @@
 # Building and running Northstar
 
 Northstar builds with **meson + ninja** and a C compiler (GCC or Clang).
-The primary target is Linux; macOS and Windows are also supported.
+The primary target is Linux; macOS and Windows are also supported. The
+project declares C++ as well, so meson wants a C++ compiler present even
+though no C++ source is built.
 
 ## Linux dependencies
 
@@ -18,30 +20,38 @@ sudo apt install build-essential pkg-config meson ninja-build cmake \
 Fedora / RHEL:
 
 ```sh
-sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
-    openssl-devel uchardet-devel harfbuzz-devel fribidi-devel cairo-devel \
-    fontconfig-devel freetype-devel libpsl-devel sqlite-devel \
-    libseccomp-devel SDL2-devel zlib-devel
+sudo dnf install gcc gcc-c++ pkgconf meson ninja-build cmake gtk4-devel \
+    libcurl-devel openssl-devel uchardet-devel harfbuzz-devel \
+    fribidi-devel cairo-devel fontconfig-devel freetype-devel \
+    libpsl-devel sqlite-devel libseccomp-devel SDL2-devel zlib-devel
 ```
 
 openSUSE:
 
 ```sh
-sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
-    libopenssl-devel libuchardet-devel harfbuzz-devel fribidi-devel \
-    cairo-devel fontconfig-devel freetype2-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libSDL2-devel zlib-devel
+sudo zypper install gcc gcc-c++ pkgconf meson ninja cmake gtk4-devel \
+    libcurl-devel libopenssl-devel libuchardet-devel harfbuzz-devel \
+    fribidi-devel cairo-devel fontconfig-devel freetype2-devel \
+    libpsl-devel sqlite3-devel libseccomp-devel libSDL2-devel zlib-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it. On
 macOS and Windows it is unused and the syscall filter is a no-op.
 
+The text stack has version floors set by ns-pango: GLib ≥ 2.80,
+HarfBuzz ≥ 8.3, fontconfig ≥ 2.15, Cairo ≥ 1.18 and FriBidi ≥ 1.0.6.
+They are what Ubuntu 24.04 ships, the oldest system CI builds on; older
+distributions (Debian 12, for one) need newer copies of those libraries.
+GTK must be ≥ 4.14 and libcurl ≥ 8.5. With a libcurl older than 8.11 the
+build warns that WebSocket is unavailable unless that libcurl was built
+with WebSocket support.
+
 **Optional, auto-detected:** `libavif-dev` (AVIF images — it pulls in a
 full AV1 decoder for a format that is rare on the web, so
 `-Davif=disabled` drops it), `libenchant-2-dev` (+ a dictionary such as
-`hunspell-en-us`) enables on-screen spell-checking; `opusfile` /
-`vorbisfile` dev packages add native Ogg Opus/Vorbis decode to the
-in-process mixer. The build works without them.
+`hunspell-en-us`) for on-screen spell-checking, `opusfile` / `vorbisfile`
+dev packages for native Ogg Opus/Vorbis decode in the in-process mixer,
+and `libthai-dev` for Thai word breaking. The build works without them.
 
 ## macOS dependencies
 
@@ -61,6 +71,9 @@ shown below.
 Install MSYS2 MINGW64, then install the packages listed by
 `.github/workflows/windows.yml`. Run Meson from the MINGW64 shell so its
 compiler and `pkg-config` resolve the MinGW libraries.
+`scripts/_msys_build.sh` does that from any shell: it sets up the MINGW64
+environment, configures `builddir` on first use and compiles. The binary
+is `builddir/src/gtk/northstar.exe`.
 
 ## Build
 
@@ -76,8 +89,8 @@ meson compile -C builddir
 
 | Dependency | Pinned to | Resolution |
 |------------|-----------|------------|
-| [lexbor](https://github.com/lexbor/lexbor) — HTML/CSS/URL parser | `v3.0.1` | A system lexbor ≥ 3.0.0 is used when `pkg-config` or CMake finds one; otherwise the wrap is cloned and its static library built through meson's CMake module. |
-| [quickjs-ng](https://github.com/quickjs-ng/quickjs) — JavaScript | `v0.17.0` | System package first, the wrap as fallback. |
+| [lexbor](https://github.com/lexbor/lexbor) — HTML parser and WHATWG URL module | `v3.0.1` | A system lexbor ≥ 3.0.0 is used when `pkg-config` or CMake finds one; otherwise the wrap is cloned and its static library built through meson's CMake module. |
+| [quickjs-ng](https://github.com/quickjs-ng/quickjs) — JavaScript | `v0.17.0` | A system quickjs-ng first, of any version; the wrap as fallback. |
 | [ns-pango](https://github.com/nordstjernen-web/ns-pango) — text itemization, shaping, line breaking | a commit | Always the subproject. There is no system copy to find: the fork renames every symbol precisely so it can coexist with the system Pango that GTK loads. |
 
 WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree and need no network.
@@ -87,6 +100,10 @@ So the first build needs network access for whichever of those three it
 cannot satisfy locally — ns-pango always, the other two unless the system
 supplies them. A tarball that must build offline has to embed them;
 `debian/README.source` carries the recipe.
+
+When `qjs` and `qjsc` are on the `PATH`, the build also compiles
+`data/js/polyfills.js` with them as a syntax and sanity check
+(`scripts/verify-polyfills.py`).
 
 `./scripts/dev.sh build` runs `meson setup` (only when needed) and
 `meson compile -C builddir` in one step.
@@ -107,10 +124,11 @@ meson compile -C builddir
 the shallow clones these wraps ask for, in either direction. Deleting
 `subprojects/<name>/` and reconfiguring does the same thing more slowly.
 
-Three local patches ride on top of the fetched sources, named by
-`diff_files` in the wraps and living in `subprojects/packagefiles/`: one
-for lexbor and two for quickjs-ng. Regenerate them against the new
-sources when a pin moves, or drop one upstream has taken.
+Two local patches ride on top of the fetched sources, named by
+`diff_files` in the wraps and living in `subprojects/packagefiles/`: a
+bounds check for lexbor and a Windows link fix for quickjs-ng. Regenerate
+them against the new sources when a pin moves, or drop one upstream has
+taken. A system lexbor or quickjs-ng does not get them.
 
 The vendored copies are updated by replacing the files. Wuffs
 (`subprojects/wuffs/wuffs-v0.4.c`) and minimp3 (`src/audio/minimp3.h`) are
@@ -129,10 +147,19 @@ Verify a dependency move the way any other change is verified: a clean
 drift, and the browser launched on the paths the dependency touches. A
 text-layout change wants more than that, because the shaping cache can be
 wrong only for the second paragraph that shares a word with the first:
-render `data/render-tests/` twice, once with `NS_PANGO_SHAPE_CACHE=0` and
-once with the cache on, and require the layout dumps to be identical, then
-check that `NS_PANGO_SHAPE_CACHE=verify` reports no mismatch over the same
-pages.
+dump the layout of every page in `data/render-tests/` with the cache off
+and on, require the two sets to be identical, then check that
+`NS_PANGO_SHAPE_CACHE=verify` reports no mismatch over the same pages.
+
+```sh
+for f in data/render-tests/*.html; do
+    n=$(basename "$f" .html)
+    NS_PANGO_SHAPE_CACHE=0 ./builddir/src/gtk/northstar --headless \
+        --dump=layout "$f" > "/tmp/off-$n.txt"
+    ./builddir/src/gtk/northstar --headless --dump=layout "$f" > "/tmp/on-$n.txt"
+    cmp -s "/tmp/off-$n.txt" "/tmp/on-$n.txt" || echo "differs: $n"
+done
+```
 
 ## Fast iteration
 
@@ -145,17 +172,36 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. Disable on platforms WAMR does not support. |
+| `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. `auto` turns it off on 32-bit x86, which WAMR does not support; disable it on other platforms WAMR does not support. |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL2). |
 | `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |
 | `build_date` | *(configure date)* | Build-date stamp shown in the About dialog. |
 
 Set with `-Dname=value`, e.g. `meson setup builddir -Dwasm=disabled`.
 
+## Command line
+
+`northstar [options] [URL | FILE]` opens the start page, or the given URL
+or local file. A normal launch runs under a watchdog process that restarts
+the browser, with its session, after a crash or hang. `debian/northstar.1`
+is the manual page.
+
+| Option | Effect |
+|--------|--------|
+| `--version` | Print the version and exit. |
+| `--private` | Keep history, cookies, cache and site storage off disk for this session. |
+| `--proxy=URL` | Use an HTTP(S) proxy. |
+| `--window-size=WxH` | Initial window size. |
+| `--gsk-renderer=gl\|ngl\|vulkan\|cairo` | GTK renderer. |
+| `--no-watchdog` | Run without the watchdog. |
+| `--print-config` | Print the effective configuration and exit. |
+
 ## Headless mode (scripting / testing)
 
-The browser can render without a display, which is how the render-test
-fixtures are exercised and how behaviour can be scripted:
+The browser can render without a display, which is how the fixtures are
+exercised and how behaviour can be scripted. Any of `--headless`,
+`--dump=`, `--eval=`, `--act=`, `--inspect=`, `--inspect-at=` or `--wpt`
+selects it; headless runs are never supervised by the watchdog.
 
 ```sh
 # Dump a page to PNG
@@ -167,9 +213,25 @@ fixtures are exercised and how behaviour can be scripted:
     --url="file:///tmp/page.html" --eval="document.title"
 ```
 
-Useful flags: `--dump=png:PATH` / `--dump=layout` / `--dump=text` /
-`--dump=dom`, `--eval=EXPR`, `--viewport=W`, `--viewport-height=H`,
-`--settle-ms=N`.
+| Option | Effect |
+|--------|--------|
+| `--url=URL`, or a bare URL or file path | The page to load. |
+| `--dump=text\|dom\|layout\|none` | Print the page text (the default), the DOM, the box tree, or nothing. |
+| `--dump=png:FILE`, `pdf:FILE`, `print:FILE` | Write a screenshot, the page as one long PDF sheet, or the page paginated for print. These also write `FILE-initial.ext`, captured at the first render; the named file follows after `--time-ms`. |
+| `--viewport=W` or `WxH`, `--viewport-height=H` | Viewport size in CSS pixels (default width 1000). |
+| `--settle-ms=N` | Time to let the page settle before output (default 200). |
+| `--time-ms=N` | Page time between the first and final image or PDF capture (default 1000). |
+| `--eval=EXPR` | Evaluate JavaScript after settling and print the result. |
+| `--act='ACTION; ACTION'` | Input before output: `click X,Y`, `rightclick X,Y`, `type TEXT`, `key NAME`, `wait MS`, `eval JS`, `evalfile PATH`, and more. |
+| `--inspect=SELECTOR`, `--inspect-at=X,Y` | Report the layout boxes matching a selector, or at a point. |
+| `--wpt`, `--wpt-timeout-ms=N` | Run a testharness.js page and report every subtest; see [compliance.md](compliance.md). |
+| `--debug[=info,warn,error,render,net,js]` | Stream engine events to stderr; `net` adds fetch, layout and shaping-cache totals at exit. |
+
+Two traps in `--act`. Actions are split on `;`, so inline JS in an `eval`
+action is cut at its first statement separator — put anything longer
+than one expression in a file and use `evalfile`. And `type` inserts
+text without keyboard events, so use `key` when the page's behaviour
+depends on `keydown`.
 
 Two dump modes write PDF and differ in how much they know about paper.
 `--dump=pdf:PATH` writes the page as one long unpaginated sheet, the same
@@ -183,30 +245,81 @@ checked without a printer attached:
     --dump="print:/tmp/paged.pdf" data/render-tests/print-pagination.html
 ```
 
-Running as `root` is refused for safety; set `NS_ALLOW_ROOT=1` only in a
-throwaway container. `NS_NO_SANDBOX=1` / `NS_NO_SECCOMP=1` disable the
-sandbox layers for debugging — never in normal use.
+On Linux the sandbox confines what a headless run can read. A local
+page has to live somewhere Landlock allows: a build run from
+`builddir/` can read its own source tree, so the fixtures under `data/`
+load as files, but a page in `/tmp` or elsewhere in `$HOME` does not —
+serve it over HTTP instead, as `scripts/render-tests.sh` does. The output
+directory of a PNG, PDF or print dump is added to the sandbox
+automatically.
+
+## Configuration and environment
+
+Settings live in `~/.config/northstar/northstar.conf`, one `key = value`
+per line; `--print-config` prints every key with its effective value.
+These environment variables override the file:
+
+| Variable | Effect |
+|----------|--------|
+| `NS_HOME_URL`, `NS_USER_AGENT`, `NS_COMPAT_MODE` | Start page, User-Agent, compatibility mode. |
+| `NS_HTTP_PROXY`, `NS_HTTPS_PROXY`, `NS_NO_PROXY`, `NS_DOH_URL` | Proxies and the DNS-over-HTTPS resolver. |
+| `NS_GSK_RENDERER` | GTK renderer, as for `--gsk-renderer`. |
+| `NS_PRIVATE` | Start in private mode. |
+| `NS_NO_WATCHDOG`, `NS_NO_CACHE`, `NS_NO_IMAGES`, `NS_NO_LOCAL_STORAGE`, `NS_NO_HTTPS_FIRST`, `NS_NO_PRELOAD_SCAN`, `NS_NO_ASYNC_IMG_DECODE`, `NS_NO_HARDEN_ALLOC` | Turn the matching feature off. |
+
+Others the browser reads:
+
+| Variable | Effect |
+|----------|--------|
+| `NS_SAFEBROWSING_LIST` | Blocklist file used instead of `~/.config/northstar/safebrowsing.list` and the bundled list. |
+| `NS_EXTENSIONS_DIR` | WebExtensions directory (default `~/.local/share/northstar/extensions`). |
+| `NS_I18N_DIR` | Directory of the `.lang` UI catalogues. |
+| `NS_LOG_FILE`, `NS_NO_LOG_FILE` | Mirror the debug event log to a file (on by default only on Windows). |
+| `NS_CAMERA_ALLOW` | Grant every camera request without asking. For testing. |
+| `NS_FORCE_HTTP3` | Use HTTP/3 directly instead of waiting for Alt-Svc. |
+| `NS_PANGO_SHAPE_CACHE` | `0` turns the ns-pango caches off; `verify` checks every cached shape against a fresh one. |
+| `NS_HEADLESS_LEGACY` | Send every headless run through the direct engine path. |
+
+Running as `root` is refused for safety; `NS_ALLOW_ROOT=1` overrides it,
+and only belongs in a throwaway container — though `scripts/dev.sh` and
+the WPT runners set it by default so they work in one. `NS_NO_SANDBOX`
+disables the whole sandbox and `NS_NO_SECCOMP` only the syscall filter;
+both take effect when set to anything, and are for debugging only.
 
 ## Smoke and render-test fixtures
 
-`./scripts/dev.sh smoke` renders each fixture in `data/fixtures/` headless
-and diffs it against the checked-in baseline in `data/baseline/`, reporting
-drift. Text fixtures use `--dump=text`; the `geo-*` ones use
-`--dump=layout`, which is text-free and fixed-size so the diff is
-font-stable. After an intended change, refresh with
-`./scripts/dev.sh baselines` (or `dev.sh baseline <target>` for one).
+`./scripts/dev.sh smoke` renders the fixture list built into
+`scripts/dev.sh` — the pages in `data/fixtures/` — headless, and diffs
+each against its baseline in `data/baseline/`, reporting drift. Text
+fixtures use `--dump=text`; the `geo-*` ones use `--dump=layout`, which is
+text-free and fixed-size so the diff is font-stable. After an intended
+change, refresh with `./scripts/dev.sh baselines` (or
+`dev.sh baseline <target>` for one).
 
-`scripts/render-tests.sh [out-dir]` serves `data/render-tests/*.html` over
-a local HTTP server and renders each to a PNG for visual inspection.
+`scripts/render-tests.sh [out-dir]` serves `data/render-tests/*.html` on
+port 8137 and renders each to a PNG in `render-tests-out/` (800 px wide,
+or `NS_TEST_VIEWPORT`) for visual inspection.
 
 Neither is an automated test suite, and this project has none by design:
 the baselines catch drift, the PNGs are read by eye, and correctness is
 verified by running the browser.
 
+## Other scripts
+
+| Script | Purpose |
+|--------|---------|
+| `wpt-run.sh`, `wpt-local.sh`, `wpt-fast.sh` | Web-platform-tests runners; see [compliance.md](compliance.md). |
+| `_msys_build.sh`, `_msys_eval.sh`, `_msys_act.sh`, `_msys_wpt.sh`, `run-windows.ps1`, `smoke-windows.ps1` | Build, drive and smoke-test the Windows binary. |
+| `pack-linux.sh`, `pack-deb.sh`, `pack-rpm.sh`, `pack-srpm.sh`, `pack-appimage.sh`, `pack-bsd.sh`, `pack-windows.sh`, `pack-windows-installer.sh`, `pack-msix.sh` | Release packaging. |
+| `nightly.sh`, `nightly-distro-build.sh` | Nightly build orchestration. |
+| `speedometer-bench.sh`, `speedometer4-bench.sh`, `sample-profile.sh` | Benchmarks and a sampling profiler. |
+| `gen-architecture.py`, `gen-badge.sh`, `gen-splash.py`, `gen-splash.sh`, `gen-windows-icon.py` | Regenerate the architecture diagram, the badge, the splash and the Windows icon. |
+| `embed-text.py`, `verify-polyfills.py`, `verify-polyfills.js` | Build helpers: embed the JS polyfills and hooks, check the polyfills. |
+
 ## Definition of done
 
 A change is complete when it (1) compiles cleanly with no new warnings
 under the configured GCC/Clang flags, (2) launches and the affected UI path
-works when exercised manually or headless, and (3) is committed. See
-[`../CLAUDE.md`](../CLAUDE.md) for the full contributor workflow and the
-comments/scope policy.
+works when exercised manually or headless, and (3) is committed and pushed.
+See [`../CLAUDE.md`](../CLAUDE.md) for the full contributor workflow and
+the comments/scope policy.

@@ -1,10 +1,14 @@
-.TH NORTHSTAR 1 "July 2026" "northstar" "User Commands"
+.TH NORTHSTAR 1 "September 2026" "northstar" "User Commands"
 .SH NAME
 northstar \- minimalist GTK 4 web browser with an original engine
 .SH SYNOPSIS
 .B northstar
 .RI [ options ]
-.RI [ URL ]
+.RI [ URL | FILE ]
+.br
+.B northstar \-\-headless
+.RI [ options ]
+.RI [ URL | FILE ]
 .SH DESCRIPTION
 Northstar is a web browser written from scratch in C, with a GTK 4
 user interface and a libcurl network stack. Its HTML, CSS, and
@@ -15,9 +19,191 @@ HTML5, modern CSS, modern JavaScript, WebAssembly, and inline MPEG-1
 video playback.
 .PP
 When started without arguments, Northstar opens its start page.
-Passing a URL opens that page instead.
+Passing a URL or the path of a local file opens that page instead.
+A normal launch runs the browser under a small watchdog process that
+restarts it, with its session, after a crash or a hang.
+.PP
+Any of
+.BR \-\-headless ,
+.BR \-\-dump ,
+.BR \-\-eval ,
+.BR \-\-act ,
+.BR \-\-inspect ,
+.BR \-\-inspect\-at ,
+.B \-\-wpt
+or
+.B \-\-print\-config
+selects headless mode, which loads the page without a window, prints
+or writes the requested output, and exits.
 .SH OPTIONS
-Northstar accepts the standard GTK 4 command-line options.
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.B \-\-private
+Keep history, cookies, the HTTP cache and site storage out of the
+profile on disk for this session.
+.TP
+.BI \-\-proxy= URL
+Send HTTP and HTTPS traffic through the given proxy.
+.TP
+.BI \-\-window\-size= W x H
+Open the window at the given size in pixels.
+.TP
+.BI \-\-gsk\-renderer= NAME
+Select the GTK renderer:
+.BR gl ,
+.BR ngl ,
+.BR vulkan
+or
+.BR cairo .
+.TP
+.B \-\-no\-watchdog
+Run the browser without the watchdog process.
+.TP
+.B \-\-print\-config
+Print the effective configuration and exit.
+.SS Headless options
+.TP
+.B \-\-headless
+Run without a window.
+.TP
+.BI \-\-url= URL
+The page to load; a bare
+.I URL
+or
+.I FILE
+argument does the same.
+.TP
+.BI \-\-dump= MODE
+What to output:
+.B text
+(the default),
+.BR dom ,
+.B layout
+(the box tree),
+.BR none ,
+.BI png: FILE
+(a screenshot),
+.BI pdf: FILE
+(the page as one long sheet), or
+.BI print: FILE
+(the page paginated as for printing).
+Image and PDF dumps write a
+.IB name \-initial. ext
+file at the first render and the named file after
+.BR \-\-time\-ms .
+.TP
+\fB\-\-viewport=\fP\fIW\fP[\fBx\fP\fIH\fP]
+Viewport width, and optionally height, in CSS pixels (default 1000).
+.TP
+.BI \-\-viewport\-height= H
+Viewport height in CSS pixels.
+.TP
+.BI \-\-settle\-ms= N
+Milliseconds to let the page settle before output (default 200).
+.TP
+.BI \-\-time\-ms= N
+Milliseconds to run the page between the first and the final image or
+PDF capture (default 1000).
+.TP
+.BI \-\-eval= EXPR
+Evaluate a JavaScript expression in the page and print the result.
+.TP
+.BI \-\-act= ACTIONS
+Run semicolon-separated input actions before output, among them
+.BI click " X,Y" \fR,\fP
+.BI rightclick " X,Y" \fR,\fP
+.BI type " TEXT" \fR,\fP
+.BI key " NAME" \fR,\fP
+.BI wait " MS" \fR,\fP
+.BI eval " JS"
+and
+.BI evalfile " PATH" \fR.\fP
+Because actions are split at semicolons, JavaScript longer than one
+statement belongs in a file for
+.BR evalfile .
+.TP
+.BI \-\-inspect= SELECTOR
+Report the layout boxes of the elements that match a CSS selector.
+.TP
+.BI \-\-inspect\-at= X,Y
+Report the layout box at a point in the viewport.
+.TP
+.B \-\-wpt
+Run a web-platform-tests testharness.js page and report each subtest.
+.TP
+.BI \-\-wpt\-timeout\-ms= N
+Give up on a
+.B \-\-wpt
+page after
+.I N
+milliseconds.
+.TP
+.BR \-\-debug [\fB=\fP\fILEVELS\fP]
+Stream engine events to standard error. Levels are
+.BR info ,
+.BR warn ,
+.BR error ,
+.BR render ,
+.B net
+and
+.BR js ,
+comma-separated; without a list, all of them.
+.SH ENVIRONMENT
+.TP
+.B NS_HOME_URL
+Start page.
+.TP
+.B NS_USER_AGENT
+User-Agent string.
+.TP
+.BR NS_HTTP_PROXY ", " NS_HTTPS_PROXY ", " NS_NO_PROXY
+Proxy settings.
+.TP
+.B NS_DOH_URL
+DNS-over-HTTPS resolver URL.
+.TP
+.B NS_GSK_RENDERER
+GTK renderer, as for
+.BR \-\-gsk\-renderer .
+.TP
+.B NS_PRIVATE
+Start in private mode.
+.TP
+.B NS_NO_WATCHDOG
+Run without the watchdog process.
+.TP
+.BR NS_NO_CACHE ", " NS_NO_IMAGES ", " NS_NO_LOCAL_STORAGE ", " NS_NO_HTTPS_FIRST
+Turn the HTTP cache, image loading, web storage or HTTPS-first
+navigation off.
+.TP
+.B NS_SAFEBROWSING_LIST
+Blocklist file to use instead of the user and bundled lists.
+.TP
+.B NS_LOG_FILE
+Write the debug event log to this file.
+.TP
+.B NS_ALLOW_ROOT
+Run even when started as root or elevated. For throwaway containers only.
+.TP
+.BR NS_NO_SANDBOX ", " NS_NO_SECCOMP
+Disable the sandbox, or only its system-call filter. For debugging only.
+.SH FILES
+.TP
+.I ~/.config/northstar/northstar.conf
+Settings, one
+.I key = value
+per line; see
+.BR \-\-print\-config .
+.TP
+.I ~/.config/northstar/safebrowsing.list
+Additional blocklist entries.
+.TP
+.IR ~/.config/northstar/ ", " ~/.local/share/northstar/ ", " ~/.cache/northstar/
+Cookies, history, bookmarks, site storage and the HTTP cache.
+.SH EXIT STATUS
+Northstar exits with status 77 when it refuses to run as root.
 .SH SEE ALSO
 Project homepage:
 .UR https://github.com/nordstjernen-web/northstar-browser

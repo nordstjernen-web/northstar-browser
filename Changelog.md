@@ -15,6 +15,17 @@ Significant changes in each release:
   of a print dump was not made writable the way a `png:` or `pdf:` dump's
   is, so the pagination check `docs/building.md` describes failed with
   "failed to create PDF surface" and wrote nothing.
+* The documentation matches the source again. `docs/architecture.md`
+  describes the threads, the two headless paths, printing and
+  diagnostics as they are, and its diagram is regenerated from
+  `scripts/gen-architecture.py` instead of the old picture of a render
+  protocol that no longer exists. `SECURITY.md` lists the Windows
+  mitigations that are actually applied, the real Landlock paths, which
+  CSP directives, mixed-content rules and SRI checks are enforced, how
+  the address bar shows internationalised hosts, and the known gaps.
+  `docs/compliance.md` leads with the latest reading per area and drops
+  gaps that have closed, `docs/building.md` documents every command-line
+  option and environment variable, and the manual page does the same.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs

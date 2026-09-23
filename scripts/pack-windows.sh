@@ -93,7 +93,7 @@ if [ -d "$MINGW_PREFIX/etc/fonts" ]; then
     cp -r "$MINGW_PREFIX/etc/fonts" "$APP/etc/"
 fi
 
-# GDK-PixBuf loader cache + loader DLLs (image decode for <img>). Copied
+# GDK-PixBuf loader cache + loader DLLs for GTK's icon theme. Copied
 # *before* the DLL chase so the loaders' transitive deps (notably
 # librsvg-2-2.dll, pulled in only by pixbufloader_svg.dll) get bundled too.
 # The browser renders SVG itself; these loaders only serve GTK's icon theme.

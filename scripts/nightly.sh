@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Northstar nightly build orchestrator. Builds, from a single Linux host,
 # a source tarball, per-distro Linux packages (debian/ubuntu/opensuse/alpine
-# via containers, in parallel), and Windows, macOS and BSD (FreeBSD/NetBSD)
-# builds (by driving the GitHub Actions runners, dispatched up front so
+# via containers, in parallel), and Windows and macOS builds (by driving
+# the GitHub Actions runners, dispatched up front so
 # they run while the local container builds proceed), then collects everything
 # into $NIGHTLY_ROOT with
 # checksums, a manifest, and stable download symlinks. Intended to run
@@ -69,8 +69,8 @@ orchestrator. A dirty or diverged working tree is left untouched.
 Environment overrides: NIGHTLY_ROOT, NIGHTLY_REF, NIGHTLY_PULL,
 NIGHTLY_PULL_BRANCH, NIGHTLY_PARALLEL, NIGHTLY_GHA_TIMEOUT,
 NIGHTLY_GHA_BRANCH, NIGHTLY_GHA_DISPATCH, NIGHTLY_DOCKER_PULL_RETRIES,
-NIGHTLY_GH_RETRIES, NS_DOCKER, the
-and the NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE,ALPINE}_IMAGE image tags.
+NIGHTLY_GH_RETRIES, NS_DOCKER, and the
+NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE,ALPINE}_IMAGE image tags.
 EOF
 }
 
