@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `grid-template-rows: repeat(auto-fill, ...)` repeats its rows. Only
+  columns expanded an automatic repetition; rows kept a single copy of
+  the pattern. Rows now repeat as many times as fit the grid's height,
+  or its `max-height` or `min-height` when the height is not fixed.
 * `repeat(auto-fill, ...)` and `repeat(auto-fit, ...)` count their
   repetitions from the space the other tracks and gaps leave, and size a
   `minmax()` track by its fixed maximum; `10px 20% repeat(auto-fill,
