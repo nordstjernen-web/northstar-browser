@@ -14724,7 +14724,7 @@ parse_border_shorthand(const border_side_map *side, const char *vtext,
     for (int i = 0; i < n; i++) g_free(tokens[i]);
 }
 
-enum { TX_NUMBER = 1, TX_PERCENT = 2, TX_LENGTH = 4, TX_ANGLE = 8, TX_ZERO = 16 };
+enum { TX_NUMBER = 1, TX_PERCENT = 2, TX_LENGTH = 4, TX_ANGLE = 8 };
 
 static char *
 transform_arg_canonical(const char *arg, int want, gboolean scale_percent)
@@ -17180,46 +17180,7 @@ ns_css_keyframes_resolve(const ns_css_keyframes *kf,
     for (int i = 0; i < out->n_stops; i++) {
         ns_css_keyframe_stop *s = &out->stops[i];
         const char *rawp = s->raw_props;
-        s->raw_props = NULL;
-        if (!rawp) continue;
-        char *resolved = substitute_vars_with(rawp, vars, 0);
-        if (!resolved) continue;
-        ns_css_transform ind = { 0 };
-        ns_css_transform list = s->has_transform ? s->transform
-                                                 : (ns_css_transform){ 0 };
-        char **decls = g_strsplit(resolved, ";", -1);
-        for (int d = 0; decls[d]; d++) {
-            char *colon = strchr(decls[d], ':');
-            if (!colon) continue;
-            *colon = '\0';
-            char *prop = g_strstrip(decls[d]);
-            char *val  = g_strstrip(colon + 1);
-            ns_css_value *tv = NULL;
-            if (g_ascii_strcasecmp(prop, "transform") == 0) {
-                tv = parse_transform(val);
-                if (tv) list = tv->u.transform;
-            } else if (g_ascii_strcasecmp(prop, "translate") == 0) {
-                tv = parse_translate_prop(val);
-            } else if (g_ascii_strcasecmp(prop, "rotate") == 0) {
-                tv = parse_rotate_prop(val);
-            } else if (g_ascii_strcasecmp(prop, "scale") == 0) {
-                tv = parse_scale_prop(val);
-            }
-            if (tv && g_ascii_strcasecmp(prop, "transform") != 0 &&
-                ind.n_ops < NS_CSS_TRANSFORM_OPS_MAX)
-                ind.ops[ind.n_ops++] = tv->u.transform.ops[0];
-            if (tv) ns_css_value_free(tv);
-        }
-        g_strfreev(decls);
-        s->raw_props = resolved;
-        ns_css_transform merged = ind;
-        for (int k = 0; k < list.n_ops &&
-                        merged.n_ops < NS_CSS_TRANSFORM_OPS_MAX; k++)
-            merged.ops[merged.n_ops++] = list.ops[k];
-        if (merged.n_ops > 0) {
-            s->transform = merged;
-            s->has_transform = TRUE;
-        }
+        s->raw_props = rawp ? substitute_vars_with(rawp, vars, 0) : NULL;
     }
     return out;
 }
@@ -19375,13 +19336,6 @@ parse_rules_until(const char **pp, const char *end,
                         gsize sel_len = (gsize)(sel_end - sel_start);
                         char *sel = g_strndup(sel_start, sel_len);
                         g_strstrip(sel);
-                        double op = 0;
-                        gboolean has_op = FALSE;
-                        ns_css_transform tf = { 0 };
-                        gboolean has_tf = FALSE;
-                        ns_css_transform tf_ind = { 0 };
-                        guint8 col[4] = { 0 }, bgcol[4] = { 0 };
-                        gboolean has_col = FALSE, has_bgcol = FALSE;
                         GString *raw = NULL;
                         const char *decl_p = body_start;
                         while (decl_p < body_end) {
@@ -19402,62 +19356,12 @@ parse_rules_until(const char **pp, const char *end,
                             *colon = '\0';
                             char *prop = g_strstrip(line);
                             char *val  = g_strstrip(colon + 1);
-                            gboolean tf_prop =
-                                g_ascii_strcasecmp(prop, "transform") == 0 ||
-                                g_ascii_strcasecmp(prop, "translate") == 0 ||
-                                g_ascii_strcasecmp(prop, "rotate") == 0 ||
-                                g_ascii_strcasecmp(prop, "scale") == 0;
                             if (!raw) raw = g_string_new(NULL);
                             if (raw->len) g_string_append_c(raw, ';');
                             g_string_append_printf(raw, "%s:%s", prop, val);
-                            if (tf_prop && strstr(val, "var(")) {
-                            } else if (g_ascii_strcasecmp(prop, "opacity") == 0) {
-                                op = g_ascii_strtod(val, NULL);
-                                has_op = TRUE;
-                            } else if (g_ascii_strcasecmp(prop, "transform") == 0) {
-                                ns_css_value *tv = parse_transform(val);
-                                if (tv) {
-                                    tf = tv->u.transform;
-                                    has_tf = TRUE;
-                                    ns_css_value_free(tv);
-                                }
-                            } else if (g_ascii_strcasecmp(prop, "translate") == 0 ||
-                                       g_ascii_strcasecmp(prop, "rotate") == 0 ||
-                                       g_ascii_strcasecmp(prop, "scale") == 0) {
-                                ns_css_value *tv =
-                                    g_ascii_strcasecmp(prop, "translate") == 0
-                                        ? parse_translate_prop(val)
-                                    : g_ascii_strcasecmp(prop, "rotate") == 0
-                                        ? parse_rotate_prop(val)
-                                        : parse_scale_prop(val);
-                                if (tv) {
-                                    if (tf_ind.n_ops < NS_CSS_TRANSFORM_OPS_MAX)
-                                        tf_ind.ops[tf_ind.n_ops++] =
-                                            tv->u.transform.ops[0];
-                                    ns_css_value_free(tv);
-                                }
-                            } else if (g_ascii_strcasecmp(prop, "color") == 0) {
-                                if (parse_color(val, &col[0], &col[1],
-                                                &col[2], &col[3]))
-                                    has_col = TRUE;
-                            } else if (g_ascii_strcasecmp(prop, "background-color") == 0 ||
-                                       g_ascii_strcasecmp(prop, "background") == 0) {
-                                if (parse_color(val, &bgcol[0], &bgcol[1],
-                                                &bgcol[2], &bgcol[3]))
-                                    has_bgcol = TRUE;
-                            }
                             g_free(decl);
                             if (!dterm) break;
                             decl_p = decl_end + 1;
-                        }
-                        if (tf_ind.n_ops > 0) {
-                            ns_css_transform merged = tf_ind;
-                            for (int k = 0; k < tf.n_ops &&
-                                            merged.n_ops < NS_CSS_TRANSFORM_OPS_MAX;
-                                 k++)
-                                merged.ops[merged.n_ops++] = tf.ops[k];
-                            tf = merged;
-                            has_tf = TRUE;
                         }
                         const char *sel_p = sel;
                         const char *sel_all_end = sel + strlen(sel);
@@ -19470,14 +19374,9 @@ parse_rules_until(const char **pp, const char *end,
                             if (parse_keyframe_stop_pct(one, &pct)) {
                                 ns_css_keyframe_stop s = {
                                     .pct = pct,
-                                    .opacity = op, .has_opacity = has_op,
-                                    .transform = tf, .has_transform = has_tf,
-                                    .has_color = has_col, .has_bg_color = has_bgcol,
                                     .raw_props = raw && raw->len
                                         ? g_strdup(raw->str) : NULL,
                                 };
-                                memcpy(s.color, col, 4);
-                                memcpy(s.bg_color, bgcol, 4);
                                 g_array_append_val(stops, s);
                             }
                             g_free(one);

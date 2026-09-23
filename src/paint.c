@@ -5263,8 +5263,6 @@ blend_mode_operator(const ns_style *s)
 }
 
 static const ns_box *g_paint_skip_box;
-static ns_paint_stats g_paint_stats;
-static gboolean g_paint_collect_stats;
 static gboolean g_paint_have_clip;
 static double g_paint_clip_y0, g_paint_clip_y1;
 static double g_paint_cull_margin = 400.0;
@@ -6132,20 +6130,10 @@ static void
 paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b) return;
-    if (g_paint_collect_stats) g_paint_stats.boxes_seen++;
-    if (box_is_hidden(b)) {
-        if (g_paint_collect_stats) g_paint_stats.hidden++;
-        return;
-    }
+    if (box_is_hidden(b)) return;
     ns_dbg_paint_probe(cr, b);
-    if (box_clip_hides(b)) {
-        if (g_paint_collect_stats) g_paint_stats.hidden++;
-        return;
-    }
-    if (b == g_paint_skip_box) {
-        if (g_paint_collect_stats) g_paint_stats.skipped_top++;
-        return;
-    }
+    if (box_clip_hides(b)) return;
+    if (b == g_paint_skip_box) return;
     if (g_paint_hoisted && b != g_paint_flush_box &&
         g_hash_table_contains(g_paint_hoisted, b))
         return;
@@ -6170,10 +6158,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         double top = b->paint_top + g_paint_anchor_dy;
         double bottom = b->paint_bottom + g_paint_anchor_dy;
         if (bottom < g_paint_clip_y0 - g_paint_cull_margin ||
-            top > g_paint_clip_y1 + g_paint_cull_margin) {
-            if (g_paint_collect_stats) g_paint_stats.culled_bounds++;
+            top > g_paint_clip_y1 + g_paint_cull_margin)
             return;
-        }
     }
     double dbg_e0 = 0, dbg_e1 = 0, dbg_e2 = 0, dbg_e3 = 0;
     if (g_dbg_paint_x >= 0)
@@ -6251,12 +6237,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                 box_offscreen = TRUE;
         }
     }
-    if (box_offscreen && g_paint_collect_stats) g_paint_stats.offscreen++;
 
-    if (grouped) {
-        if (g_paint_collect_stats) g_paint_stats.grouped++;
-        cairo_push_group(cr);
-    }
+    if (grouped) cairo_push_group(cr);
     if (has_transform) {
         cairo_save(cr);
         double bx, by, bw, bh;
@@ -6307,7 +6289,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             b->kind == NS_BOX_TABLE_ROW || b->kind == NS_BOX_TABLE_CELL ||
             b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
             b->kind == NS_BOX_MATH || b->kind == NS_BOX_SVG) {
-            if (g_paint_collect_stats) g_paint_stats.blocks++;
             paint_block(cr, b);
             if (g_dbg_paint_x >= 0) {
                 double t0, t1, t2, t3;
@@ -6326,7 +6307,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_marker(cr, b);
         }
         if (b->kind == NS_BOX_INLINE) {
-            if (g_paint_collect_stats) g_paint_stats.inlines++;
             paint_inline(cr, b, highlight);
             if (g_dbg_paint_x >= 0) {
                 double t0, t1, t2, t3;
@@ -6338,21 +6318,16 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                                b->text ? b->text : "");
             }
         }
-        if (b->kind == NS_BOX_IMAGE) {
-            if (g_paint_collect_stats) g_paint_stats.images++;
+        if (b->kind == NS_BOX_IMAGE)
             paint_image(cr, b);
-        }
-        if (b->kind == NS_BOX_VIDEO) {
-            if (g_paint_collect_stats) g_paint_stats.videos++;
+        if (b->kind == NS_BOX_VIDEO)
             paint_video(cr, b);
-        }
         if (b->kind == NS_BOX_MATH)
             paint_math(cr, b);
         if (b->kind == NS_BOX_SVG)
             paint_svg(cr, b);
     }
     if (ns_node_is_element_named(b->dom, "canvas") && g_paint_js) {
-        if (g_paint_collect_stats) g_paint_stats.canvases++;
         cairo_surface_t *surf = ns_js_canvas_surface(g_paint_js, b->dom);
         if (surf) {
             int sw = cairo_image_surface_get_width(surf);
@@ -6388,13 +6363,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (e.key != 0) any_z = TRUE;
         entries[e.order] = e;
     }
-    if (any_z) {
-        if (g_paint_collect_stats) {
-            g_paint_stats.sorted_parents++;
-            g_paint_stats.sorted_children += n_children;
-        }
+    if (any_z)
         qsort(entries, n_children, sizeof(paint_entry), paint_entry_cmp);
-    }
     const char *ovx = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW_X) : NULL;
     const char *ovy = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW_Y) : NULL;
     const char *ovs = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW) : NULL;
@@ -6459,7 +6429,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if ((b->scroll_x != 0 || b->scroll_y != 0) &&
                 !isnan(b->scroll_x) && !isnan(b->scroll_y))
                 cairo_translate(cr, -b->scroll_x, -b->scroll_y);
-            if (g_paint_collect_stats) g_paint_stats.overflow_clips++;
         } else {
             clip_overflow = FALSE;
         }

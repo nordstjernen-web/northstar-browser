@@ -457,11 +457,10 @@ static ns_box *g_box_pool[16384];
 static int g_box_pool_n;
 
 static ns_fragment_context *
-fragment_context_new(ns_fragment_context_kind kind, int count, double gap)
+fragment_context_new(ns_fragment_context_kind kind, int count)
 {
     ns_fragment_context *context = g_new0(ns_fragment_context, 1);
     context->kind = kind;
-    context->gap = gap;
     context->fragmentainers = g_array_sized_new(FALSE, TRUE,
                                                 sizeof(ns_fragmentainer),
                                                 (guint)count);
@@ -484,21 +483,6 @@ box_set_fragment_context(ns_box *box, ns_fragment_context *context)
     box->fragment_context = context;
 }
 
-static void
-box_mark_fragmentainer(ns_box *box, int index)
-{
-    if (!box) return;
-    box->fragmentainer_index = index;
-    if (box->fragment_context) return;
-    for (ns_box *child = box->first_child; child; child = child->next_sibling)
-        box_mark_fragmentainer(child, index);
-    if (box->inline_atomics)
-        for (guint i = 0; i < box->inline_atomics->len; i++)
-            box_mark_fragmentainer(
-                g_array_index(box->inline_atomics, ns_inline_atomic, i).box,
-                index);
-}
-
 static ns_box *
 box_new(ns_box_kind kind)
 {
@@ -512,8 +496,6 @@ box_new(ns_box_kind kind)
     b->kind = kind;
     b->colspan = 1;
     b->rowspan = 1;
-    b->fragmentainer_index = -1;
-    b->fragment_flags = NS_BOX_FRAGMENT_FIRST | NS_BOX_FRAGMENT_LAST;
     return b;
 }
 
@@ -1177,7 +1159,6 @@ ns_vertical_stack_text(const char *text)
 static struct ns_image_cache *g_image_cache_for_layout;
 static const char    *g_base_url_for_layout;
 static GHashTable    *g_counters_for_layout;
-static gboolean       g_svg_defs_computed_for_layout;
 static ns_box *ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width);
 
 typedef struct ns_subgrid_cols {
@@ -1889,12 +1870,7 @@ control_style_strips_chrome(const ns_style *s)
         NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
         NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE,
     };
-    static const ns_css_prop widths_p[4] = {
-        NS_CSS_BORDER_TOP_WIDTH, NS_CSS_BORDER_RIGHT_WIDTH,
-        NS_CSS_BORDER_BOTTOM_WIDTH, NS_CSS_BORDER_LEFT_WIDTH,
-    };
     if (!s) return FALSE;
-    (void)widths_p;
     for (int i = 0; i < 4; i++) {
         const ns_css_value *st = s->values[styles_p[i]];
         if (!keyword_is(st, "none") && !keyword_is(st, "hidden"))
@@ -6053,10 +6029,6 @@ inline_box_clone_range(const ns_box *src, gsize start, gsize end)
     out->dom = src->dom;
     out->style = src->style;
     out->text = g_strndup(src->text + start, end - start);
-    out->fragment_text_start = start;
-    out->fragment_text_end = end;
-    out->fragment_flags = (start == 0 ? NS_BOX_FRAGMENT_FIRST : 0) |
-                          (end == text_len ? NS_BOX_FRAGMENT_LAST : 0);
 
     if (src->attrs) {
         for (guint i = 0; i < src->attrs->len; i++) {
@@ -6195,8 +6167,7 @@ layout_multicol_single_inline(ns_box *box, double inner_x, double inner_y,
     box->content_width = col_w * n_cols + col_gap * (n_cols - 1);
     *cursor_y = inner_y + max_h;
     ns_fragment_context *context = fragment_context_new(
-        NS_FRAGMENT_CONTEXT_COLUMNS, n_cols, col_gap);
-    ns_box *fragment_box = box->first_child;
+        NS_FRAGMENT_CONTEXT_COLUMNS, n_cols);
     for (int col = 0; col < n_cols; col++) {
         ns_fragmentainer *fragment = &g_array_index(
             context->fragmentainers, ns_fragmentainer, (guint)col);
@@ -6204,12 +6175,6 @@ layout_multicol_single_inline(ns_box *box, double inner_x, double inner_y,
         fragment->y = inner_y;
         fragment->inline_size = col_w;
         fragment->block_size = max_h;
-        if (fragment_box) {
-            fragment->first_box = fragment_box;
-            fragment->last_box = fragment_box;
-            box_mark_fragmentainer(fragment_box, col);
-            fragment_box = fragment_box->next_sibling;
-        }
     }
     box_set_fragment_context(box, context);
     return TRUE;
@@ -12064,7 +12029,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         !layout_multicol_single_inline(box, inner_x, inner_y, cw, col_gap,
                                        n_cols, child_inherited, &cursor_y)) {
         ns_fragment_context *context = fragment_context_new(
-            NS_FRAGMENT_CONTEXT_COLUMNS, n_cols, col_gap);
+            NS_FRAGMENT_CONTEXT_COLUMNS, n_cols);
         ns_box *host = column_host ? column_host : box;
         double flow_x = column_host && host->first_child
             ? host->first_child->x : inner_x;
@@ -12105,11 +12070,6 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             double dx = target_x - c->x;
             double dy = target_y - c->y;
             if (dx != 0 || dy != 0) shift_box_tree(c, dx, dy);
-            ns_fragmentainer *fragment = &g_array_index(
-                context->fragmentainers, ns_fragmentainer, (guint)cur_col);
-            if (!fragment->first_box) fragment->first_box = c;
-            fragment->last_box = c;
-            box_mark_fragmentainer(c, cur_col);
             cur_y += c_full_h;
             if (cur_y > max_col_h) max_col_h = cur_y;
         }
@@ -12399,7 +12359,6 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_focused_sel_anchor_byte_for_layout = focused_sel_anchor_byte;
     g_image_cache_for_layout = image_cache;
     g_base_url_for_layout = base_url;
-    g_svg_defs_computed_for_layout = FALSE;
     ns_image_cache_begin_generation(image_cache);
     g_counters_for_layout = build_counter_snapshots(doc, styles);
     ns_box *root = ns_layout_build_(doc, styles, viewport_width);
@@ -12421,7 +12380,6 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_focused_sel_anchor_byte_for_layout = 0;
     g_image_cache_for_layout = NULL;
     g_base_url_for_layout = NULL;
-    g_svg_defs_computed_for_layout = FALSE;
     if (g_counters_for_layout) {
         g_hash_table_destroy(g_counters_for_layout);
         g_counters_for_layout = NULL;
@@ -13806,21 +13764,6 @@ ns_layout_collect_images(const ns_box *root, GPtrArray *out_boxes)
     collect_images_walk(root, out_boxes);
 }
 
-gboolean
-ns_box_tree_has_sticky(const ns_box *root)
-{
-    if (!root) return FALSE;
-    if (root->style) {
-        const ns_css_value *v = root->style->values[NS_CSS_POSITION];
-        if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
-            strcmp(v->u.keyword, "sticky") == 0)
-            return TRUE;
-    }
-    for (const ns_box *c = root->first_child; c; c = c->next_sibling)
-        if (ns_box_tree_has_sticky(c)) return TRUE;
-    return FALSE;
-}
-
 static guint
 count_matches_in_text(const char *text, const char *needle,
                       gboolean case_sensitive)
@@ -14674,41 +14617,6 @@ ns_box_hit_dom_stack(const ns_box *root, double x, double y)
     if (top != root) box_hit_stack_collect(top, x, y, hits);
     box_hit_stack_collect(root, x, y, hits);
     return hits;
-}
-
-const ns_box *
-ns_box_find_by_id(const ns_box *root, const char *id)
-{
-    if (!root || !id) return NULL;
-    if (root->dom && root->dom->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(root->dom, "id");
-        if (eid && strcmp(eid, id) == 0) return root;
-    }
-    for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
-        const ns_box *m = ns_box_find_by_id(c, id);
-        if (m) return m;
-    }
-    return NULL;
-}
-
-const ns_box *
-ns_box_find_by_id_or_name(const ns_box *root, const char *frag)
-{
-    if (!root || !frag) return NULL;
-    if (root->dom && root->dom->kind == NS_NODE_ELEMENT) {
-        const char *eid = ns_element_get_attr(root->dom, "id");
-        if (eid && strcmp(eid, frag) == 0) return root;
-        if (root->dom->name &&
-            g_ascii_strcasecmp(root->dom->name, "a") == 0) {
-            const char *nm = ns_element_get_attr(root->dom, "name");
-            if (nm && strcmp(nm, frag) == 0) return root;
-        }
-    }
-    for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
-        const ns_box *m = ns_box_find_by_id_or_name(c, frag);
-        if (m) return m;
-    }
-    return NULL;
 }
 
 const ns_link_range *

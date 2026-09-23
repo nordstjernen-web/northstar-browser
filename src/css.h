@@ -959,14 +959,6 @@ void ns_css_clear_registered_properties(void);
 
 typedef struct ns_css_keyframe_stop {
     double pct;
-    double opacity;
-    gboolean has_opacity;
-    ns_css_transform transform;
-    gboolean has_transform;
-    guint8 color[4];
-    gboolean has_color;
-    guint8 bg_color[4];
-    gboolean has_bg_color;
     char *raw_props;
 } ns_css_keyframe_stop;
 
@@ -1191,12 +1183,6 @@ static inline gboolean
 ns_display_is_table_wrapper(ns_display d)
 {
     return ns_display_inner_is(d, NS_DISPLAY_INNER_TABLE);
-}
-
-static inline gboolean
-ns_display_is_list_item(ns_display d)
-{
-    return d.box == NS_DISPLAY_BOX_NORMAL && d.list_item;
 }
 
 int ns_css_writing_mode(const ns_style *s);

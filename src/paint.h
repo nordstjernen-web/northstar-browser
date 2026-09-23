@@ -17,23 +17,6 @@ G_BEGIN_DECLS
 
 struct ns_selection;
 struct ns_anim;
-typedef struct ns_paint_stats {
-    guint boxes_seen;
-    guint hidden;
-    guint skipped_top;
-    guint culled_bounds;
-    guint offscreen;
-    guint grouped;
-    guint overflow_clips;
-    guint sorted_parents;
-    guint sorted_children;
-    guint blocks;
-    guint inlines;
-    guint images;
-    guint videos;
-    guint canvases;
-} ns_paint_stats;
-
 void ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query);
 void ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                              const char *highlight_query,

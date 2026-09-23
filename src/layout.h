@@ -128,21 +128,13 @@ typedef enum ns_fragment_context_kind {
     NS_FRAGMENT_CONTEXT_COLUMNS,
 } ns_fragment_context_kind;
 
-typedef enum ns_box_fragment_flags {
-    NS_BOX_FRAGMENT_FIRST = 1u << 0,
-    NS_BOX_FRAGMENT_LAST  = 1u << 1,
-} ns_box_fragment_flags;
-
 typedef struct ns_fragmentainer {
     double x, y;
     double inline_size, block_size;
-    struct ns_box *first_box;
-    struct ns_box *last_box;
 } ns_fragmentainer;
 
 typedef struct ns_fragment_context {
     ns_fragment_context_kind kind;
-    double gap;
     GArray *fragmentainers;
 } ns_fragment_context;
 
@@ -203,10 +195,6 @@ typedef struct ns_box {
     int colspan;
     int rowspan;
     ns_fragment_context *fragment_context;
-    int fragmentainer_index;
-    guint fragment_flags;
-    gsize fragment_text_start;
-    gsize fragment_text_end;
 
     struct ns_box *parent;
     struct ns_box *first_child;
@@ -247,15 +235,8 @@ char *ns_vertical_stack_text(const char *text);
 void ns_layout_collect_images(const ns_box *root, GPtrArray *out_boxes);
 void ns_layout_collect_videos(const ns_box *root, GPtrArray *out_boxes);
 
-
-gboolean ns_box_tree_has_sticky(const ns_box *root);
-
-
 const char *ns_box_hit_link(const ns_box *root, double x, double y);
 const ns_link_range *ns_box_hit_link_range(const ns_box *root, double x, double y);
-
-const ns_box *ns_box_find_by_id(const ns_box *root, const char *id);
-const ns_box *ns_box_find_by_id_or_name(const ns_box *root, const char *frag);
 
 const ns_box *ns_box_hit_test(const ns_box *root, double x, double y);
 gboolean ns_box_clips_out_point(const ns_box *b, double x, double y);
