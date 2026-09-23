@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Hiding a popover no longer hands focus back to an element that a
+  script moved inside the popover while it was open; that element is
+  hidden along with it.
 * Popover and dialog light dismiss runs before the page receives the
   `pointerdown`/`pointerup` that triggers it, so `beforetoggle` reaches
   the page ahead of its `pointerup` listeners and a listener that
