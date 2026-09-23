@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* In a `<picture>`, the `width` and `height` of the `<source>` that is
+  selected size the `<img>`, as HTML's dimension attribute source rule
+  says, so art-directed images with different proportions per
+  breakpoint reserve the right box.
 * An `<img>`, `<video>` or `<input type=image>` with `width` and
   `height` attributes computes `aspect-ratio: auto W / H`, as the HTML
   rendering rules map them, so a responsive image styled `width: 100%;
