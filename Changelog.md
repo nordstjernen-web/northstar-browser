@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The `--wpt` runner delivers `test_driver` clicks, pointer actions and
+  key presses as trusted input through the same paths as the shell, so
+  light dismiss, Escape, Tab, keyboard activation and click-to-focus
+  are exercised as a user triggers them; WebDriver key codes are no
+  longer typed into text fields as raw characters.
 * Hiding a popover no longer hands focus back to an element that a
   script moved inside the popover while it was open; that element is
   hidden along with it.
