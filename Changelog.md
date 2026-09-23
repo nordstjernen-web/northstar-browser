@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A popover opened inside a modal `<dialog>` can be clicked. Hit
+  testing only looked inside the dialog's own box and missed the
+  popover drawn above it, so clicks on it landed on the dialog.
 * `:focus` and `:focus-visible` are up to date when a `focus` listener
   reads styles: `getComputedStyle()` inside the handler described the
   element as unfocused, a focused button input switched to a text
