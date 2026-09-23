@@ -380,6 +380,7 @@ ns_add_screenshot_writable_dirs(int argc, char **argv)
             const char *v = argv[i] + 7;
             if      (g_str_has_prefix(v, "png:")) p = v + 4;
             else if (g_str_has_prefix(v, "pdf:")) p = v + 4;
+            else if (g_str_has_prefix(v, "print:")) p = v + 6;
         } else if (g_str_has_prefix(argv[i], "--screenshot=")) {
             p = argv[i] + 13;
         }

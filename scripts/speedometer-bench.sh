@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Northstar Speedometer 3.1 benchmark harness.
 #
-# Speedometer's own runner loads every workload inside an <iframe>, and
-# Northstar renders iframes as display:none and runs no nested browsing
-# context, so the official aggregate harness cannot drive the engine. This
-# script instead loads each Speedometer 3.1 TodoMVC workload directly and
+# Speedometer's own runner loads every workload inside an <iframe> and
+# drives it from the parent page. This script instead loads each
+# Speedometer 3.1 TodoMVC workload directly as the top-level page and
 # replays Speedometer's *own* per-suite interaction steps (Adding100Items,
 # CompletingAllItems, DeletingAllItems) against the top-level document, timing
 # each phase with the same sync + forced-layout-async method the real runner

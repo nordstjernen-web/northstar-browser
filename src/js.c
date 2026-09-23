@@ -53556,8 +53556,10 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 
         const char *iorigin = abs_url && *abs_url ? abs_url : origin;
         ns_js_mark_iframe_source(iframe, origin, abs_url);
-        if (iorigin && js->current_url &&
-            !ns_url_same_origin(iorigin, js->current_url))
+        if ((iorigin && js->current_url &&
+             !ns_url_same_origin(iorigin, js->current_url)) ||
+            ((sandbox & NS_SANDBOX_ACTIVE) &&
+             !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN)))
             sandbox |= NS_FRAME_CROSS_ORIGIN;
         const char *cs = ns_element_get_attr(iframe, "data-nd-frame-charset");
         if (!cs || !*cs) cs = "UTF-8";

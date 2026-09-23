@@ -8,8 +8,8 @@
 # certification; for local sideload testing set NS_MSIX_CERT_PFX to a
 # self-signed .pfx and the script signs with signtool.
 #
-# Identity values default to placeholders — override them with the values
-# Partner Center shows under Product identity once the name is reserved:
+# Identity values default to the reserved Partner Center product identity;
+# override them to package under a different Store identity:
 #   NS_MSIX_IDENTITY_NAME       Package/Identity/Name
 #   NS_MSIX_PUBLISHER           Package/Identity/Publisher (CN=GUID)
 #   NS_MSIX_PUBLISHER_DISPLAY   PublisherDisplayName

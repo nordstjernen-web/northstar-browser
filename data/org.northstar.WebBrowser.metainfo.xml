@@ -19,7 +19,7 @@
     <p>Features:</p>
     <ul>
       <li>A from-scratch HTML5, CSS, and JavaScript engine — no forked browser engine.</li>
-      <li>One window, one page, one process: the page engine runs in the shell process behind a seccomp + Landlock syscall sandbox on Linux.</li>
+      <li>One page per window and one process: the page engine runs in the shell process, behind a seccomp + Landlock sandbox on Linux.</li>
       <li>No JIT, which keeps the JavaScript attack surface small.</li>
       <li>No telemetry: it does not phone home and does not track the user.</li>
     </ul>
@@ -28,12 +28,12 @@
   <launchable type="desktop-id">org.northstar.WebBrowser.desktop</launchable>
 
   <url type="homepage">https://nordstjernen.org</url>
-  <url type="bugtracker">https://github.com/nordstjernen-web/nordstjernen/issues</url>
-  <url type="vcs-browser">https://github.com/nordstjernen-web/nordstjernen</url>
+  <url type="bugtracker">https://github.com/nordstjernen-web/northstar-browser/issues</url>
+  <url type="vcs-browser">https://github.com/nordstjernen-web/northstar-browser</url>
 
   <screenshots>
     <screenshot type="default">
-      <caption>The Northstar start page</caption>
+      <caption>Northstar showing a Wikipedia article</caption>
       <image>https://raw.githubusercontent.com/nordstjernen-web/northstar-browser/main/docs/screenshot.png</image>
     </screenshot>
   </screenshots>

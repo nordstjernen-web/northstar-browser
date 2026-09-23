@@ -1,4 +1,4 @@
-/* Northstar — image cache (PNG/JPEG/GIF/WebP/SVG).
+/* Northstar — image cache and the decode chain (Wuffs, ICO, AVIF, SVG, MPEG-1).
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

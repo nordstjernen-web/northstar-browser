@@ -1,0 +1,335 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1336" width="1200" height="1336" font-family="DejaVu Sans, Verdana, sans-serif">
+<title>Northstar architecture</title>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#445"/></marker>
+<style>
+.bg{fill:#fbfaf7}
+.proc{fill:none;stroke:#333;stroke-width:1.6}
+.dash{stroke-dasharray:7 5}
+.g-shell{fill:#eef4fb;stroke:#3a78c2;stroke-width:1.4}
+.g-engine{fill:#eef8f2;stroke:#2e9a61;stroke-width:1.4}
+.g-js{fill:#fdf7ea;stroke:#d39a1c;stroke-width:1.4}
+.g-thr{fill:#f5f1fb;stroke:#7a5bb5;stroke-width:1.4}
+.g-store{fill:#f1f7ee;stroke:#4f8a3a;stroke-width:1.4}
+.g-sec{fill:#fcf0f0;stroke:#c24a4a;stroke-width:1.4}
+.g-ext{fill:#f2f2f2;stroke:#777;stroke-width:1.4}
+.mod{fill:#fff;stroke:#b9b9b9;stroke-width:1}
+.bar{stroke:none}
+.a-shell{fill:#3a78c2}.a-engine{fill:#2e9a61}.a-js{fill:#d39a1c}.a-thr{fill:#7a5bb5}.a-store{fill:#4f8a3a}.a-sec{fill:#c24a4a}.a-ext{fill:#777}
+.chip{fill:#fff;stroke:#999;stroke-width:1}
+.title{font-size:26px;font-weight:bold;fill:#222}
+.sub{font-size:13px;fill:#555}
+.gtitle{font-size:15px;font-weight:bold;fill:#222}
+.ptitle{font-size:13px;font-weight:bold;fill:#222}
+.file{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace;font-size:13px;font-weight:bold;fill:#222}
+.desc{font-size:11px;fill:#555}
+.chiptext{font-size:12px;fill:#333}
+.lbl{font-size:11px;fill:#444}
+.arr{stroke:#445;stroke-width:1.5;fill:none}
+.arrd{stroke:#445;stroke-width:1.5;fill:none;stroke-dasharray:6 4}
+</style>
+</defs>
+<rect class="bg" x="0" y="0" width="1200" height="1336" rx="0"/>
+<text class="title" x="600.0" y="40" text-anchor="middle">Northstar — software architecture</text>
+<text class="sub" x="600.0" y="62" text-anchor="middle">Hand-written HTML/CSS/JS engine in C · GTK 4 shell · libcurl · one process · no Gecko, WebKit or Blink</text>
+<rect class="g-ext dash" x="20" y="84" width="360" height="92" rx="12"/>
+<text class="gtitle" x="36" y="110" text-anchor="start">Watchdog supervisor — GUI launches only</text>
+<rect class="mod" x="36" y="118" width="328" height="48" rx="8"/>
+<rect class="bar a-ext" x="36" y="118" width="5" height="48" rx="2"/>
+<text class="file" x="50" y="138" text-anchor="start">watchdog.c</text>
+<text class="desc" x="50" y="155" text-anchor="start">no network, sandbox or UI · restarts on crash or hang</text>
+<rect class="g-ext dash" x="820" y="84" width="360" height="92" rx="12"/>
+<text class="gtitle" x="836" y="110" text-anchor="start">Headless / tooling — same binary</text>
+<rect class="mod" x="836" y="118" width="328" height="48" rx="8"/>
+<rect class="bar a-ext" x="836" y="118" width="5" height="48" rx="2"/>
+<text class="file" x="850" y="138" text-anchor="start">headless.c</text>
+<text class="desc" x="850" y="155" text-anchor="start">--dump= · --eval= · --act= · --wpt · --inspect=</text>
+<text class="ptitle" x="600" y="112" text-anchor="middle">one executable: northstar</text>
+<text class="lbl" x="600" y="132" text-anchor="middle">GUI, supervisor and headless modes</text>
+<text class="lbl" x="600" y="148" text-anchor="middle">are chosen by command-line flags</text>
+<line class="arr" x1="200" y1="176" x2="200" y2="200" marker-end="url(#ah)"/>
+<text class="lbl" x="210" y="194" text-anchor="start">runs the browser as --watchdog-child</text>
+<rect class="proc dash" x="14" y="204" width="1172" height="908" rx="14"/>
+<text class="ptitle" x="30" y="226" text-anchor="start">Browser process — GTK shell + page engine in one address space</text>
+<rect class="g-shell" x="30" y="236" width="1140" height="100" rx="12"/>
+<text class="gtitle" x="46" y="262" text-anchor="start">GTK main thread  (src/gtk/)</text>
+<rect class="mod" x="46" y="270" width="330" height="56" rx="8"/>
+<rect class="bar a-shell" x="46" y="270" width="5" height="56" rx="2"/>
+<text class="file" x="60" y="290" text-anchor="start">appmain.c</text>
+<text class="desc" x="60" y="307" text-anchor="start">flags · refuse root · i18n · config</text>
+<text class="desc" x="60" y="322" text-anchor="start">watchdog decision · sandbox → shell or headless</text>
+<rect class="mod" x="392" y="270" width="380" height="56" rx="8"/>
+<rect class="bar a-shell" x="392" y="270" width="5" height="56" rx="2"/>
+<text class="file" x="406" y="290" text-anchor="start">procwindow.c</text>
+<text class="desc" x="406" y="307" text-anchor="start">window chrome: omnibox · menus · bookmarks</text>
+<text class="desc" x="406" y="322" text-anchor="start">history · downloads · print · settings · zoom</text>
+<rect class="mod" x="788" y="270" width="366" height="56" rx="8"/>
+<rect class="bar a-shell" x="788" y="270" width="5" height="56" rx="2"/>
+<text class="file" x="802" y="290" text-anchor="start">procview.c</text>
+<text class="desc" x="802" y="307" text-anchor="start">page-view widget: input → typed requests,</text>
+<text class="desc" x="802" y="322" text-anchor="start">frame surface → screen · find · devtools</text>
+<line class="arr" x1="700" y1="336" x2="700" y2="382" marker-end="url(#ah)"/>
+<line class="arr" x1="760" y1="382" x2="760" y2="336" marker-end="url(#ah)"/>
+<text class="lbl" x="690" y="356" text-anchor="end">requests (REQ_LOAD, REQ_CLICK, REQ_KEY, …)</text>
+<text class="lbl" x="690" y="372" text-anchor="end">posted as jobs to the engine thread</text>
+<text class="lbl" x="770" y="356" text-anchor="start">responses back on the GTK main loop:</text>
+<text class="lbl" x="770" y="372" text-anchor="start">frame + title, URL, cursor, audio commands</text>
+<rect class="g-engine" x="30" y="382" width="790" height="460" rx="12"/>
+<text class="gtitle" x="46" y="408" text-anchor="start">Engine thread “ns-engine” — its own GMainContext  (enginethread.c, mainctx.c)</text>
+<rect class="mod" x="46" y="418" width="240" height="50" rx="8"/>
+<rect class="bar a-engine" x="46" y="418" width="5" height="50" rx="2"/>
+<text class="file" x="60" y="438" text-anchor="start">page_session.c</text>
+<text class="desc" x="60" y="455" text-anchor="start">open page · bfcache (4) · last frame</text>
+<rect class="mod" x="318" y="418" width="240" height="50" rx="8"/>
+<rect class="bar a-engine" x="318" y="418" width="5" height="50" rx="2"/>
+<text class="file" x="332" y="438" text-anchor="start">libnorthstar.c</text>
+<text class="desc" x="332" y="455" text-anchor="start">ns_browser: document, runtime, input</text>
+<rect class="mod" x="590" y="418" width="214" height="50" rx="8"/>
+<rect class="bar a-engine" x="590" y="418" width="5" height="50" rx="2"/>
+<text class="file" x="604" y="438" text-anchor="start">engine.c · render.c</text>
+<text class="desc" x="604" y="455" text-anchor="start">fetch · cascade · layout pass</text>
+<line class="arr" x1="286" y1="443" x2="316" y2="443" marker-end="url(#ah)"/>
+<line class="arr" x1="558" y1="443" x2="588" y2="443" marker-end="url(#ah)"/>
+<text class="ptitle" x="46" y="494" text-anchor="start">Rendering pipeline</text>
+<rect class="mod" x="46" y="504" width="380" height="42" rx="8"/>
+<rect class="bar a-engine" x="46" y="504" width="5" height="42" rx="2"/>
+<text class="file" x="60" y="524" text-anchor="start">net.c · cache.c</text>
+<text class="desc" x="60" y="541" text-anchor="start">libcurl fetch · HSTS · cookies · HTTP cache</text>
+<line class="arr" x1="400" y1="546" x2="400" y2="556" marker-end="url(#ah)"/>
+<rect class="mod" x="46" y="556" width="380" height="42" rx="8"/>
+<rect class="bar a-engine" x="46" y="556" width="5" height="42" rx="2"/>
+<text class="file" x="60" y="576" text-anchor="start">html.c · html_lexbor.c · xml.c</text>
+<text class="desc" x="60" y="593" text-anchor="start">charset (uchardet) · lexbor parse</text>
+<line class="arr" x1="400" y1="598" x2="400" y2="608" marker-end="url(#ah)"/>
+<rect class="mod" x="46" y="608" width="380" height="42" rx="8"/>
+<rect class="bar a-engine" x="46" y="608" width="5" height="42" rx="2"/>
+<text class="file" x="60" y="628" text-anchor="start">dom.c</text>
+<text class="desc" x="60" y="645" text-anchor="start">node tree + mutation API</text>
+<line class="arr" x1="400" y1="650" x2="400" y2="660" marker-end="url(#ah)"/>
+<rect class="mod" x="46" y="660" width="380" height="42" rx="8"/>
+<rect class="bar a-engine" x="46" y="660" width="5" height="42" rx="2"/>
+<text class="file" x="60" y="680" text-anchor="start">css*.c · anim.c · font.c</text>
+<text class="desc" x="60" y="697" text-anchor="start">cascade · media/container queries · @font-face</text>
+<line class="arr" x1="400" y1="702" x2="400" y2="712" marker-end="url(#ah)"/>
+<rect class="mod" x="46" y="712" width="380" height="42" rx="8"/>
+<rect class="bar a-engine" x="46" y="712" width="5" height="42" rx="2"/>
+<text class="file" x="60" y="732" text-anchor="start">layout.c · mathml.c</text>
+<text class="desc" x="60" y="749" text-anchor="start">block · inline · flex · grid · table · multicol</text>
+<line class="arr" x1="400" y1="754" x2="400" y2="764" marker-end="url(#ah)"/>
+<rect class="mod" x="46" y="764" width="380" height="42" rx="8"/>
+<rect class="bar a-engine" x="46" y="764" width="5" height="42" rx="2"/>
+<text class="file" x="60" y="784" text-anchor="start">paint.c · svg.c · image.c</text>
+<text class="desc" x="60" y="801" text-anchor="start">box tree in stacking order → Cairo</text>
+<text class="lbl" x="46" y="828" text-anchor="start">print.c paginates the same box tree onto sheets</text>
+<rect class="g-js" x="442" y="488" width="362" height="340" rx="12"/>
+<text class="gtitle" x="458" y="514" text-anchor="start">JavaScript runtime &amp; Web APIs</text>
+<rect class="mod" x="456" y="520" width="334" height="54" rx="8"/>
+<rect class="bar a-js" x="456" y="520" width="5" height="54" rx="2"/>
+<text class="file" x="470" y="540" text-anchor="start">js.c</text>
+<text class="desc" x="470" y="557" text-anchor="start">QuickJS bindings · DOM ↔ JS bridge · events</text>
+<text class="desc" x="470" y="572" text-anchor="start">fetch/XHR · CSSOM · storage · workers</text>
+<rect class="mod" x="456" y="580" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="456" y="580" width="5" height="40" rx="2"/>
+<text class="file" x="470" y="600" text-anchor="start">js_canvas.c</text>
+<text class="desc" x="470" y="617" text-anchor="start"></text>
+<text class="desc" x="470" y="614" text-anchor="start">Canvas 2D</text>
+<rect class="mod" x="627" y="580" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="627" y="580" width="5" height="40" rx="2"/>
+<text class="file" x="641" y="600" text-anchor="start">webcrypto.c</text>
+<text class="desc" x="641" y="617" text-anchor="start"></text>
+<text class="desc" x="641" y="614" text-anchor="start">crypto.subtle</text>
+<rect class="mod" x="456" y="626" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="456" y="626" width="5" height="40" rx="2"/>
+<text class="file" x="470" y="646" text-anchor="start">js_intl.c</text>
+<text class="desc" x="470" y="663" text-anchor="start"></text>
+<text class="desc" x="470" y="660" text-anchor="start">Intl, ICU-free</text>
+<rect class="mod" x="627" y="626" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="627" y="626" width="5" height="40" rx="2"/>
+<text class="file" x="641" y="646" text-anchor="start">js_date.c</text>
+<text class="desc" x="641" y="663" text-anchor="start"></text>
+<text class="desc" x="641" y="660" text-anchor="start">Temporal</text>
+<rect class="mod" x="456" y="672" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="456" y="672" width="5" height="40" rx="2"/>
+<text class="file" x="470" y="692" text-anchor="start">js_perf.c</text>
+<text class="desc" x="470" y="709" text-anchor="start"></text>
+<text class="desc" x="470" y="706" text-anchor="start">performance.*</text>
+<rect class="mod" x="627" y="672" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="627" y="672" width="5" height="40" rx="2"/>
+<text class="file" x="641" y="692" text-anchor="start">js_realm.c</text>
+<text class="desc" x="641" y="709" text-anchor="start"></text>
+<text class="desc" x="641" y="706" text-anchor="start">ShadowRealm</text>
+<rect class="mod" x="456" y="718" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="456" y="718" width="5" height="40" rx="2"/>
+<text class="file" x="470" y="738" text-anchor="start">wasm.c</text>
+<text class="desc" x="470" y="755" text-anchor="start"></text>
+<text class="desc" x="470" y="752" text-anchor="start">WebAssembly (WAMR)</text>
+<rect class="mod" x="627" y="718" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="627" y="718" width="5" height="40" rx="2"/>
+<text class="file" x="641" y="738" text-anchor="start">idb.c</text>
+<text class="desc" x="641" y="755" text-anchor="start"></text>
+<text class="desc" x="641" y="752" text-anchor="start">IndexedDB</text>
+<rect class="mod" x="456" y="764" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="456" y="764" width="5" height="40" rx="2"/>
+<text class="file" x="470" y="784" text-anchor="start">webaudio.c</text>
+<text class="desc" x="470" y="801" text-anchor="start"></text>
+<text class="desc" x="470" y="798" text-anchor="start">Web Audio (offline)</text>
+<rect class="mod" x="627" y="764" width="163" height="40" rx="8"/>
+<rect class="bar a-js" x="627" y="764" width="5" height="40" rx="2"/>
+<text class="file" x="641" y="784" text-anchor="start">ext.c</text>
+<text class="desc" x="641" y="801" text-anchor="start"></text>
+<text class="desc" x="641" y="798" text-anchor="start">WebExtensions</text>
+<text class="lbl" x="456" y="818" text-anchor="start">data/js/polyfills.js — embedded at build time</text>
+<rect class="g-thr" x="836" y="382" width="334" height="460" rx="12"/>
+<text class="gtitle" x="852" y="408" text-anchor="start">Other threads</text>
+<rect class="mod" x="850" y="418" width="306" height="44" rx="8"/>
+<rect class="bar a-thr" x="850" y="418" width="5" height="44" rx="2"/>
+<text class="file" x="864" y="438" text-anchor="start">net.c</text>
+<text class="desc" x="864" y="455" text-anchor="start">curl multi thread + fetch tasks</text>
+<rect class="mod" x="850" y="470" width="306" height="44" rx="8"/>
+<rect class="bar a-thr" x="850" y="470" width="5" height="44" rx="2"/>
+<text class="file" x="864" y="490" text-anchor="start">image.c · video.c</text>
+<text class="desc" x="864" y="507" text-anchor="start">image and MPEG-1 decode tasks</text>
+<rect class="mod" x="850" y="522" width="306" height="44" rx="8"/>
+<rect class="bar a-thr" x="850" y="522" width="5" height="44" rx="2"/>
+<text class="file" x="864" y="542" text-anchor="start">js.c</text>
+<text class="desc" x="864" y="559" text-anchor="start">Web Workers · service workers, own runtimes</text>
+<rect class="mod" x="850" y="574" width="306" height="44" rx="8"/>
+<rect class="bar a-thr" x="850" y="574" width="5" height="44" rx="2"/>
+<text class="file" x="864" y="594" text-anchor="start">ws.c · eventsource.c</text>
+<text class="desc" x="864" y="611" text-anchor="start">WebSocket · EventSource</text>
+<rect class="mod" x="850" y="626" width="306" height="44" rx="8"/>
+<rect class="bar a-thr" x="850" y="626" width="5" height="44" rx="2"/>
+<text class="file" x="864" y="646" text-anchor="start">audio/audio.c</text>
+<text class="desc" x="864" y="663" text-anchor="start">mixer: minimp3 · pl_mpeg · Ogg → SDL2</text>
+<rect class="mod" x="850" y="678" width="306" height="44" rx="8"/>
+<rect class="bar a-thr" x="850" y="678" width="5" height="44" rx="2"/>
+<text class="file" x="864" y="698" text-anchor="start">procwindow.c</text>
+<text class="desc" x="864" y="715" text-anchor="start">downloads</text>
+<rect class="mod" x="850" y="730" width="306" height="44" rx="8"/>
+<rect class="bar a-thr" x="850" y="730" width="5" height="44" rx="2"/>
+<text class="file" x="864" y="750" text-anchor="start">camera.c</text>
+<text class="desc" x="864" y="767" text-anchor="start">V4L2 webcam capture (Linux)</text>
+<rect class="g-store" x="30" y="856" width="1140" height="118" rx="12"/>
+<text class="gtitle" x="46" y="882" text-anchor="start">Storage &amp; state — XDG config/data/cache directories, owner-only permissions</text>
+<rect class="mod" x="46" y="890" width="268" height="34" rx="8"/>
+<rect class="bar a-store" x="46" y="890" width="5" height="34" rx="2"/>
+<text class="file" x="60" y="910" text-anchor="start">config.c</text>
+<text class="desc" x="60" y="927" text-anchor="start"></text>
+<text class="desc" x="134" y="911" text-anchor="start">northstar.conf</text>
+<rect class="mod" x="326" y="890" width="268" height="34" rx="8"/>
+<rect class="bar a-store" x="326" y="890" width="5" height="34" rx="2"/>
+<text class="file" x="340" y="910" text-anchor="start">cache.c</text>
+<text class="desc" x="340" y="927" text-anchor="start"></text>
+<text class="desc" x="406" y="911" text-anchor="start">HTTP cache: SQLite + files</text>
+<rect class="mod" x="606" y="890" width="268" height="34" rx="8"/>
+<rect class="bar a-store" x="606" y="890" width="5" height="34" rx="2"/>
+<text class="file" x="620" y="910" text-anchor="start">net.c</text>
+<text class="desc" x="620" y="927" text-anchor="start"></text>
+<text class="desc" x="670" y="911" text-anchor="start">cookies · HSTS · Alt-Svc per site</text>
+<rect class="mod" x="886" y="890" width="268" height="34" rx="8"/>
+<rect class="bar a-store" x="886" y="890" width="5" height="34" rx="2"/>
+<text class="file" x="900" y="910" text-anchor="start">idb.c</text>
+<text class="desc" x="900" y="927" text-anchor="start"></text>
+<text class="desc" x="950" y="911" text-anchor="start">IndexedDB (SQLite)</text>
+<rect class="mod" x="46" y="930" width="268" height="34" rx="8"/>
+<rect class="bar a-store" x="46" y="930" width="5" height="34" rx="2"/>
+<text class="file" x="60" y="950" text-anchor="start">js.c</text>
+<text class="desc" x="60" y="967" text-anchor="start"></text>
+<text class="desc" x="102" y="951" text-anchor="start">localStorage · SW registrations</text>
+<rect class="mod" x="326" y="930" width="268" height="34" rx="8"/>
+<rect class="bar a-store" x="326" y="930" width="5" height="34" rx="2"/>
+<text class="file" x="340" y="950" text-anchor="start">history.c</text>
+<text class="desc" x="340" y="967" text-anchor="start"></text>
+<text class="desc" x="422" y="951" text-anchor="start">history (SQLite)</text>
+<rect class="mod" x="606" y="930" width="268" height="34" rx="8"/>
+<rect class="bar a-store" x="606" y="930" width="5" height="34" rx="2"/>
+<text class="file" x="620" y="950" text-anchor="start">bookmarks.c</text>
+<text class="desc" x="620" y="967" text-anchor="start"></text>
+<text class="desc" x="718" y="951" text-anchor="start">bookmarks.txt</text>
+<rect class="mod" x="886" y="930" width="268" height="34" rx="8"/>
+<rect class="bar a-store" x="886" y="930" width="5" height="34" rx="2"/>
+<text class="file" x="900" y="950" text-anchor="start">bytecode_cache.c</text>
+<text class="desc" x="900" y="967" text-anchor="start"></text>
+<text class="desc" x="1038" y="951" text-anchor="start">compiled scripts</text>
+<rect class="g-sec" x="30" y="990" width="1140" height="110" rx="12"/>
+<text class="gtitle" x="46" y="1016" text-anchor="start">Security &amp; platform</text>
+<rect class="mod" x="46" y="1024" width="262" height="64" rx="8"/>
+<rect class="bar a-sec" x="46" y="1024" width="5" height="64" rx="2"/>
+<text class="file" x="60" y="1044" text-anchor="start">security.c</text>
+<text class="desc" x="60" y="1061" text-anchor="start">refuse root · Landlock + seccomp</text>
+<text class="desc" x="60" y="1076" text-anchor="start">Seatbelt · Win32 mitigations · SRI</text>
+<rect class="mod" x="320" y="1024" width="190" height="64" rx="8"/>
+<rect class="bar a-sec" x="320" y="1024" width="5" height="64" rx="2"/>
+<text class="file" x="334" y="1044" text-anchor="start">csp.c</text>
+<text class="desc" x="334" y="1061" text-anchor="start">Content-Security-Policy</text>
+<text class="desc" x="334" y="1076" text-anchor="start">per document</text>
+<rect class="mod" x="522" y="1024" width="220" height="64" rx="8"/>
+<rect class="bar a-sec" x="522" y="1024" width="5" height="64" rx="2"/>
+<text class="file" x="536" y="1044" text-anchor="start">safebrowsing.c</text>
+<text class="desc" x="536" y="1061" text-anchor="start">local SHA-256 host blocklist</text>
+<text class="desc" x="536" y="1076" text-anchor="start">+ interstitial</text>
+<rect class="mod" x="754" y="1024" width="170" height="64" rx="8"/>
+<rect class="bar a-sec" x="754" y="1024" width="5" height="64" rx="2"/>
+<text class="file" x="768" y="1044" text-anchor="start">i18n.c</text>
+<text class="desc" x="768" y="1061" text-anchor="start">UI strings from</text>
+<text class="desc" x="768" y="1076" text-anchor="start">data/i18n/*.lang</text>
+<rect class="mod" x="936" y="1024" width="226" height="64" rx="8"/>
+<rect class="bar a-sec" x="936" y="1024" width="5" height="64" rx="2"/>
+<text class="file" x="950" y="1044" text-anchor="start">debuglog.c · threaddump.c</text>
+<text class="desc" x="950" y="1061" text-anchor="start">event log · --debug</text>
+<text class="desc" x="950" y="1076" text-anchor="start">SIGQUIT thread list</text>
+<rect class="g-ext" x="20" y="1130" width="1160" height="96" rx="12"/>
+<text class="gtitle" x="36" y="1156" text-anchor="start">Pinned subprojects (fetched by meson) and vendored code — no browser-engine fork</text>
+<rect class="chip" x="36" y="1168" width="200" height="30" rx="6"/>
+<text class="chiptext" x="136.0" y="1188" text-anchor="middle">lexbor — HTML + URL</text>
+<rect class="chip" x="244" y="1168" width="200" height="30" rx="6"/>
+<text class="chiptext" x="344.0" y="1188" text-anchor="middle">quickjs-ng — JS, no JIT</text>
+<rect class="chip" x="452" y="1168" width="206" height="30" rx="6"/>
+<text class="chiptext" x="555.0" y="1188" text-anchor="middle">ns-pango — shaping cache</text>
+<rect class="chip" x="666" y="1168" width="130" height="30" rx="6"/>
+<text class="chiptext" x="731.0" y="1188" text-anchor="middle">Wuffs — images</text>
+<rect class="chip" x="804" y="1168" width="170" height="30" rx="6"/>
+<text class="chiptext" x="889.0" y="1188" text-anchor="middle">pl_mpeg — MPEG-1, MP2</text>
+<rect class="chip" x="982" y="1168" width="90" height="30" rx="6"/>
+<text class="chiptext" x="1027.0" y="1188" text-anchor="middle">minimp3</text>
+<rect class="chip" x="1080" y="1168" width="80" height="30" rx="6"/>
+<text class="chiptext" x="1120.0" y="1188" text-anchor="middle">WAMR</text>
+<text class="lbl" x="36" y="1218" text-anchor="start">lexbor, quickjs-ng, ns-pango: subprojects/*.wrap · Wuffs, pl_mpeg: subprojects/ · minimp3: src/audio/ · WAMR: src/wamr/</text>
+<rect class="g-ext" x="20" y="1238" width="1160" height="76" rx="12"/>
+<text class="gtitle" x="36" y="1264" text-anchor="start">System libraries</text>
+<rect class="chip" x="36" y="1272" width="49" height="30" rx="6"/>
+<text class="chiptext" x="60.5" y="1292" text-anchor="middle">GTK 4</text>
+<rect class="chip" x="90.3125" y="1272" width="42" height="30" rx="6"/>
+<text class="chiptext" x="111.3125" y="1292" text-anchor="middle">GLib</text>
+<rect class="chip" x="137.625" y="1272" width="49" height="30" rx="6"/>
+<text class="chiptext" x="162.125" y="1292" text-anchor="middle">Cairo</text>
+<rect class="chip" x="191.9375" y="1272" width="70" height="30" rx="6"/>
+<text class="chiptext" x="226.9375" y="1292" text-anchor="middle">HarfBuzz</text>
+<rect class="chip" x="267.25" y="1272" width="63" height="30" rx="6"/>
+<text class="chiptext" x="298.75" y="1292" text-anchor="middle">FriBidi</text>
+<rect class="chip" x="335.5625" y="1272" width="84" height="30" rx="6"/>
+<text class="chiptext" x="377.5625" y="1292" text-anchor="middle">fontconfig</text>
+<rect class="chip" x="424.875" y="1272" width="70" height="30" rx="6"/>
+<text class="chiptext" x="459.875" y="1292" text-anchor="middle">FreeType</text>
+<rect class="chip" x="500.1875" y="1272" width="63" height="30" rx="6"/>
+<text class="chiptext" x="531.6875" y="1292" text-anchor="middle">libcurl</text>
+<rect class="chip" x="568.5" y="1272" width="63" height="30" rx="6"/>
+<text class="chiptext" x="600.0" y="1292" text-anchor="middle">OpenSSL</text>
+<rect class="chip" x="636.8125" y="1272" width="56" height="30" rx="6"/>
+<text class="chiptext" x="664.8125" y="1292" text-anchor="middle">SQLite</text>
+<rect class="chip" x="698.125" y="1272" width="70" height="30" rx="6"/>
+<text class="chiptext" x="733.125" y="1292" text-anchor="middle">uchardet</text>
+<rect class="chip" x="773.4375" y="1272" width="56" height="30" rx="6"/>
+<text class="chiptext" x="801.4375" y="1292" text-anchor="middle">libpsl</text>
+<rect class="chip" x="834.75" y="1272" width="42" height="30" rx="6"/>
+<text class="chiptext" x="855.75" y="1292" text-anchor="middle">zlib</text>
+<rect class="chip" x="882.0625" y="1272" width="42" height="30" rx="6"/>
+<text class="chiptext" x="903.0625" y="1292" text-anchor="middle">SDL2</text>
+<rect class="chip" x="929.375" y="1272" width="84" height="30" rx="6"/>
+<text class="chiptext" x="971.375" y="1292" text-anchor="middle">libseccomp</text>
+<rect class="chip" x="1018.6875" y="1272" width="70" height="30" rx="6"/>
+<text class="chiptext" x="1053.6875" y="1292" text-anchor="middle">libavif*</text>
+<rect class="chip" x="1094.0" y="1272" width="70" height="30" rx="6"/>
+<text class="chiptext" x="1129.0" y="1292" text-anchor="middle">Enchant*</text>
+<text class="lbl" x="1164" y="1262" text-anchor="end">* optional</text>
+</svg>

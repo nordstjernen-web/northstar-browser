@@ -1,6 +1,6 @@
 # Northstar web browser
 
-![Northstar showing its about:start page](docs/screenshot.png)
+![Northstar showing a Wikipedia article](docs/screenshot.png)
 
 Northstar is a minimalist web browser written from scratch in C. Its
 engine targets practical HTML5, modern CSS and JavaScript compatibility
@@ -25,18 +25,19 @@ sandbox (plus `PR_SET_NO_NEW_PRIVS`), with a default-deny seccomp syscall
 filter in both GUI and headless/tooling modes · no JIT.
 See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 
-**Minimalism:** one window, one page, one process. The GTK shell runs on
+**Minimalism:** one page per window, one process. The GTK shell runs on
 the main thread and the page engine on one dedicated thread with its own
-main loop, so a slow page never freezes the window, and the two talk
-through plain function calls. The engine is a compact body of C — about
-170,000 lines of original C, excluding the vendored WAMR, Wuffs and
-audio decoders — small enough for one person to read and audit
-end-to-end.
+main loop, so a slow page never freezes the window; the shell posts
+requests to that thread and gets rendered frames back, all inside the
+same process. The engine is a compact body of C — about 177,000 lines of
+original C, excluding the vendored WAMR, Wuffs and audio decoders —
+small enough for one person to read and audit end-to-end. See
+[docs/architecture.md](docs/architecture.md) for how it fits together.
 
 ## What this edition is
 
-This edition strips Northstar down to a single-window, single-page,
-single-process desktop browser, based on the
+This edition strips Northstar down to a tab-less, single-process
+desktop browser, based on the
 [Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
 It deliberately omits tabs, per-tab renderer processes, WebGL, WebGPU,
 an embedded PDF viewer and AI-style web APIs. It does not send telemetry
@@ -60,20 +61,24 @@ libavif when available, and SVG in the engine).
 - **Storage** — IndexedDB over SQLite, `localStorage`/`sessionStorage`
   and the Cache API (`caches`, request/response pairs per the Service
   Workers specification), each partitioned by site.
-- **Live connections** — WebSockets and server-sent events.
+- **Live connections** — WebSockets (with libcurl 8.11 or newer, or one
+  built with WebSocket support) and server-sent events.
 - **Navigation API** — `window.navigation` for single-page routing.
 - **Service workers** — origin-scoped registration, persistence,
   controlled-page fetch interception and offline pages served from the
   Cache API.
 - **WebExtensions** — installed local extensions with manifest content
   scripts, safe packaged resources, local storage and runtime messaging.
-- **Networking** over HTTP/2 with libcurl — HTTP/3 when the linked
-  libcurl provides it — HSTS, CSP, subresource-integrity (SRI) checks,
-  and cookies partitioned by site in one libcurl store that
+- **Networking** over HTTP/2 with libcurl — HTTP/3 through Alt-Svc when
+  the linked libcurl provides it — HTTPS-first navigation, HSTS,
+  optional DNS-over-HTTPS, CSP, subresource-integrity (SRI) checks for
+  scripts, and cookies partitioned by site in one libcurl store that
   `document.cookie` and network requests share.
 - **Safe browsing** — before a top-level navigation is fetched, its host
   is checked against a local SHA-256 blocklist. The check runs entirely
-  on-device.
+  on-device. The bundled list carries only test entries; a real list goes
+  in `~/.config/northstar/safebrowsing.list` or is named by
+  `NS_SAFEBROWSING_LIST`.
 - **Media** — images (PNG/APNG, GIF, BMP, JPEG, WebP, optional AVIF,
   SVG); audio (`<audio>`) decodes and plays in the browser process,
   alongside a Web Audio graph.
@@ -91,11 +96,18 @@ libavif when available, and SVG in the engine).
 - **MathML** — a minimalist presentation-MathML renderer.
 - **Spell checking** — optional, via the Enchant library.
 - **WebAssembly** — the JavaScript API over a vendored WAMR interpreter.
-- **Single window / single process** — the browser shows one page in one
-  window, and the page engine runs on its own thread inside the shell
-  process (no renderer processes, no request protocol between the two).
-- **UI** — bookmarks, find-in-page, printing, save-to-PDF, JS console,
-  settings, headless mode.
+- **One process, no tabs** — each window shows one page (*New Window*
+  opens another in the same process), and the page engine runs on its own
+  thread inside the shell process; there are no renderer processes. A
+  watchdog restarts the browser, with its session, after a crash or hang.
+- **UI** — bookmarks, history, downloads, find-in-page, zoom, full
+  screen, printing, save as PDF or image, page source, developer tools
+  with a JS console, settings, private browsing (`--private`), and a UI
+  translated into 40 languages that follows the operating-system
+  language.
+- **Headless mode** — text, DOM, layout, PNG and PDF dumps, scripted
+  input and web-platform-tests runs from the command line; see
+  [docs/building.md](docs/building.md#headless-mode-scripting--testing).
 
 ## Build and run
 
@@ -152,9 +164,10 @@ browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
 | [quickjs-ng](https://github.com/quickjs-ng/quickjs) v0.17.0 | JavaScript engine — no JIT |
 | [ns-pango](https://github.com/nordstjernen-web/ns-pango) | Text itemization, shaping and line breaking — a Pango fork with a cross-layout shaping cache |
 
-lexbor and quickjs-ng take a system copy instead when the build finds one
-new enough; ns-pango is always the subproject, since the fork's renamed
-symbols are what let it coexist with the system Pango that GTK loads.
+lexbor (3.0 or newer) and quickjs-ng take a system copy instead when the
+build finds one; ns-pango is always the subproject, since the fork's
+renamed symbols are what let it coexist with the system Pango that GTK
+loads.
 
 **Vendored in-tree** (built from the main tree, no submodules):
 
@@ -166,8 +179,10 @@ symbols are what let it coexist with the system Pango that GTK loads.
 | [minimp3](https://github.com/lieff/minimp3) (CC0) | In-process MP3 audio decode |
 
 **Required system libraries:** GTK 4 (≥ 4.14; ≥ 4.22.1 on Windows),
-GLib/Cairo, HarfBuzz, FriBidi, fontconfig, FreeType, libcurl (≥ 8.5),
-OpenSSL (libcrypto), uchardet, libpsl, SQLite and zlib. The engine lays
+GLib (≥ 2.80), Cairo (≥ 1.18), HarfBuzz (≥ 8.3), FriBidi, fontconfig
+(≥ 2.15), FreeType, libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet,
+libpsl, SQLite and zlib — Ubuntu 24.04, the oldest system CI builds on,
+meets every floor. The engine lays
 text out through ns-pango rather than the system Pango; GTK still links
 the system Pango for its own widgets, and the two coexist because every
 symbol in the fork is renamed. Linux builds also require libseccomp. SDL2 is

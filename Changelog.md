@@ -62,6 +62,28 @@ Significant changes in each release:
   decode the same way, so a windows-1252 page with a byte like 0x81 no
   longer falls back to another encoding, and the labels that name the
   replacement encoding give a single U+FFFD rather than decoded text.
+* A frame sandboxed without `allow-same-origin` can no longer reach the
+  page that embeds it. A `srcdoc` or same-origin frame sandboxed that way
+  got the embedding page's real window as `parent` and `top`, so its
+  script could read and change the parent's DOM, `document.cookie` and
+  `localStorage`; it now gets the same restricted window proxy as a
+  cross-origin frame, where anything but `postMessage`, the `location`
+  setter and a few navigation properties throws `SecurityError`.
+* `--dump=print:FILE` works under the Linux sandbox. The output directory
+  of a print dump was not made writable the way a `png:` or `pdf:` dump's
+  is, so the pagination check `docs/building.md` describes failed with
+  "failed to create PDF surface" and wrote nothing.
+* The documentation matches the source again. `docs/architecture.md`
+  describes the threads, the two headless paths, printing and
+  diagnostics as they are, and its diagram is regenerated from
+  `scripts/gen-architecture.py` instead of the old picture of a render
+  protocol that no longer exists. `SECURITY.md` lists the Windows
+  mitigations that are actually applied, the real Landlock paths, which
+  CSP directives, mixed-content rules and SRI checks are enforced, how
+  the address bar shows internationalised hosts, and the known gaps.
+  `docs/compliance.md` leads with the latest reading per area and drops
+  gaps that have closed, `docs/building.md` documents every command-line
+  option and environment variable, and the manual page does the same.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs

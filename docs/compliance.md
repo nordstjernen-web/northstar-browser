@@ -26,9 +26,9 @@ means compliance is not inherited from anywhere; it is measured.
 ## How the numbers are produced
 
 The engine runs [web-platform-tests](https://github.com/web-platform-tests/wpt)
-through headless mode. `--wpt` injects a completion hook before any
-document script runs, waits for `testharness.js` to finish, and reports
-each subtest on stdout.
+through headless mode. `--wpt` injects a completion hook
+(`data/js/wpt-hook.js`) before any document script runs, waits for
+`testharness.js` to finish, and reports each subtest on stdout.
 
 ```sh
 git clone --depth 1 https://github.com/web-platform-tests/wpt.git ~/wpt
@@ -40,12 +40,29 @@ scripts/dev.sh build
 scripts/wpt-run.sh --wpt-root=$HOME/wpt --no-serve dom/nodes css/cssom
 ```
 
-`scripts/wpt-run.sh` enumerates the tests under each path, serves them,
-runs each through the browser, and aggregates per-file and per-subtest
-results; `--results=FILE` writes one JSON line per test for analysis.
-Only `testharness.js` tests run — no reftests, no wdspec, no
-`*.worker.js`, since this edition has no WebDriver and no worker
-renderer process.
+Three runners live in `scripts/`:
+
+- **`wpt-run.sh`** — the stock-checkout runner above. It enumerates the
+  tests under each path, serves them with WPT's own `./wpt serve` unless
+  `--no-serve` says one is running at `--base`, runs each through the
+  browser with a per-test `--timeout-ms` (15 s by default), and
+  aggregates per-file and per-subtest results; `--results=FILE` appends
+  one JSON line per test, and `--list` prints the enumerated URLs.
+- **`wpt-local.sh`** — serves a checkout (`NS_WPT_ROOT`, default `~/wpt`)
+  over a plain static HTTP server and prints one summary line per file.
+  It needs no WPT server infrastructure, so multi-origin and server-side
+  tests do not work under it. The sparse-checkout re-measurements below
+  were served the same way.
+- **`wpt-fast.sh`** — runs the
+  [wpt-fast](https://github.com/nordstjernen-web/wpt-fast) checkout
+  (`--fast-root`, default `~/wpt-fast`) in parallel (`--jobs`, up to 8),
+  writes a `wptreport.json` and prints per-standard scores through the
+  checkout's `./wpt-score`.
+
+Only `testharness.js` tests run. Reftests and wdspec tests need
+screenshot comparison or WebDriver, which this edition does not have,
+and the runners do not enumerate `*.worker.js` tests; `.any.js` tests run
+in their window scope only.
 
 Two caveats when reading any of this:
 
@@ -56,21 +73,86 @@ Two caveats when reading any of this:
   calls `done()` from `onload` can time out under load and report zero
   subtests. Re-run a single file before treating it as a regression.
 
-## Current scores
+## Latest reading per area
+
+The most recent measurement of each area, gathered from the dated runs
+under *Measurement history*. They were taken against different
+checkouts — a full WPT checkout for the rows measured at `7b38d66`, and
+sparse checkouts served statically for the rest — so a denominator is
+comparable only with rows from the same run. Nothing after release 1.0.8
+has been re-measured: the work recorded in `Changelog.md` for 1.0.9 and
+1.0.10 (among it the colour serialisation, writing-mode flexbox and
+document-metadata fixes) is not reflected here, so treat each row as a
+floor.
+
+| Area | Subtests | Pass rate | Measured at |
+| --- | --- | --- | --- |
+| `html/dom` | 60099 / 60879 | 98.7% | `7b38d66`, 2026-07-29 |
+| `dom/nodes` | 11465 / 11680 | 98.2% | `7b38d66`, 2026-07-29 |
+| `dom/events` | 738 / 781 | 94.5% | `7b38d66`, 2026-07-29 |
+| `html/semantics/forms` | 3606 / 4302 | 83.8% | `51157ce`, 2026-09-12 |
+| `html/semantics/text-level-semantics` | 27 / 38 | 71.1% | `7b38d66`, 2026-07-29 |
+| `html/semantics/scripting-1` | 1304 / 1980 | 65.9% | `7b38d66`, 2026-07-29 |
+| `html/semantics/document-metadata` | 68 / 171 | 39.8% | `7b38d66`, 2026-07-29 |
+| `css/css-images` | 3107 / 3210 | 96.8% | `7afa634`, 2026-09-04 |
+| `css/css-content` | 201 / 211 | 95.3% | `18df2bb`, 2026-09-04 |
+| `css/css-backgrounds` | 1029 / 1093 | 94.1% | `51157ce`, 2026-09-12 |
+| `css/css-lists` | 256 / 274 | 93.4% | `7afa634`, 2026-09-04 |
+| `css/css-transitions` | 2282 / 2504 | 91.1% | `7afa634`, 2026-09-04 |
+| `css/selectors` | 5245 / 5766 | 91.0% | `51157ce`, 2026-09-12 |
+| `css/cssom` | 3466 / 3824 | 90.6% | `51157ce`, 2026-09-12 |
+| `css/css-display` | 326 / 376 | 86.7% | `43a5d0a`, 2026-09-04 |
+| `css/css-cascade` | 806 / 978 | 82.4% | `51157ce`, 2026-09-12 |
+| `css/css-animations` | 803 / 976 | 82.3% | `7afa634`, 2026-09-04 |
+| `css/css-conditional` | 2187 / 2718 | 80.5% | `7afa634`, 2026-09-04 |
+| `css/css-logical` | 873 / 1170 | 74.6% | `7afa634`, 2026-09-04 |
+| `css/css-fonts` | 3608 / 4980 | 72.4% | `7afa634`, 2026-09-04 |
+| `css/css-nesting` | 84 / 117 | 71.8% | `7afa634`, 2026-09-04 |
+| `css/css-align` | 3247 / 4534 | 71.6% | `7afa634`, 2026-09-04 |
+| `css/css-box` | 273 / 407 | 67.1% | `43a5d0a`, 2026-09-04 |
+| `css/css-variables` | 366 / 550 | 66.5% | `7afa634`, 2026-09-04 |
+| `css/css-transforms` | 464 / 705 | 65.8% | `51157ce`, 2026-09-12 |
+| `css/css-syntax` | 277 / 429 | 64.6% | `7afa634`, 2026-09-04 |
+| `css/css-position` | 297 / 474 | 62.7% | `7afa634`, 2026-09-04 |
+| `css/css-values` | 3743 / 6058 | 61.8% | `51157ce`, 2026-09-12 |
+| `css/css-ui` | 525 / 898 | 58.5% | `51157ce`, 2026-09-12 |
+| `css/css-grid` | 6265 / 11001 | 56.9% | `7afa634`, 2026-09-04 |
+| `css/css-properties-values-api` | 590 / 1039 | 56.8% | `41c3030`, 2026-08-09 |
+| `css/css-counter-styles` | 67 / 118 | 56.8% | `41c3030`, 2026-08-09 |
+| `css/css-flexbox` | 2220 / 3917 | 56.7% | `7afa634`, 2026-09-04 |
+| `css/css-text` | 1649 / 3027 | 54.5% | `51157ce`, 2026-09-12 |
+| `css/css-sizing` | 1320 / 2444 | 54.0% | `7afa634`, 2026-09-04 |
+| `css/css-easing` | 84 / 156 | 53.8% | `7afa634`, 2026-09-04 |
+| `css/css-color` | 5219 / 11006 | 47.4% | `7b38d66`, 2026-07-29 |
+| `css/cssom-view` | 895 / 2116 | 42.3% | `7afa634`, 2026-09-04 |
+| `css/css-tables` | 331 / 787 | 42.1% | `7afa634`, 2026-09-04 |
+| `css/css-multicol` | 143 / 344 | 41.6% | `7afa634`, 2026-09-04 |
+| `css/css-overflow` | 365 / 972 | 37.6% | `7afa634`, 2026-09-04 |
+| `css/css-pseudo` | 250 / 717 | 34.9% | `7afa634`, 2026-09-04 |
+| `css/css-contain` | 107 / 352 | 30.4% | `7afa634`, 2026-09-04 |
+
+`css/css-color` was last measured in full before the colour-space work in
+1.0.10, when almost every serialisation subtest failed; expect it to have
+moved the most. Read `html/semantics/scripting-1` with its denominator
+in view: roughly a quarter of its 474 files load modules or iframes over
+the network and time out under load, so the total swings by tens of
+subtests between runs of the same binary (1944, 1962 and 1980 across
+three runs). A change smaller than about thirty subtests there is noise.
+
+## Measurement history
+
+### Baseline, 2026-07-29
 
 Measured at `7b38d66` against a WPT checkout of 2026-07-29, 8 s per-test
 timeout — except `css/css-flexbox`, re-measured against a checkout of
 2026-08-08 with a 6 s timeout after the CSSOM and flex work in 1.0.7.
 
-**These numbers are a snapshot, not a running total.** Engine work has
-landed since — the colour, `border-radius`, flex-baseline and CSSOM fixes,
-and everything in `Changelog.md` after 1.0.5 — and none of it has been
-re-measured against this table; each change was verified against the
-behaviour it names. Treat every row but the flexbox one as a **floor**
-rather than a reading: they were all taken while `offsetLeft` and
-`offsetTop` returned document coordinates, which `checkLayout` compares
-directly, so any area with layout assertions scored lower than the engine
-deserved. Re-run the areas below before quoting any of this as current.
+These rows were all taken while `offsetLeft` and `offsetTop` returned
+document coordinates instead of offsetParent-relative ones, which
+`checkLayout` — the harness most of WPT's layout tests are written
+against — compares directly, so every area with layout assertions scored
+lower than the engine deserved. The `css/css-flexbox` row was re-measured
+after that fix: 1437 of 3535 subtests, up from 653 on the same checkout.
 
 | Area | Subtests | Pass rate |
 | --- | --- | --- |
@@ -116,17 +198,9 @@ grew because files that used to stop at the first missing API now reach
 subtests they never got to. The two areas that read as unchanged were
 checked file by file rather than in aggregate — no file in either moved.
 
-Read `html/semantics/scripting-1` with its denominator in view: roughly
-a quarter of its 474 files load modules or iframes over the network and
-time out under load, so the total swings by tens of subtests between
-runs of the same binary (1944, 1962 and 1980 across three runs). A
-change smaller than about thirty subtests there is noise.
-
-`html/dom` is the largest single area in WPT and the one most ordinary
-pages depend on. `css/css-flexbox` is still the weakest layout area and
-the most consequential for real pages. `css/css-color` is nearly as low,
-but almost all of its failures are the one structural gap under *Known
-gaps* rather than scattered bugs.
+At that point `css/css-flexbox` was the weakest layout area, and almost
+all of `css/css-color`'s failures were one structural gap — computed
+colours that kept no colour space — which 1.0.10 closed.
 
 ### Re-measured for the flex, grid and alignment work in 1.0.8
 
@@ -155,9 +229,9 @@ alone.
 boxes placed by grid lines, `auto-fit` track collapsing, rtl columns
 and grid-area percentage heights, plus `document.fonts.ready` now
 waiting for Ahem so `checkLayout` measures the intended font.
-`css/css-sizing` and `css/css-overflow` stay low for the structural
-reason below: most of their remaining files are vertical writing modes
-or the `stretch` sizing keyword.
+`css/css-sizing` and `css/css-overflow` stayed low because most of
+their remaining files were vertical writing modes or the `stretch`
+sizing keyword; `stretch` landed in the third pass below.
 
 ### Re-measured for the second pass of 1.0.8
 
@@ -196,10 +270,10 @@ the font shorthand and font-family canonicalization, and
 `css/css-conditional` the container query evaluator. `css/css-grid`
 picked up the resolved track sizes, em and calc() tracks, fr rows and
 self-alignment; `css/cssom-view` the scrollable-overflow rules. The
-`css/css-transitions` and `css/css-animations` rows stay where they
-were: getComputedStyle does not reflect running transitions and
-`document.getAnimations()` returns nothing, which is the gap most of
-their subtests test for.
+`css/css-transitions` and `css/css-animations` rows stayed where they
+were: at `18df2bb` getComputedStyle did not reflect running transitions
+and `document.getAnimations()` returned nothing, which is the gap most of
+their subtests test for. The third pass closed it.
 
 ### Re-measured for the third pass of 1.0.8
 
@@ -301,100 +375,91 @@ not parsing.
 
 ### Vertical writing modes
 
-Layout is horizontal-only: `writing-mode: vertical-rl`, `vertical-lr`
-and the `sideways-*` values are parsed but every layout algorithm treats
-the inline axis as x. This is now the single largest source of failures
-in every layout area — `abspos/position-absolute-013` in flexbox alone
-is 216 subtests, half of `css/css-sizing/stretch` is orthogonal-flow
-combinations, and the `*-vertWM-*`, `*-wmvert-*` and `orthogonal-*`
-files in flexbox and grid fail as groups. Fixing it means threading a
-logical-to-physical mapping through box geometry, not patching any one
-algorithm.
+Vertical writing modes are only partly laid out. Flex containers map
+`row` and `column` through `writing-mode` and give vertical items a
+central baseline, tables transpose their cells, logical properties map
+through the writing mode, container queries size vertical containers,
+and a single run of vertical text is measured and painted rotated or
+upright. Block flow, grid, and line breaking along a vertical inline
+axis are still horizontal: a vertical paragraph is one unbroken column,
+and a block container stacks its children top to bottom whatever its
+writing mode. This remains the largest source of failures in the layout
+areas — the `*-vertWM-*`, `*-wmvert-*` and `orthogonal-*` files in
+flexbox and grid, and half of `css/css-sizing/stretch` — and closing it
+means threading a logical-to-physical mapping through block and inline
+layout, not patching any one algorithm.
 
 ### Flex layout
 
-`css/css-flexbox` was re-measured after the `offsetLeft`/`offsetTop` and
-flex static-position work described in `Changelog.md`: **1437 of 3535
-subtests, 40.7%**, up from 653 (18.5%) on the same checkout and the same
-denominator. That single jump also says something about the table above —
-`offsetLeft` and `offsetTop` returned document coordinates instead of
-offsetParent-relative ones, and `checkLayout`, the harness most of WPT's
-layout tests are written against, compares exactly those. Every number in
-the table measured before that fix understates the engine by an unknown
-amount, and every layout area is worth re-running before it is quoted.
+`css/css-flexbox` stood at 2220 of 3917 subtests (56.7%) after the third
+pass of 1.0.8, up from 653 on the checkout first measured. The main-size
+step is the spec's resolve-flexible-lengths loop shared by row,
+wrapping-row and column containers; column containers wrap and honour
+`align-content`; negative free space overflows in the right direction;
+the automatic minimum size is `min(content, specified)`; an absolutely
+positioned child takes its static position from `justify-content` and
+its own `align-self`; and since 1.0.10 the flex axes follow
+`writing-mode` and replaced items stretch across a column container
+keeping their aspect ratio. What remains, in the order it costs
+subtests:
 
-What is correct: a row of `flex: 1 1 auto` / `flex: 2 1 0` / fixed-width
-items resolves to the same geometry a browser produces,
-`flex-direction: column` with `align-items` and `justify-content` places
-items correctly, `align-items: baseline` aligns baselines,
-`flex-wrap: wrap-reverse` reverses the cross axis, and an
-absolutely-positioned child takes its static position from the
-container's `justify-content` and its own `align-self`.
+- **Vertical writing modes** beyond the flex axes, as above.
+- **Baseline alignment across nested containers.** An item's baseline is
+  its first in-flow descendant's, in document order, rather than one
+  synthesized by the flex, grid and multicol rules, and in-flow items do
+  not align on `last baseline`; the `alignment/flex-align-baseline-*`
+  files fail as a group.
+- **Intrinsic sizes.** A flex container's contribution to its parent is
+  an estimate — the sum of its items' max-content widths plus gaps, or
+  its widest item for min-content — not the result of running the flex
+  algorithm (`intrinsic-size/*`, `flex-container-min-content-*`).
+- **Replaced items in the main axis.** The min and max main-size clamp
+  reads only the width properties, so an image's `height`, `min-height`
+  or `max-height` does not transfer through its aspect ratio
+  (`image-as-flexitem-size-*`).
 
-Since 1.0.8 the main-size step is the spec's resolve-flexible-lengths
-loop shared by row, wrapping-row and column containers, column
-containers wrap and honour `align-content`, negative free space
-overflows in the right direction, and the automatic minimum size is
-`min(content, specified)`. What remains, in the order it costs subtests:
+### Colour interpolation
 
-- **Vertical writing modes**, as above.
-- **Baseline alignment across nested containers.** `align-items:
-  baseline` works for a single line of items; the
-  `alignment/flex-align-baseline-*` files, which synthesize baselines
-  from nested flex, grid and multicol items and from `last baseline`,
-  fail as a group.
-- **Intrinsic sizes.** The min-content and max-content contribution of
-  a flex container to its parent (`intrinsic-size/*`,
-  `flex-container-min-content-*`) still comes from the block estimate
-  rather than the flex algorithm.
-- Replaced elements as flex items (`image-as-flexitem-size-*`) do not
-  transfer their aspect ratio through the main-size clamp.
+Colours keep the space they are authored in through the cascade and
+serialise in it — `lab(20 0 10 / 0.5)` reads back as itself — and a
+`none` component or `currentcolor` inside `color-mix()` and relative
+colours is resolved per element. Transitions and animations still
+interpolate colours as 8-bit sRGB rather than in Oklab, so an animated
+colour takes a different path between its endpoints than the
+specification describes.
 
-### Computed values keep no colour space
+### Typed arithmetic in `calc()`
 
-Every colour is reduced to 8-bit sRGB as soon as it is parsed, and
-`getComputedStyle` serializes it as `rgb()`/`rgba()`. CSS Color 4
-requires the computed value to keep the space it was authored in, so
-`lab(20 0 10)` must read back as `lab(20 0 10)` and
-`color(display-p3 .1 .2 .3)` as itself. The colours *render* correctly —
-the conversions to sRGB are exact — but every serialization subtest in
-`css/css-color` fails. Fixing this means carrying a space-tagged colour
-through the style system and the paint path, not a parser change.
-
-### Inverse trigonometry does not produce an angle
-
-`asin()`, `acos()`, `atan()` and `atan2()` return a plain number in
-radians rather than an `<angle>`. Where the result is used directly as
-an angle — `rotate(atan(1))` — the angle parser converts it and the
-result is right; where it takes part in arithmetic with an angle, as in
-`calc(atan(1) / 45deg)`, the calculation is rejected. Fixing it properly
-means carrying a unit type through `calc()`, not a change to these four
-functions.
+`calc()` carries a value kind, and `asin()`, `acos()`, `atan()` and
+`atan2()` produce angles, so `rotate(atan(1))` and
+`calc(atan(1) + 10deg)` work. Division by a dimension does not: the
+divisor must be a plain number, so `calc(atan(1) / 45deg)` and
+`calc(100vw / 1px)` are rejected.
 
 ### Experimental CSS Values features
 
-`if()`, `random()`, `calc-mix()` and `attr()` with a type argument are
-unimplemented. These are `.tentative.html` tests for features still
-being specified; they account for roughly 550 subtests in
-`css/css-values` and are deliberately not a priority.
+`if()`, `random()` and `calc-mix()` are unimplemented. These are
+`.tentative.html` tests for features still being specified and are
+deliberately not a priority. Typed `attr()` — `type()`, `raw-string` and
+unit types — is implemented.
 
-### Scroll snap does not reach the document scroller
+### Animation composition and scroll-driven animations
 
-`scroll-snap-type` works on a scroll container — a box with its own
-overflow — and `ns_box_scroll_snap` is reached from the wheel handler and
-from the `scrollTop`/`scrollLeft` setters. The document scroller is not
-one of those boxes: it belongs to the window, so the property has no
-effect on `html` or `body`, which is where a page most often puts it.
-`scroll-padding` on the container and `scroll-margin` on an item are
-honoured wherever snapping happens at all. Closing this means giving the
-document scroller a box to snap against, not extending the snap code.
+`animation-composition: add` and `accumulate` are parsed and reported on
+keyframes but not composited, and scroll-driven timelines
+(`animation-timeline`, `ScrollTimeline`, `ViewTimeline`) exist only as
+property names. Most of what remains failing in `css/css-animations` is
+these two features.
 
 ### `html/semantics/document-metadata`
 
-The low score here is dominated by files that time out rather than fail
-assertions — `<link>` loading, `rel=preload`, and `referrerpolicy`
-behaviours that need resource-timing signals the headless driver does
-not settle on. The subtests that do run mostly pass.
+Last measured at 39.8% on 2026-07-29, when the score was dominated by
+files that timed out rather than failed assertions — `<link>` loading,
+`rel=preload`, and `referrerpolicy` behaviours that need resource-timing
+signals the headless driver does not settle on. 1.0.9 and 1.0.10 changed
+`relList.supports`, `<style type>`, `<link disabled>`,
+`document.title` creation, `<base href>` resolution and a `load` event
+that waits for images, none of which has been re-measured.
 
 ## Recent fixes
 
@@ -404,7 +469,8 @@ structurally missing; it is not a second changelog.
 
 ## Keeping this current
 
-Re-run the areas in the table and update it in the same commit as any
-engine change that moves them. When a fix lands, name the tests it was
+Re-run the areas an engine change moves, record the run as a dated
+section under *Measurement history*, and update the matching rows of the
+latest-reading table in the same commit. When a fix lands, name the tests it was
 verified against in the commit message — the numbers above are only
 useful if they can be reproduced from the commit that claims them.

@@ -21,28 +21,13 @@
 *.gch
 *.d
 
-# Autotools / configure artifacts (if introduced later)
-/configure.lineno
-/config.cache
-/config.log
-/config.status
-/autom4te.cache/
-
-# Meson / Ninja (likely build system for a GTK4/C project)
+# Meson / Ninja
 /builddir/
 /builddir-release/
-/builddir-wgpu/
 /builddir-verify/
 /release-build/
 /build-*/
 
-# iOS build artifacts: the cross-compile staging + generated Xcode project.
-/ios/.build/
-/ios/App/vendor/
-/ios/App/Northstar.xcodeproj/
-/ios/sysroot/
-# Downloaded wgpu-native release blobs (headers are vendored; the library is fetched)
-/third_party/wgpu-native/dl/
 .ninja_deps
 .ninja_log
 build.ninja
@@ -56,7 +41,7 @@ compile_commands.json
 /subprojects/quickjs-ng/
 /subprojects/ns-pango/
 
-# CMake (in case)
+# CMake (lexbor's subproject build)
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
@@ -73,7 +58,9 @@ Thumbs.db
 .vscode/
 *.sublime-*
 
-# Logs / scratch
+# Logs / scratch / tool output
+/render-tests-out/
+wptreport.json
 *.log
 /.scratch/
 /.cache/

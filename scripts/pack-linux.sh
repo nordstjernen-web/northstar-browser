@@ -98,8 +98,8 @@ Distro install commands:
 
 ${RUNTIME_INSTALL}
 
-For Linux distros without modern GTK 4, build an AppImage instead
-(future work).
+For Linux distros without modern GTK 4, use the AppImage
+(scripts/pack-appimage.sh) instead.
 
 ## Run
 

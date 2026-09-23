@@ -116,7 +116,8 @@ This repo is driven by Claude in long uninterrupted sessions.
 - **Windows specifics.** The meson toolchain lives in MSYS2, whose
   login shell starts in `$HOME` outside the MINGW64 environment, so
   build through the wrapper, which exports `MSYSTEM`, `USERPROFILE`,
-  `TMPDIR` and the compiler and regenerates cleanly:
+  `TMPDIR` and the compiler, configures `builddir` on first use and
+  compiles:
   `C:/msys64/usr/bin/bash.exe -lc "bash /c/dev/northstar-browser-gpl/scripts/_msys_build.sh"`.
   `git` is not on the MSYS2 PATH — run it from Git Bash or PowerShell.
   A running `northstar.exe` locks the link target and the build fails
@@ -127,8 +128,10 @@ This repo is driven by Claude in long uninterrupted sessions.
   allow-lists both the Bash and PowerShell tools.
 - **CI is enabled.** The Linux (Ubuntu gcc), musl (Alpine), macOS and Windows workflows run on
   every push to `main` and every PR targeting `main`, plus manual
-  `workflow_dispatch`. Local Linux is still the primary correctness
-  gate before pushing; CI provides cross-platform sanity coverage.
+  `workflow_dispatch` — except for changes that touch only Markdown,
+  `docs/` or `LICENSE`, which skip CI. Local Linux is still the primary
+  correctness gate before pushing; CI provides cross-platform sanity
+  coverage.
 - Make good descriptive commit messages always.
 
 ## Build / verify locally
@@ -144,8 +147,10 @@ meson compile -C builddir
 The JavaScript engine is
 [quickjs-ng](https://github.com/quickjs-ng/quickjs), consumed as an
 **upstream meson subproject** pinned to a release
-(`subprojects/quickjs-ng.wrap`, currently v0.17.0) — no in-tree fork.
-`meson setup` fetches it and exposes it as the `libquickjs`
+(`subprojects/quickjs-ng.wrap`, currently v0.17.0) — no in-tree fork;
+the wrap's one patch (`subprojects/packagefiles/`) only changes how it
+links on Windows. `meson setup` uses a system quickjs-ng when it finds
+one, and otherwise fetches it and exposes it as the `libquickjs`
 dependency. The browser includes only the public `<quickjs.h>`. A
 few browser-side entry points that stock quickjs-ng does not expose —
 caller/function realm lookup, module private values, an
@@ -206,8 +211,10 @@ The GTK shell still uses the system Pango for its own widgets (the
 The single HTML→DOM backend is
 [lexbor](https://github.com/lexbor/lexbor), consumed as an **upstream
 meson CMake subproject** pinned to a release
-(`subprojects/lexbor.wrap`, currently v3.0.1) — no in-tree fork.
-`meson setup` builds only its static library (`lexbor_static`, with
+(`subprojects/lexbor.wrap`, currently v3.0.1) — no in-tree fork, one
+small bounds patch in `subprojects/packagefiles/`. A system lexbor ≥
+3.0.0 is used when found; otherwise `meson setup` builds only its static
+library (`lexbor_static`, with
 warnings suppressed as third-party code) via meson's CMake module and
 exposes it as the `liblexbor` dependency. The browser uses the
 standard `<lexbor/...>` headers.
@@ -282,24 +289,25 @@ the build works without it and simply does no spell-checking. The
 Opus/Vorbis decode to the in-process mixer. `libavif-dev` is optional
 too and adds AVIF decoding; it drags in a full AV1 decoder for a format
 that is rare on the web, so `-Davif=disabled` drops it and AVIF images
-simply fail to decode.
+simply fail to decode. `libthai-dev`, also optional, gives
+ns-pango Thai word breaking.
 
 On Fedora/RHEL:
 
 ```sh
-sudo dnf install gcc pkgconf meson ninja-build cmake gtk4-devel libcurl-devel \
-    openssl-devel uchardet-devel harfbuzz-devel fribidi-devel cairo-devel \
-    fontconfig-devel freetype-devel libpsl-devel sqlite-devel \
-    libseccomp-devel SDL2-devel zlib-devel
+sudo dnf install gcc gcc-c++ pkgconf meson ninja-build cmake gtk4-devel \
+    libcurl-devel openssl-devel uchardet-devel harfbuzz-devel \
+    fribidi-devel cairo-devel fontconfig-devel freetype-devel \
+    libpsl-devel sqlite-devel libseccomp-devel SDL2-devel zlib-devel
 ```
 
 On openSUSE:
 
 ```sh
-sudo zypper install gcc pkgconf meson ninja cmake gtk4-devel libcurl-devel \
-    libopenssl-devel libuchardet-devel harfbuzz-devel fribidi-devel \
-    cairo-devel fontconfig-devel freetype2-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libSDL2-devel zlib-devel
+sudo zypper install gcc gcc-c++ pkgconf meson ninja cmake gtk4-devel \
+    libcurl-devel libopenssl-devel libuchardet-devel harfbuzz-devel \
+    fribidi-devel cairo-devel fontconfig-devel freetype2-devel \
+    libpsl-devel sqlite3-devel libseccomp-devel libSDL2-devel zlib-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.
