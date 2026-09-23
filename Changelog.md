@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Documents in quirks mode get the extra user-agent rules HTML lists
+  for them: tables reset font, line-height, white-space and text-align
+  instead of inheriting them, forms keep a 1em bottom margin, stray list
+  items put their marker inside, text inputs and textareas size with
+  `border-box`, and left- or right-aligned images get a 3px gap.
 * `getComputedStyle().transform` resolves only the `transform`
   property; the individual `translate`, `rotate` and `scale` properties
   stay separate as CSS Transforms 2 says, instead of being folded into
