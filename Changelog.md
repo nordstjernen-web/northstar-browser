@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Absolutely positioned children of flex containers land where they
+  should. One with `margin: auto` and no `left`/`right` sat 40px in from
+  its static position instead of at it (auto margins only centre a box
+  between two insets), `align-self: baseline` and `last baseline` put it
+  at the wrong edge of a `wrap-reverse` line, and in a wrapping container
+  whose lines are stretched by `align-content`, `flex-end` and `center`
+  items stayed at the top of the taller line.
 * A float in a column too narrow for it is as wide as its longest word
   or widest unbreakable child, like in other browsers, instead of being
   squeezed below it so that its content spills out of its border. A
