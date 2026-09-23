@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Deeply nested flex rows lay out in a blink instead of seconds. Every
+  row laid each item out once to measure it and again in place, and each
+  of those layouts did the same for the row inside, so the work doubled
+  with every level: 22 nested `display: flex` boxes took three and a
+  half seconds. An item whose size did not change between the two passes
+  is now moved into place rather than laid out again, and a row with a
+  definite height hands its stretched items that height on the first
+  pass, so the same page takes 0.2s. Moving a grid container now also
+  moves its track positions, which absolutely positioned grid children
+  are placed against.
 * Shrink-to-fit boxes -- inline-blocks, floats, flex items sized by
   their content -- no longer come out wider than what they hold. A
   child with a pixel `width` and `box-sizing: border-box` was measured
