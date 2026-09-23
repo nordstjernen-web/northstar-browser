@@ -5643,15 +5643,28 @@ calc_num_value(double n)
     return v;
 }
 
+static gboolean
+css_less_signed(double a, double b)
+{
+    return a < b || (a == 0 && b == 0 && signbit(a) && !signbit(b));
+}
+
+static double
+css_clamp_signed(double lo, double val, double hi)
+{
+    double out = css_less_signed(hi, val) ? hi : val;
+    return css_less_signed(out, lo) ? lo : out;
+}
+
 static double
 css_round_step(int strategy, double a, double b)
 {
     if (isnan(a) || isnan(b) || b == 0) return NAN;
     if (isinf(a)) return isinf(b) ? NAN : a;
     if (isinf(b)) {
-        if (strategy == 1) return a > 0 ? INFINITY : 0.0;
-        if (strategy == 2) return a < 0 ? -INFINITY : 0.0;
-        return 0.0;
+        if (strategy == 1) return a > 0 ? INFINITY : copysign(0.0, a);
+        if (strategy == 2) return a < 0 ? -INFINITY : copysign(0.0, a);
+        return copysign(0.0, a);
     }
     double q = a / fabs(b);
     double rq = strategy == 1 ? ceil(q) :
@@ -5668,8 +5681,10 @@ css_mod_rem(gboolean is_mod, double a, double b)
         if (!is_mod) return a;
         return signbit(a) == signbit(b) ? a : NAN;
     }
-    double q = a / b;
-    return is_mod ? a - b * floor(q) : a - b * trunc(q);
+    double r = fmod(a, b);
+    if (is_mod && r != 0 && (r < 0) != (b < 0)) r += b;
+    if (r == 0) r = copysign(0.0, is_mod ? b : a);
+    return r;
 }
 
 static ns_css_value *
@@ -5766,6 +5781,7 @@ ns_css_number_str(double n)
 {
     if (isnan(n)) return g_strdup("NaN");
     if (isinf(n)) return g_strdup(n < 0 ? "-infinity" : "infinity");
+    if (n == 0) return g_strdup("0");
     return g_strdup_printf("%g", n);
 }
 
@@ -5900,13 +5916,15 @@ calc_compare_scalar(int fn, char *const *parts, int n)
         double val = terms[1].num;
         double hi = none[2] ? HUGE_VAL : terms[2].num;
         result = isnan(lo) || isnan(val) || isnan(hi) ? NAN
-               : MIN(MAX(val, lo), hi);
+               : css_clamp_signed(lo, val, hi);
     } else {
         result = terms[0].num;
         for (int i = 1; i < n; i++) {
             if (isnan(terms[i].num)) result = NAN;
-            else if (fn == 1 && terms[i].num < result) result = terms[i].num;
-            else if (fn == 2 && terms[i].num > result) result = terms[i].num;
+            else if (fn == 1 && css_less_signed(terms[i].num, result))
+                result = terms[i].num;
+            else if (fn == 2 && css_less_signed(result, terms[i].num))
+                result = terms[i].num;
         }
     }
     return calc_scalar_value(kind, result);
@@ -5949,9 +5967,9 @@ calc_compare_lengths(int fn, char *const *parts, int n)
         if (f->em != 0 || f->rem != 0 || f->lh != 0 || f->rlh != 0 ||
             f->vw != 0 || f->vh != 0 || f->vmin != 0 || f->vmax != 0)
             font_dependent = TRUE;
-        keys[i] = values_px[i] + (f->em + f->rem) * 16.0 +
-                  (f->lh + f->rlh) * 19.2 +
-                  values_pct[i] * 0.01 * g_viewport_w;
+        double relative = (f->em + f->rem) * 16.0 + (f->lh + f->rlh) * 19.2 +
+                          values_pct[i] * 0.01 * g_viewport_w;
+        keys[i] = relative != 0 ? values_px[i] + relative : values_px[i];
     }
     double out_px;
     if (fn == 3) {
@@ -5961,17 +5979,15 @@ calc_compare_lengths(int fn, char *const *parts, int n)
         if (isnan(min_v) || isnan(val_v) || isnan(max_v)) {
             out_px = NAN;
         } else {
-            out_px = val_v;
-            if (out_px > max_v) out_px = max_v;
-            if (out_px < min_v) out_px = min_v;
+            out_px = css_clamp_signed(min_v, val_v, max_v);
         }
     } else {
         out_px = keys[0];
         gboolean any_nan = isnan(keys[0]);
         for (int i = 1; i < n; i++) {
             if (isnan(keys[i])) any_nan = TRUE;
-            if (fn == 1 && keys[i] < out_px) out_px = keys[i];
-            if (fn == 2 && keys[i] > out_px) out_px = keys[i];
+            if (fn == 1 && css_less_signed(keys[i], out_px)) out_px = keys[i];
+            if (fn == 2 && css_less_signed(out_px, keys[i])) out_px = keys[i];
         }
         if (any_nan) out_px = NAN;
     }
@@ -23961,17 +23977,34 @@ css_add_leading_zeros(char *v)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+is_math_fn_open(const char *text, const char *paren)
+{
+    const char *start = paren;
+    while (start > text && (is_ident(start[-1]) || start[-1] == '-')) start--;
+    return start < paren && is_math_fn_start(start);
+}
+
 static char *
-css_normalize_negative_zero(char *value)
+negative_zero_normalize(char *value, gboolean inside_math)
 {
     if (!value) return NULL;
     gboolean changed = FALSE;
     GString *out = g_string_new(NULL);
     const char *p = value;
+    int math_depth = 0, depth = 0;
     while (*p) {
+        if (*p == '(') {
+            depth++;
+            if (math_depth == 0 && !inside_math && is_math_fn_open(value, p))
+                math_depth = depth;
+        } else if (*p == ')') {
+            if (depth == math_depth) math_depth = 0;
+            if (depth > 0) depth--;
+        }
         gboolean boundary = p == value ||
             !(is_ident(p[-1]) || p[-1] == '.' || p[-1] == '\\');
-        if (*p == '-' && boundary &&
+        if (*p == '-' && boundary && math_depth == 0 &&
             (g_ascii_isdigit((guchar)p[1]) || p[1] == '.')) {
             char *number_end = NULL;
             double number = g_ascii_strtod(p, &number_end);
@@ -23990,6 +24023,18 @@ css_normalize_negative_zero(char *value)
     }
     g_free(value);
     return g_string_free(out, FALSE);
+}
+
+static char *
+css_normalize_negative_zero(char *value)
+{
+    return negative_zero_normalize(value, FALSE);
+}
+
+char *
+ns_css_negative_zero_normalize(char *value)
+{
+    return negative_zero_normalize(value, TRUE);
 }
 
 static char *

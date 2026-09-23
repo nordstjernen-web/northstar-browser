@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Math functions keep the sign of zero. `calc(-0)` was rewritten to
+  `calc(0)` before it was evaluated, so `1 / sign(calc(-0))` came out
+  as `infinity` instead of `-infinity`; `min()`, `max()` and `clamp()`
+  now order `-0` below `0`, `round()` with an infinite step, `mod()`
+  and `rem()` return the signed zero CSS Values 4 specifies, and `-0`
+  still reads back as `0` through `element.style`.
 * A `calc()` that evaluates to NaN or an infinity no longer produces
   NaN geometry. `width: calc(NaN * 1px)` laid out and read back as
   `nanpx` and `calc(infinity * 1px)` as an unusable infinite length;
