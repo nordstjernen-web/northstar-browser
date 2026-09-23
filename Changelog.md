@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Every radio button in a required group reports `valueMissing` while
+  none is checked, not only the one carrying `required`; required
+  checkboxes, file inputs and selects report it even when disabled;
+  and `input.validity` identifies itself as a `ValidityState`.
 * Submit buttons take part in form validation (`willValidate` is true
   and a custom validity message on one blocks submission), and a
   `readonly` input of any type is left out of it, as HTML specifies.
