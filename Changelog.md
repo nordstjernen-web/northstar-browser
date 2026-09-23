@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A page can hide its own iframes again, and `<object>` shows its
+  fallback content. The default stylesheet hid every frame, object and
+  embed with `!important` and forced a loaded iframe to `display: block
+  !important` -- and a user-agent `!important` beats anything an author
+  writes, so an OAuth or payment helper iframe styled `display: none`
+  was laid out in the page once it loaded, and `<object data=x.swf><p>Get
+  Flash</p></object>` showed nothing at all. Those rules are ordinary
+  defaults now; an `<object>` that has not loaded a document renders the
+  content inside it, as HTML specifies.
 * A `<summary>` draws its disclosure triangle as a list marker, the way
   the HTML rendering rules style it, so `list-style: none`, `display:
   block` or `::marker { content: "" }` removes it as in other browsers;
