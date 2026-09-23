@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `crypto.getRandomValues()` throws the errors the Web Cryptography API
+  specifies: a `TypeMismatchError` DOMException for a `DataView` (it
+  was a plain TypeError) and a `QuotaExceededError` for more than 65536
+  bytes (it was a RangeError).
 * `XMLHttpRequest.responseText` decodes the body in the charset named by
   `overrideMimeType()` or the response's `Content-Type`, and a byte-order
   mark overrides both, as the XHR standard specifies. The body was

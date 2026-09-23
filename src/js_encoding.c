@@ -72,9 +72,9 @@ ns_view_bytes(JSContext *ctx, JSValueConst buffer, uint64_t offset,
     return TRUE;
 }
 
-static gboolean
-ns_buffer_source_bytes(JSContext *ctx, JSValueConst v, const uint8_t **data,
-                       size_t *len)
+gboolean
+ns_js_buffer_source_bytes(JSContext *ctx, JSValueConst v, const uint8_t **data,
+                          size_t *len)
 {
     *data = NULL;
     *len = 0;
@@ -192,7 +192,7 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
     gboolean has_input = argc >= 1 && !JS_IsUndefined(argv[0]);
     const uint8_t *data = NULL;
     size_t len = 0;
-    if (has_input && !ns_buffer_source_bytes(ctx, argv[0], &data, &len))
+    if (has_input && !ns_js_buffer_source_bytes(ctx, argv[0], &data, &len))
         return JS_ThrowTypeError(ctx,
             "TextDecoder.decode: input must be an ArrayBuffer or ArrayBufferView");
     JSValue bad = ns_check_dictionary(ctx, argc, argv, 1, "TextDecoder.decode");
@@ -201,7 +201,7 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
     if (ns_dictionary_bool(ctx, argc >= 2 ? argv[1] : JS_UNDEFINED, "stream",
                            &stream) < 0)
         return JS_EXCEPTION;
-    if (has_input) ns_buffer_source_bytes(ctx, argv[0], &data, &len);
+    if (has_input) ns_js_buffer_source_bytes(ctx, argv[0], &data, &len);
 
     if (!td->do_not_flush) {
         ns_decoder_reset(td->decoder);
