@@ -15027,6 +15027,19 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             lbox, strcmp(resolved_name, "grid-template-columns") == 0);
         if (tracks) return tracks;
     }
+    if (computed && (resolved_id == NS_CSS_GRID_TEMPLATE_COLUMNS ||
+                     resolved_id == NS_CSS_GRID_TEMPLATE_ROWS ||
+                     resolved_id == NS_CSS_GRID_AUTO_COLUMNS ||
+                     resolved_id == NS_CSS_GRID_AUTO_ROWS)) {
+        const ns_node *root = n;
+        while (root->parent && root->parent->kind == NS_NODE_ELEMENT)
+            root = root->parent;
+        const ns_style *root_style = js && js->style_table
+            ? g_hash_table_lookup(js->style_table, root) : NULL;
+        char *tracks = ns_css_tracks_computed_serialize(computed, root_style,
+                                                        resolved_id);
+        if (tracks) return tracks;
+    }
 
     if (strcmp(resolved_name, "width") == 0 ||
         strcmp(resolved_name, "height") == 0) {

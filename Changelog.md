@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `getComputedStyle()` reports `grid-template-columns` and
+  `grid-template-rows` of an element that is not a grid, and
+  `grid-auto-columns` and `grid-auto-rows` of any element, as the
+  computed track list: `repeat()`, `minmax()`, `fit-content()` and line
+  names stay as written and only lengths become pixels, so `[a] 1em
+  repeat(2, 2em [b] 3em)` reads back as `[a] 16px repeat(2, 32px [b]
+  48px)` instead of an expanded list with the functions dropped.
 * Flexible grid tracks honour their fixed minimums. `minmax(40px, 1fr)
   minmax(0, 1fr)` in a 60px grid gave the second column 30px and
   overflowed; a track whose share falls below its minimum now keeps the
