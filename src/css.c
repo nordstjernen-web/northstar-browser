@@ -16554,6 +16554,8 @@ ns_css_scope_free(ns_css_scope *s)
     g_free(s);
 }
 
+static void cq_query_free(ns_css_container_query *q);
+
 static void
 ns_css_rule_free(ns_css_rule *r)
 {
@@ -16571,6 +16573,7 @@ ns_css_rule_free(ns_css_rule *r)
     if (r->pending) g_array_free(r->pending, TRUE);
     g_free(r->layer_name);
     g_free(r->container_condition);
+    cq_query_free(r->container_query);
     if (r->scopes) g_ptr_array_free(r->scopes, TRUE);
     g_free(r);
 }
@@ -17429,6 +17432,7 @@ static __thread GHashTable *g_cq_map;     /* ns_node* -> ns_cq_container* */
 static __thread GArray     *g_cq_stack;   /* ns_cq_container (by value) */
 static __thread GHashTable *g_var_adjust_cache; /* parent ns_var_map* -> adjusted ns_var_map* */
 static __thread gboolean    g_container_features_used;
+static __thread gboolean    g_container_units_seen;
 
 void
 ns_css_set_container_map(GHashTable *map)
@@ -17446,6 +17450,12 @@ gboolean
 ns_css_container_features_used(void)
 {
     return g_container_features_used;
+}
+
+gboolean
+ns_css_container_units_seen(void)
+{
+    return g_container_units_seen;
 }
 
 static void
@@ -17546,6 +17556,7 @@ cq_select_axis(gboolean block_axis)
 static double
 container_unit_resolve(double v, ns_css_unit unit)
 {
+    g_container_units_seen = TRUE;
     if (g_cq_map) g_container_features_used = TRUE;
     const ns_cq_container *inline_container = cq_select_axis(FALSE);
     const ns_cq_container *block_container = cq_select_axis(TRUE);
@@ -18217,38 +18228,89 @@ cq_eval(const cq_node *n, const ns_cq_container *c)
     return CQ_TRI_UNKNOWN;
 }
 
-static gboolean
-container_cond_matches_one(const char *cond)
+typedef struct cq_alternative {
+    char    *name;
+    gsize    name_len;
+    cq_node *query;
+} cq_alternative;
+
+struct ns_css_container_query {
+    GPtrArray *terms;
+};
+
+static void
+cq_term_free(gpointer data)
 {
-    GPtrArray *parts = cq_split_commas(cond);
-    gboolean result = FALSE;
-    for (guint i = 0; i < parts->len && !result; i++) {
-        char *name = NULL;
-        cq_node *n = NULL;
-        if (!cq_parse_condition(parts->pdata[i], &name, &n)) continue;
-        const ns_cq_container *c =
-            cq_select_container(name, name ? strlen(name) : 0);
-        result = c && (!n || cq_eval(n, c) == CQ_TRI_TRUE);
-        cq_node_free(n);
-        g_free(name);
+    GArray *term = data;
+    for (guint i = 0; i < term->len; i++) {
+        cq_alternative *alt = &g_array_index(term, cq_alternative, i);
+        g_free(alt->name);
+        cq_node_free(alt->query);
     }
-    g_ptr_array_free(parts, TRUE);
-    return result;
+    g_array_free(term, TRUE);
 }
 
-static gboolean
-container_cond_matches(const char *cond)
+static void
+cq_query_free(ns_css_container_query *q)
 {
+    if (!q) return;
+    g_ptr_array_free(q->terms, TRUE);
+    g_free(q);
+}
+
+static GArray *
+cq_compile_term(const char *text)
+{
+    GArray *term = g_array_new(FALSE, FALSE, sizeof(cq_alternative));
+    GPtrArray *parts = cq_split_commas(text);
+    for (guint i = 0; i < parts->len; i++) {
+        cq_alternative alt = { 0 };
+        if (!cq_parse_condition(parts->pdata[i], &alt.name, &alt.query))
+            continue;
+        alt.name_len = alt.name ? strlen(alt.name) : 0;
+        g_array_append_val(term, alt);
+    }
+    g_ptr_array_free(parts, TRUE);
+    return term;
+}
+
+static ns_css_container_query *
+cq_compile(const char *cond)
+{
+    ns_css_container_query *q = g_new0(ns_css_container_query, 1);
+    q->terms = g_ptr_array_new_with_free_func(cq_term_free);
     const char *p = cond;
     while (*p) {
         const char *sep = strchr(p, '\x1f');
         char *part = sep ? g_strndup(p, (gsize)(sep - p)) : g_strdup(p);
-        gboolean ok = container_cond_matches_one(part);
+        g_ptr_array_add(q->terms, cq_compile_term(part));
         g_free(part);
-        if (!ok) return FALSE;
         if (!sep) break;
         p = sep + 1;
     }
+    return q;
+}
+
+static gboolean
+cq_term_matches(const GArray *term)
+{
+    for (guint i = 0; i < term->len; i++) {
+        const cq_alternative *alt = &g_array_index(term, cq_alternative, i);
+        const ns_cq_container *c = cq_select_container(alt->name, alt->name_len);
+        if (c && (!alt->query || cq_eval(alt->query, c) == CQ_TRI_TRUE))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+container_rule_matches(ns_css_rule *r)
+{
+    if (!r->container_query)
+        r->container_query = cq_compile(r->container_condition);
+    for (guint i = 0; i < r->container_query->terms->len; i++)
+        if (!cq_term_matches(g_ptr_array_index(r->container_query->terms, i)))
+            return FALSE;
     return TRUE;
 }
 
@@ -25280,8 +25342,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         if (ri >= n_rules) continue;
         ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
         if (!r || cand.selector_idx >= r->selectors->len) continue;
-        if (r->container_condition &&
-            !container_cond_matches(r->container_condition))
+        if (r->container_condition && !container_rule_matches(r))
             continue;
         for (guint dd = 0; dd < n_dests; dd++) {
             gather_dest *dst = &dests[dd];
@@ -30056,6 +30117,8 @@ ns_css_compute(ns_node *doc,
         && g_incr_prev_sig == sig;
     g_incr_reused = 0;
     g_incr_recomputed = 0;
+    if (!g_incr_pass_active && !g_cq_map)
+        g_container_units_seen = FALSE;
 
     incr_ensure_struct_keys(cached_ua, author_sheets, n_sheets, sig);
     if (g_incr_pass_active) {

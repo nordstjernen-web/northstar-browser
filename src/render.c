@@ -335,7 +335,8 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
 
     GHashTable *containers = ns_css_container_map_new();
     gint64 tc0 = profile ? g_get_monotonic_time() : 0;
-    render_collect_containers(layout, containers);
+    if (cache_selectors || ns_css_container_units_seen())
+        render_collect_containers(layout, containers);
     gint64 tc1 = profile ? g_get_monotonic_time() : 0;
     guint n_containers = g_hash_table_size(containers);
     if (profile) {

@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A page that declares `container-type` but has no `@container` rules
+  and no container units no longer styles itself twice on every layout.
+  The second, container-aware style pass ran whenever any element was a
+  container, and threw its result away; on a 12,000-element page with
+  3,000 rules that cost 700 ms per relayout. It now runs only when a
+  sheet has `@container` rules or a container unit was resolved, and a
+  `@container` condition is parsed once per rule instead of once per
+  rule and element.
 * Removing or inserting children no longer counts the node's position
   among its siblings when no `Range` exists. The bookkeeping that keeps
   live ranges pointing at the right offsets measured the index of every

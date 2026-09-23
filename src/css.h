@@ -906,6 +906,8 @@ typedef struct ns_css_pending_decl {
     gboolean  important;
 } ns_css_pending_decl;
 
+typedef struct ns_css_container_query ns_css_container_query;
+
 typedef struct ns_css_rule {
     GPtrArray  *selectors;
     GArray     *decls;
@@ -914,6 +916,7 @@ typedef struct ns_css_rule {
     GArray     *pending;
     char       *layer_name;
     char       *container_condition;
+    ns_css_container_query *container_query;
     GPtrArray  *scopes;
     int         source_order;
     guint       pe_mask;
@@ -1238,6 +1241,7 @@ void ns_css_set_container_map(GHashTable *map);
 void ns_css_set_container_dims(double inline_px, double block_px);
 void ns_css_container_features_begin(void);
 gboolean ns_css_container_features_used(void);
+gboolean ns_css_container_units_seen(void);
 GHashTable *ns_css_container_map_new(void);
 void ns_css_container_map_add(GHashTable *map, const void *node,
                               const char *type_kw, const char *name_kw,
