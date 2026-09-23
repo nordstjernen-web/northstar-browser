@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A translation that mixes a percentage with a length, such as
+  `translateX(calc(-50% + 10px))`, moves by both. The percentage was
+  dropped whenever a length was present, which left centred pop-ups and
+  tooltips off by half their width. `em` and `rem` in `translate()`, its
+  siblings and the `translate` property are measured against the
+  element's own font size and the root's, not a fixed 16px, and a
+  transition between a percentage and a length translation moves
+  through both instead of treating the percentage as pixels.
 * A transition between `transform: none` and a transform plays, and the
   element keeps its transform when it ends. Building the identity
   transform to animate from wrote zeros into the target value itself --

@@ -7872,6 +7872,40 @@ parse_transform_len(const char *s, double *out, gboolean *is_percent)
 }
 
 static gboolean
+parse_translate_len(const char *s, ns_css_transform_op *op, int axis)
+{
+    if (!s) return FALSE;
+    double *field = axis == 0 ? &op->a : axis == 1 ? &op->b : &op->c;
+    gboolean *is_percent = axis == 0 ? &op->a_is_percent
+                         : axis == 1 ? &op->b_is_percent : NULL;
+    double px = 0, pct = 0;
+    ns_font_units font = { 0 };
+    if (!resolve_to_px_pct_font(s, strlen(s), &px, &pct, &font)) {
+        gboolean fallback_pct = FALSE;
+        if (!parse_transform_len(s, field, &fallback_pct)) return FALSE;
+        if (is_percent) *is_percent = fallback_pct;
+        return is_percent || !fallback_pct;
+    }
+    px += (font.lh + font.rlh) * 19.2;
+    op->em[axis] = font.em;
+    op->rem[axis] = font.rem;
+    if (!is_percent) {
+        *field = px;
+        return pct == 0;
+    }
+    if (pct != 0 && px == 0 && font.em == 0 && font.rem == 0) {
+        *field = pct;
+        *is_percent = TRUE;
+        return TRUE;
+    }
+    *field = px;
+    *is_percent = FALSE;
+    if (axis == 0) op->a_pct = pct;
+    else op->b_pct = pct;
+    return TRUE;
+}
+
+static gboolean
 parse_angle_any(const char *s, double *deg_out)
 {
     if (!s) return FALSE;
@@ -7956,13 +7990,13 @@ parse_transform(const char *text)
             op->a = 0; op->b = 0; op->c = 0;
             op->a_is_percent = FALSE; op->b_is_percent = FALSE;
             if (strcmp(fn_lc, "translatey") == 0) {
-                if (nt >= 1) parse_transform_len(targs[0], &op->b, &op->b_is_percent);
+                if (nt >= 1) parse_translate_len(targs[0], op, 1);
             } else if (strcmp(fn_lc, "translatez") == 0) {
-                if (nt >= 1) parse_transform_len(targs[0], &op->c, &dummy_pct);
+                if (nt >= 1) parse_translate_len(targs[0], op, 2);
                 op->is_3d = TRUE;
             } else {
-                if (nt >= 1) parse_transform_len(targs[0], &op->a, &op->a_is_percent);
-                if (nt >= 2) parse_transform_len(targs[1], &op->b, &op->b_is_percent);
+                if (nt >= 1) parse_translate_len(targs[0], op, 0);
+                if (nt >= 2) parse_translate_len(targs[1], op, 1);
             }
             accept = TRUE;
         } else if (strcmp(fn_lc, "rotate") == 0 ||
@@ -8041,9 +8075,9 @@ parse_transform(const char *text)
             op->kind = NS_CSS_TFN_TRANSLATE;
             op->a = 0; op->b = 0; op->c = 0;
             op->a_is_percent = FALSE; op->b_is_percent = FALSE;
-            parse_transform_len(targs[0], &op->a, &op->a_is_percent);
-            parse_transform_len(targs[1], &op->b, &op->b_is_percent);
-            if (nt >= 3) parse_transform_len(targs[2], &op->c, &dummy_pct);
+            parse_translate_len(targs[0], op, 0);
+            parse_translate_len(targs[1], op, 1);
+            if (nt >= 3) parse_translate_len(targs[2], op, 2);
             op->is_3d = TRUE;
             accept = TRUE;
         } else if (strcmp(fn_lc, "scale3d") == 0 && nt >= 2) {
@@ -8176,13 +8210,9 @@ parse_translate_prop(const char *text)
     ns_css_transform_op op;
     memset(&op, 0, sizeof(op));
     op.kind = NS_CSS_TFN_TRANSLATE;
-    gboolean dummy = FALSE;
-    gboolean ok = parse_transform_len(toks[0], &op.a, &op.a_is_percent);
-    if (ok && nt >= 2)
-        ok = parse_transform_len(toks[1], &op.b, &op.b_is_percent);
-    if (ok && nt >= 3) {
-        ok = parse_transform_len(toks[2], &op.c, &dummy) && !dummy;
-    }
+    gboolean ok = parse_translate_len(toks[0], &op, 0);
+    if (ok && nt >= 2) ok = parse_translate_len(toks[1], &op, 1);
+    if (ok && nt >= 3) ok = parse_translate_len(toks[2], &op, 2);
     for (int i = 0; i < nt; i++) g_free(toks[i]);
     if (!ok) return NULL;
     return transform_value_one_op(&op);
@@ -8302,13 +8332,43 @@ append_scale_number(GString *s, double n)
     g_free(t);
 }
 
-static void
-append_transform_length(GString *s, double v, gboolean is_percent)
+static gboolean
+translate_axis_is_mixed(const ns_css_transform_op *op, int axis)
 {
-    char *t = ns_css_number_str(v);
-    g_string_append(s, t);
-    g_free(t);
-    g_string_append(s, is_percent ? "%" : "px");
+    double pct = axis == 0 ? op->a_pct : axis == 1 ? op->b_pct : 0;
+    return pct != 0 || op->em[axis] != 0 || op->rem[axis] != 0;
+}
+
+static void
+append_translate_length(GString *s, const ns_css_transform_op *op, int axis)
+{
+    double v = axis == 0 ? op->a : axis == 1 ? op->b : op->c;
+    gboolean is_percent = axis == 0 ? op->a_is_percent
+                        : axis == 1 && op->b_is_percent;
+    if (is_percent || !translate_axis_is_mixed(op, axis)) {
+        char *t = ns_css_number_str(v);
+        g_string_append(s, t);
+        g_free(t);
+        g_string_append(s, is_percent ? "%" : "px");
+        return;
+    }
+    const double parts[4] = {
+        axis == 0 ? op->a_pct : axis == 1 ? op->b_pct : 0,
+        v, op->em[axis], op->rem[axis],
+    };
+    static const char *const units[4] = { "%", "px", "em", "rem" };
+    gboolean first = TRUE;
+    g_string_append(s, "calc(");
+    for (int k = 0; k < 4; k++) {
+        if (parts[k] == 0) continue;
+        if (!first) g_string_append(s, parts[k] < 0 ? " - " : " + ");
+        char *t = ns_css_number_str(first ? parts[k] : fabs(parts[k]));
+        g_string_append(s, t);
+        g_free(t);
+        g_string_append(s, units[k]);
+        first = FALSE;
+    }
+    g_string_append_c(s, ')');
 }
 
 char *
@@ -8357,16 +8417,17 @@ ns_css_individual_transform_serialize(const ns_css_value *v, int prop)
             g_string_append(s, "deg");
         }
     } else if (prop == NS_CSS_TRANSLATE) {
-        append_transform_length(s, op->a, op->a_is_percent);
-        gboolean need_c = (op->c != 0);
-        gboolean need_b = need_c || (op->b != 0) || op->b_is_percent;
+        append_translate_length(s, op, 0);
+        gboolean need_c = op->c != 0 || translate_axis_is_mixed(op, 2);
+        gboolean need_b = need_c || op->b != 0 || op->b_is_percent ||
+                          translate_axis_is_mixed(op, 1);
         if (need_b) {
             g_string_append_c(s, ' ');
-            append_transform_length(s, op->b, op->b_is_percent);
+            append_translate_length(s, op, 1);
         }
         if (need_c) {
             g_string_append_c(s, ' ');
-            append_transform_length(s, op->c, FALSE);
+            append_translate_length(s, op, 2);
         }
     } else {
         g_string_free(s, TRUE);
@@ -8392,7 +8453,7 @@ ns_css_transform_is_3d(const ns_css_transform *tf)
         const ns_css_transform_op *op = &tf->ops[i];
         switch (op->kind) {
         case NS_CSS_TFN_TRANSLATE:
-            if (op->c != 0) return TRUE;
+            if (op->c != 0 || translate_axis_is_mixed(op, 2)) return TRUE;
             break;
         case NS_CSS_TFN_SCALE:
             if (op->c != 0 && op->c != 1) return TRUE;
@@ -8444,15 +8505,22 @@ ns_css_transform_to_mat4(const ns_css_transform *tf,
         ns_css_transform_op sane = tf->ops[i];
         double dflt = sane.kind == NS_CSS_TFN_SCALE ? 1.0 : 0.0;
         double *fields[] = { &sane.a, &sane.b, &sane.c, &sane.d,
-                             &sane.e, &sane.f };
+                             &sane.e, &sane.f, &sane.a_pct, &sane.b_pct,
+                             &sane.em[0], &sane.em[1], &sane.em[2],
+                             &sane.rem[0], &sane.rem[1], &sane.rem[2] };
         for (gsize k = 0; k < G_N_ELEMENTS(fields); k++)
             if (!isfinite(*fields[k])) *fields[k] = dflt;
         const ns_css_transform_op *op = &sane;
         switch (op->kind) {
         case NS_CSS_TFN_TRANSLATE: {
-            double dx = op->a_is_percent ? op->a / 100.0 * bw : op->a;
-            double dy = op->b_is_percent ? op->b / 100.0 * bh : op->b;
-            ns_mat4_translate(out, dx, dy, op->c);
+            double dx = (op->a_is_percent ? op->a / 100.0 * bw : op->a) +
+                        op->a_pct / 100.0 * bw +
+                        (op->em[0] + op->rem[0]) * 16.0;
+            double dy = (op->b_is_percent ? op->b / 100.0 * bh : op->b) +
+                        op->b_pct / 100.0 * bh +
+                        (op->em[1] + op->rem[1]) * 16.0;
+            double dz = op->c + (op->em[2] + op->rem[2]) * 16.0;
+            ns_mat4_translate(out, dx, dy, dz);
             break;
         }
         case NS_CSS_TFN_ROTATE:
@@ -24165,6 +24233,32 @@ keyword_lerp(const char *ka, const char *kb, double t, char **out)
     return FALSE;
 }
 
+static void
+translate_axis_lerp(const ns_css_transform_op *x, const ns_css_transform_op *y,
+                    double t, int axis, ns_css_transform_op *o)
+{
+    gboolean xp = axis == 0 ? x->a_is_percent : x->b_is_percent;
+    gboolean yp = axis == 0 ? y->a_is_percent : y->b_is_percent;
+    double xv = axis == 0 ? x->a : x->b;
+    double yv = axis == 0 ? y->a : y->b;
+    double xpct = (xp ? xv : 0) + (axis == 0 ? x->a_pct : x->b_pct);
+    double ypct = (yp ? yv : 0) + (axis == 0 ? y->a_pct : y->b_pct);
+    double xpx = xp ? 0 : xv;
+    double ypx = yp ? 0 : yv;
+    gboolean pure_percent = xp && yp;
+    double v = pure_percent ? xv + (yv - xv) * t : xpx + (ypx - xpx) * t;
+    double pct = pure_percent ? 0 : xpct + (ypct - xpct) * t;
+    if (axis == 0) {
+        o->a = v;
+        o->a_is_percent = pure_percent;
+        o->a_pct = pct;
+    } else {
+        o->b = v;
+        o->b_is_percent = pure_percent;
+        o->b_pct = pct;
+    }
+}
+
 static ns_css_value *
 transform_identity_like(const ns_css_value *src)
 {
@@ -24175,7 +24269,11 @@ transform_identity_like(const ns_css_value *src)
     for (int i = 0; i < v->u.transform.n_ops; i++) {
         ns_css_transform_op *op = &v->u.transform.ops[i];
         switch (op->kind) {
-        case NS_CSS_TFN_TRANSLATE: op->a = op->b = op->c = 0; break;
+        case NS_CSS_TFN_TRANSLATE:
+            op->a = op->b = op->c = op->a_pct = op->b_pct = 0;
+            memset(op->em, 0, sizeof op->em);
+            memset(op->rem, 0, sizeof op->rem);
+            break;
         case NS_CSS_TFN_ROTATE:    op->a = 0; break;
         case NS_CSS_TFN_ROTATE3D:  op->d = 0; break;
         case NS_CSS_TFN_SCALE:     op->a = op->b = op->c = 1; break;
@@ -24291,6 +24389,13 @@ ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
             o->f = x->f + (y->f - x->f) * t;
             for (int k = 0; k < 16; k++)
                 o->m3d[k] = x->m3d[k] + (y->m3d[k] - x->m3d[k]) * t;
+            if (x->kind != NS_CSS_TFN_TRANSLATE) continue;
+            translate_axis_lerp(x, y, t, 0, o);
+            translate_axis_lerp(x, y, t, 1, o);
+            for (int k = 0; k < 3; k++) {
+                o->em[k] = x->em[k] + (y->em[k] - x->em[k]) * t;
+                o->rem[k] = x->rem[k] + (y->rem[k] - x->rem[k]) * t;
+            }
         }
         return out;
     }
@@ -24555,7 +24660,19 @@ value_serialize_one(const ns_css_value *v)
             if (i) g_string_append_c(s, ' ');
             switch (op->kind) {
             case NS_CSS_TFN_TRANSLATE:
-                if (op->is_3d)
+                if (translate_axis_is_mixed(op, 0) ||
+                    translate_axis_is_mixed(op, 1) ||
+                    translate_axis_is_mixed(op, 2)) {
+                    g_string_append(s, op->is_3d ? "translate3d(" : "translate(");
+                    append_translate_length(s, op, 0);
+                    g_string_append(s, ", ");
+                    append_translate_length(s, op, 1);
+                    if (op->is_3d) {
+                        g_string_append(s, ", ");
+                        append_translate_length(s, op, 2);
+                    }
+                    g_string_append_c(s, ')');
+                } else if (op->is_3d)
                     g_string_append_printf(s, "translate3d(%g%s, %g%s, %gpx)",
                         op->a, op->a_is_percent ? "%" : "px",
                         op->b, op->b_is_percent ? "%" : "px", op->c);
@@ -26286,6 +26403,16 @@ calc_has_font_units(const ns_css_value *v)
 }
 
 static gboolean
+transform_has_font_units(const ns_css_transform *tf)
+{
+    for (int k = 0; k < tf->n_ops; k++)
+        for (int m = 0; m < 3; m++)
+            if (tf->ops[k].em[m] != 0 || tf->ops[k].rem[m] != 0)
+                return TRUE;
+    return FALSE;
+}
+
+static gboolean
 calc_has_percent(const ns_css_value *v)
 {
     if (v->u.calc.pct != 0) return TRUE;
@@ -26564,6 +26691,20 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                 t->min_v += t->min_em * my_font_px + t->min_rem * root_px;
                 t->min_em = 0;
                 t->min_rem = 0;
+            }
+            continue;
+        }
+        if (v->kind == NS_CSS_V_TRANSFORM) {
+            if (!transform_has_font_units(&v->u.transform)) continue;
+            v = ns_css_value_cow(out, i);
+            for (int k = 0; k < v->u.transform.n_ops; k++) {
+                ns_css_transform_op *op = &v->u.transform.ops[k];
+                double *axes[3] = { &op->a, &op->b, &op->c };
+                for (int m = 0; m < 3; m++) {
+                    *axes[m] += op->em[m] * my_font_px + op->rem[m] * root_px;
+                    op->em[m] = 0;
+                    op->rem[m] = 0;
+                }
             }
             continue;
         }
