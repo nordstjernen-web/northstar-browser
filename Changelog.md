@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Flexbox follows `writing-mode`: in a vertical container `row` runs
+  along the vertical inline axis and `column` along the horizontal block
+  axis, and vertical items take a central baseline for baseline
+  alignment, so vertical-rl/vertical-lr flex layouts no longer lay out
+  as if they were horizontal.
 * In a column flexbox an image, video or SVG stretches across the
   container like any other item (keeping its aspect ratio, capped by
   `max-width`), and a stretched item's percentage `max-width` resolves
