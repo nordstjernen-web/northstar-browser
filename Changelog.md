@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Floated columns with `box-sizing: border-box` sit side by side again.
+  Deciding where a float fits counted its padding and border twice for
+  a border-box width, so the Bootstrap 3 grid -- `*{box-sizing:
+  border-box}` and two `float: left; width: 50%; padding: 0 15px`
+  columns -- dropped its second column below the first.
 * A flex item with a height of its own keeps it in a row. Stretching
   ignored whether the item's height was `auto`, so two 20px-tall items
   in a 100px-tall row both came out 100px tall -- and the second layout
