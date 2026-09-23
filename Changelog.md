@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `reportError(value)` reports the value the way an uncaught exception
+  is reported: it fires a cancelable `error` event at the window with
+  the caller's file, line and column and `event.error` set to the value,
+  and logs it only if no listener cancels the event. It used to print
+  the value to the console and nothing else, so error trackers never
+  saw it. The `error` events for uncaught exceptions are now
+  `ErrorEvent` instances.
 * Links on pages in legacy encodings (Shift_JIS, EUC-JP, EUC-KR, Big5,
   windows-1252, ...) encode non-ASCII characters in their query string
   in the page's encoding, as the HTML standard requires and servers of
