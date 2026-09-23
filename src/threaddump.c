@@ -14,18 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <tlhelp32.h>
-#else
+#ifndef _WIN32
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
-#endif
 
 typedef struct {
     char  *p;
@@ -69,42 +64,7 @@ ns_thread_dump_text(int pid, const char *label)
     ns_thread_buf b = {0};
     ns_thread_buf_addf(&b, "===== thread dump: %s (pid %d) =====\n",
                        label ? label : "process", pid);
-#if defined(_WIN32)
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snap == INVALID_HANDLE_VALUE) {
-        ns_thread_buf_addf(&b, "  (thread snapshot failed)\n");
-    } else {
-        THREADENTRY32 te;
-        te.dwSize = sizeof te;
-        int n = 0;
-        if (Thread32First(snap, &te)) {
-            do {
-                if (te.th32OwnerProcessID != (DWORD)pid) continue;
-                double cpu = -1.0;
-                HANDLE th = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE,
-                                       te.th32ThreadID);
-                if (th) {
-                    FILETIME c, e, k, u;
-                    if (GetThreadTimes(th, &c, &e, &k, &u)) {
-                        ULONGLONG kk = ((ULONGLONG)k.dwHighDateTime << 32)
-                                       | k.dwLowDateTime;
-                        ULONGLONG uu = ((ULONGLONG)u.dwHighDateTime << 32)
-                                       | u.dwLowDateTime;
-                        cpu = (double)(kk + uu) / 1e7;
-                    }
-                    CloseHandle(th);
-                }
-                ns_thread_buf_addf(&b,
-                                   "  thread %-6lu  cpu %8.3fs  base-pri %ld\n",
-                                   (unsigned long)te.th32ThreadID, cpu,
-                                   (long)te.tpBasePri);
-                n++;
-            } while (Thread32Next(snap, &te));
-        }
-        CloseHandle(snap);
-        ns_thread_buf_addf(&b, "  (%d threads)\n", n);
-    }
-#elif defined(__linux__)
+#if defined(__linux__)
     char dir[64];
     snprintf(dir, sizeof dir, "/proc/%d/task", pid);
     DIR *d = opendir(dir);
@@ -172,7 +132,6 @@ ns_thread_dump_to_stderr(int pid, const char *label)
     fflush(stderr);
 }
 
-#ifndef _WIN32
 static int   g_sig_pipe[2] = { -1, -1 };
 static char *g_sig_label;
 
