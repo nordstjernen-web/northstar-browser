@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A declaration whose `var()` cannot be substituted -- the variable is
+  undefined and there is no fallback, or what it holds does not parse
+  for that property -- leaves the property `unset`, as the spec's
+  "invalid at computed-value time" rule says, instead of vanishing and
+  letting an earlier declaration win. `color: red` followed by
+  `color: var(--undefined)` now inherits the parent's colour, as in
+  every other browser, rather than staying red.
 * A declaration that uses `var()` keeps its place among the other
   declarations of its rule. Such declarations are set aside until the
   element's custom properties are known, and were then ranked after
