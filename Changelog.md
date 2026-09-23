@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A long descendant selector no longer hangs the browser on a deep page.
+  Matching `.nomatch div div div span` retried every ancestor at every
+  step, so the work grew with the depth of the tree raised to the number
+  of compounds: 3 seconds for that selector over a 120-deep tree, over a
+  minute with one more `div`. A step that has already searched every
+  ancestor up to the root now tells the steps before it to stop, as
+  other engines' selector checkers do, and the same selectors match in
+  under a millisecond.
 * Matching a selector against an element no longer looks up the
   element's namespace unless the selector names one, and a type selector
   compares the tag name against a lowercase copy made when the sheet is

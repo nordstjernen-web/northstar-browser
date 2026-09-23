@@ -23810,38 +23810,62 @@ ns_css_selector_matches(const ns_css_selector *sel, const ns_node *el)
     return match_selector(sel, el);
 }
 
-static gboolean
+typedef enum css_chain_result {
+    CSS_CHAIN_MATCHES,
+    CSS_CHAIN_FAILS_LOCALLY,
+    CSS_CHAIN_FAILS_ALL_SIBLINGS,
+    CSS_CHAIN_FAILS_COMPLETELY,
+} css_chain_result;
+
+static css_chain_result match_complex_chain(const ns_css_selector *sel,
+                                            int idx, const ns_node *cur);
+
+static css_chain_result
+match_compound_then_chain(const ns_css_selector *sel, int idx,
+                          const ns_node *el)
+{
+    if (!match_simple(g_ptr_array_index(sel->compounds, idx), el))
+        return CSS_CHAIN_FAILS_LOCALLY;
+    return match_complex_chain(sel, idx, el);
+}
+
+static css_chain_result
 match_complex_chain(const ns_css_selector *sel, int idx, const ns_node *cur)
 {
-    if (idx <= 0) return TRUE;
+    if (idx <= 0) return CSS_CHAIN_MATCHES;
     ns_css_comb comb = g_array_index(sel->combinators, ns_css_comb, idx);
-    const ns_css_simple *prev = g_ptr_array_index(sel->compounds, idx - 1);
     if (comb == NS_CSS_COMB_CHILD) {
         const ns_node *p = cur->parent;
-        return p && match_simple(prev, p) &&
-               match_complex_chain(sel, idx - 1, p);
+        if (!p) return CSS_CHAIN_FAILS_COMPLETELY;
+        return match_compound_then_chain(sel, idx - 1, p);
     }
     if (comb == NS_CSS_COMB_ADJACENT) {
         const ns_node *s = cur->prev_sibling;
         while (s && s->kind != NS_NODE_ELEMENT) s = s->prev_sibling;
-        return s && match_simple(prev, s) &&
-               match_complex_chain(sel, idx - 1, s);
+        if (!s) return CSS_CHAIN_FAILS_ALL_SIBLINGS;
+        return match_compound_then_chain(sel, idx - 1, s);
     }
     if (comb == NS_CSS_COMB_SIBLING) {
         int depth = 0;
-        for (const ns_node *s = cur->prev_sibling; s && depth++ < NS_DOM_MAX_DEPTH; s = s->prev_sibling)
-            if (s->kind == NS_NODE_ELEMENT && match_simple(prev, s) &&
-                match_complex_chain(sel, idx - 1, s))
-                return TRUE;
-        return FALSE;
+        const ns_node *s = cur->prev_sibling;
+        for (; s && depth++ < NS_DOM_MAX_DEPTH; s = s->prev_sibling) {
+            if (s->kind != NS_NODE_ELEMENT) continue;
+            css_chain_result r = match_compound_then_chain(sel, idx - 1, s);
+            if (r != CSS_CHAIN_FAILS_LOCALLY) return r;
+        }
+        return s ? CSS_CHAIN_FAILS_LOCALLY : CSS_CHAIN_FAILS_ALL_SIBLINGS;
     }
     int depth = 0;
-    for (const ns_node *p = cur->parent; p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent) {
-        if (p->kind == NS_NODE_DOCUMENT) break;
-        if (match_simple(prev, p) && match_complex_chain(sel, idx - 1, p))
-            return TRUE;
+    const ns_node *p = cur->parent;
+    for (; p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent) {
+        if (p->kind == NS_NODE_DOCUMENT)
+            return p == g_css_match_scope ? CSS_CHAIN_FAILS_LOCALLY
+                                          : CSS_CHAIN_FAILS_COMPLETELY;
+        css_chain_result r = match_compound_then_chain(sel, idx - 1, p);
+        if (r == CSS_CHAIN_MATCHES || r == CSS_CHAIN_FAILS_COMPLETELY)
+            return r;
     }
-    return FALSE;
+    return p ? CSS_CHAIN_FAILS_LOCALLY : CSS_CHAIN_FAILS_COMPLETELY;
 }
 
 static gboolean
@@ -23849,8 +23873,7 @@ match_selector_structural(const ns_css_selector *sel, const ns_node *el)
 {
     if (!sel || sel->compounds->len == 0) return FALSE;
     int idx = (int)sel->compounds->len - 1;
-    if (!match_simple(g_ptr_array_index(sel->compounds, idx), el)) return FALSE;
-    return match_complex_chain(sel, idx, el);
+    return match_compound_then_chain(sel, idx, el) == CSS_CHAIN_MATCHES;
 }
 
 static gboolean
