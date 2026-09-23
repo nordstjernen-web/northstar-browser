@@ -24168,8 +24168,10 @@ keyword_lerp(const char *ka, const char *kb, double t, char **out)
 static ns_css_value *
 transform_identity_like(const ns_css_value *src)
 {
-    ns_css_value *v = ns_css_value_dup(src);
-    if (!v) return NULL;
+    if (!src || src->kind != NS_CSS_V_TRANSFORM) return NULL;
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_TRANSFORM;
+    v->u.transform = src->u.transform;
     for (int i = 0; i < v->u.transform.n_ops; i++) {
         ns_css_transform_op *op = &v->u.transform.ops[i];
         switch (op->kind) {

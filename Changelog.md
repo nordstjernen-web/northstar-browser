@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A transition between `transform: none` and a transform plays, and the
+  element keeps its transform when it ends. Building the identity
+  transform to animate from wrote zeros into the target value itself --
+  the one the element's computed style holds -- so a hover that slid or
+  scaled something from `none` left it where it was, for good.
 * `text-shadow` is inherited, as CSS Text Decoration specifies, so a
   shadow set on a container reaches the text of the paragraphs, list
   items and inline-blocks inside it rather than only the container's
