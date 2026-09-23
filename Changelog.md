@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `Blob` and `File` follow the File API. The constructors accept any
+  iterable of parts and reject strings, numbers and plain objects,
+  honour `endings: "native"`, read their options in the specified
+  order, drop a `type` with non-printable characters and copy
+  `ArrayBuffer` parts (a detached one is empty); `size`, `type`, `name`
+  and `lastModified` are prototype getters, `slice()` clamps like other
+  browsers and validates its content type, `blob.bytes()` exists, and
+  `String(blob)` is `[object Blob]`. Calling `Blob()` without `new`
+  throws.
 * Setting `meta.content`, `textarea.rows` or `frameset.rows` from script
   changes the attribute; the assignments were silently ignored.
   `role`, `ariaLabel`, `ariaBusy` and the other ARIA properties read
