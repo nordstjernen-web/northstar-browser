@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Legacy table borders follow the HTML rendering rules. `<table
+  border>` draws an outset border of that width in the text colour (1px
+  when the value does not parse) and inset 1px cell borders, instead of a
+  fixed `#888` solid line; `frame` picks which sides are outset or
+  hidden; `rules` collapses the borders, hides the table's own and draws
+  the rules on cells, rows or groups as specified; `bordercolor` sets the
+  border colour; `cellspacing` and `cellpadding` accept any non-negative
+  integer; and `align=middle`/`absmiddle` centres a row or cell.
 * `innerHTML`, `outerHTML`, `insertAdjacentHTML` and
   `Range.createContextualFragment` parse markup in the context
   element's namespace. Inside an `<svg>` every element came out as an
