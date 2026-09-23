@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `grid-template-columns/-rows: subgrid` checks its line-name list:
+  only `[names]` groups and `repeat(N | auto-fill, [names]...)` may
+  follow `subgrid` (so `subgrid 1px` or `subgrid repeat(2, 1px)` is
+  dropped), the names -- including empty `[]` groups -- are kept for
+  `getComputedStyle()`, and `subgrid` on an element whose parent is not
+  a grid reports `none`, as it is laid out as an ordinary grid.
 * A grid with only a `min-height` grows its `fr` rows to fill it. The
   common page skeleton `min-height: 100vh; grid-template-rows: auto 1fr
   auto` sized the middle row to its content and left the footer halfway
