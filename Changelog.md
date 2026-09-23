@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A percentage height inside a `box-sizing: border-box` parent is a
+  share of that parent's content box. It was taken from the border-box
+  height instead, so `height: 50%` inside a 100px-tall parent with 10px
+  of padding came out 50px rather than 40px.
 * An absolutely positioned box without `top` sits where it would have
   flowed, not at the bottom of its parent. Finding that static position
   only settled when the walk reached the next element after the box, by
