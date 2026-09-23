@@ -4,6 +4,17 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* More of the legacy presentational attributes work the way the HTML
+  rendering rules map them. `<font size>` accepts `+n` and `-n` relative
+  to size 3 and maps to the absolute font-size keywords, so `size="+1"`
+  is 18px rather than 10px, `size="-1"` is no longer ignored, and nested
+  `<font>` elements no longer compound. `<body>`'s `marginwidth`,
+  `marginheight`, `leftmargin`, `topmargin`, `rightmargin` and
+  `bottommargin` set its margins; `background` sets the background image
+  of a body, table, row or cell; `<br clear>` moves what follows below
+  the floats; `<caption align>` places and aligns the caption; `<nobr>`
+  does not wrap; and `<marquee>` is shown as a (still) inline-block
+  instead of being hidden with its text.
 * Italics, underlines, strike-throughs and superscripts come from CSS
   rather than from the tag name. The text collector slanted every `<i>`,
   `<em>`, `<cite>` and `<dfn>` whatever its `font-style` said -- so Font
