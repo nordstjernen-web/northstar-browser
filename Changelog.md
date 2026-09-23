@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `color: currentColor` takes the parent's colour, which is what the
+  keyword means on the `color` property itself. It was left unresolved,
+  so it was handed down as a word, getComputedStyle reported
+  "currentcolor", and a border that takes its colour from the text was
+  drawn black.
 * `initial` on an inherited property means that property's initial
   value -- black text, a 16px font, normal weight and style,
   `line-height: normal` and so on -- instead of acting like `inherit`.
