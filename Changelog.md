@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* In nested CSS, declarations that follow a nested rule apply after it,
+  as the CSS Nesting spec's nested-declarations rule requires. They were
+  gathered into one rule at the top of the parent, so
+  `.card { padding: 1px; @media (...) { padding: 20px } padding-top: 3px }`
+  ended with a 20px top padding instead of 3px.
 * Switching the desktop between light and dark, or turning animations
   off, now reaches `prefers-color-scheme` and `prefers-reduced-motion`
   rules in style sheets that were already loaded. Media queries are
