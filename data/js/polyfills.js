@@ -7699,7 +7699,8 @@
             }
             function preState(node) {
                 var parent = node && node.parentNode;
-                return parent ? { node: node, parent: parent, index: indexOfNode(node) } : null;
+                if (!parent || liveRanges.length === 0) return null;
+                return { node: node, parent: parent, index: indexOfNode(node) };
             }
             function applyRemove(st) {
                 if (!st) return;
@@ -7712,7 +7713,7 @@
             }
             function applyInsert(node) {
                 var parent = node && node.parentNode;
-                if (!parent) return;
+                if (!parent || liveRanges.length === 0) return;
                 if (node.nextSibling === null) return;
                 var index = indexOfNode(node);
                 forEachLiveRange(function (r) {

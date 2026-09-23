@@ -41,6 +41,7 @@ typedef struct ns_font_pending {
 static GHashTable        *g_entries;
 static GHashTable        *g_pending_by_url;
 static char              *g_cache_dir;
+static guint              g_font_generation;
 
 typedef struct ns_font_idle_waiter {
     ns_font_idle_cb cb;
@@ -133,6 +134,12 @@ ns_font_available(void)
 #else
     return FALSE;
 #endif
+}
+
+guint
+ns_font_generation(void)
+{
+    return g_font_generation;
 }
 
 gboolean
@@ -422,6 +429,7 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
                     ns_font_install_file(path, family);
 #endif
                     if (e) e->loaded = TRUE;
+                    g_font_generation++;
                 }
                 g_clear_error(&werr);
                 g_free(path);

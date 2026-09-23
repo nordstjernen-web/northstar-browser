@@ -185,6 +185,108 @@ Significant changes in each release:
   `<hr>` restyled as a coloured bar had a stripe drawn across it. The
   `color`, `noshade` and `size` attributes follow the rendering rules
   too: `size` is the rule's full height, including its borders.
+* Style matching skips rules whose ancestors cannot be there. While the
+  style pass walks the document it keeps a small counting filter of the
+  tag names, ids and classes of the current element's ancestors, and a
+  rule such as `ul li.menu a[href]` is dropped at once for a link with
+  no `li.menu` above it instead of walking the ancestor chain. The style
+  pass on a page of 16,000 elements and 3,000 rules takes 195 ms
+  instead of 2 seconds. Rules inside `@scope`, and matching relative to
+  a scope, still take the full path.
+* The render pipeline's zoom factor scales every element's font size
+  exactly once. Elements that share one computed style value -- five
+  identical list items, say -- had that value multiplied once per
+  element, so at 150% the fifth sibling's text came out 7.6 times too
+  big. The pipeline is only driven at 100% today, so no page rendered
+  differently yet.
+* Numbering a long ordered list is linear again. Each marker counted
+  every `<li>` before it, reading their `value` attributes, so a list of
+  4,000 references cost 8 million sibling steps per layout with inside
+  markers and again on every paint; a layout or paint pass now numbers a
+  list's items in one sweep the first time a marker asks. Laying out
+  4,000 items with `list-style-position: inside` takes 157 ms instead of
+  253 ms.
+* An image with a CSS `filter` is filtered once, not on every paint.
+  The filtered copy was rebuilt from the full-resolution pixels each
+  time the image was drawn -- once per `<img>` when a page repeats an
+  image -- and is now kept with the decoded image until the filter
+  changes. A page showing one 800x800 image forty times in grayscale
+  renders in 2.0 s instead of 4.0 s, as fast as without the filter.
+* The CSS `font-family` list of a text run is turned into a font name
+  once rather than three or four times per run on every layout and
+  paint. The answer is remembered per family list until the system font
+  set changes or a web font finishes loading; laying out a page of 3,000
+  paragraphs with long font stacks is 12% faster.
+* Relayouts no longer redo work on unchanged style sheets. Each one
+  re-resolved every `url()` in every cached sheet, copied every linked
+  sheet to scan it for viewport media queries, and built the lookup key
+  for the page's inline styles by copying all of their text; on a page
+  with 1.5 MB of CSS that was 100 ms per relayout and is now 9 ms. The
+  inline-style cache now also includes the page's base URL, so a page
+  whose `<style>` text matches one visited earlier no longer loads
+  `url()` images relative to the earlier page.
+* A page that declares `container-type` but has no `@container` rules
+  and no container units no longer styles itself twice on every layout.
+  The second, container-aware style pass ran whenever any element was a
+  container, and threw its result away; on a 12,000-element page with
+  3,000 rules that cost 700 ms per relayout. It now runs only when a
+  sheet has `@container` rules or a container unit was resolved, and a
+  `@container` condition is parsed once per rule instead of once per
+  rule and element.
+* Removing or inserting children no longer counts the node's position
+  among its siblings when no `Range` exists. The bookkeeping that keeps
+  live ranges pointing at the right offsets measured the index of every
+  moved node by walking its previous siblings, so emptying a 20,000-item
+  list from the end took 13 seconds and 5,000 insertions into the middle
+  of a 10,000-child element took 4; they now take 29 ms and 41 ms. Pages
+  with live ranges keep the exact same range updates.
+* Changing an element's `class` or `id` to a name no style sheet
+  mentions no longer restyles everything inside it. Toggling a theme
+  class on `<body>` that no selector uses re-ran the whole cascade --
+  900 ms on a page of 12,000 elements and 3,000 rules -- and now leaves
+  the styles alone (6 ms). Names that appear anywhere in a selector,
+  including inside `:is()`, `:not()`, `:has()`, `:nth-child(... of S)`
+  and `@scope`, or any `[class]`/`[id]` attribute selector or
+  `:target`, still restyle as before.
+* `getElementById` answers repeat lookups of a duplicated id at once.
+  When two elements shared an id every call walked the whole document to
+  find the first one, so 2,000 lookups on a 60,000-node page took 4
+  seconds; the answer is now remembered until an element with that id is
+  added, removed or renamed, and the same loop takes 4 ms. The tag and
+  class indexes behind `getElementsByTagName`, `getElementsByClassName`
+  and simple `querySelectorAll` calls no longer search a whole list to
+  drop or place one element: a large list keeps a set of its members and
+  is put back in document order the next time it is read.
+* A style sheet pulled in with `@import` is parsed once, like a
+  `<link>` sheet, instead of again on every layout. Every relayout
+  re-parsed each imported sheet from its bytes, so a page that imports
+  a 2,000-rule sheet and changes its DOM twenty times spent 4.6 seconds
+  in the parser; it now takes 0.14 seconds, the same as linking the
+  sheet. The cached sheet is keyed by its address, the layer it is
+  imported into and the viewport, and is re-parsed when the fetched
+  bytes change.
+* `:nth-child()`, `:nth-last-child()`, `:nth-of-type()` and
+  `:nth-last-of-type()` no longer slow down with the square of the list
+  length. Each test counted the element's siblings from scratch, so a
+  zebra-striped list of 40,000 rows took 14 seconds to style; the style
+  pass now numbers all the children of a parent in one sweep the first
+  time one of them is asked about, and the same page loads in about a
+  second. `:nth-child(... of S)` still counts the matching siblings each
+  time.
+* A long descendant selector no longer hangs the browser on a deep page.
+  Matching `.nomatch div div div span` retried every ancestor at every
+  step, so the work grew with the depth of the tree raised to the number
+  of compounds: 3 seconds for that selector over a 120-deep tree, over a
+  minute with one more `div`. A step that has already searched every
+  ancestor up to the root now tells the steps before it to stop, as
+  other engines' selector checkers do, and the same selectors match in
+  under a millisecond.
+* Matching a selector against an element no longer looks up the
+  element's namespace unless the selector names one, and a type selector
+  compares the tag name against a lowercase copy made when the sheet is
+  parsed instead of case-folding both names on every test. The style
+  pass on a page of 16,000 elements and 3,000 rules takes a quarter less
+  time, and a long descendant selector over a deep tree a third.
 * Each `<style>` element is its own style sheet again. Adjacent inline
   sheets were joined into one text before parsing, so a sheet that ended
   inside an unclosed block, string or comment swallowed every sheet after

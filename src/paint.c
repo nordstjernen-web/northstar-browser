@@ -2011,10 +2011,19 @@ ns_paint_font_metrics(const char *family, double size_px, int weight,
     *out = m;
 }
 
+static guint64
+ns_paint_font_generation(void)
+{
+    NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
+    guint serial = fm ? ns_pango_font_map_get_serial(fm) : 0;
+    return ((guint64)serial << 32) | ns_font_generation();
+}
+
 void
 ns_paint_register_font_oracle(void)
 {
     ns_css_set_font_available_cb(ns_paint_font_available);
+    ns_css_set_font_generation_cb(ns_paint_font_generation);
     ns_css_set_font_metrics_cb(ns_paint_font_metrics);
 }
 
@@ -4155,15 +4164,27 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
     return clipped;
 }
 
-static cairo_surface_t *
-texture_surface_cached(ns_texture *tex, const char *filter_kw)
+typedef struct {
+    cairo_surface_t *plain;
+    char            *filter;
+    cairo_surface_t *filtered;
+} texture_surfaces;
+
+static void
+texture_surfaces_free(gpointer data)
 {
-    int iw = ns_texture_get_width(tex);
-    int ih = ns_texture_get_height(tex);
-    if (iw <= 0 || ih <= 0) return NULL;
-    cairo_surface_t *surf = ns_texture_get_user_data(tex);
-    if (surf && !filter_kw) return surf;
-    surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
+    texture_surfaces *ts = data;
+    if (ts->plain) cairo_surface_destroy(ts->plain);
+    if (ts->filtered) cairo_surface_destroy(ts->filtered);
+    g_free(ts->filter);
+    g_free(ts);
+}
+
+static cairo_surface_t *
+texture_surface_create(ns_texture *tex, int iw, int ih, const char *filter_kw)
+{
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                                       iw, ih);
     if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surf);
         return NULL;
@@ -4171,13 +4192,35 @@ texture_surface_cached(ns_texture *tex, const char *filter_kw)
     guchar *dst = cairo_image_surface_get_data(surf);
     int dst_stride = cairo_image_surface_get_stride(surf);
     ns_texture_download(tex, dst, (gsize)dst_stride);
-    if (filter_kw) {
+    if (filter_kw)
         apply_image_filter(dst, dst_stride, iw, ih, filter_kw);
-    }
     cairo_surface_mark_dirty(surf);
-    if (!filter_kw)
-        ns_texture_set_user_data(tex, surf,
-                                 (GDestroyNotify)cairo_surface_destroy);
+    return surf;
+}
+
+static cairo_surface_t *
+texture_surface_cached(ns_texture *tex, const char *filter_kw)
+{
+    int iw = ns_texture_get_width(tex);
+    int ih = ns_texture_get_height(tex);
+    if (iw <= 0 || ih <= 0) return NULL;
+    texture_surfaces *ts = ns_texture_get_user_data(tex);
+    if (!ts) {
+        ts = g_new0(texture_surfaces, 1);
+        ns_texture_set_user_data(tex, ts, texture_surfaces_free);
+    }
+    if (!filter_kw) {
+        if (!ts->plain) ts->plain = texture_surface_create(tex, iw, ih, NULL);
+        return ts->plain;
+    }
+    if (ts->filtered && g_strcmp0(ts->filter, filter_kw) == 0)
+        return ts->filtered;
+    cairo_surface_t *surf = texture_surface_create(tex, iw, ih, filter_kw);
+    if (!surf) return NULL;
+    if (ts->filtered) cairo_surface_destroy(ts->filtered);
+    g_free(ts->filter);
+    ts->filtered = surf;
+    ts->filter = g_strdup(filter_kw);
     return surf;
 }
 
@@ -4249,7 +4292,6 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
          strcmp(ir->u.keyword, "crisp-edges") == 0))
         cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
     cairo_paint(cr);
-    if (surface_filter) cairo_surface_destroy(surf);
     return TRUE;
 }
 
@@ -4567,11 +4609,68 @@ list_item_count(const ns_node *parent)
     return total;
 }
 
+static GHashTable *g_list_ordinals;
+static GHashTable *g_list_next_ordinal;
+static int         g_list_ordinal_scope;
+
+void
+ns_paint_list_ordinals_begin(void)
+{
+    if (g_list_ordinal_scope++ > 0) return;
+    g_list_ordinals = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_list_next_ordinal = g_hash_table_new(g_direct_hash, g_direct_equal);
+}
+
+void
+ns_paint_list_ordinals_end(void)
+{
+    if (g_list_ordinal_scope == 0 || --g_list_ordinal_scope > 0) return;
+    g_clear_pointer(&g_list_ordinals, g_hash_table_destroy);
+    g_clear_pointer(&g_list_next_ordinal, g_hash_table_destroy);
+}
+
+static int
+list_item_number_children(const ns_node *parent)
+{
+    const char *start_attr = ns_element_get_attr(parent, "start");
+    int start = start_attr
+        ? ns_parse_int(start_attr, 1, -1000000, 1000000)
+        : 1;
+    gboolean reversed = ns_element_get_attr(parent, "reversed") != NULL;
+    int current = reversed && !start_attr ? list_item_count(parent) : start;
+    for (const ns_node *p = parent->first_child; p; p = p->next_sibling) {
+        if (!ns_node_is_element_named(p, "li")) continue;
+        const char *val = ns_element_get_attr(p, "value");
+        int ordinal = val ? ns_parse_int(val, current, -1000000, 1000000)
+                          : current;
+        g_hash_table_insert(g_list_ordinals, (gpointer)p,
+                            GINT_TO_POINTER(ordinal));
+        current = ordinal + (reversed ? -1 : 1);
+    }
+    return current;
+}
+
+static int
+list_item_ordinal_cached(const ns_node *li, const ns_node *parent)
+{
+    gpointer next;
+    if (!g_hash_table_lookup_extended(g_list_next_ordinal, parent, NULL,
+                                      &next)) {
+        next = GINT_TO_POINTER(list_item_number_children(parent));
+        g_hash_table_insert(g_list_next_ordinal, (gpointer)parent, next);
+    }
+    gpointer ordinal;
+    if (g_hash_table_lookup_extended(g_list_ordinals, li, NULL, &ordinal))
+        return GPOINTER_TO_INT(ordinal);
+    return GPOINTER_TO_INT(next);
+}
+
 static int
 list_item_ordinal(const ns_node *li)
 {
     const ns_node *parent = li ? li->parent : NULL;
     if (!parent || !parent->name) return 1;
+    if (g_list_ordinals) return list_item_ordinal_cached(li, parent);
     const char *start_attr = ns_element_get_attr(parent, "start");
     int start = start_attr
         ? ns_parse_int(start_attr, 1, -1000000, 1000000)
@@ -6762,6 +6861,7 @@ paint_top_layer(cairo_t *cr, const ns_box *root, const char *highlight)
 void
 ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
 {
+    ns_paint_list_ordinals_begin();
     rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
     canvas_background_of(root, &bg);
     cairo_save(cr);
@@ -6775,6 +6875,7 @@ ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
     paint_top_layer(cr, root, highlight_query);
     g_paint_have_clip = FALSE;
     g_paint_have_viewport = FALSE;
+    ns_paint_list_ordinals_end();
 }
 
 void
@@ -6782,6 +6883,7 @@ ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                         const char *highlight_query,
                         const struct ns_selection *sel)
 {
+    ns_paint_list_ordinals_begin();
     rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
     canvas_background_of(root, &bg);
     cairo_save(cr);
@@ -6797,4 +6899,5 @@ ns_paint_with_selection(cairo_t *cr, const ns_box *root,
     g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
     g_paint_have_clip = FALSE;
     g_paint_have_viewport = FALSE;
+    ns_paint_list_ordinals_end();
 }

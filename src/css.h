@@ -723,6 +723,7 @@ double   ns_css_dimension_px(const ns_css_value *v, double font_size,
 gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);
 char    *ns_css_font_family_for_pango(const char *css_family);
 void     ns_css_set_font_available_cb(gboolean (*cb)(const char *family));
+void     ns_css_set_font_generation_cb(guint64 (*cb)(void));
 int      ns_css_font_weight_number(const ns_css_value *v, int fallback);
 
 typedef struct ns_css_font_metrics {
@@ -823,6 +824,8 @@ typedef struct ns_css_pseudo_pred {
 
 typedef struct ns_css_simple {
     char *type;
+    char *type_lower;
+    gboolean type_has_colon;
     char *namespace_uri;
     char *id;
     GPtrArray *classes;
@@ -866,6 +869,9 @@ typedef struct ns_css_selector {
     ns_css_pseudo_element pseudo_element;
 
     int spec_a, spec_b, spec_c;
+
+    guint32 ancestor_hashes[4];
+    guint   n_ancestor_hashes;
 } ns_css_selector;
 
 GPtrArray *ns_css_parse_selector_list(const char *text);
@@ -906,6 +912,8 @@ typedef struct ns_css_pending_decl {
     int       order;
 } ns_css_pending_decl;
 
+typedef struct ns_css_container_query ns_css_container_query;
+
 typedef struct ns_css_rule {
     GPtrArray  *selectors;
     GArray     *decls;
@@ -914,6 +922,7 @@ typedef struct ns_css_rule {
     GArray     *pending;
     char       *layer_name;
     char       *container_condition;
+    ns_css_container_query *container_query;
     GPtrArray  *scopes;
     int         source_order;
     guint       pe_mask;
@@ -989,6 +998,7 @@ typedef struct ns_css_stylesheet {
     gboolean   cached;
     guint      pseudo_mask;
     guint64    serial;
+    char      *resolved_base;
     struct ns_css_rule_index *index;
 } ns_css_stylesheet;
 
@@ -1005,10 +1015,14 @@ gboolean           ns_css_supports_condition(const char *condition,
                                              gboolean allow_bare_declaration);
 ns_css_stylesheet *ns_css_stylesheet_from_style_element_cached(ns_node *style);
 char              *ns_css_style_element_text(ns_node *style);
-ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len);
+ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len,
+                                               const char *base_url);
 ns_css_stylesheet *ns_css_stylesheet_parse_url_cached(const char *url,
                                                       const char *css,
                                                       gssize len);
+ns_css_stylesheet *ns_css_stylesheet_parse_import_cached(const char *url,
+                                                         const char *layer_name,
+                                                         GBytes *bytes);
 void               ns_css_style_element_cache_begin(void);
 void               ns_css_stylesheet_cache_drop(void);
 void               ns_css_relayout_enter(void);
@@ -1220,6 +1234,8 @@ void ns_css_set_container_map(GHashTable *map);
 void ns_css_set_container_dims(double inline_px, double block_px);
 void ns_css_container_features_begin(void);
 gboolean ns_css_container_features_used(void);
+gboolean ns_css_container_units_seen(void);
+void ns_css_style_scale_font_size(ns_style *s, double factor);
 GHashTable *ns_css_container_map_new(void);
 void ns_css_container_map_add(GHashTable *map, const void *node,
                               const char *type_kw, const char *name_kw,
