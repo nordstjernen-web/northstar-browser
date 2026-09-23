@@ -151,9 +151,7 @@ if have_fontconfig
   northstar_deps += [libfontconfig]
 endif
 
-if have_pangoft2
-  northstar_deps += [libpangoft2]
-endif
+northstar_deps += [libpangoft2]
 
 if have_freetype
   northstar_deps += [libfreetype]
@@ -235,10 +233,4 @@ else
   message('SDL2 not found — in-process audio playback disabled')
 endif
 
-if have_gtk
-  subdir('gtk')
-endif
-
-if not have_gtk
-  message('GTK 4 shell disabled — building the engine without GTK.')
-endif
+subdir('gtk')

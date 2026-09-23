@@ -7,7 +7,6 @@
 #include "cache.h"
 #include "config.h"
 #include "history.h"
-#include "csp.h"
 #include "debuglog.h"
 #include "ext.h"
 #include "html.h"

@@ -119,10 +119,6 @@ message('northstar build profile: ' +
         (ns_is_release ? ns_release_profile
                        : 'development (debug symbols + frame pointer + hardened)'))
 
-# The GTK shell is a feature: disabling it yields an engine-only build that
-# needs no GTK 4 at all.
-gtk_feature = get_option('gtk')
-
 glib       = dependency('glib-2.0')
 gobject    = dependency('gobject-2.0')
 gio        = dependency('gio-2.0')
@@ -141,21 +137,14 @@ ns_pango_sp = subproject('ns-pango',
 pango      = ns_pango_sp.get_variable('libpango_dep')
 pangocairo = ns_pango_sp.get_variable('libpangocairo_dep')
 
-have_gtk = false
-if gtk_feature.allowed()
-  gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
-  gtk4 = dependency('gtk4', version: gtk4_min, required: gtk_feature)
-  if gtk4.found()
-    have_gtk = true
-    gtk4_dep = gtk4
-    if host_machine.system() == 'windows'
-      message('GTK @0@ — Windows requires the MSYS2 stock GTK (>= 4.22.1).'.format(gtk4.version()))
-    elif gtk4.version().version_compare('>=4.22')
-      message('GTK @0@ — preferred (>= 4.22).'.format(gtk4.version()))
-    else
-      warning('GTK @0@ meets the 4.14 minimum, but Northstar prefers >= 4.22 for the newer GSK renderers.'.format(gtk4.version()))
-    endif
-  endif
+gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
+gtk4 = dependency('gtk4', version: gtk4_min)
+if host_machine.system() == 'windows'
+  message('GTK @0@ — Windows requires the MSYS2 stock GTK (>= 4.22.1).'.format(gtk4.version()))
+elif gtk4.version().version_compare('>=4.22')
+  message('GTK @0@ — preferred (>= 4.22).'.format(gtk4.version()))
+else
+  warning('GTK @0@ meets the 4.14 minimum, but Northstar prefers >= 4.22 for the newer GSK renderers.'.format(gtk4.version()))
 endif
 gmodule = dependency('gmodule-2.0')
 libcurl = dependency('libcurl', version: '>=8.5')
@@ -177,10 +166,6 @@ if have_fontconfig
   add_project_arguments('-DNS_HAVE_FONTCONFIG=1', language: 'c')
 endif
 libpangoft2 = ns_pango_sp.get_variable('libpangoft2_dep')
-have_pangoft2 = true
-if have_pangoft2
-  add_project_arguments('-DNS_HAVE_PANGOFT2=1', language: 'c')
-endif
 
 libfreetype = dependency('freetype2', required: false)
 have_freetype = libfreetype.found()
@@ -381,6 +366,5 @@ install_data(
 
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
-summary({'GTK 4 shell': have_gtk}, section: 'Shells')
 
 subdir('src')

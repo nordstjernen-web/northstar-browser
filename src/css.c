@@ -6,7 +6,6 @@
 #include "css.h"
 #include "css_syntax.h"
 
-#include "config.h"
 #include "net.h"
 
 #include <limits.h>

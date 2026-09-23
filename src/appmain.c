@@ -41,7 +41,6 @@
 #include "history.h"
 #include "i18n.h"
 #include "net.h"
-#include "proc_limits.h"
 #include "procview.h"
 #include "procwindow.h"
 #include "security.h"

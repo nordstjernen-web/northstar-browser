@@ -8,10 +8,7 @@ northstar_gtk_sources = files(
   'enginethread.c',
 )
 
-northstar_gtk_deps = northstar_deps + [gtk4_dep]
-if host_machine.system() != 'windows'
-  northstar_gtk_deps += [cc.find_library('rt', required: false)]
-endif
+northstar_gtk_deps = northstar_deps + [gtk4]
 
 northstar_gtk_platform_sources = []
 northstar_gtk_platform_link_args = []
@@ -33,7 +30,6 @@ executable(
     northstar_win_resources + [polyfills_h, wpt_hook_h],
   dependencies: northstar_gtk_deps + northstar_audio_deps,
   link_with: northstar_audio_libs,
-  c_args: ['-DNS_HAVE_GTK=1'],
   include_directories: include_directories('..', '.'),
   pie: host_machine.system() != 'windows',
   win_subsystem: northstar_win_subsystem,

@@ -8,7 +8,6 @@
 #include "audio/audio.h"
 #include "procview.h"
 #include "i18n.h"
-#include "watchdog.h"
 #include "bookmarks.h"
 #include "cache.h"
 #include "config.h"

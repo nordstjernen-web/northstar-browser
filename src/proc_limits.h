@@ -14,7 +14,6 @@
 
 #define NS_PROC_ZOOM_MIN  0.25
 #define NS_PROC_ZOOM_MAX  5.0
-#define NS_PROC_ZOOM_STEP 1.1
 
 #define NS_PROC_SETTLE_ENV "NS_SETTLE_MS"
 

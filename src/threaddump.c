@@ -63,7 +63,7 @@ ns_thread_buf_addf(ns_thread_buf *b, const char *fmt, ...)
     b->len += (size_t)need;
 }
 
-char *
+static char *
 ns_thread_dump_text(int pid, const char *label)
 {
     ns_thread_buf b = {0};
@@ -161,7 +161,7 @@ ns_thread_dump_text(int pid, const char *label)
     return b.p;
 }
 
-void
+static void
 ns_thread_dump_to_stderr(int pid, const char *label)
 {
     char *text = ns_thread_dump_text(pid, label);

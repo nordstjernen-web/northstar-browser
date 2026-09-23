@@ -128,8 +128,8 @@ single page can also be rendered directly:
 ./builddir/src/gtk/northstar --headless --dump=text about:start
 ```
 
-Meson feature options include `-Davif=disabled`, `-Daudio=disabled`,
-`-Dwasm=disabled` and `-Dgtk=disabled` for smaller or engine-only builds.
+Meson feature options include `-Davif=disabled`, `-Daudio=disabled` and
+`-Dwasm=disabled` for smaller builds.
 
 WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree. ns-pango, lexbor
 and quickjs-ng are pinned upstream subprojects (see `subprojects/*.wrap`)

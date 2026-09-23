@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "config.h"
 
 #ifndef G_OS_WIN32
 #include <errno.h>

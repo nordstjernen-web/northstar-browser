@@ -145,7 +145,6 @@ once (`apt install ccache` / `dnf install ccache`). Optionally use the
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `gtk` | `auto` | Build the GTK 4 desktop shell. Disable for an engine-only build that needs no GTK 4 at all. |
 | `wasm` | `auto` | Build the WebAssembly JS API over vendored WAMR. Disable on platforms WAMR does not support. |
 | `audio` | `auto` | Enable in-process audio playback (needs SDL2). |
 | `avif` | `auto` | Decode AVIF through libavif. Disabling drops a full AV1 decoder; AVIF images then fail to decode. |

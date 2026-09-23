@@ -28,7 +28,6 @@
 #include "image.h"
 #include "js.h"
 #include "layout.h"
-#include "libnorthstar.h"
 #include "net.h"
 #include "paint.h"
 #include "page_session.h"

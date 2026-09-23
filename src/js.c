@@ -5,7 +5,6 @@
 
 #include "js.h"
 #include "polyfills.h"
-#include "version.h"
 
 #include <math.h>
 #include <string.h>
