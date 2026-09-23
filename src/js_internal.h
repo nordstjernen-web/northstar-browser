@@ -86,6 +86,8 @@ struct ns_js {
     gpointer      repaint_user_data;
     ns_js_layout_flush_cb layout_flush_cb;
     gpointer      layout_flush_user_data;
+    gboolean    (*load_delay_cb)(gpointer user_data);
+    gpointer      load_delay_user_data;
     ns_js_layout_flush_cb style_flush_cb;
     gpointer      style_flush_user_data;
     gboolean      in_layout_flush;

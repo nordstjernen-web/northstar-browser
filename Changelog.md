@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Images in the page start downloading as soon as the document is laid
+  out, not at the first paint; each `<img>` fires its `load` or `error`
+  event when its image arrives, `complete` and `naturalWidth` report
+  it, and the window `load` event waits for the page's (non-lazy)
+  images, as HTML says, instead of firing before any of them loaded.
 * Elements whose interface is plain `HTMLElement` (`article`,
   `section`, `b`, `abbr`, `nav`, `summary`, ...) and valid custom element
   names are no longer `HTMLUnknownElement` instances; truly unknown tags
