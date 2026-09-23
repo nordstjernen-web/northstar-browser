@@ -46,7 +46,6 @@ typedef struct {
 
 ns_page_session *ns_page_session_new(int max_width, int max_height);
 void ns_page_session_free(ns_page_session *s);
-int  ns_page_session_busy(const ns_page_session *s);
 
 int  ns_page_session_open(ns_page_session *s, const char *url, int width,
                           int height, int settle_ms, int history,

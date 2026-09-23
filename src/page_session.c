@@ -177,12 +177,6 @@ ns_page_session_free(ns_page_session *s)
     free(s);
 }
 
-int
-ns_page_session_busy(const ns_page_session *s)
-{
-    return s && ns_browser_busy(s->cur);
-}
-
 static void
 fill_page_info(ns_page_session *s, const char *fallback_url,
                ns_page_info *out)

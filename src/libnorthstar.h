@@ -98,7 +98,6 @@ int ns_browser_bfcache_eligible(ns_browser *browser);
 void ns_browser_bfcache_park(ns_browser *browser);
 void ns_browser_bfcache_restore(ns_browser *browser, int viewport_width,
                                 double viewport_height);
-int ns_browser_busy(const ns_browser *browser);
 void ns_browser_close(ns_browser *browser);
 
 #endif

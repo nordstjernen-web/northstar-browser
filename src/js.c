@@ -12312,16 +12312,6 @@ ns_window_post_message_data(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_window_post_message_explicit(JSContext *ctx, JSValueConst this_val,
-                                int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    if (argc < 2 || !JS_IsObject(argv[0])) return JS_UNDEFINED;
-    return ns_post_message_to_target(ctx, JS_DupValue(ctx, argv[0]),
-                                     JS_UNDEFINED, argc - 1, argv + 1);
-}
-
-static JSValue
 ns_window_post_message_this(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -12348,8 +12338,6 @@ ns_window_bind_post_message(JSContext *ctx, JSValueConst global)
     JS_SetPropertyStr(ctx, global, "postMessage",
                       JS_NewCFunctionData(ctx, ns_window_post_message_data,
                                           2, 0, 1, data));
-    ns_bind_fn(ctx, global, "__nsPostMessageTo",
-               ns_window_post_message_explicit, 4);
     ns_bind_fn(ctx, global, "__nsPostMessageThis",
                ns_window_post_message_this, 3);
     ns_bind_fn(ctx, global, "__nsPostMessageFrom",
@@ -41685,34 +41673,6 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     return root;
 }
 
-static JSValue
-ns_js_doc_enter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_UNDEFINED;
-    if (!js->doc_stack)
-        js->doc_stack = g_array_new(FALSE, FALSE, sizeof(gpointer));
-    gpointer prev = js->current_doc;
-    g_array_append_val(js->doc_stack, prev);
-    ns_node *root = (argc >= 1) ? ns_unwrap_element_mut(argv[0]) : NULL;
-    if (root) js->current_doc = root;
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_js_doc_exit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
-    if (js && js->doc_stack && js->doc_stack->len > 0) {
-        js->current_doc = g_array_index(js->doc_stack, gpointer,
-                                        js->doc_stack->len - 1);
-        g_array_set_size(js->doc_stack, js->doc_stack->len - 1);
-    }
-    return JS_UNDEFINED;
-}
-
 static const char ns_iframe_scope_bootstrap[] =
     "(function(realWin, iframeDoc, initialURL, sandbox){"
     "  var url = initialURL || 'about:blank';"
@@ -44874,13 +44834,6 @@ ns_js_alert(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
-static JSValue
-ns_js_engine_name_js(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)this_val; (void)argc; (void)argv;
-    return JS_NewString(ctx, "quickjs");
-}
-
 static gboolean
 ns_ce_name_valid(const char *s)
 {
@@ -47218,7 +47171,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_install_namespace_object(ctx, global, "console", console, "console");
 
     ns_bind_fn(ctx, global, "alert",         ns_js_alert,             1);
-    ns_bind_fn(ctx, global, "__jsEngine",    ns_js_engine_name_js,    0);
     ns_bind_fn(ctx, global, "setTimeout",    ns_js_setTimeout_wrap,   2);
     ns_bind_fn(ctx, global, "setInterval",   ns_js_setInterval_wrap,  2);
     ns_bind_fn(ctx, global, "clearTimeout",  ns_js_clearTimer,        1);
@@ -47592,8 +47544,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__nsWptWheel",          ns_wpt_wheel,                     5);
     ns_bind_fn(ctx, global, "__nsWptTouch",          ns_wpt_touch,                     4);
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
-    ns_bind_fn(ctx, global, "__ndDocEnter",          ns_js_doc_enter,                  1);
-    ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
     ns_bind_fn(ctx, global, "__ndUrlSet",            ns_window_url_set_internal,       3);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
@@ -52225,10 +52175,6 @@ ns_js_free(ns_js *js)
         }
         g_ptr_array_free(js->resize_observers, TRUE);
         js->resize_observers = NULL;
-    }
-    if (js->doc_stack) {
-        g_array_free(js->doc_stack, TRUE);
-        js->doc_stack = NULL;
     }
     if (js->ce_registry) {
         g_hash_table_destroy(js->ce_registry);
