@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The `dir` attribute sets the CSS `direction`, as the HTML rendering
+  rules map it. Only the text shaper read the attribute, so on a
+  right-to-left page the words ran right to left but a table still put
+  its first column on the left and a flex row still started at the left
+  edge. `dir=rtl`, `dir=ltr`, `dir=auto` and `<bdi>` now reach the
+  cascade through `:dir()`, and list markers sit on the right of a
+  right-to-left list item instead of being painted off its left edge.
 * Lists follow the HTML rendering rules. A nested `<ul>` draws a
   circle and the next level a square instead of a disc at every depth; a
   list inside a list has no block margins of its own; `<dir>` and `<menu>`
