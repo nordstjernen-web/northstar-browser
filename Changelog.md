@@ -49,12 +49,12 @@ Significant changes in each release:
   them, and Shift_JIS pages use NEC and IBM rows) failed the conversion
   and the page was read as UTF-8 or windows-1252 instead. Each encoding
   now has its own decoder that follows the standard's state machine,
-  looks characters up in the standard's index (built once from the
-  system's conversion tables and corrected where they differ) and puts
-  U+FFFD where a sequence is invalid. Single-byte encodings decode the
-  same way, so a windows-1252 page with a byte like 0x81 no longer falls
-  back to another encoding, and the labels that name the replacement
-  encoding give a single U+FFFD rather than decoded text.
+  looks characters up in the standard's index tables (those lexbor
+  already ships, so decoding no longer depends on the platform's iconv)
+  and puts U+FFFD where a sequence is invalid. Single-byte encodings
+  decode the same way, so a windows-1252 page with a byte like 0x81 no
+  longer falls back to another encoding, and the labels that name the
+  replacement encoding give a single U+FFFD rather than decoded text.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
