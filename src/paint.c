@@ -4619,11 +4619,68 @@ list_item_count(const ns_node *parent)
     return total;
 }
 
+static GHashTable *g_list_ordinals;
+static GHashTable *g_list_next_ordinal;
+static int         g_list_ordinal_scope;
+
+void
+ns_paint_list_ordinals_begin(void)
+{
+    if (g_list_ordinal_scope++ > 0) return;
+    g_list_ordinals = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_list_next_ordinal = g_hash_table_new(g_direct_hash, g_direct_equal);
+}
+
+void
+ns_paint_list_ordinals_end(void)
+{
+    if (g_list_ordinal_scope == 0 || --g_list_ordinal_scope > 0) return;
+    g_clear_pointer(&g_list_ordinals, g_hash_table_destroy);
+    g_clear_pointer(&g_list_next_ordinal, g_hash_table_destroy);
+}
+
+static int
+list_item_number_children(const ns_node *parent)
+{
+    const char *start_attr = ns_element_get_attr(parent, "start");
+    int start = start_attr
+        ? ns_parse_int(start_attr, 1, -1000000, 1000000)
+        : 1;
+    gboolean reversed = ns_element_get_attr(parent, "reversed") != NULL;
+    int current = reversed && !start_attr ? list_item_count(parent) : start;
+    for (const ns_node *p = parent->first_child; p; p = p->next_sibling) {
+        if (!ns_node_is_element_named(p, "li")) continue;
+        const char *val = ns_element_get_attr(p, "value");
+        int ordinal = val ? ns_parse_int(val, current, -1000000, 1000000)
+                          : current;
+        g_hash_table_insert(g_list_ordinals, (gpointer)p,
+                            GINT_TO_POINTER(ordinal));
+        current = ordinal + (reversed ? -1 : 1);
+    }
+    return current;
+}
+
+static int
+list_item_ordinal_cached(const ns_node *li, const ns_node *parent)
+{
+    gpointer next;
+    if (!g_hash_table_lookup_extended(g_list_next_ordinal, parent, NULL,
+                                      &next)) {
+        next = GINT_TO_POINTER(list_item_number_children(parent));
+        g_hash_table_insert(g_list_next_ordinal, (gpointer)parent, next);
+    }
+    gpointer ordinal;
+    if (g_hash_table_lookup_extended(g_list_ordinals, li, NULL, &ordinal))
+        return GPOINTER_TO_INT(ordinal);
+    return GPOINTER_TO_INT(next);
+}
+
 static int
 list_item_ordinal(const ns_node *li)
 {
     const ns_node *parent = li ? li->parent : NULL;
     if (!parent || !parent->name) return 1;
+    if (g_list_ordinals) return list_item_ordinal_cached(li, parent);
     const char *start_attr = ns_element_get_attr(parent, "start");
     int start = start_attr
         ? ns_parse_int(start_attr, 1, -1000000, 1000000)
@@ -6845,6 +6902,7 @@ paint_top_layer(cairo_t *cr, const ns_box *root, const char *highlight)
 void
 ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
 {
+    ns_paint_list_ordinals_begin();
     rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
     canvas_background_of(root, &bg);
     cairo_save(cr);
@@ -6858,6 +6916,7 @@ ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
     paint_top_layer(cr, root, highlight_query);
     g_paint_have_clip = FALSE;
     g_paint_have_viewport = FALSE;
+    ns_paint_list_ordinals_end();
 }
 
 void
@@ -6865,6 +6924,7 @@ ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                         const char *highlight_query,
                         const struct ns_selection *sel)
 {
+    ns_paint_list_ordinals_begin();
     rgba bg = { 254.0 / 255, 254.0 / 255, 254.0 / 255, 1 };
     canvas_background_of(root, &bg);
     cairo_save(cr);
@@ -6880,4 +6940,5 @@ ns_paint_with_selection(cairo_t *cr, const ns_box *root,
     g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
     g_paint_have_clip = FALSE;
     g_paint_have_viewport = FALSE;
+    ns_paint_list_ordinals_end();
 }

@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Numbering a long ordered list is linear again. Each marker counted
+  every `<li>` before it, reading their `value` attributes, so a list of
+  4,000 references cost 8 million sibling steps per layout with inside
+  markers and again on every paint; a layout or paint pass now numbers a
+  list's items in one sweep the first time a marker asks. Laying out
+  4,000 items with `list-style-position: inside` takes 157 ms instead of
+  253 ms.
 * An image with a CSS `filter` is filtered once, not on every paint.
   The filtered copy was rebuilt from the full-resolution pixels each
   time the image was drawn -- once per `<img>` when a page repeats an
