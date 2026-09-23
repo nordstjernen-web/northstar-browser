@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A one-line text input (`text`, `search`, `tel`, `url`, `email`,
+  `password`) never uses a line height smaller than `normal`, as HTML
+  requires, so `input { line-height: 1px }` no longer squashes the field
+  and clips its text; `getComputedStyle` reports the used value.
 * The user-agent sheet hides `area` and `base`, leaves `source` and
   `track` at `display: inline`, keeps `input type=hidden` and a `form`
   the parser left inside a table part hidden even against author

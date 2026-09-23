@@ -167,6 +167,7 @@ typedef struct ns_class_token {
 
 const ns_class_token *ns_node_class_tokens(const ns_node *el, guint *n_out);
 gboolean    ns_node_is_element_named(const ns_node *n, const char *tag);
+gboolean    ns_input_is_one_line_text(const ns_node *n);
 
 const ns_node *ns_node_root(const ns_node *n);
 ns_node    *ns_node_find_first_element(const ns_node *root, const char *tag);
