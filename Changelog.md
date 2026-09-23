@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The `autofocus` attribute works on page load: the first focusable
+  element carrying it in the document gets focus at the next rendering
+  update (or before `load` at the latest), unless something is
+  already focused or the URL fragment points at an element. Search
+  boxes and login fields marked `autofocus` used to wait for a click.
 * `<dialog>` follows the HTML standard's show, close and request-close
   steps. The `close` event fired synchronously and even for a dialog
   that was never open, `close()` on a closed dialog still changed its

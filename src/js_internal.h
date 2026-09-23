@@ -129,6 +129,7 @@ struct ns_js {
     int           box_lookup_pending_count;
     const ns_node *focused_node;
     gboolean      pointer_input;
+    gboolean      autofocus_processed;
     const ns_node *active_modal;
     GPtrArray     *close_watchers;
     GPtrArray     *modal_dialogs;
