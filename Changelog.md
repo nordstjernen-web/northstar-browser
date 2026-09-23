@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Form controls compute `appearance: auto` as the HTML rendering rules
+  give them (`none` for hidden, file and image inputs), and
+  `getComputedStyle` answers for prefixed aliases such as
+  `-webkit-appearance` and `-webkit-border-radius` -- they were parsed as
+  aliases but read back as empty strings, which feature-detection code
+  takes to mean the property is unsupported.
 * Legacy table borders follow the HTML rendering rules. `<table
   border>` draws an outset border of that width in the text colour (1px
   when the value does not parse) and inset 1px cell borders, instead of a

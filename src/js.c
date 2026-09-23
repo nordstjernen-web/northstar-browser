@@ -14915,7 +14915,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (!computed && lbox) computed = lbox->style;
     int property_id = ns_css_prop_id(name);
     int resolved_id = ns_css_resolve_prop(property_id, computed);
-    const char *resolved_name = resolved_id != property_id
+    const char *resolved_name = resolved_id >= 0
         ? ns_css_prop_name(resolved_id) : name;
 
     if (lbox && (strcmp(resolved_name, "grid-template-columns") == 0 ||
