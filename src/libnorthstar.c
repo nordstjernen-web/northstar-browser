@@ -61,6 +61,7 @@ struct ns_browser {
     double          js_scroll_x;
     double          js_scroll_y;
     double          cur_viewport_h;
+    int             pending_scroll_x;
     int             pending_scroll_y;
     gboolean        pending_scroll;
     const ns_node  *scroll_anchor;
@@ -738,6 +739,27 @@ browser_js_log(const char *line, gpointer ud)
     g_string_append_c(b->console_buf, '\n');
 }
 static void
+browser_js_viewport_scroll(double *x, double *y, gpointer user_data)
+{
+    ns_browser *b = user_data;
+    if (!b) return;
+    browser_flush(b);
+    int page_w = 0, page_h = 0;
+    ns_browser_page_size(b, &page_w, &page_h);
+    double view_h = b->cur_viewport_h > 0.0 ? b->cur_viewport_h : b->vh;
+    double max_x = MAX((double)page_w - (double)b->vw, 0.0);
+    double max_y = MAX((double)page_h - view_h, 0.0);
+    *x = round(CLAMP(*x, 0.0, max_x));
+    *y = round(CLAMP(*y, 0.0, max_y));
+    b->pending_scroll_x = (int)*x;
+    b->pending_scroll_y = (int)*y;
+    b->pending_scroll = TRUE;
+    b->js_scroll_x = *x;
+    b->js_scroll_y = *y;
+    b->scroll_anchor = NULL;
+}
+
+static void
 browser_js_repaint(gpointer user_data)
 {
     ns_browser *browser = user_data;
@@ -1033,6 +1055,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_engine_speculative_preload(doc, base, FALSE);
 
     ns_browser *b = g_new0(ns_browser, 1);
+    b->pending_scroll_x = -1;
     b->doc = doc;
     b->doc_charset = doc_charset;
     b->doc_language = doc_language;
@@ -1064,6 +1087,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_form_submit_cb(b->js, browser_js_form_submit, b);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_repaint_cb(b->js, browser_js_repaint, b);
+        ns_js_set_viewport_scroll_cb(b->js, browser_js_viewport_scroll, b);
         ns_js_set_style_flush_cb(b->js, browser_flush_style, b);
         ns_js_set_scroll_to_cb(b->js, browser_js_scroll_to, b);
         ns_js_set_fragment_nav_cb(b->js, browser_js_fragment_navigate, b);
@@ -1517,7 +1541,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     gboolean video_changed = FALSE;
     gboolean other_changed = FALSE;
     int guard = 0;
-    if (browser->js &&
+    if (browser->js && !browser->pending_scroll &&
         (fabs(browser->cur_scroll_x - browser->js_scroll_x) > 0.5 ||
          fabs(browser->cur_scroll_y - browser->js_scroll_y) > 0.5)) {
         browser->js_scroll_x = browser->cur_scroll_x;
@@ -3204,10 +3228,13 @@ ns_browser_take_pending_nav(ns_browser *browser)
 }
 
 int
-ns_browser_take_pending_scroll_y(ns_browser *browser, int *out_scroll_y)
+ns_browser_take_pending_scroll(ns_browser *browser, int *out_scroll_x,
+                               int *out_scroll_y)
 {
     if (!browser || !browser->pending_scroll) return 0;
+    if (out_scroll_x) *out_scroll_x = browser->pending_scroll_x;
     if (out_scroll_y) *out_scroll_y = browser->pending_scroll_y;
+    browser->pending_scroll_x = -1;
     browser->pending_scroll = FALSE;
     return 1;
 }

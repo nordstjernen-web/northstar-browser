@@ -16,6 +16,14 @@ Significant changes in each release:
   newer and is a NotSupportedError with older libraries, rather than
   being dropped. X448 `deriveBits` and `deriveKey` reject an all-zero
   shared secret with OperationError.
+* `window.scrollTo()`, `scroll()`, `scrollBy()` and setting
+  `document.documentElement.scrollTop` or `scrollLeft` scroll the page.
+  They used to change only what `scrollY` reported while the view stayed
+  where it was, so "back to top" buttons, scroll restoration and
+  script-driven anchor links did nothing. The position is clamped to the
+  scrollable range, `scrollBy()` called without a receiver starts from
+  the real position instead of 0, and `scrollY` no longer flickers back
+  to the old position while the view catches up.
 * `<audio>` and `<video>` are real media elements now. Each has a player
   object (`src/js_media.c`) with the HTML state machine: `networkState`
   and `readyState` move through loading, metadata and playable,
