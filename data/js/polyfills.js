@@ -1161,9 +1161,20 @@
     function TextEncoderStream() {
         if (!(this instanceof TextEncoderStream)) return new TextEncoderStream();
         var enc = new TextEncoder();
+        var pending = '';
         TransformStream.call(this, {
             transform: function (chunk, controller) {
-                controller.enqueue(enc.encode(String(chunk == null ? '' : chunk)));
+                var text = pending + String(chunk);
+                pending = '';
+                var last = text.charCodeAt(text.length - 1);
+                if (last >= 0xd800 && last <= 0xdbff) {
+                    pending = text.charAt(text.length - 1);
+                    text = text.slice(0, -1);
+                }
+                if (text.length) controller.enqueue(enc.encode(text));
+            },
+            flush: function (controller) {
+                if (pending) controller.enqueue(enc.encode(pending));
             }
         });
         Object.defineProperty(this, 'encoding', { value: 'utf-8', configurable: true });
@@ -1172,27 +1183,30 @@
     TextEncoderStream.prototype.constructor = TextEncoderStream;
     defineCtor('TextEncoderStream', TextEncoderStream);
 
+    function isBufferSource(chunk) {
+        return chunk instanceof ArrayBuffer || ArrayBuffer.isView(chunk) ||
+            (typeof SharedArrayBuffer === 'function' &&
+             chunk instanceof SharedArrayBuffer);
+    }
+
     function TextDecoderStream(label, options) {
         if (!(this instanceof TextDecoderStream)) return new TextDecoderStream(label, options);
-        var dec = new TextDecoder(label || 'utf-8', options);
+        var dec = new TextDecoder(label === undefined ? 'utf-8' : label, options);
         TransformStream.call(this, {
             transform: function (chunk, controller) {
-                var out;
-                try { out = dec.decode(chunk, { stream: true }); }
-                catch (e) { out = String(chunk); }
+                if (!isBufferSource(chunk))
+                    throw new TypeError('TextDecoderStream: chunk is not a BufferSource');
+                var out = dec.decode(chunk, { stream: true });
                 if (out) controller.enqueue(out);
             },
             flush: function (controller) {
-                try {
-                    var rest = dec.decode();
-                    if (rest) controller.enqueue(rest);
-                } catch (e) { /* ignore */ }
+                var rest = dec.decode();
+                if (rest) controller.enqueue(rest);
             }
         });
-        Object.defineProperty(this, 'encoding', {
-            value: label ? String(label).toLowerCase() : 'utf-8',
-            configurable: true
-        });
+        Object.defineProperty(this, 'encoding', { value: dec.encoding, configurable: true });
+        Object.defineProperty(this, 'fatal', { value: dec.fatal, configurable: true });
+        Object.defineProperty(this, 'ignoreBOM', { value: dec.ignoreBOM, configurable: true });
     }
     TextDecoderStream.prototype = Object.create(TransformStream.prototype);
     TextDecoderStream.prototype.constructor = TextDecoderStream;

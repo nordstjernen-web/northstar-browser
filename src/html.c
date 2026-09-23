@@ -4,6 +4,7 @@
  */
 
 #include "html.h"
+#include "encoding.h"
 
 #include <string.h>
 #include <uchardet.h>
@@ -299,45 +300,6 @@ ns_html_json_document(const char *url, const char *json, gsize len)
 }
 
 static char *
-charset_normalize(const char *name)
-{
-    static const struct { const char *label; const char *iconv_name; } map[] = {
-        { "gb2312",          "GBK" },
-        { "gb_2312-80",      "GBK" },
-        { "csgb2312",        "GBK" },
-        { "iso-8859-1",      "WINDOWS-1252" },
-        { "latin1",          "WINDOWS-1252" },
-        { "ascii",           "WINDOWS-1252" },
-        { "us-ascii",        "WINDOWS-1252" },
-        { "utf8",            "UTF-8" },
-        { "big5-hkscs",      "BIG5-HKSCS" },
-        { "x-cp1251",        "WINDOWS-1251" },
-        { "koi8_r",          "KOI8-R" },
-        { "koi",             "KOI8-R" },
-        { "x-mac-cyrillic",  "MAC-CYRILLIC" },
-        { "x-mac-ukrainian", "MAC-CYRILLIC" },
-        { "maccyrillic",     "MAC-CYRILLIC" },
-        { "x-cp1252",        "WINDOWS-1252" },
-        { "x-cp1250",        "WINDOWS-1250" },
-        { "shift_jis",       "CP932" },
-        { "shift-jis",       "CP932" },
-        { "sjis",            "CP932" },
-        { "x-sjis",          "CP932" },
-        { "ms_kanji",        "CP932" },
-        { "csshiftjis",      "CP932" },
-        { "windows-31j",     "CP932" },
-        { "x-euc-jp",        "EUC-JP" },
-        { "eucjp",           "EUC-JP" },
-        { "euc-kr",          "CP949" },
-        { "iso-8859-8-i",    "ISO-8859-8" },
-    };
-    for (gsize i = 0; i < G_N_ELEMENTS(map); i++)
-        if (g_ascii_strcasecmp(name, map[i].label) == 0)
-            return g_strdup(map[i].iconv_name);
-    return g_ascii_strup(name, -1);
-}
-
-static char *
 charset_value_in(const char *s, gsize len)
 {
     for (gsize i = 0; i + 7 <= len; i++) {
@@ -628,21 +590,14 @@ ns_html_declared_charset(const char *body, gsize len, const char *content_type)
     return g_strdup(name);
 }
 
-static gboolean
-charset_is_dangerous(const char *cs)
+static char *
+decode_with(const char *encoding, const char *body, gsize len,
+            char **charset_out, const char *report)
 {
-    if (!cs || !*cs) return TRUE;
-    char *up = g_ascii_strup(cs, -1);
-    gboolean bad =
-        strstr(up, "UTF-7") || strstr(up, "UTF7") ||
-        strstr(up, "REPLACEMENT") ||
-        g_str_has_prefix(up, "HZ") ||
-        strstr(up, "2022-CN") || strstr(up, "2022CN") ||
-        strstr(up, "2022-KR") || strstr(up, "2022KR") ||
-        strstr(up, "IMAP") ||
-        strstr(up, "CESU") || strstr(up, "BOCU") || strstr(up, "SCSU");
-    g_free(up);
-    return bad;
+    char *out = ns_encoding_decode(ns_encoding_for_name(encoding), body, len,
+                                   NULL);
+    charset_report(charset_out, report);
+    return out;
 }
 
 char *
@@ -652,94 +607,41 @@ ns_html_decode_body_full(const char *body, gsize len,
     if (charset_out) *charset_out = NULL;
     if (!body || len == 0) return g_strdup("");
 
-    if (len >= 3 && memcmp(body, "\xef\xbb\xbf", 3) == 0) {
-        charset_report(charset_out, "UTF-8");
-        return g_utf8_make_valid(body + 3, (gssize)(len - 3));
-    }
-    if (len >= 2 && memcmp(body, "\xff\xfe", 2) == 0) {
-        char *out = g_convert(body + 2, (gssize)(len - 2), "UTF-8", "UTF-16LE",
-                              NULL, NULL, NULL);
-        if (out) {
-            charset_report(charset_out, "UTF-16LE");
-            return out;
-        }
-    }
-    if (len >= 2 && memcmp(body, "\xfe\xff", 2) == 0) {
-        char *out = g_convert(body + 2, (gssize)(len - 2), "UTF-8", "UTF-16BE",
-                              NULL, NULL, NULL);
-        if (out) {
-            charset_report(charset_out, "UTF-16BE");
-            return out;
-        }
-    }
+    if (len >= 3 && memcmp(body, "\xef\xbb\xbf", 3) == 0)
+        return decode_with("UTF-8", body + 3, len - 3, charset_out, "UTF-8");
+    if (len >= 2 && memcmp(body, "\xff\xfe", 2) == 0)
+        return decode_with("UTF-16LE", body + 2, len - 2, charset_out,
+                           "UTF-16LE");
+    if (len >= 2 && memcmp(body, "\xfe\xff", 2) == 0)
+        return decode_with("UTF-16BE", body + 2, len - 2, charset_out,
+                           "UTF-16BE");
 
     char *declared = ns_html_declared_charset(body, len, content_type);
-    gboolean declared_utf8 = FALSE;
-    if (declared) {
-        char *cs = charset_normalize(declared);
-        if (g_ascii_strcasecmp(cs, "UTF-8") == 0) {
-            declared_utf8 = TRUE;
-        } else if (!charset_is_dangerous(cs)) {
-            char *out = g_convert(body, (gssize)len, "UTF-8", cs,
-                                  NULL, NULL, NULL);
-            if (out) {
-                charset_report(charset_out, declared);
-                g_free(cs);
-                g_free(declared);
-                return out;
-            }
-        }
-        g_free(cs);
+    const ns_encoding *enc = declared ? ns_encoding_for_name(declared) : NULL;
+    if (enc && !ns_encoding_is_utf8(enc)) {
+        char *out = ns_encoding_decode(enc, body, len, NULL);
+        charset_report(charset_out, declared);
         g_free(declared);
+        return out;
     }
+    g_free(declared);
 
-    if (g_utf8_validate(body, (gssize)len, NULL)) {
-        charset_report(charset_out, "UTF-8");
-        return g_strndup(body, len);
-    }
+    if (enc || g_utf8_validate(body, (gssize)len, NULL))
+        return decode_with("UTF-8", body, len, charset_out, "UTF-8");
 
-    if (declared_utf8) {
-        charset_report(charset_out, "UTF-8");
-        return g_utf8_make_valid(body, (gssize)len);
-    }
-
-    char *charset = NULL;
+    const ns_encoding *detected = NULL;
     uchardet_t det = uchardet_new();
     if (det) {
         gsize scan = len < (gsize)1024 * 1024 ? len : (gsize)1024 * 1024;
         if (uchardet_handle_data(det, body, scan) == 0) {
             uchardet_data_end(det);
-            const char *name = uchardet_get_charset(det);
-            if (name && *name
-                && g_ascii_strcasecmp(name, "ASCII") != 0
-                && g_ascii_strcasecmp(name, "UTF-8") != 0)
-                charset = g_strdup(name);
+            detected = ns_encoding_for_label(uchardet_get_charset(det));
         }
         uchardet_delete(det);
     }
-
-    if (charset) {
-        if (!charset_is_dangerous(charset)) {
-            char *out = g_convert(body, (gssize)len, "UTF-8", charset,
-                                  NULL, NULL, NULL);
-            if (out) {
-                const char *canonical = ns_encoding_label_to_name(charset);
-                charset_report(charset_out,
-                               canonical ? canonical : charset);
-                g_free(charset);
-                return out;
-            }
-        }
-        g_free(charset);
-    }
-
-    char *latin1 = g_convert(body, (gssize)len, "UTF-8", "WINDOWS-1252",
-                             NULL, NULL, NULL);
-    if (latin1) {
-        charset_report(charset_out, "windows-1252");
-        return latin1;
-    }
-
-    charset_report(charset_out, "UTF-8");
-    return g_utf8_make_valid(body, (gssize)len);
+    if (!detected || ns_encoding_is_utf16(detected) ||
+        ns_encoding_is_replacement(detected))
+        detected = ns_encoding_for_name("windows-1252");
+    return decode_with(ns_encoding_name(detected), body, len, charset_out,
+                       ns_encoding_name(detected));
 }

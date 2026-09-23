@@ -100,7 +100,7 @@ drivers both call.
 |-------|---------|-----|
 | 1. Fetch | `net.c`, `cache.c`, `engine.c` | libcurl on a shared multi handle (HTTP/1.1, HTTP/2; HTTP/3 through Alt-Svc when libcurl supports it), TLS verification, redirect clamp, response-size cap, HSTS, Alt-Svc, per-site cookie jars and HTTP cache. `engine.c` scans a parsed document for its scripts and stylesheets and preloads them; a preload map, an in-flight coalescer and the HTTP cache then answer in that order, keyed on request identity rather than bare URL, so a subresource is fetched once. `netutil.c` holds Accept-Language, search-URL and proxy helpers. |
 | 2. Safety gate | `safebrowsing.c`, `csp.c`, `security.c` | Top-level host checked against the local SHA-256 blocklist; Content-Security-Policy parsed and enforced; Subresource Integrity (`ns_security_sri_check`) verified for scripts. |
-| 3. Parse | `html.c`, `html_lexbor.c`, `xml.c` | Charset detection (BOM, header, `<meta>` prescan, then uchardet) and bytes → DOM via lexbor (WHATWG HTML). `xml.c` parses XHTML and other namespaced XML documents. |
+| 3. Parse | `html.c`, `encoding.c`, `html_lexbor.c`, `xml.c` | Charset detection (BOM, header, `<meta>` prescan, then uchardet), decoding through the WHATWG Encoding Standard decoders in `encoding.c`, and bytes → DOM via lexbor (WHATWG HTML). `xml.c` parses XHTML and other namespaced XML documents. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
 | 5. Style | `css.c`, `css_syntax.c`, `css_media.c`, `css_prop_syntax.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_media.c` the Media Queries Level 4 parser and evaluator, and `css_prop_syntax.c` the `<syntax>` grammar behind `@property` and `CSS.registerProperty`. `anim.c` runs transitions and `@keyframes` animations; `font.c` loads `@font-face` web fonts. |
 | 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. Text is itemized, shaped and broken into lines by ns-pango. `mathml.c` lays out presentation MathML. |
@@ -137,7 +137,7 @@ run of table-internal siblings.
 | `Intl` (ECMA-402, without ICU) | `js_intl.c` |
 | `performance` and `PerformanceObserver` | `js_perf.c` |
 | `ShadowRealm` | `js_realm.c` |
-| `crypto.subtle` (WebCrypto over OpenSSL) | `webcrypto.c` |
+| `crypto.subtle` (WebCrypto over OpenSSL) | `js_webcrypto.c`, `webcrypto.c` |
 | Offline Web Audio graph rendering | `webaudio.c` |
 | WebAssembly JS API (over vendored WAMR) | `wasm.c`, `src/wamr/` |
 | `WebSocket`, `EventSource` | `ws.c`, `eventsource.c` |

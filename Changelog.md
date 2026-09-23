@@ -29,6 +29,64 @@ Significant changes in each release:
 * A build configured with `-Daudio=disabled` links again. The audio stub
   that replaces the SDL2 mixer lacked `ns_audio_context_dispatch_blob`,
   which the page view calls for `blob:` media, so the final link failed.
+* Links in pages that use a legacy encoding put non-ASCII query text
+  into the URL in that encoding, as HTML's URL parsing requires: on a
+  windows-1252 page `<a href="?q=é">` now reads back and navigates as
+  `?q=%E9` rather than `?q=%C3%A9`, Shift_JIS, EUC-KR or Big5 pages
+  send their own multi-byte sequences, and a character the encoding
+  cannot represent becomes `%26%23NNNN%3B`. The fragment and every
+  other part of the URL stay UTF-8.
+* `crypto.subtle` follows the Web Cryptography API's algorithm
+  normalization and error rules. Algorithm dictionaries are read the
+  WebIDL way (a missing member or an out-of-range length is a
+  TypeError, an unknown algorithm or hash a NotSupportedError), usages
+  that do not fit the key are a SyntaxError, bad key material a
+  DataError and a key used for the wrong algorithm, usage or key type
+  an InvalidAccessError, where many of these used to come back as
+  OperationError or as a plain Error. Keys are real `CryptoKey` objects
+  whose `algorithm` carries `length`, `hash`, `modulusLength`,
+  `publicExponent` or `namedCurve` as the key type requires; JWK import
+  checks `kty`, `use`, `key_ops`, `ext`, `alg` and `crv` and rejects
+  mismatched EC and Ed25519 key pairs; JWK export sets `alg`;
+  `deriveBits` honours an absent, zero or non-byte length; Ed25519
+  verification refuses small-order keys and signatures; compressed EC
+  points import and export uncompressed; `wrapKey`/`unwrapKey` with JWK
+  no longer fail to parse the unwrapped text; and `structuredClone()`
+  copies a `CryptoKey`.
+* `crypto.getRandomValues()` throws the errors the Web Cryptography API
+  specifies: a `TypeMismatchError` DOMException for a `DataView` (it
+  was a plain TypeError) and a `QuotaExceededError` for more than 65536
+  bytes (it was a RangeError).
+* `XMLHttpRequest.responseText` decodes the body in the charset named by
+  `overrideMimeType()` or the response's `Content-Type`, and a byte-order
+  mark overrides both, as the XHR standard specifies. The body was
+  always read as UTF-8, so Shift_JIS or windows-1252 text came back as
+  mojibake; `x-user-defined` now maps bytes 0x80-0xFF to U+F780-U+F7FF
+  as the Encoding Standard defines.
+* `TextDecoder` accepts every label of the Encoding Standard, not just
+  UTF-8, UTF-16 and windows-1252, so `new TextDecoder("shift_jis")` or
+  `"gbk"` no longer throws a RangeError, and it decodes with the same
+  decoders as documents: partial sequences of any encoding carry over
+  between `{stream: true}` calls and invalid input is replaced the way
+  the standard specifies. `TextDecoder` and `TextEncoder` are real
+  interfaces with `encoding`, `fatal`, `ignoreBOM` and the methods on
+  their prototypes, `TextEncoder.encodeInto()` is native and counts
+  what it read in UTF-16 units, `TextDecoderStream` reports the
+  decoder's canonical encoding name and its `fatal`/`ignoreBOM`, and
+  `TextEncoderStream` joins a surrogate pair split across two chunks.
+* Pages in the legacy East Asian encodings -- Big5, EUC-JP, Shift_JIS,
+  ISO-2022-JP, EUC-KR, GBK and gb18030 -- decode as the Encoding
+  Standard specifies. The whole document went through iconv in one
+  call, so a single sequence iconv's table lacked (Big5 has hundreds of
+  them, and Shift_JIS pages use NEC and IBM rows) failed the conversion
+  and the page was read as UTF-8 or windows-1252 instead. Each encoding
+  now has its own decoder that follows the standard's state machine,
+  looks characters up in the standard's index tables (those lexbor
+  already ships, so decoding no longer depends on the platform's iconv)
+  and puts U+FFFD where a sequence is invalid. Single-byte encodings
+  decode the same way, so a windows-1252 page with a byte like 0x81 no
+  longer falls back to another encoding, and the labels that name the
+  replacement encoding give a single U+FFFD rather than decoded text.
 * A frame sandboxed without `allow-same-origin` can no longer reach the
   page that embeds it. A `srcdoc` or same-origin frame sandboxed that way
   got the embedding page's real window as `parent` and `top`, so its

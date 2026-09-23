@@ -33,6 +33,7 @@
 #include "css.h"
 #include "datetime.h"
 #include "debuglog.h"
+#include "encoding.h"
 #include "engine.h"
 #include "ext.h"
 #include "html.h"
@@ -2508,13 +2509,13 @@ ns_storage_fits(GHashTable *store, const char *key, const char *value)
 }
 
 static JSValue
-ns_throw_quota_exceeded(JSContext *ctx)
+ns_throw_quota_exceeded_msg(JSContext *ctx, const char *message)
 {
     JSValue g = JS_GetGlobalObject(ctx);
     JSValue ctor = JS_GetPropertyStr(ctx, g, "QuotaExceededError");
     JS_FreeValue(ctx, g);
     if (JS_IsFunction(ctx, ctor)) {
-        JSValue msg = JS_NewString(ctx, "Storage quota exceeded");
+        JSValue msg = JS_NewString(ctx, message);
         JSValueConst args[1] = { msg };
         JSValue err = JS_CallConstructor(ctx, ctor, 1, args);
         JS_FreeValue(ctx, msg);
@@ -2529,7 +2530,7 @@ ns_throw_quota_exceeded(JSContext *ctx)
         JS_NewString(ctx, "QuotaExceededError"),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_DefinePropertyValueStr(ctx, err, "message",
-        JS_NewString(ctx, "Storage quota exceeded"),
+        JS_NewString(ctx, message),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_DefinePropertyValueStr(ctx, err, "code",
         JS_NewInt32(ctx, 22),
@@ -2539,6 +2540,12 @@ ns_throw_quota_exceeded(JSContext *ctx)
     JS_DefinePropertyValueStr(ctx, err, "quota", JS_NULL,
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     return JS_Throw(ctx, err);
+}
+
+static JSValue
+ns_throw_quota_exceeded(JSContext *ctx)
+{
+    return ns_throw_quota_exceeded_msg(ctx, "Storage quota exceeded");
 }
 
 static JSValue
@@ -9694,1166 +9701,6 @@ ns_window_queue_microtask(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static GChecksumType
-ns_subtle_algorithm(const char *name)
-{
-    if (!name) return (GChecksumType)-1;
-    if (g_ascii_strcasecmp(name, "SHA-1") == 0   || g_ascii_strcasecmp(name, "SHA1") == 0)
-        return G_CHECKSUM_SHA1;
-    if (g_ascii_strcasecmp(name, "SHA-256") == 0 || g_ascii_strcasecmp(name, "SHA256") == 0)
-        return G_CHECKSUM_SHA256;
-    if (g_ascii_strcasecmp(name, "SHA-384") == 0 || g_ascii_strcasecmp(name, "SHA384") == 0)
-        return G_CHECKSUM_SHA384;
-    if (g_ascii_strcasecmp(name, "SHA-512") == 0 || g_ascii_strcasecmp(name, "SHA512") == 0)
-        return G_CHECKSUM_SHA512;
-    return (GChecksumType)-1;
-}
-
-static JSClassID ns_cryptokey_class_id;
-
-static void
-ns_cryptokey_finalizer(JSRuntime *rt, JSValue val)
-{
-    (void)rt;
-    ns_crypto_key *k = JS_GetOpaque(val, ns_cryptokey_class_id);
-    if (k) ns_crypto_key_unref(k);
-}
-
-static JSClassDef ns_cryptokey_class = {
-    "CryptoKey",
-    .finalizer = ns_cryptokey_finalizer,
-};
-
-static const char *
-ns_wc_canon(const char *n)
-{
-    static const char *names[] = {
-        "RSASSA-PKCS1-v1_5", "RSA-PSS", "RSA-OAEP",
-        "AES-GCM", "AES-CBC", "AES-CTR", "AES-KW",
-        "HMAC", "ECDSA", "ECDH", "PBKDF2", "HKDF",
-        "Ed25519", "X25519",
-        "SHA-1", "SHA-256", "SHA-384", "SHA-512",
-        "P-256", "P-384", "P-521",
-    };
-    if (!n) return NULL;
-    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
-        if (!g_ascii_strcasecmp(n, names[i])) return names[i];
-    return NULL;
-}
-
-static gboolean
-ns_wc_is_symmetric(const char *n)
-{
-    return n && (!g_strcmp0(n, "HMAC") || !g_ascii_strncasecmp(n, "AES-", 4) ||
-                 !g_strcmp0(n, "PBKDF2") || !g_strcmp0(n, "HKDF"));
-}
-
-static int
-ns_wc_hmac_default_bits(const char *hash)
-{
-    if (!g_strcmp0(hash, "SHA-384") || !g_strcmp0(hash, "SHA-512")) return 1024;
-    return 512;
-}
-
-static guint8 *
-ns_wc_dup_buf(JSContext *ctx, JSValueConst v, gsize *out_len)
-{
-    *out_len = 0;
-    size_t off = 0, blen = 0, bpe = 0;
-    JSValue buf = JS_GetTypedArrayBuffer(ctx, v, &off, &blen, &bpe);
-    if (!JS_IsException(buf)) {
-        size_t total = 0;
-        uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
-        guint8 *out = NULL;
-        if (base && off + blen <= total) {
-            out = blen ? g_memdup2(base + off, blen) : g_malloc0(1);
-            *out_len = blen;
-        }
-        JS_FreeValue(ctx, buf);
-        return out;
-    }
-    JS_FreeValue(ctx, JS_GetException(ctx));
-    size_t total = 0;
-    uint8_t *base = JS_GetArrayBuffer(ctx, &total, v);
-    if (base) {
-        *out_len = total;
-        return total ? g_memdup2(base, total) : g_malloc0(1);
-    }
-    return NULL;
-}
-
-static guint8 *
-ns_b64url_decode(const char *s, gsize *out_len)
-{
-    GString *t = g_string_new(s);
-    for (gsize i = 0; i < t->len; i++) {
-        if (t->str[i] == '-') t->str[i] = '+';
-        else if (t->str[i] == '_') t->str[i] = '/';
-    }
-    while (t->len % 4) g_string_append_c(t, '=');
-    guint8 *d = g_base64_decode(t->str, out_len);
-    g_string_free(t, TRUE);
-    return d;
-}
-
-static char *
-ns_b64url_encode(const guint8 *b, gsize len)
-{
-    char *s = g_base64_encode(b, len);
-    gsize n = strlen(s);
-    for (gsize i = 0; i < n; i++) {
-        if (s[i] == '+') s[i] = '-';
-        else if (s[i] == '/') s[i] = '_';
-    }
-    while (n > 0 && s[n - 1] == '=') s[--n] = '\0';
-    return s;
-}
-
-static guint8 *
-ns_wc_jwk_field(JSContext *ctx, JSValueConst o, const char *name, gsize *len)
-{
-    *len = 0;
-    JSValue p = JS_GetPropertyStr(ctx, o, name);
-    guint8 *out = NULL;
-    if (JS_IsString(p)) {
-        const char *s = JS_ToCString(ctx, p);
-        if (s) { out = ns_b64url_decode(s, len); JS_FreeCString(ctx, s); }
-    }
-    JS_FreeValue(ctx, p);
-    return out;
-}
-
-typedef struct {
-    char    *name;
-    char    *hash;
-    char    *curve;
-    int      modulus_bits;
-    guint32  pubexp;
-    int      length;
-    int      salt_len_pss;
-    int      iterations;
-    int      tag_bits;
-    guint8  *iv;      gsize iv_len;
-    guint8  *aad;     gsize aad_len;
-    guint8  *label;   gsize label_len;
-    guint8  *salt;    gsize salt_len;
-    guint8  *info;    gsize info_len;
-    guint8  *counter; gsize counter_len;
-    ns_crypto_key *peer;
-} ns_wc_alg;
-
-static char *
-ns_wc_prop_str(JSContext *ctx, JSValueConst o, const char *n)
-{
-    JSValue p = JS_GetPropertyStr(ctx, o, n);
-    char *r = NULL;
-    if (JS_IsString(p)) {
-        const char *s = JS_ToCString(ctx, p);
-        if (s) { r = g_strdup(s); JS_FreeCString(ctx, s); }
-    }
-    JS_FreeValue(ctx, p);
-    return r;
-}
-
-static int
-ns_wc_prop_int(JSContext *ctx, JSValueConst o, const char *n, int dflt)
-{
-    JSValue p = JS_GetPropertyStr(ctx, o, n);
-    int r = dflt;
-    if (JS_IsNumber(p)) { int32_t x = 0; JS_ToInt32(ctx, &x, p); r = x; }
-    JS_FreeValue(ctx, p);
-    return r;
-}
-
-static guint8 *
-ns_wc_prop_buf(JSContext *ctx, JSValueConst o, const char *n, gsize *len)
-{
-    *len = 0;
-    JSValue p = JS_GetPropertyStr(ctx, o, n);
-    guint8 *out = NULL;
-    if (!JS_IsUndefined(p) && !JS_IsNull(p)) out = ns_wc_dup_buf(ctx, p, len);
-    JS_FreeValue(ctx, p);
-    return out;
-}
-
-static gboolean
-ns_wc_parse_alg(JSContext *ctx, JSValueConst v, ns_wc_alg *a)
-{
-    memset(a, 0, sizeof *a);
-    a->salt_len_pss = -1;
-    a->tag_bits = 128;
-    if (JS_IsString(v)) {
-        const char *s = JS_ToCString(ctx, v);
-        a->name = s ? g_strdup(ns_wc_canon(s)) : NULL;
-        if (s) JS_FreeCString(ctx, s);
-        return a->name != NULL;
-    }
-    if (!JS_IsObject(v)) return FALSE;
-    JSValue nm = JS_GetPropertyStr(ctx, v, "name");
-    if (JS_IsString(nm)) {
-        const char *s = JS_ToCString(ctx, nm);
-        a->name = s ? g_strdup(ns_wc_canon(s)) : NULL;
-        if (s) JS_FreeCString(ctx, s);
-    }
-    JS_FreeValue(ctx, nm);
-    if (!a->name) return FALSE;
-
-    JSValue h = JS_GetPropertyStr(ctx, v, "hash");
-    if (JS_IsString(h)) {
-        const char *s = JS_ToCString(ctx, h);
-        a->hash = s ? g_strdup(ns_wc_canon(s)) : NULL;
-        if (s) JS_FreeCString(ctx, s);
-    } else if (JS_IsObject(h)) {
-        char *hn = ns_wc_prop_str(ctx, h, "name");
-        a->hash = hn ? g_strdup(ns_wc_canon(hn)) : NULL;
-        g_free(hn);
-    }
-    JS_FreeValue(ctx, h);
-
-    char *crv = ns_wc_prop_str(ctx, v, "namedCurve");
-    if (crv) { a->curve = g_strdup(ns_wc_canon(crv)); g_free(crv); }
-
-    a->modulus_bits = ns_wc_prop_int(ctx, v, "modulusLength", 0);
-    a->length = ns_wc_prop_int(ctx, v, "length", 0);
-    a->iterations = ns_wc_prop_int(ctx, v, "iterations", 0);
-    a->salt_len_pss = ns_wc_prop_int(ctx, v, "saltLength", -1);
-    a->tag_bits = ns_wc_prop_int(ctx, v, "tagLength", 128);
-
-    gsize exp_len = 0;
-    guint8 *exp_buf = ns_wc_prop_buf(ctx, v, "publicExponent", &exp_len);
-    a->pubexp = 65537;
-    if (exp_buf && exp_len) {
-        guint32 val = 0;
-        for (gsize i = 0; i < exp_len; i++) val = (val << 8) | exp_buf[i];
-        if (val) a->pubexp = val;
-    }
-    g_free(exp_buf);
-
-    a->iv = ns_wc_prop_buf(ctx, v, "iv", &a->iv_len);
-    a->aad = ns_wc_prop_buf(ctx, v, "additionalData", &a->aad_len);
-    a->label = ns_wc_prop_buf(ctx, v, "label", &a->label_len);
-    a->salt = ns_wc_prop_buf(ctx, v, "salt", &a->salt_len);
-    a->info = ns_wc_prop_buf(ctx, v, "info", &a->info_len);
-    a->counter = ns_wc_prop_buf(ctx, v, "counter", &a->counter_len);
-
-    JSValue pk = JS_GetPropertyStr(ctx, v, "public");
-    if (JS_IsObject(pk))
-        a->peer = JS_GetOpaque(pk, ns_cryptokey_class_id);
-    JS_FreeValue(ctx, pk);
-    return TRUE;
-}
-
-static void
-ns_wc_alg_free(ns_wc_alg *a)
-{
-    g_free(a->name); g_free(a->hash); g_free(a->curve);
-    g_free(a->iv); g_free(a->aad); g_free(a->label);
-    g_free(a->salt); g_free(a->info); g_free(a->counter);
-}
-
-static guint32
-ns_wc_usages_from_array(JSContext *ctx, JSValueConst v)
-{
-    guint32 u = 0;
-    if (!JS_IsObject(v)) return 0;
-    JSValue lv = JS_GetPropertyStr(ctx, v, "length");
-    uint32_t n = 0;
-    JS_ToUint32(ctx, &n, lv);
-    JS_FreeValue(ctx, lv);
-    for (uint32_t i = 0; i < n; i++) {
-        JSValue e = JS_GetPropertyUint32(ctx, v, i);
-        const char *s = JS_ToCString(ctx, e);
-        if (s) {
-            if (!strcmp(s, "encrypt")) u |= NS_USAGE_ENCRYPT;
-            else if (!strcmp(s, "decrypt")) u |= NS_USAGE_DECRYPT;
-            else if (!strcmp(s, "sign")) u |= NS_USAGE_SIGN;
-            else if (!strcmp(s, "verify")) u |= NS_USAGE_VERIFY;
-            else if (!strcmp(s, "deriveKey")) u |= NS_USAGE_DERIVE_KEY;
-            else if (!strcmp(s, "deriveBits")) u |= NS_USAGE_DERIVE_BITS;
-            else if (!strcmp(s, "wrapKey")) u |= NS_USAGE_WRAP;
-            else if (!strcmp(s, "unwrapKey")) u |= NS_USAGE_UNWRAP;
-            JS_FreeCString(ctx, s);
-        }
-        JS_FreeValue(ctx, e);
-    }
-    return u;
-}
-
-static JSValue
-ns_wc_usages_to_array(JSContext *ctx, guint32 u)
-{
-    static const struct { guint32 b; const char *n; } m[] = {
-        { NS_USAGE_ENCRYPT, "encrypt" }, { NS_USAGE_DECRYPT, "decrypt" },
-        { NS_USAGE_SIGN, "sign" }, { NS_USAGE_VERIFY, "verify" },
-        { NS_USAGE_DERIVE_KEY, "deriveKey" }, { NS_USAGE_DERIVE_BITS, "deriveBits" },
-        { NS_USAGE_WRAP, "wrapKey" }, { NS_USAGE_UNWRAP, "unwrapKey" },
-    };
-    JSValue a = JS_NewArray(ctx);
-    uint32_t i = 0;
-    for (gsize j = 0; j < G_N_ELEMENTS(m); j++)
-        if (u & m[j].b)
-            JS_SetPropertyUint32(ctx, a, i++, JS_NewString(ctx, m[j].n));
-    return a;
-}
-
-static JSValue
-ns_wc_make_key(JSContext *ctx, ns_crypto_key *k)
-{
-    JSValue o = JS_NewObjectClass(ctx, ns_cryptokey_class_id);
-    JS_SetOpaque(o, k);
-    const char *t = k->type == NS_CK_PRIVATE ? "private"
-                  : k->type == NS_CK_PUBLIC ? "public" : "secret";
-    JS_SetPropertyStr(ctx, o, "type", JS_NewString(ctx, t));
-    JS_SetPropertyStr(ctx, o, "extractable", JS_NewBool(ctx, k->extractable));
-    JS_SetPropertyStr(ctx, o, "usages", ns_wc_usages_to_array(ctx, k->usages));
-
-    JSValue alg = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, alg, "name", JS_NewString(ctx, k->algo ? k->algo : ""));
-    if (k->hash) {
-        JSValue h = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, h, "name", JS_NewString(ctx, k->hash));
-        JS_SetPropertyStr(ctx, alg, "hash", h);
-    }
-    if (k->curve)
-        JS_SetPropertyStr(ctx, alg, "namedCurve", JS_NewString(ctx, k->curve));
-    if (k->type == NS_CK_SECRET && k->bits)
-        JS_SetPropertyStr(ctx, alg, "length", JS_NewInt32(ctx, k->bits));
-    if (k->algo && (!g_strcmp0(k->algo, "RSASSA-PKCS1-v1_5") ||
-                    !g_strcmp0(k->algo, "RSA-PSS") ||
-                    !g_strcmp0(k->algo, "RSA-OAEP")) && k->bits)
-        JS_SetPropertyStr(ctx, alg, "modulusLength", JS_NewInt32(ctx, k->bits));
-    JS_SetPropertyStr(ctx, o, "algorithm", alg);
-    return o;
-}
-
-static void
-ns_wc_resolve(JSContext *ctx, JSValue *resolvers, JSValue v)
-{
-    JSValue r = JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, &v);
-    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
-    JS_FreeValue(ctx, r);
-    JS_FreeValue(ctx, v);
-    JS_FreeValue(ctx, resolvers[0]);
-    JS_FreeValue(ctx, resolvers[1]);
-}
-
-static JSValue
-ns_wc_resolve_buf(JSContext *ctx, JSValue *resolvers, guint8 *data, gsize len,
-                  JSValue promise)
-{
-    JSValue ab = JS_NewArrayBufferCopy(ctx, data ? data : (const guint8 *)"", len);
-    ns_wc_resolve(ctx, resolvers, ab);
-    return promise;
-}
-
-static JSValue
-ns_subtle_generateKey(JSContext *ctx, JSValueConst this_val,
-                      int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 3) {
-        ns_js_promise_reject(ctx, resolvers, "generateKey: 3 arguments required");
-        return promise;
-    }
-    ns_wc_alg a;
-    if (!ns_wc_parse_alg(ctx, argv[0], &a)) {
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, "NotSupportedError: algorithm");
-        return promise;
-    }
-    gboolean ext = JS_ToBool(ctx, argv[1]) > 0;
-    guint32 usages = ns_wc_usages_from_array(ctx, argv[2]);
-    char *err = NULL;
-
-    if (ns_wc_is_symmetric(a.name)) {
-        int bits = a.length;
-        if (!g_strcmp0(a.name, "HMAC") && bits <= 0)
-            bits = ns_wc_hmac_default_bits(a.hash);
-        ns_crypto_key *k = ns_crypto_generate_secret(a.name, a.hash, bits, ext,
-                                                     usages, &err);
-        if (k) ns_wc_resolve(ctx, resolvers, ns_wc_make_key(ctx, k));
-        else ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    } else {
-        ns_crypto_key *pub = NULL, *priv = NULL;
-        gboolean ok = ns_crypto_generate_keypair(a.name, a.hash, a.curve,
-                                                 a.modulus_bits, a.pubexp, ext,
-                                                 usages, &pub, &priv, &err);
-        if (ok) {
-            pub->usages = usages & (NS_USAGE_ENCRYPT | NS_USAGE_VERIFY | NS_USAGE_WRAP);
-            priv->usages = usages & (NS_USAGE_DECRYPT | NS_USAGE_SIGN |
-                                     NS_USAGE_DERIVE_KEY | NS_USAGE_DERIVE_BITS |
-                                     NS_USAGE_UNWRAP);
-            JSValue pair = JS_NewObject(ctx);
-            JS_SetPropertyStr(ctx, pair, "publicKey", ns_wc_make_key(ctx, pub));
-            JS_SetPropertyStr(ctx, pair, "privateKey", ns_wc_make_key(ctx, priv));
-            ns_wc_resolve(ctx, resolvers, pair);
-        } else {
-            ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-        }
-    }
-    g_free(err);
-    ns_wc_alg_free(&a);
-    return promise;
-}
-
-static ns_crypto_key *
-ns_wc_do_import(JSContext *ctx, const char *format, JSValueConst keydata,
-                const ns_wc_alg *a, gboolean ext, guint32 usages, char **err)
-{
-    ns_crypto_key *k = NULL;
-    if (!strcmp(format, "jwk")) {
-        char *kty = ns_wc_prop_str(ctx, keydata, "kty");
-        if (!g_strcmp0(kty, "oct")) {
-            gsize kl = 0;
-            JSValue kv = JS_GetPropertyStr(ctx, keydata, "k");
-            guint8 *kb = NULL;
-            if (JS_IsString(kv)) {
-                const char *s = JS_ToCString(ctx, kv);
-                kb = ns_b64url_decode(s, &kl);
-                JS_FreeCString(ctx, s);
-            }
-            JS_FreeValue(ctx, kv);
-            k = ns_crypto_import_raw("raw", kb, kl, a->name, a->hash, NULL, ext,
-                                     usages, err);
-            g_free(kb);
-        } else if (!g_strcmp0(kty, "RSA")) {
-            gsize nl, el, dl, pl, ql, dpl, dql, qil;
-            guint8 *n = ns_wc_jwk_field(ctx, keydata, "n", &nl);
-            guint8 *e = ns_wc_jwk_field(ctx, keydata, "e", &el);
-            guint8 *d = ns_wc_jwk_field(ctx, keydata, "d", &dl);
-            guint8 *p = ns_wc_jwk_field(ctx, keydata, "p", &pl);
-            guint8 *q = ns_wc_jwk_field(ctx, keydata, "q", &ql);
-            guint8 *dp = ns_wc_jwk_field(ctx, keydata, "dp", &dpl);
-            guint8 *dq = ns_wc_jwk_field(ctx, keydata, "dq", &dql);
-            guint8 *qi = ns_wc_jwk_field(ctx, keydata, "qi", &qil);
-            k = ns_crypto_import_rsa_jwk(n, nl, e, el, d, dl, p, pl, q, ql,
-                                         dp, dpl, dq, dql, qi, qil, a->name, a->hash,
-                                         ext, usages, err);
-            g_free(n); g_free(e); g_free(d); g_free(p); g_free(q);
-            g_free(dp); g_free(dq); g_free(qi);
-        } else if (!g_strcmp0(kty, "EC")) {
-            char *crv = ns_wc_prop_str(ctx, keydata, "crv");
-            const char *curve = crv ? ns_wc_canon(crv) : a->curve;
-            gsize xl, yl, dl;
-            guint8 *x = ns_wc_jwk_field(ctx, keydata, "x", &xl);
-            guint8 *y = ns_wc_jwk_field(ctx, keydata, "y", &yl);
-            guint8 *d = ns_wc_jwk_field(ctx, keydata, "d", &dl);
-            k = ns_crypto_import_ec_jwk(curve, x, xl, y, yl, d, dl, a->name, ext,
-                                        usages, err);
-            g_free(x); g_free(y); g_free(d); g_free(crv);
-        } else if (!g_strcmp0(kty, "OKP")) {
-            char *crv = ns_wc_prop_str(ctx, keydata, "crv");
-            const char *curve = crv ? ns_wc_canon(crv) : a->name;
-            gsize xl, dl;
-            guint8 *x = ns_wc_jwk_field(ctx, keydata, "x", &xl);
-            guint8 *d = ns_wc_jwk_field(ctx, keydata, "d", &dl);
-            k = ns_crypto_import_okp_jwk(curve, x, xl, d, dl, a->name, ext,
-                                         usages, err);
-            g_free(x); g_free(d); g_free(crv);
-        } else if (err && !*err) {
-            *err = g_strdup("DataError: unsupported jwk kty");
-        }
-        g_free(kty);
-    } else {
-        gsize dl = 0;
-        guint8 *data = ns_wc_dup_buf(ctx, keydata, &dl);
-        k = ns_crypto_import_raw(format, data, dl, a->name, a->hash, a->curve, ext,
-                                 usages, err);
-        g_free(data);
-    }
-    return k;
-}
-
-static JSValue
-ns_subtle_importKey(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 5) {
-        ns_js_promise_reject(ctx, resolvers, "importKey: 5 arguments required");
-        return promise;
-    }
-    const char *format = JS_ToCString(ctx, argv[0]);
-    ns_wc_alg a = {0};
-    if (!format || !ns_wc_parse_alg(ctx, argv[2], &a)) {
-        if (format) JS_FreeCString(ctx, format);
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, "NotSupportedError: algorithm");
-        return promise;
-    }
-    gboolean ext = JS_ToBool(ctx, argv[3]) > 0;
-    guint32 usages = ns_wc_usages_from_array(ctx, argv[4]);
-    char *err = NULL;
-    ns_crypto_key *k = ns_wc_do_import(ctx, format, argv[1], &a, ext, usages, &err);
-
-    if (k) ns_wc_resolve(ctx, resolvers, ns_wc_make_key(ctx, k));
-    else ns_js_promise_reject(ctx, resolvers, err ? err : "DataError");
-    g_free(err);
-    JS_FreeCString(ctx, format);
-    ns_wc_alg_free(&a);
-    return promise;
-}
-
-static JSValue
-ns_wc_export_jwk(JSContext *ctx, ns_crypto_key *k, char **err)
-{
-    JSValue o = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, o, "ext", JS_NewBool(ctx, k->extractable));
-    JS_SetPropertyStr(ctx, o, "key_ops", ns_wc_usages_to_array(ctx, k->usages));
-    if (k->raw) {
-        char *b = ns_b64url_encode(k->raw, k->raw_len);
-        JS_SetPropertyStr(ctx, o, "kty", JS_NewString(ctx, "oct"));
-        JS_SetPropertyStr(ctx, o, "k", JS_NewString(ctx, b));
-        g_free(b);
-        return o;
-    }
-    if (!g_strcmp0(k->algo, "RSASSA-PKCS1-v1_5") ||
-        !g_strcmp0(k->algo, "RSA-PSS") || !g_strcmp0(k->algo, "RSA-OAEP")) {
-        guint8 *n, *e, *d, *p, *q, *dp, *dq, *qi;
-        gsize nl, el, dl, pl, ql, dpl, dql, qil;
-        if (!ns_crypto_export_rsa_jwk(k, &n, &nl, &e, &el, &d, &dl, &p, &pl,
-                                      &q, &ql, &dp, &dpl, &dq, &dql, &qi, &qil, err)) {
-            JS_FreeValue(ctx, o);
-            return JS_NULL;
-        }
-        JS_SetPropertyStr(ctx, o, "kty", JS_NewString(ctx, "RSA"));
-        {
-            const char *suf = NULL;
-            if (!g_strcmp0(k->hash, "SHA-1"))   suf = "1";
-            else if (!g_strcmp0(k->hash, "SHA-256")) suf = "256";
-            else if (!g_strcmp0(k->hash, "SHA-384")) suf = "384";
-            else if (!g_strcmp0(k->hash, "SHA-512")) suf = "512";
-            char *alg = NULL;
-            if (!g_strcmp0(k->algo, "RSA-OAEP"))
-                alg = g_strcmp0(k->hash, "SHA-1")
-                          ? g_strdup_printf("RSA-OAEP-%s", suf ? suf : "256")
-                          : g_strdup("RSA-OAEP");
-            else if (!g_strcmp0(k->algo, "RSASSA-PKCS1-v1_5") && suf)
-                alg = g_strdup_printf("RS%s", suf);
-            else if (!g_strcmp0(k->algo, "RSA-PSS") && suf)
-                alg = g_strdup_printf("PS%s", suf);
-            if (alg) {
-                JS_SetPropertyStr(ctx, o, "alg", JS_NewString(ctx, alg));
-                g_free(alg);
-            }
-        }
-        char *bn = ns_b64url_encode(n, nl), *be = ns_b64url_encode(e, el);
-        JS_SetPropertyStr(ctx, o, "n", JS_NewString(ctx, bn));
-        JS_SetPropertyStr(ctx, o, "e", JS_NewString(ctx, be));
-        g_free(bn); g_free(be);
-        if (d) {
-            struct { const char *k; guint8 *v; gsize l; } f[] = {
-                { "d", d, dl }, { "p", p, pl }, { "q", q, ql },
-                { "dp", dp, dpl }, { "dq", dq, dql }, { "qi", qi, qil },
-            };
-            for (gsize i = 0; i < G_N_ELEMENTS(f); i++)
-                if (f[i].v) {
-                    char *b = ns_b64url_encode(f[i].v, f[i].l);
-                    JS_SetPropertyStr(ctx, o, f[i].k, JS_NewString(ctx, b));
-                    g_free(b);
-                }
-        }
-        g_free(n); g_free(e); g_free(d); g_free(p); g_free(q);
-        g_free(dp); g_free(dq); g_free(qi);
-        return o;
-    }
-    if (!g_strcmp0(k->algo, "ECDSA") || !g_strcmp0(k->algo, "ECDH")) {
-        guint8 *x, *y, *d;
-        gsize xl, yl, dl;
-        if (!ns_crypto_export_ec_jwk(k, &x, &xl, &y, &yl, &d, &dl, err)) {
-            JS_FreeValue(ctx, o);
-            return JS_NULL;
-        }
-        JS_SetPropertyStr(ctx, o, "kty", JS_NewString(ctx, "EC"));
-        JS_SetPropertyStr(ctx, o, "crv", JS_NewString(ctx, k->curve ? k->curve : ""));
-        char *bx = ns_b64url_encode(x, xl), *by = ns_b64url_encode(y, yl);
-        JS_SetPropertyStr(ctx, o, "x", JS_NewString(ctx, bx));
-        JS_SetPropertyStr(ctx, o, "y", JS_NewString(ctx, by));
-        g_free(bx); g_free(by);
-        if (d) {
-            char *bd = ns_b64url_encode(d, dl);
-            JS_SetPropertyStr(ctx, o, "d", JS_NewString(ctx, bd));
-            g_free(bd);
-        }
-        g_free(x); g_free(y); g_free(d);
-        return o;
-    }
-    if (!g_strcmp0(k->algo, "Ed25519") || !g_strcmp0(k->algo, "X25519")) {
-        guint8 *x, *d;
-        gsize xl, dl;
-        if (!ns_crypto_export_okp_jwk(k, &x, &xl, &d, &dl, err)) {
-            JS_FreeValue(ctx, o);
-            return JS_NULL;
-        }
-        JS_SetPropertyStr(ctx, o, "kty", JS_NewString(ctx, "OKP"));
-        JS_SetPropertyStr(ctx, o, "crv", JS_NewString(ctx, k->algo));
-        char *bx = ns_b64url_encode(x, xl);
-        JS_SetPropertyStr(ctx, o, "x", JS_NewString(ctx, bx));
-        g_free(bx);
-        if (d) {
-            char *bd = ns_b64url_encode(d, dl);
-            JS_SetPropertyStr(ctx, o, "d", JS_NewString(ctx, bd));
-            g_free(bd);
-        }
-        g_free(x); g_free(d);
-        return o;
-    }
-    JS_FreeValue(ctx, o);
-    if (err && !*err) *err = g_strdup("NotSupportedError: jwk export");
-    return JS_NULL;
-}
-
-static JSValue
-ns_subtle_exportKey(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 2) {
-        ns_js_promise_reject(ctx, resolvers, "exportKey: 2 arguments required");
-        return promise;
-    }
-    const char *format = JS_ToCString(ctx, argv[0]);
-    ns_crypto_key *k = JS_GetOpaque(argv[1], ns_cryptokey_class_id);
-    if (!format || !k) {
-        if (format) JS_FreeCString(ctx, format);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
-        return promise;
-    }
-    if (!k->extractable) {
-        JS_FreeCString(ctx, format);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: not extractable");
-        return promise;
-    }
-    char *err = NULL;
-    if (!strcmp(format, "jwk")) {
-        JSValue jwk = ns_wc_export_jwk(ctx, k, &err);
-        if (JS_IsNull(jwk))
-            ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-        else
-            ns_wc_resolve(ctx, resolvers, jwk);
-    } else {
-        gsize ol = 0;
-        guint8 *out = ns_crypto_export_raw(format, k, &ol, &err);
-        if (out) {
-            ns_wc_resolve_buf(ctx, resolvers, out, ol, promise);
-            g_free(out);
-        } else {
-            ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-        }
-    }
-    g_free(err);
-    JS_FreeCString(ctx, format);
-    return promise;
-}
-
-static const char *
-ns_wc_op_check(const ns_crypto_key *k, const char *alg_name, guint32 need)
-{
-    if (!(k->usages & need))
-        return "InvalidAccessError: key does not permit this operation";
-    if (alg_name && k->algo && g_ascii_strcasecmp(alg_name, k->algo) != 0)
-        return "InvalidAccessError: key algorithm does not match";
-    return NULL;
-}
-
-static JSValue
-ns_subtle_sign(JSContext *ctx, JSValueConst this_val,
-               int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 3) {
-        ns_js_promise_reject(ctx, resolvers, "sign: 3 arguments required");
-        return promise;
-    }
-    ns_wc_alg a;
-    ns_crypto_key *k = JS_GetOpaque(argv[1], ns_cryptokey_class_id);
-    if (!ns_wc_parse_alg(ctx, argv[0], &a) || !k) {
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
-        return promise;
-    }
-    const char *uerr = ns_wc_op_check(k, a.name, NS_USAGE_SIGN);
-    if (uerr) {
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, uerr);
-        return promise;
-    }
-    gsize dl = 0;
-    guint8 *data = ns_wc_dup_buf(ctx, argv[2], &dl);
-    ns_crypto_params p = {0};
-    p.sign_hash = a.hash;
-    p.pss_salt_len = a.salt_len_pss;
-    gsize ol = 0;
-    char *err = NULL;
-    guint8 *sig = ns_crypto_sign(k, &p, data, dl, &ol, &err);
-    if (sig) { ns_wc_resolve_buf(ctx, resolvers, sig, ol, promise); g_free(sig); }
-    else ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    g_free(err);
-    g_free(data);
-    ns_wc_alg_free(&a);
-    return promise;
-}
-
-static JSValue
-ns_subtle_verify(JSContext *ctx, JSValueConst this_val,
-                 int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 4) {
-        ns_js_promise_reject(ctx, resolvers, "verify: 4 arguments required");
-        return promise;
-    }
-    ns_wc_alg a;
-    ns_crypto_key *k = JS_GetOpaque(argv[1], ns_cryptokey_class_id);
-    if (!ns_wc_parse_alg(ctx, argv[0], &a) || !k) {
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
-        return promise;
-    }
-    const char *uerr = ns_wc_op_check(k, a.name, NS_USAGE_VERIFY);
-    if (uerr) {
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, uerr);
-        return promise;
-    }
-    gsize sl = 0, dl = 0;
-    guint8 *sig = ns_wc_dup_buf(ctx, argv[2], &sl);
-    guint8 *data = ns_wc_dup_buf(ctx, argv[3], &dl);
-    ns_crypto_params p = {0};
-    p.sign_hash = a.hash;
-    p.pss_salt_len = a.salt_len_pss;
-    char *err = NULL;
-    int r = ns_crypto_verify(k, &p, sig, sl, data, dl, &err);
-    if (r < 0) ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    else ns_wc_resolve(ctx, resolvers, JS_NewBool(ctx, r == 1));
-    g_free(err);
-    g_free(sig);
-    g_free(data);
-    ns_wc_alg_free(&a);
-    return promise;
-}
-
-static guint8 *
-ns_wc_do_cipher(const ns_crypto_key *k, const ns_wc_alg *a, const guint8 *data,
-                gsize dl, gboolean enc, gsize *out_len, char **err)
-{
-    ns_crypto_params p = {0};
-    p.iv = a->iv; p.iv_len = a->iv_len;
-    p.aad = a->aad; p.aad_len = a->aad_len;
-    p.tag_bits = a->tag_bits;
-    p.label = a->label; p.label_len = a->label_len;
-    if (!g_strcmp0(a->name, "AES-CTR")) {
-        p.iv = a->counter;
-        p.iv_len = a->counter_len;
-        p.counter_bits = a->length;
-    }
-    return enc ? ns_crypto_encrypt(k, &p, data, dl, out_len, err)
-               : ns_crypto_decrypt(k, &p, data, dl, out_len, err);
-}
-
-static JSValue
-ns_subtle_cipher(JSContext *ctx, int argc, JSValueConst *argv, gboolean enc)
-{
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 3) {
-        ns_js_promise_reject(ctx, resolvers, "3 arguments required");
-        return promise;
-    }
-    ns_wc_alg a;
-    ns_crypto_key *k = JS_GetOpaque(argv[1], ns_cryptokey_class_id);
-    if (!ns_wc_parse_alg(ctx, argv[0], &a) || !k) {
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
-        return promise;
-    }
-    const char *uerr = ns_wc_op_check(k, a.name,
-                                      enc ? NS_USAGE_ENCRYPT : NS_USAGE_DECRYPT);
-    if (uerr) {
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, uerr);
-        return promise;
-    }
-    gsize dl = 0;
-    guint8 *data = ns_wc_dup_buf(ctx, argv[2], &dl);
-    gsize ol = 0;
-    char *err = NULL;
-    guint8 *out = ns_wc_do_cipher(k, &a, data, dl, enc, &ol, &err);
-    if (out) { ns_wc_resolve_buf(ctx, resolvers, out, ol, promise); g_free(out); }
-    else ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    g_free(err);
-    g_free(data);
-    ns_wc_alg_free(&a);
-    return promise;
-}
-
-static JSValue
-ns_subtle_encrypt(JSContext *ctx, JSValueConst this_val,
-                  int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_subtle_cipher(ctx, argc, argv, TRUE);
-}
-
-static JSValue
-ns_subtle_decrypt(JSContext *ctx, JSValueConst this_val,
-                  int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_subtle_cipher(ctx, argc, argv, FALSE);
-}
-
-static guint8 *
-ns_wc_derive(ns_wc_alg *a, ns_crypto_key *k, int length_bits,
-             gsize *out_len, char **err)
-{
-    ns_crypto_params p = {0};
-    p.peer = a->peer;
-    p.salt = a->salt; p.salt_len = a->salt_len;
-    p.info = a->info; p.info_len = a->info_len;
-    p.iterations = a->iterations;
-    p.kdf_hash = a->hash;
-    return ns_crypto_derive_bits(k, &p, length_bits, out_len, err);
-}
-
-static JSValue
-ns_subtle_deriveBits(JSContext *ctx, JSValueConst this_val,
-                     int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 2) {
-        ns_js_promise_reject(ctx, resolvers, "deriveBits: 2 arguments required");
-        return promise;
-    }
-    ns_wc_alg a;
-    ns_crypto_key *k = JS_GetOpaque(argv[1], ns_cryptokey_class_id);
-    if (!ns_wc_parse_alg(ctx, argv[0], &a) || !k) {
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
-        return promise;
-    }
-    int length = 0;
-    if (argc >= 3 && JS_IsNumber(argv[2])) {
-        int32_t x = 0;
-        JS_ToInt32(ctx, &x, argv[2]);
-        length = x;
-    }
-    gsize ol = 0;
-    char *err = NULL;
-    guint8 *out = ns_wc_derive(&a, k, length, &ol, &err);
-    if (out) { ns_wc_resolve_buf(ctx, resolvers, out, ol, promise); g_free(out); }
-    else ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    g_free(err);
-    ns_wc_alg_free(&a);
-    return promise;
-}
-
-static JSValue
-ns_subtle_deriveKey(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 5) {
-        ns_js_promise_reject(ctx, resolvers, "deriveKey: 5 arguments required");
-        return promise;
-    }
-    ns_wc_alg a = {0}, dk = {0};
-    ns_crypto_key *k = JS_GetOpaque(argv[1], ns_cryptokey_class_id);
-    if (!ns_wc_parse_alg(ctx, argv[0], &a) ||
-        !ns_wc_parse_alg(ctx, argv[2], &dk) || !k) {
-        ns_wc_alg_free(&a);
-        ns_wc_alg_free(&dk);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
-        return promise;
-    }
-    gboolean ext = JS_ToBool(ctx, argv[3]) > 0;
-    guint32 usages = ns_wc_usages_from_array(ctx, argv[4]);
-    int bits = dk.length;
-    if (bits <= 0 && !g_strcmp0(dk.name, "HMAC"))
-        bits = ns_wc_hmac_default_bits(dk.hash);
-    if (bits <= 0) bits = 256;
-
-    gsize ol = 0;
-    char *err = NULL;
-    guint8 *out = ns_wc_derive(&a, k, bits, &ol, &err);
-    if (out) {
-        ns_crypto_key *nk = ns_crypto_import_raw("raw", out, ol, dk.name, dk.hash,
-                                                 NULL, ext, usages, &err);
-        if (ol) memset(out, 0, ol);
-        g_free(out);
-        if (nk) ns_wc_resolve(ctx, resolvers, ns_wc_make_key(ctx, nk));
-        else ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    } else {
-        ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    }
-    g_free(err);
-    ns_wc_alg_free(&a);
-    ns_wc_alg_free(&dk);
-    return promise;
-}
-
-static guint8 *
-ns_wc_serialize_key(JSContext *ctx, const char *format, ns_crypto_key *k,
-                    gsize *out_len, char **err)
-{
-    if (strcmp(format, "jwk") != 0)
-        return ns_crypto_export_raw(format, k, out_len, err);
-    JSValue jwk = ns_wc_export_jwk(ctx, k, err);
-    if (JS_IsNull(jwk)) return NULL;
-    JSValue text = JS_JSONStringify(ctx, jwk, JS_UNDEFINED, JS_UNDEFINED);
-    JS_FreeValue(ctx, jwk);
-    if (JS_IsException(text)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        if (err && !*err) *err = g_strdup("OperationError: jwk serialize");
-        return NULL;
-    }
-    size_t slen = 0;
-    const char *s = JS_ToCStringLen(ctx, &slen, text);
-    guint8 *out = s ? g_memdup2(s, slen) : NULL;
-    if (out) *out_len = slen;
-    if (s) JS_FreeCString(ctx, s);
-    JS_FreeValue(ctx, text);
-    if (!out && err && !*err) *err = g_strdup("OperationError: jwk serialize");
-    return out;
-}
-
-static JSValue
-ns_subtle_wrapKey(JSContext *ctx, JSValueConst this_val,
-                  int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 4) {
-        ns_js_promise_reject(ctx, resolvers, "wrapKey: 4 arguments required");
-        return promise;
-    }
-    const char *format = JS_ToCString(ctx, argv[0]);
-    ns_crypto_key *key = JS_GetOpaque(argv[1], ns_cryptokey_class_id);
-    ns_crypto_key *wk = JS_GetOpaque(argv[2], ns_cryptokey_class_id);
-    ns_wc_alg a = {0};
-    if (!format || !key || !wk || !ns_wc_parse_alg(ctx, argv[3], &a)) {
-        if (format) JS_FreeCString(ctx, format);
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
-        return promise;
-    }
-    const char *uerr = ns_wc_op_check(wk, a.name, NS_USAGE_WRAP);
-    if (!uerr && !key->extractable)
-        uerr = "InvalidAccessError: key is not extractable";
-    if (uerr) {
-        JS_FreeCString(ctx, format);
-        ns_wc_alg_free(&a);
-        ns_js_promise_reject(ctx, resolvers, uerr);
-        return promise;
-    }
-    char *err = NULL;
-    gsize dl = 0;
-    guint8 *data = ns_wc_serialize_key(ctx, format, key, &dl, &err);
-    if (data) {
-        gsize ol = 0;
-        guint8 *out = ns_wc_do_cipher(wk, &a, data, dl, TRUE, &ol, &err);
-        if (out) { ns_wc_resolve_buf(ctx, resolvers, out, ol, promise); g_free(out); }
-        else ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-        if (dl) memset(data, 0, dl);
-        g_free(data);
-    } else {
-        ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    }
-    g_free(err);
-    JS_FreeCString(ctx, format);
-    ns_wc_alg_free(&a);
-    return promise;
-}
-
-static JSValue
-ns_subtle_unwrapKey(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 7) {
-        ns_js_promise_reject(ctx, resolvers, "unwrapKey: 7 arguments required");
-        return promise;
-    }
-    const char *format = JS_ToCString(ctx, argv[0]);
-    ns_crypto_key *wk = JS_GetOpaque(argv[2], ns_cryptokey_class_id);
-    ns_wc_alg ua = {0}, uka = {0};
-    if (!format || !wk || !ns_wc_parse_alg(ctx, argv[3], &ua) ||
-        !ns_wc_parse_alg(ctx, argv[4], &uka)) {
-        if (format) JS_FreeCString(ctx, format);
-        ns_wc_alg_free(&ua);
-        ns_wc_alg_free(&uka);
-        ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
-        return promise;
-    }
-    const char *uerr = ns_wc_op_check(wk, ua.name, NS_USAGE_UNWRAP);
-    if (uerr) {
-        JS_FreeCString(ctx, format);
-        ns_wc_alg_free(&ua);
-        ns_wc_alg_free(&uka);
-        ns_js_promise_reject(ctx, resolvers, uerr);
-        return promise;
-    }
-    gboolean ext = JS_ToBool(ctx, argv[5]) > 0;
-    guint32 usages = ns_wc_usages_from_array(ctx, argv[6]);
-    gsize wl = 0;
-    guint8 *wrapped = ns_wc_dup_buf(ctx, argv[1], &wl);
-    char *err = NULL;
-    gsize pl = 0;
-    guint8 *plain = ns_wc_do_cipher(wk, &ua, wrapped, wl, FALSE, &pl, &err);
-    ns_crypto_key *nk = NULL;
-    if (plain) {
-        if (!strcmp(format, "jwk")) {
-            char *jwk_text = g_strndup((const char *)plain, pl);
-            JSValue obj = JS_ParseJSON(ctx, jwk_text, pl, "<unwrap>");
-            g_free(jwk_text);
-            if (JS_IsException(obj)) {
-                JS_FreeValue(ctx, JS_GetException(ctx));
-                err = g_strdup("DataError: wrapped jwk is not valid JSON");
-            } else {
-                nk = ns_wc_do_import(ctx, "jwk", obj, &uka, ext, usages, &err);
-            }
-            JS_FreeValue(ctx, obj);
-        } else {
-            JSValue ab = JS_NewArrayBufferCopy(ctx, plain, pl);
-            nk = ns_wc_do_import(ctx, format, ab, &uka, ext, usages, &err);
-            JS_FreeValue(ctx, ab);
-        }
-        memset(plain, 0, pl);
-        g_free(plain);
-    }
-    if (nk) ns_wc_resolve(ctx, resolvers, ns_wc_make_key(ctx, nk));
-    else ns_js_promise_reject(ctx, resolvers, err ? err : "OperationError");
-    g_free(err);
-    g_free(wrapped);
-    JS_FreeCString(ctx, format);
-    ns_wc_alg_free(&ua);
-    ns_wc_alg_free(&uka);
-    return promise;
-}
-
-static JSValue
-ns_subtle_digest(JSContext *ctx, JSValueConst this_val,
-                 int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    JSValue resolvers[2];
-    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
-    if (JS_IsException(promise)) return promise;
-    if (argc < 2) {
-        ns_js_promise_reject(ctx, resolvers, "digest: 2 arguments required");
-        return promise;
-    }
-    const char *algo_name = NULL;
-    if (JS_IsString(argv[0])) {
-        algo_name = JS_ToCString(ctx, argv[0]);
-    } else if (JS_IsObject(argv[0])) {
-        JSValue nm = JS_GetPropertyStr(ctx, argv[0], "name");
-        if (JS_IsUndefined(nm)) {
-            JS_FreeValue(ctx, nm);
-            ns_js_promise_reject(ctx, resolvers,
-                "TypeError: algorithm name is required");
-            return promise;
-        }
-        algo_name = JS_ToCString(ctx, nm);
-        JS_FreeValue(ctx, nm);
-    }
-    GChecksumType type = ns_subtle_algorithm(algo_name);
-    gboolean is_sha3 = algo_name &&
-        (g_ascii_strcasecmp(algo_name, "SHA3-256") == 0 ||
-         g_ascii_strcasecmp(algo_name, "SHA3-384") == 0 ||
-         g_ascii_strcasecmp(algo_name, "SHA3-512") == 0);
-    char *sha3_name = is_sha3 ? g_strdup(algo_name) : NULL;
-    if ((int)type < 0 && !is_sha3) {
-        if (algo_name) JS_FreeCString(ctx, algo_name);
-        ns_js_promise_reject(ctx, resolvers,
-            "NotSupportedError: unsupported digest algorithm");
-        return promise;
-    }
-    if (algo_name) JS_FreeCString(ctx, algo_name);
-    size_t byte_off = 0, byte_len = 0, bpe = 0;
-    JSValue buf = JS_GetTypedArrayBuffer(ctx, argv[1], &byte_off, &byte_len, &bpe);
-    uint8_t *data = NULL;
-    size_t data_len = 0;
-    gboolean buffer_like = FALSE;
-    if (!JS_IsException(buf)) {
-        buffer_like = TRUE;
-        size_t total = 0;
-        uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
-        if (!base) JS_FreeValue(ctx, JS_GetException(ctx));
-        if (base && byte_off + byte_len <= total) {
-            data = base + byte_off;
-            data_len = byte_len;
-        }
-        JS_FreeValue(ctx, buf);
-    } else {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        buffer_like = JS_IsArrayBuffer(argv[1]) ||
-                      JS_GetTypedArrayType(argv[1]) >= 0;
-        size_t ab_total = 0;
-        uint8_t *ab_base = JS_GetArrayBuffer(ctx, &ab_total, argv[1]);
-        if (!ab_base) JS_FreeValue(ctx, JS_GetException(ctx));
-        if (ab_base) { data = ab_base; data_len = ab_total; }
-    }
-    if (!data && !buffer_like) {
-        g_free(sha3_name);
-        ns_js_promise_reject(ctx, resolvers,
-            "digest: data must be ArrayBuffer or typed array");
-        return promise;
-    }
-    gsize digest_len = 0;
-    guint8 *digest = NULL;
-    if (sha3_name) {
-        digest = ns_crypto_digest(sha3_name, data, data_len, &digest_len);
-        g_free(sha3_name);
-        if (!digest) {
-            ns_js_promise_reject(ctx, resolvers,
-                "OperationError: digest failed");
-            return promise;
-        }
-    } else {
-        GChecksum *sum = g_checksum_new(type);
-        g_checksum_update(sum, data ? data : (const guint8 *)"", data_len);
-        digest_len = g_checksum_type_get_length(type);
-        digest = g_malloc(digest_len);
-        g_checksum_get_digest(sum, digest, &digest_len);
-        g_checksum_free(sum);
-    }
-    JSValue out_ab = JS_NewArrayBufferCopy(ctx, digest, digest_len);
-    g_free(digest);
-    JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, &out_ab);
-    JS_FreeValue(ctx, out_ab);
-    JS_FreeValue(ctx, resolvers[0]);
-    JS_FreeValue(ctx, resolvers[1]);
-    return promise;
-}
-
 static JSValue
 ns_clipboard_writeText(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -12749,6 +11596,12 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         JSValue clone = JS_NewArrayBufferCopy(ctx, p, sz);
         if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
         return clone;
+    }
+
+    JSValue key_clone = ns_webcrypto_clone_key(ctx, v);
+    if (!JS_IsUndefined(key_clone)) {
+        if (!JS_IsException(key_clone)) ns_sc_memo_put(s, ptr, key_clone);
+        return key_clone;
     }
 
     int tt = JS_GetTypedArrayType(v);
@@ -16072,10 +14925,18 @@ ns_window_getRandomValues(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_ThrowTypeError(ctx, "getRandomValues: argument required");
     JSValue arr = argv[0];
     size_t byte_offset = 0, byte_length = 0, bytes_per_element = 0;
+    if (JS_GetTypedArrayType(arr) < 0) {
+        const uint8_t *view_data = NULL;
+        size_t view_len = 0;
+        if (JS_IsObject(arr) && !JS_IsArrayBuffer(arr) &&
+            ns_js_buffer_source_bytes(ctx, arr, &view_data, &view_len))
+            return ns_throw_dom_exception(ctx, "TypeMismatchError", 17,
+                "getRandomValues: integer typed array required");
+        return JS_ThrowTypeError(ctx, "getRandomValues: integer typed array required");
+    }
     JSValue buf = JS_GetTypedArrayBuffer(ctx, arr, &byte_offset,
                                          &byte_length, &bytes_per_element);
-    if (JS_IsException(buf))
-        return JS_ThrowTypeError(ctx, "getRandomValues: integer typed array required");
+    if (JS_IsException(buf)) return buf;
     int ta_type = JS_GetTypedArrayType(arr);
     if (ta_type == JS_TYPED_ARRAY_FLOAT16 ||
         ta_type == JS_TYPED_ARRAY_FLOAT32 ||
@@ -16089,9 +14950,8 @@ ns_window_getRandomValues(JSContext *ctx, JSValueConst this_val,
         aligned -= aligned % bytes_per_element;
     if (aligned > 65536) {
         JS_FreeValue(ctx, buf);
-        return JS_ThrowRangeError(ctx,
-            "getRandomValues: requested array length (%zu) exceeds 65536",
-            aligned);
+        return ns_throw_quota_exceeded_msg(ctx,
+            "getRandomValues: the array is longer than 65536 bytes");
     }
     if (aligned == 0) {
         JS_FreeValue(ctx, buf);
@@ -17533,46 +16393,25 @@ ns_xhr_overrideMimeType(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static gboolean
-ns_xhr_mime_is_user_defined(const char *mime)
-{
-    if (!mime) return FALSE;
-    char *lower = g_ascii_strdown(mime, -1);
-    gboolean yes = lower && strstr(lower, "x-user-defined") != NULL;
-    g_free(lower);
-    return yes;
-}
-
-static gboolean
-ns_xhr_uses_user_defined_text(JSContext *ctx, JSValueConst obj,
-                              const char *content_type)
-{
-    JSValue mv = JS_GetPropertyStr(ctx, obj, "_mimeOverride");
-    const char *mime = JS_ToCString(ctx, mv);
-    gboolean yes = ns_xhr_mime_is_user_defined(mime) ||
-                   ns_xhr_mime_is_user_defined(content_type);
-    if (mime) JS_FreeCString(ctx, mime);
-    JS_FreeValue(ctx, mv);
-    return yes;
-}
-
 static JSValue
 ns_xhr_response_text_value(JSContext *ctx, JSValueConst obj,
                            const guint8 *body, gsize blen,
                            const char *content_type)
 {
-    if (!ns_xhr_uses_user_defined_text(ctx, obj, content_type))
-        return JS_NewStringLen(ctx, body ? (const char *)body : "", blen);
-    if (blen == 0)
-        return JS_NewStringLen(ctx, "", 0);
-    if (blen > G_MAXSIZE / sizeof(uint16_t))
-        return JS_ThrowRangeError(ctx, "responseText is too large");
-    uint16_t *wide = g_try_new(uint16_t, blen);
-    if (!wide) return JS_ThrowOutOfMemory(ctx);
-    for (gsize i = 0; i < blen; i++)
-        wide[i] = body ? body[i] : 0;
-    JSValue v = JS_NewStringUTF16(ctx, wide, blen);
-    g_free(wide);
+    JSValue mv = JS_GetPropertyStr(ctx, obj, "_mimeOverride");
+    const char *override = JS_IsUndefined(mv) ? NULL : JS_ToCString(ctx, mv);
+    char *label = override ? ns_encoding_mime_charset(override) : NULL;
+    if (!label) label = ns_encoding_mime_charset(content_type);
+    const ns_encoding *enc = label ? ns_encoding_for_label(label) : NULL;
+    gsize len = 0;
+    char *text = ns_encoding_decode_sniffed(enc ? enc : ns_encoding_utf8(),
+                                            body ? (const char *)body : "",
+                                            blen, &len);
+    JSValue v = JS_NewStringLen(ctx, text, len);
+    g_free(text);
+    g_free(label);
+    if (override) JS_FreeCString(ctx, override);
+    JS_FreeValue(ctx, mv);
     return v;
 }
 
@@ -19096,322 +17935,6 @@ ns_window_close_watcher_ctor(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
-static char *
-ns_utf8_replace_lone_surrogates(const char *s, gsize len, gsize *out_len)
-{
-    gboolean found = FALSE;
-    for (gsize i = 0; i + 2 < len; i++)
-        if ((guint8)s[i] == 0xED && (guint8)s[i + 1] >= 0xA0) { found = TRUE; break; }
-    if (!found) return NULL;
-    GByteArray *out = g_byte_array_sized_new(len);
-    for (gsize i = 0; i < len; ) {
-        if (i + 2 < len && (guint8)s[i] == 0xED &&
-            (guint8)s[i + 1] >= 0xA0 && (guint8)s[i + 1] <= 0xBF) {
-            static const guint8 repl[3] = { 0xEF, 0xBF, 0xBD };
-            g_byte_array_append(out, repl, 3);
-            i += 3;
-        } else {
-            g_byte_array_append(out, (const guint8 *)(s + i), 1);
-            i++;
-        }
-    }
-    *out_len = out->len;
-    return (char *)g_byte_array_free(out, FALSE);
-}
-
-static JSValue
-ns_text_encoder_encode(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    gsize len = 0;
-    const char *s = NULL;
-    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
-        s = JS_ToCStringLen(ctx, &len, argv[0]);
-        if (!s) len = 0;
-    }
-    gsize fixed_len = 0;
-    char *fixed = s ? ns_utf8_replace_lone_surrogates(s, len, &fixed_len) : NULL;
-    JSValue arr_buf = fixed
-        ? JS_NewArrayBufferCopy(ctx, (const uint8_t *)fixed, fixed_len)
-        : JS_NewArrayBufferCopy(ctx, (const uint8_t *)(s ? s : ""), len);
-    g_free(fixed);
-    if (s) JS_FreeCString(ctx, s);
-    if (JS_IsException(arr_buf)) return arr_buf;
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue u8 = JS_GetPropertyStr(ctx, global, "Uint8Array");
-    JS_FreeValue(ctx, global);
-    JSValueConst args[1] = { arr_buf };
-    JSValue view = JS_CallConstructor(ctx, u8, 1, args);
-    JS_FreeValue(ctx, u8);
-    JS_FreeValue(ctx, arr_buf);
-    return view;
-}
-
-static JSValue
-ns_window_text_encoder_ctor(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    JSValue proto = JS_IsObject(this_val)
-        ? JS_GetPropertyStr(ctx, this_val, "prototype") : JS_NULL;
-    JSValue obj = JS_IsObject(proto) ? JS_NewObjectProto(ctx, proto)
-                                     : JS_NewObject(ctx);
-    JS_FreeValue(ctx, proto);
-    JS_SetPropertyStr(ctx, obj, "encoding", JS_NewString(ctx, "utf-8"));
-    ns_bind_fn(ctx, obj, "encode", ns_text_encoder_encode, 1);
-    return obj;
-}
-
-static void
-ns_utf8_append_cp(GByteArray *out, guint32 cp)
-{
-    guint8 b[4];
-    if (cp < 0x80) {
-        b[0] = (guint8)cp;
-        g_byte_array_append(out, b, 1);
-    } else if (cp < 0x800) {
-        b[0] = (guint8)(0xC0 | (cp >> 6));
-        b[1] = (guint8)(0x80 | (cp & 0x3F));
-        g_byte_array_append(out, b, 2);
-    } else if (cp < 0x10000) {
-        b[0] = (guint8)(0xE0 | (cp >> 12));
-        b[1] = (guint8)(0x80 | ((cp >> 6) & 0x3F));
-        b[2] = (guint8)(0x80 | (cp & 0x3F));
-        g_byte_array_append(out, b, 3);
-    } else {
-        b[0] = (guint8)(0xF0 | (cp >> 18));
-        b[1] = (guint8)(0x80 | ((cp >> 12) & 0x3F));
-        b[2] = (guint8)(0x80 | ((cp >> 6) & 0x3F));
-        b[3] = (guint8)(0x80 | (cp & 0x3F));
-        g_byte_array_append(out, b, 4);
-    }
-}
-
-static gboolean
-ns_decode_utf8(const guint8 *data, gsize len, GByteArray *out, gboolean fatal,
-               gboolean stream, gsize *pending_out)
-{
-    guint32 codep = 0;
-    guint bytes_needed = 0, bytes_seen = 0;
-    guint32 lower = 0x80, upper = 0xBF;
-    gsize seq_start = 0;
-    if (pending_out) *pending_out = 0;
-    for (gsize i = 0; i < len; ) {
-        guint8 b = data[i];
-        if (bytes_needed == 0) {
-            if (b <= 0x7F) {
-                ns_utf8_append_cp(out, b);
-                i++;
-            } else if (b >= 0xC2 && b <= 0xDF) {
-                seq_start = i; bytes_needed = 1; codep = b & 0x1F; i++;
-            } else if (b >= 0xE0 && b <= 0xEF) {
-                seq_start = i;
-                if (b == 0xE0) lower = 0xA0;
-                if (b == 0xED) upper = 0x9F;
-                bytes_needed = 2; codep = b & 0x0F; i++;
-            } else if (b >= 0xF0 && b <= 0xF4) {
-                seq_start = i;
-                if (b == 0xF0) lower = 0x90;
-                if (b == 0xF4) upper = 0x8F;
-                bytes_needed = 3; codep = b & 0x07; i++;
-            } else {
-                if (fatal) return FALSE;
-                ns_utf8_append_cp(out, 0xFFFD);
-                i++;
-            }
-        } else if (b < lower || b > upper) {
-            codep = 0; bytes_needed = 0; bytes_seen = 0;
-            lower = 0x80; upper = 0xBF;
-            if (fatal) return FALSE;
-            ns_utf8_append_cp(out, 0xFFFD);
-        } else {
-            lower = 0x80; upper = 0xBF;
-            codep = (codep << 6) | (b & 0x3F);
-            bytes_seen++; i++;
-            if (bytes_seen == bytes_needed) {
-                ns_utf8_append_cp(out, codep);
-                codep = 0; bytes_needed = 0; bytes_seen = 0;
-            }
-        }
-    }
-    if (bytes_needed != 0) {
-        if (stream) {
-            if (pending_out) *pending_out = len - seq_start;
-            return TRUE;
-        }
-        if (fatal) return FALSE;
-        ns_utf8_append_cp(out, 0xFFFD);
-    }
-    return TRUE;
-}
-
-static gboolean
-ns_decode_utf16(const guint8 *data, gsize len, GByteArray *out, gboolean fatal,
-                gboolean big_endian, gboolean stream, gsize *pending_out)
-{
-    guint32 hi = 0;
-    gboolean have_hi = FALSE;
-    gsize i = 0;
-    if (pending_out) *pending_out = 0;
-    for (; i + 2 <= len; i += 2) {
-        guint16 u = big_endian ? (guint16)((data[i] << 8) | data[i + 1])
-                               : (guint16)((data[i + 1] << 8) | data[i]);
-        if (have_hi) {
-            have_hi = FALSE;
-            if (u >= 0xDC00 && u <= 0xDFFF) {
-                ns_utf8_append_cp(out, 0x10000 + ((hi - 0xD800) << 10) +
-                                       (u - 0xDC00));
-                continue;
-            }
-            if (fatal) return FALSE;
-            ns_utf8_append_cp(out, 0xFFFD);
-        }
-        if (u >= 0xD800 && u <= 0xDBFF) {
-            hi = u; have_hi = TRUE;
-        } else if (u >= 0xDC00 && u <= 0xDFFF) {
-            if (fatal) return FALSE;
-            ns_utf8_append_cp(out, 0xFFFD);
-        } else {
-            ns_utf8_append_cp(out, u);
-        }
-    }
-    gsize tail = len - i;
-    if (stream) {
-        if (pending_out) *pending_out = tail + (have_hi ? 2 : 0);
-        return TRUE;
-    }
-    if (have_hi) {
-        if (fatal) return FALSE;
-        ns_utf8_append_cp(out, 0xFFFD);
-    }
-    if (tail) {
-        if (fatal) return FALSE;
-        ns_utf8_append_cp(out, 0xFFFD);
-    }
-    return TRUE;
-}
-
-static void
-ns_decode_windows1252(const guint8 *data, guint n, GByteArray *out)
-{
-    static const guint16 high[32] = {
-        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
-        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
-    };
-    for (guint i = 0; i < n; i++) {
-        guint8 b = data[i];
-        gunichar cp = b < 0x80 ? b : (b < 0xA0 ? high[b - 0x80] : b);
-        gchar tmp[6];
-        gint len = g_unichar_to_utf8(cp, tmp);
-        g_byte_array_append(out, (guint8 *)tmp, (guint)len);
-    }
-}
-
-static JSValue
-ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
-{
-    gboolean stream = FALSE;
-    if (argc >= 2 && JS_IsObject(argv[1])) {
-        JSValue s = JS_GetPropertyStr(ctx, argv[1], "stream");
-        stream = JS_ToBool(ctx, s);
-        JS_FreeValue(ctx, s);
-    }
-
-    int mode = 0;
-    JSValue mv = JS_GetPropertyStr(ctx, this_val, "_mode");
-    if (JS_IsNumber(mv)) { int32_t m = 0; JS_ToInt32(ctx, &m, mv); mode = m; }
-    JS_FreeValue(ctx, mv);
-    JSValue fv = JS_GetPropertyStr(ctx, this_val, "fatal");
-    gboolean fatal = JS_ToBool(ctx, fv);
-    JS_FreeValue(ctx, fv);
-
-    GByteArray *buf = g_byte_array_new();
-
-    JSValue tail = JS_GetPropertyStr(ctx, this_val, "_tail");
-    if (JS_IsObject(tail)) {
-        size_t tlen = 0;
-        uint8_t *tp = JS_GetArrayBuffer(ctx, &tlen, tail);
-        if (tp && tlen) g_byte_array_append(buf, tp, tlen);
-    }
-    JS_FreeValue(ctx, tail);
-
-    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
-        const uint8_t *data = NULL;
-        size_t data_len = 0;
-        JSValue holder = JS_UNDEFINED;
-        if (ns_js_bytes_view(ctx, argv[0], &data, &data_len, &holder)) {
-            if (data && data_len) g_byte_array_append(buf, data, data_len);
-            JS_FreeValue(ctx, holder);
-        } else {
-            uint32_t len = ns_js_array_length(ctx, argv[0]);
-            if (len > (1u << 24)) len = (1u << 24);
-            for (uint32_t i = 0; i < len; i++) {
-                JSValue v = JS_GetPropertyUint32(ctx, argv[0], i);
-                int32_t b = 0;
-                JS_ToInt32(ctx, &b, v);
-                JS_FreeValue(ctx, v);
-                guint8 byte = (guint8)(b & 0xff);
-                g_byte_array_append(buf, &byte, 1);
-            }
-        }
-    }
-
-    guint n = buf->len;
-    gsize pending = 0;
-    GByteArray *out = g_byte_array_sized_new(n + 1);
-    gboolean ok;
-    if (mode == 1)
-        ok = ns_decode_utf16(buf->data, n, out, fatal, FALSE, stream, &pending);
-    else if (mode == 2)
-        ok = ns_decode_utf16(buf->data, n, out, fatal, TRUE, stream, &pending);
-    else if (mode == 3) {
-        ns_decode_windows1252(buf->data, n, out);
-        ok = TRUE;
-        pending = 0;
-    } else {
-        ok = ns_decode_utf8(buf->data, n, out, fatal, stream, &pending);
-    }
-
-    if (!ok) {
-        g_byte_array_free(out, TRUE);
-        g_byte_array_free(buf, TRUE);
-        if (stream) JS_SetPropertyStr(ctx, this_val, "_tail", JS_UNDEFINED);
-        return JS_ThrowTypeError(ctx, "The encoded data was not valid");
-    }
-    guint hold = (guint)pending;
-
-    JSValue bom_checked_v = JS_GetPropertyStr(ctx, this_val, "_bomChecked");
-    gboolean bom_checked = JS_ToBool(ctx, bom_checked_v);
-    JS_FreeValue(ctx, bom_checked_v);
-    if (!bom_checked && out->len > 0) {
-        JSValue ib = JS_GetPropertyStr(ctx, this_val, "ignoreBOM");
-        gboolean ignore_bom = JS_ToBool(ctx, ib);
-        JS_FreeValue(ctx, ib);
-        if (!ignore_bom && out->len >= 3 && out->data[0] == 0xEF &&
-            out->data[1] == 0xBB && out->data[2] == 0xBF)
-            g_byte_array_remove_range(out, 0, 3);
-        JS_SetPropertyStr(ctx, this_val, "_bomChecked", JS_TRUE);
-    }
-
-    JSValue r = JS_NewStringLen(ctx, (const char *)out->data, out->len);
-
-    if (stream && hold > 0 && hold <= n)
-        JS_SetPropertyStr(ctx, this_val, "_tail",
-                          JS_NewArrayBufferCopy(ctx, buf->data + (n - hold), hold));
-    else
-        JS_SetPropertyStr(ctx, this_val, "_tail", JS_UNDEFINED);
-    if (!stream)
-        JS_SetPropertyStr(ctx, this_val, "_bomChecked", JS_FALSE);
-
-    g_byte_array_free(out, TRUE);
-    g_byte_array_free(buf, TRUE);
-    return r;
-}
-
 typedef struct {
     GBytes *bytes;
     char   *type;
@@ -19736,73 +18259,6 @@ ns_window_filereader_ctor(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, obj, "_listeners",  JS_NewArray(ctx));
     ns_bind_event_target_listeners(ctx, obj);
     ns_bind_fn(ctx, obj, "dispatchEvent",       ns_target_dispatchEvent, 1);
-    return obj;
-}
-
-static JSValue
-ns_window_text_decoder_ctor(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    gboolean fatal = FALSE, ignore_bom = FALSE;
-    int mode = 0;
-    const char *encoding = "utf-8";
-    char *label = NULL;
-    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
-        const char *l = JS_ToCString(ctx, argv[0]);
-        if (l) {
-            label = g_ascii_strdown(l, -1);
-            JS_FreeCString(ctx, l);
-            g_strstrip(label);
-        }
-    }
-    if (label) {
-        static const char *const utf8_labels[] = {
-            "unicode-1-1-utf-8", "unicode11utf8", "unicode20utf8",
-            "utf-8", "utf8", "x-unicode20utf8", NULL,
-        };
-        static const char *const utf16le_labels[] = {
-            "csunicode", "iso-10646-ucs-2", "ucs-2", "unicode",
-            "unicodefeff", "utf-16", "utf-16le", NULL,
-        };
-        static const char *const utf16be_labels[] = {
-            "unicodefffe", "utf-16be", NULL,
-        };
-        static const char *const win1252_labels[] = {
-            "ansi_x3.4-1968", "ascii", "cp1252", "cp819", "csisolatin1",
-            "ibm819", "iso-8859-1", "iso-ir-100", "iso8859-1", "iso88591",
-            "iso_8859-1", "iso_8859-1:1987", "l1", "latin1", "us-ascii",
-            "windows-1252", "x-cp1252", NULL,
-        };
-        if (g_strv_contains(utf8_labels, label)) {
-            mode = 0;
-        } else if (g_strv_contains(utf16le_labels, label)) {
-            mode = 1; encoding = "utf-16le";
-        } else if (g_strv_contains(utf16be_labels, label)) {
-            mode = 2; encoding = "utf-16be";
-        } else if (g_strv_contains(win1252_labels, label)) {
-            mode = 3; encoding = "windows-1252";
-        } else {
-            g_free(label);
-            return JS_ThrowRangeError(ctx,
-                "TextDecoder: the encoding label is not supported");
-        }
-    }
-    g_free(label);
-    if (argc >= 2 && JS_IsObject(argv[1])) {
-        JSValue f = JS_GetPropertyStr(ctx, argv[1], "fatal");
-        fatal = JS_ToBool(ctx, f);
-        JS_FreeValue(ctx, f);
-        JSValue ib = JS_GetPropertyStr(ctx, argv[1], "ignoreBOM");
-        ignore_bom = JS_ToBool(ctx, ib);
-        JS_FreeValue(ctx, ib);
-    }
-    JSValue obj = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, obj, "encoding", JS_NewString(ctx, encoding));
-    JS_SetPropertyStr(ctx, obj, "_mode", JS_NewInt32(ctx, mode));
-    JS_SetPropertyStr(ctx, obj, "fatal", JS_NewBool(ctx, fatal));
-    JS_SetPropertyStr(ctx, obj, "ignoreBOM", JS_NewBool(ctx, ignore_bom));
-    ns_bind_fn(ctx, obj, "decode", ns_text_decoder_decode, 1);
     return obj;
 }
 
@@ -22984,8 +21440,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_ctor(ctx, global, "MessageEvent", ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "ErrorEvent", ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "EventTarget", ns_window_event_ctor, 0);
-    ns_bind_ctor(ctx, global, "TextEncoder", ns_window_text_encoder_ctor, 0);
-    ns_bind_ctor(ctx, global, "TextDecoder", ns_window_text_decoder_ctor, 0);
+    ns_encoding_install(ctx, global);
     ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 0);
     ns_usp_install_interface(ctx);
     JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 1);
@@ -23017,22 +21472,7 @@ ns_worker_js_new(ns_worker_host *host)
         JSValue crypto = JS_NewObject(ctx);
         ns_bind_fn(ctx, crypto, "getRandomValues", ns_window_getRandomValues, 1);
         ns_bind_fn(ctx, crypto, "randomUUID",      ns_window_randomUUID,      0);
-        ns_new_class_id(&ns_cryptokey_class_id);
-        JS_NewClass(js->rt, ns_cryptokey_class_id, &ns_cryptokey_class);
-        JSValue subtle = JS_NewObject(ctx);
-        ns_bind_fn(ctx, subtle, "digest",      ns_subtle_digest,      2);
-        ns_bind_fn(ctx, subtle, "encrypt",     ns_subtle_encrypt,     3);
-        ns_bind_fn(ctx, subtle, "decrypt",     ns_subtle_decrypt,     3);
-        ns_bind_fn(ctx, subtle, "sign",        ns_subtle_sign,        3);
-        ns_bind_fn(ctx, subtle, "verify",      ns_subtle_verify,      4);
-        ns_bind_fn(ctx, subtle, "generateKey", ns_subtle_generateKey, 3);
-        ns_bind_fn(ctx, subtle, "importKey",   ns_subtle_importKey,   5);
-        ns_bind_fn(ctx, subtle, "exportKey",   ns_subtle_exportKey,   2);
-        ns_bind_fn(ctx, subtle, "deriveBits",  ns_subtle_deriveBits,  3);
-        ns_bind_fn(ctx, subtle, "deriveKey",   ns_subtle_deriveKey,   5);
-        ns_bind_fn(ctx, subtle, "wrapKey",     ns_subtle_wrapKey,     4);
-        ns_bind_fn(ctx, subtle, "unwrapKey",   ns_subtle_unwrapKey,   7);
-        JS_SetPropertyStr(ctx, crypto, "subtle", subtle);
+        ns_webcrypto_install(ctx, global, crypto);
         JS_SetPropertyStr(ctx, global, "crypto", crypto);
     }
     JS_SetPropertyStr(ctx, global, "self", JS_DupValue(ctx, global));
@@ -37286,6 +35726,31 @@ ns_js_doc_base_url(ns_js *js)
 }
 
 static char *
+ns_js_document_encoding(ns_js *js)
+{
+    if (!js || !js->ctx) return NULL;
+    JSContext *ctx = js->ctx;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue doc = JS_GetPropertyStr(ctx, global, "document");
+    JSValue cs = JS_IsObject(doc) ? JS_GetPropertyStr(ctx, doc, "characterSet")
+                                  : JS_UNDEFINED;
+    char *out = NULL;
+    if (JS_IsString(cs)) {
+        const char *str = JS_ToCString(ctx, cs);
+        if (str) {
+            out = g_strdup(str);
+            JS_FreeCString(ctx, str);
+        }
+    } else if (JS_IsException(cs) || JS_IsException(doc)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, cs);
+    JS_FreeValue(ctx, doc);
+    JS_FreeValue(ctx, global);
+    return out;
+}
+
+static char *
 ns_element_anchor_resolved_href(const ns_node *n, ns_js *js)
 {
     if (!n) return NULL;
@@ -37293,7 +35758,8 @@ ns_element_anchor_resolved_href(const ns_node *n, ns_js *js)
     if (!raw) return NULL;
     g_autofree char *base = ns_js_doc_base_url(js);
     if (base && *base) {
-        char *r = ns_url_resolve(base, raw);
+        g_autofree char *encoding = ns_js_document_encoding(js);
+        char *r = ns_url_resolve_encoded(base, raw, encoding);
         if (r) return r;
     }
     return g_strdup(raw);
@@ -47750,8 +46216,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     ns_install_abort_signal_interface(ctx, global);
 
-    ns_bind_ctor(ctx, global, "TextEncoder", ns_window_text_encoder_ctor, 0);
-    ns_bind_ctor(ctx, global, "TextDecoder", ns_window_text_decoder_ctor, 0);
+    ns_encoding_install(ctx, global);
     ns_bind_ctor(ctx, global, "Response",    ns_window_response_ctor,     0);
     ns_bind_ctor(ctx, global, "Request",     ns_window_request_ctor,      1);
     ns_fetch_install_interface(ctx, global, "Response");
@@ -48246,26 +46711,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_set_tostring_tag(ctx, css_obj, "CSS");
     JS_SetPropertyStr(ctx, global, "CSS", css_obj);
 
-    ns_new_class_id(&ns_cryptokey_class_id);
-    JS_NewClass(js->rt, ns_cryptokey_class_id, &ns_cryptokey_class);
-    JSValue subtle = JS_NewObject(ctx);
-    ns_bind_fn(ctx, subtle, "digest",      ns_subtle_digest,      2);
-    ns_bind_fn(ctx, subtle, "encrypt",     ns_subtle_encrypt,     3);
-    ns_bind_fn(ctx, subtle, "decrypt",     ns_subtle_decrypt,     3);
-    ns_bind_fn(ctx, subtle, "sign",        ns_subtle_sign,        3);
-    ns_bind_fn(ctx, subtle, "verify",      ns_subtle_verify,      4);
-    ns_bind_fn(ctx, subtle, "generateKey", ns_subtle_generateKey, 3);
-    ns_bind_fn(ctx, subtle, "importKey",   ns_subtle_importKey,   5);
-    ns_bind_fn(ctx, subtle, "exportKey",   ns_subtle_exportKey,   2);
-    ns_bind_fn(ctx, subtle, "deriveBits",  ns_subtle_deriveBits,  3);
-    ns_bind_fn(ctx, subtle, "deriveKey",   ns_subtle_deriveKey,   5);
-    ns_bind_fn(ctx, subtle, "wrapKey",     ns_subtle_wrapKey,     4);
-    ns_bind_fn(ctx, subtle, "unwrapKey",   ns_subtle_unwrapKey,   7);
     JSValue crypto_obj = JS_GetPropertyStr(ctx, global, "crypto");
-    if (!JS_IsUndefined(crypto_obj) && !JS_IsNull(crypto_obj))
-        JS_SetPropertyStr(ctx, crypto_obj, "subtle", subtle);
-    else
-        JS_FreeValue(ctx, subtle);
+    ns_webcrypto_install(ctx, global, crypto_obj);
     JS_FreeValue(ctx, crypto_obj);
 
     ns_wasm_install(ctx, global);
@@ -51712,7 +50159,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
         { "TransformStream", 1 },
         { "ByteLengthQueuingStrategy", 1 }, { "CountQueuingStrategy", 1 },
         { "Geolocation", 0 }, { "Permissions", 0 },
-        { "Crypto", 0 }, { "SubtleCrypto", 0 }, { "CryptoKey", 0 },
+        { "Crypto", 0 },
     };
     ns_bind_ctors(ctx, global, ns_window_event_ctor, shim_ctors, G_N_ELEMENTS(shim_ctors));
     {

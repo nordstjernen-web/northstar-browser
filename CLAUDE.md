@@ -249,9 +249,15 @@ Fedora/RHEL `uchardet-devel`). `ns_html_decode_body_full`
 Content-Type header or a `<meta>` prescan (mapped through the WHATWG
 encoding-label table), then accepts valid UTF-8, and only then hands the
 body to [uchardet](https://www.freedesktop.org/wiki/Software/uchardet/)
-to identify the charset before `g_convert`ing to UTF-8. The
-windows-1252 fallback only fires if uchardet can't classify the bytes
-at all.
+to identify the charset. The windows-1252 fallback only fires if
+uchardet can't classify the bytes at all.
+
+Decoding itself goes through `src/encoding.c`: one streaming decoder per
+WHATWG Encoding Standard encoding, following the spec's state machines
+and reading the index tables lexbor already ships in the binary, so the
+result does not depend on the platform's iconv. The same decoders back
+`TextDecoder`/`TextEncoder` (`src/js_encoding.c`), XHR `responseText`,
+and the document-encoding query of `<a>`/`<area>` hrefs.
 
 ### Web Cryptography: OpenSSL libcrypto
 
@@ -260,8 +266,9 @@ Required dependency (Debian/Ubuntu `libssl-dev`, Fedora/RHEL
 WebCrypto SubtleCrypto surface) is implemented in `src/webcrypto.c`
 directly over OpenSSL's EVP/`OSSL_PARAM` APIs — hashing, HMAC, AES
 (GCM/CBC/CTR/KW), RSA (PKCS1/PSS/OAEP), ECDSA/ECDH (P-256/384/521),
-Ed25519/X25519, PBKDF2 and HKDF. The QuickJS `CryptoKey` class and `subtle.*` argument
-marshalling live in `src/js.c`. OpenSSL is already linked transitively
+Ed25519/X25519, PBKDF2 and HKDF. The QuickJS `SubtleCrypto` and
+`CryptoKey` interfaces, WebIDL algorithm normalization and JWK handling
+live in `src/js_webcrypto.c`. OpenSSL is already linked transitively
 through libcurl's TLS backend on Linux and Windows/MSYS2; `meson`
 depends on `libcrypto` explicitly so the headers resolve.
 
