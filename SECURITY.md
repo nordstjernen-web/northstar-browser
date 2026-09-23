@@ -453,7 +453,23 @@ and `top` — `postMessage`, the `location` setter, `closed`, `length`,
 `window`/`self`/`frames`/`parent`/`top` and `close`/`focus`/`blur`;
 anything else throws `SecurityError` — and the embedding page sees
 `contentDocument` as `null` and a restricted `contentWindow` in the
-other direction. This is a JavaScript-level boundary for ordinary
+other direction. A frame's origin is that of the URL it finally loads,
+after redirects.
+
+Because every frame realm lives in the parent's runtime, the frame's
+global object is assembled from the parent's: it receives copies of the
+parent window's properties. For a cross-origin frame that copy is
+limited to the browser's own globals, captured before the page's scripts
+run, so the page's variables never reach it, and the parent-bound
+`cookieStore`, `caches`, `getSelection`, `opener`, `frameElement`,
+`name`, `origin` and `navigation` are replaced or left out. Nodes and
+ranges a frame constructs (`new Text()`, `new Comment()`, `new Range()`,
+custom elements) belong to the frame's document, and each document has
+its own custom element registry, so a definition made in one document
+never upgrades elements of another. Documents without a browsing context
+(`DOMParser`, `createHTMLDocument`, `cloneNode`) are cookie-averse.
+
+This is a JavaScript-level boundary for ordinary
 content, **not** a hard security boundary: a memory-safety bug or a
 Proxy escape in one frame is not contained from the rest of the page.
 Treat frame isolation as defence-in-depth, not as an origin sandbox.
@@ -535,7 +551,11 @@ The `document.cookie` setter:
   prototypes; its restricted window proxies are a JavaScript boundary,
   not a true cross-origin sandbox. A per-origin/per-frame runtime would
   close this and is tracked as future work; until then, do not rely on
-  a cross-origin frame being contained from the embedding origin.
+  a cross-origin frame being contained from the embedding origin. Known
+  seams of the shared runtime: the engine keeps one "current URL", so
+  while a frame's script is running a parent callback that runs in the
+  same turn sees the frame's URL as its own `location`, and a frame's
+  `performance` entries include the embedding page's resource timings.
 - **`document.cookie` in a frame uses the frame's own site.** A
   cross-site frame reads and writes its site's first-party jar through
   `document.cookie`, so the third-party blocking that applies to network

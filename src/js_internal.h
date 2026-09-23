@@ -110,8 +110,10 @@ struct ns_js {
     guint64       nav_key_seq;
     JSValue       navigation;
     char         *current_url;
+    char         *document_origin;
     char         *doc_charset;
     ns_node       *current_doc;
+    const ns_node *main_document;
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
@@ -261,6 +263,8 @@ struct ns_js {
     GHashTable   *console_timers;
     GHashTable   *blob_urls;
     GHashTable   *ce_registry;
+    GHashTable   *ce_def_docs;
+    GHashTable   *platform_globals;
     GHashTable   *ce_pending;
     GHashTable   *ce_under_construction;
     ns_node      *ce_upgrading;

@@ -4,6 +4,36 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A cross-origin frame no longer reaches the embedding page through what
+  the two share in the one QuickJS runtime. Its global object received a
+  copy of every global on the parent's window, the page's own variables
+  included, so `window.someState` or any stored reference to `document`
+  handed the frame the parent's DOM and cookies; `new Text()`,
+  `new Comment()` and `new Range()` produced nodes of the parent's
+  document; `customElements.define()` in the frame upgraded the parent's
+  elements with the frame's class; and the `cookieStore` shim returned
+  the parent's cookies. A cross-origin frame now gets only the browser's
+  own globals, captured before the page's scripts run, and none of the
+  parent-bound ones; nodes and ranges a frame creates belong to its own
+  document; each document has its own custom element registry, as HTML
+  specifies; and `self.origin` reports the frame's origin.
+* Documents without a browsing context -- from `DOMParser`,
+  `createHTMLDocument` or `cloneNode` -- return an empty `document.cookie`,
+  as HTML specifies, instead of the page's cookies, and the
+  `Document.prototype` cookie accessor no longer hands the page's cookies
+  to another document it is called on.
+* A frame whose URL redirects to another site takes the origin of the
+  page it actually loads. It kept the URL it was requested with, so a
+  same-origin address that redirected elsewhere gave the other site's
+  document the embedding page's origin: it could read the parent's DOM
+  and cookies, and the parent could read it.
+* `postMessage`'s `targetOrigin` is checked against the origin of the
+  window the message goes to. The top-level window's origin was read from
+  a URL that is switched to the running frame's while the frame's script
+  runs, so when a frame posted to its parent the parent seemed to have
+  the frame's origin: a message addressed to the parent's real origin was
+  dropped and one addressed to any other origin -- the case `targetOrigin`
+  exists to stop -- was delivered, and replies carried the wrong origin.
 * `crypto.subtle` supports Ed448 and X448 from the Secure Curves draft,
   which used to reject with NotSupportedError. Both generate keys,
   import and export them as `raw`, `spki`, `pkcs8` and JWK (`kty`
