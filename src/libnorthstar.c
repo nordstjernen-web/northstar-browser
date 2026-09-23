@@ -1752,6 +1752,13 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
 
 static const ns_node *browser_hit_node(ns_browser *browser, int x, int y);
 
+static gboolean
+browser_node_is_hyperlink(const ns_node *n)
+{
+    return ns_node_is_element_named(n, "a") ||
+           ns_node_is_element_named(n, "area");
+}
+
 char *
 ns_browser_link_at(ns_browser *browser, int x, int y)
 {
@@ -1768,7 +1775,7 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         const char *href = NULL;
         const ns_node *node = browser_hit_node(browser, px, py);
         for (const ns_node *a = node; a && (!href || !*href); a = a->parent)
-            if (ns_node_is_element_named(a, "a"))
+            if (browser_node_is_hyperlink(a))
                 href = ns_element_get_attr(a, "href");
         if (href && *href) return browser_resolve_navigation(browser, href);
     }
@@ -1814,7 +1821,7 @@ ns_browser_cursor_at(ns_browser *browser, int x, int y)
     if (match) return match;
 
     for (const ns_node *n = node; n; n = n->parent)
-        if (ns_node_is_element_named(n, "a") &&
+        if (browser_node_is_hyperlink(n) &&
             ns_element_get_attr(n, "href")) return NULL;
     for (const ns_node *n = node; n; n = n->parent)
         if (ns_node_is_text_input(n)) return g_strdup("text");
@@ -2687,7 +2694,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     } else if (!prevented && !browser->pending_nav) {
         const char *href = NULL;
         for (const ns_node *a = node; a && !href; a = a->parent) {
-            if (ns_node_is_element_named(a, "a")) {
+            if (browser_node_is_hyperlink(a)) {
                 const char *h = ns_element_get_attr(a, "href");
                 if (h && *h) href = h;
             }

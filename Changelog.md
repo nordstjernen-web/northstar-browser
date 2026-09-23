@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Client-side image maps work. Clicking, hovering or calling
+  `elementFromPoint()` over an `<img usemap>` lands on the `<area>`
+  under the pointer (rectangles, circles, polygons with the even-odd
+  rule and `default`, with `coords` parsed as HTML's list of numbers,
+  garbage and all), and clicking an area follows its link. Areas used
+  to be invisible to the pointer, so the whole image acted as one
+  unlinked picture.
 * A `<script>` that is inserted empty runs once it gets text or a
   `src`, as HTML's "prepare the script element" requires: a script
   created, attached and only then filled through `textContent`,
