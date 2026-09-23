@@ -4,6 +4,20 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The `grid` and `grid-template` shorthands follow their grammar and
+  set every longhand they cover. Rows written in the template form
+  without a size (`"a a" "b b" 1fr`) are `auto`, where the first size
+  given was applied to the first row; line names between rows merge
+  (`"a" [x] [y] "b"` names one line `x y`); omitted longhands are reset,
+  so `grid-template: auto / 1fr 1fr` clears an earlier
+  `grid-template-areas` and `grid: auto-flow / ...` resets
+  `grid-template-rows`; and invalid values (`grid-template: 10px`,
+  `"a" 10px 10px`, `none / "a"`) are dropped instead of partially
+  applied. `grid-auto-flow` rejects `auto` and repeated keywords.
+  `element.style` and `getComputedStyle()` read both shorthands back,
+  composed from their longhands, and a track list keeps its
+  `repeat()` and `fit-content()` when read back from a stylesheet or a
+  style attribute.
 * `grid-row`, `grid-column`, `grid-area` and their `-start`/`-end`
   longhands follow the `<grid-line>` grammar. Values such as `0`,
   `span`, `span -2`, `1 2`, `auto 1` or a fifth `grid-area` part were
