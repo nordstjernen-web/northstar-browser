@@ -4,6 +4,17 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `TextDecoder` accepts every label of the Encoding Standard, not just
+  UTF-8, UTF-16 and windows-1252, so `new TextDecoder("shift_jis")` or
+  `"gbk"` no longer throws a RangeError, and it decodes with the same
+  decoders as documents: partial sequences of any encoding carry over
+  between `{stream: true}` calls and invalid input is replaced the way
+  the standard specifies. `TextDecoder` and `TextEncoder` are real
+  interfaces with `encoding`, `fatal`, `ignoreBOM` and the methods on
+  their prototypes, `TextEncoder.encodeInto()` is native and counts
+  what it read in UTF-16 units, `TextDecoderStream` reports the
+  decoder's canonical encoding name and its `fatal`/`ignoreBOM`, and
+  `TextEncoderStream` joins a surrogate pair split across two chunks.
 * Pages in the legacy East Asian encodings -- Big5, EUC-JP, Shift_JIS,
   ISO-2022-JP, EUC-KR, GBK and gb18030 -- decode as the Encoding
   Standard specifies. The whole document went through iconv in one
