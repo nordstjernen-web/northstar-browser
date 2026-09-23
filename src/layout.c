@@ -5857,6 +5857,188 @@ flex_item_baseline(const ns_box *c, double fallback)
     return box_first_baseline(c, &baseline) ? baseline : fallback;
 }
 
+#define NS_MEASURE_CACHE_MAX_BYTES ((gsize)16 << 20)
+#define NS_MEASURE_MAX_CONTENT (-1.0)
+#define NS_MEASURE_MIN_CONTENT (-2.0)
+
+typedef struct measure_entry {
+    ns_style *style;
+    double height;
+    double baseline;
+} measure_entry;
+
+static GHashTable *g_measure_cache;
+static gsize g_measure_cache_bytes;
+
+static int
+measure_cache_mode(void)
+{
+    static gint mode = -1;
+    if (G_UNLIKELY(mode < 0)) {
+        const char *v = g_getenv("NS_LAYOUT_CACHE");
+        mode = v && strcmp(v, "0") == 0 ? 0
+             : v && strcmp(v, "verify") == 0 ? 2 : 1;
+    }
+    return mode;
+}
+
+static void
+measure_entry_free(gpointer p)
+{
+    measure_entry *e = p;
+    ns_style_free(e->style);
+    g_free(e);
+}
+
+static void
+measure_key_put(GByteArray *k, const void *p, gsize n)
+{
+    g_byte_array_append(k, p, (guint)n);
+}
+
+static void
+measure_key_str(GByteArray *k, const char *s)
+{
+    guint32 n = s ? (guint32)strlen(s) + 1 : 0;
+    measure_key_put(k, &n, sizeof n);
+    if (s) measure_key_put(k, s, n);
+}
+
+static void
+measure_key_attr(GByteArray *k, const ns_inline_attr *a)
+{
+    switch (a->kind) {
+    case NS_INLINE_BOLD:
+    case NS_INLINE_ITALIC:
+    case NS_INLINE_MONOSPACE:
+    case NS_INLINE_UPRIGHT:
+    case NS_INLINE_SMALL_CAPS:
+    case NS_INLINE_FONT_WEIGHT:
+    case NS_INLINE_FONT_STRETCH:
+    case NS_INLINE_FONT_FEATURES:
+    case NS_INLINE_FONT_VARIATIONS:
+    case NS_INLINE_FONT_SIZE:
+    case NS_INLINE_FONT_FAMILY:
+    case NS_INLINE_RISE:
+        break;
+    default:
+        return;
+    }
+    guint64 range[3] = { (guint64)a->kind, a->start, a->len };
+    measure_key_put(k, range, sizeof range);
+    switch (a->kind) {
+    case NS_INLINE_FONT_WEIGHT:
+        measure_key_put(k, &a->font_weight, sizeof a->font_weight);
+        break;
+    case NS_INLINE_FONT_STRETCH:
+        measure_key_put(k, &a->font_stretch, sizeof a->font_stretch);
+        break;
+    case NS_INLINE_FONT_FEATURES:
+        measure_key_put(k, &a->font_kerning, sizeof a->font_kerning);
+        measure_key_str(k, a->font_ligatures);
+        measure_key_str(k, a->font_features);
+        break;
+    case NS_INLINE_FONT_VARIATIONS:
+        measure_key_str(k, a->font_variations);
+        break;
+    case NS_INLINE_FONT_SIZE:
+        measure_key_put(k, &a->font_size_px, sizeof a->font_size_px);
+        break;
+    case NS_INLINE_FONT_FAMILY:
+        measure_key_str(k, a->family);
+        break;
+    case NS_INLINE_RISE:
+        measure_key_put(k, &a->rise_px, sizeof a->rise_px);
+        break;
+    default:
+        break;
+    }
+}
+
+static const char *
+node_nearest_attr(const ns_node *n, const char *attr)
+{
+    for (; n; n = n->parent) {
+        if (n->kind != NS_NODE_ELEMENT) continue;
+        const char *v = ns_element_get_attr(n, attr);
+        if (v && *v) return v;
+    }
+    return NULL;
+}
+
+static GBytes *
+measure_key_new(const ns_box *box, const ns_style *parent_style,
+                double content_width)
+{
+    GByteArray *k = g_byte_array_sized_new(128 + (guint)strlen(box->text));
+    measure_key_put(k, &parent_style, sizeof parent_style);
+    guint32 gen = parent_style ? parent_style->mutation_gen : 0;
+    measure_key_put(k, &gen, sizeof gen);
+    double dims[5] = { content_width, ns_css_viewport_w(), ns_css_viewport_h(),
+                       ns_css_container_w(), ns_css_container_h() };
+    measure_key_put(k, dims, sizeof dims);
+    guint64 fonts = ns_paint_font_generation();
+    measure_key_put(k, &fonts, sizeof fonts);
+    const ns_node *dn = box->dom;
+    const ns_style *st = box->style;
+    for (const ns_box *p = box->parent; (!dn || !st) && p; p = p->parent) {
+        if (!dn && p->dom) dn = p->dom;
+        if (!st && p->style) st = p->style;
+    }
+    guint8 flags[3] = {
+        box->parent && ns_input_is_one_line_text(box->parent->dom),
+        st && keyword_is(st->values[NS_CSS_HYPHENS], "auto"),
+        st && keyword_is(st->values[NS_CSS_DIRECTION], "rtl"),
+    };
+    measure_key_put(k, flags, sizeof flags);
+    measure_key_str(k, dn ? node_nearest_attr(dn, "lang") : NULL);
+    measure_key_str(k, dn ? node_nearest_attr(dn, "xml:lang") : NULL);
+    measure_key_str(k, dn ? node_nearest_attr(dn, "dir") : NULL);
+    measure_key_str(k, box->text);
+    if (box->attrs)
+        for (guint i = 0; i < box->attrs->len; i++)
+            measure_key_attr(k, &g_array_index(box->attrs, ns_inline_attr, i));
+    return g_byte_array_free_to_bytes(k);
+}
+
+static const measure_entry *
+measure_cache_lookup(GBytes *key)
+{
+    return g_measure_cache ? g_hash_table_lookup(g_measure_cache, key) : NULL;
+}
+
+static void
+measure_cache_check(const measure_entry *before, const ns_box *box,
+                    double measured, double baseline, double width)
+{
+    if (before && (before->height != measured || before->baseline != baseline))
+        g_printerr("[layout-cache] \"%.40s\" cached %.2f/%.2f, measured "
+                   "%.2f/%.2f at width %.2f\n", box->text, before->height,
+                   before->baseline, measured, baseline, width);
+}
+
+static void
+measure_cache_store(GBytes *key, const ns_style *parent_style, double height,
+                    double baseline)
+{
+    if (!g_measure_cache)
+        g_measure_cache = g_hash_table_new_full(g_bytes_hash, g_bytes_equal,
+                                                (GDestroyNotify)g_bytes_unref,
+                                                measure_entry_free);
+    gsize bytes = g_bytes_get_size(key) + sizeof(measure_entry);
+    if (g_measure_cache_bytes + bytes > NS_MEASURE_CACHE_MAX_BYTES) {
+        g_hash_table_remove_all(g_measure_cache);
+        g_measure_cache_bytes = 0;
+    }
+    measure_entry *e = g_new0(measure_entry, 1);
+    e->style = (ns_style *)parent_style;
+    if (e->style) e->style->ref++;
+    e->height = height;
+    e->baseline = baseline;
+    g_hash_table_replace(g_measure_cache, g_bytes_ref(key), e);
+    g_measure_cache_bytes += bytes;
+}
+
 static void
 inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 {
@@ -5897,6 +6079,21 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         fabs(box->inline_layout_cache_width - content_width) < 0.001) {
         box->content_width = content_width;
         box->content_height = box->inline_layout_cache_height;
+        return;
+    }
+    GBytes *measure_key = cacheable && measure_cache_mode() > 0
+        ? measure_key_new(box, parent_style, content_width) : NULL;
+    const measure_entry *measured_before =
+        measure_key ? measure_cache_lookup(measure_key) : NULL;
+    if (measured_before && measure_cache_mode() == 1) {
+        box->content_width = content_width;
+        box->content_height = measured_before->height;
+        box->first_baseline = measured_before->baseline;
+        box->inline_layout_cache_style = parent_style;
+        box->inline_layout_cache_width = content_width;
+        box->inline_layout_cache_height = box->content_height;
+        box->inline_layout_cache_valid = TRUE;
+        g_bytes_unref(measure_key);
         return;
     }
 
@@ -6013,6 +6210,13 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         box->inline_layout_cache_width = content_width;
         box->inline_layout_cache_height = box->content_height;
         box->inline_layout_cache_valid = TRUE;
+    }
+    measure_cache_check(measured_before, box, box->content_height,
+                        box->first_baseline, content_width);
+    if (measure_key) {
+        measure_cache_store(measure_key, parent_style, box->content_height,
+                            box->first_baseline);
+        g_bytes_unref(measure_key);
     }
 
     if (box->inline_atomics && box->inline_atomics->len > 0) {
@@ -7451,6 +7655,18 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         if (cacheable && box->inline_natural_cache_valid &&
             box->inline_natural_cache_style == parent_style)
             return box->inline_natural_cache_width;
+        GBytes *measure_key = cacheable && measure_cache_mode() > 0
+            ? measure_key_new(box, parent_style, NS_MEASURE_MAX_CONTENT)
+            : NULL;
+        const measure_entry *measured_before =
+            measure_key ? measure_cache_lookup(measure_key) : NULL;
+        if (measured_before && measure_cache_mode() == 1) {
+            box->inline_natural_cache_style = parent_style;
+            box->inline_natural_cache_width = measured_before->height;
+            box->inline_natural_cache_valid = TRUE;
+            g_bytes_unref(measure_key);
+            return box->inline_natural_cache_width;
+        }
         NsPangoLayout *layout = make_pango_layout(parent_style);
         ns_pango_layout_set_width(layout, -1);
         if (box->inline_atomics) {
@@ -7494,6 +7710,12 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             box->inline_natural_cache_style = parent_style;
             box->inline_natural_cache_width = pw;
             box->inline_natural_cache_valid = TRUE;
+        }
+        measure_cache_check(measured_before, box, pw, 0,
+                            NS_MEASURE_MAX_CONTENT);
+        if (measure_key) {
+            measure_cache_store(measure_key, parent_style, pw, 0);
+            g_bytes_unref(measure_key);
         }
         return pw;
     }
@@ -7637,6 +7859,18 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
             }
             return fast;
         }
+        GBytes *measure_key = cacheable && measure_cache_mode() > 0
+            ? measure_key_new(box, parent_style, NS_MEASURE_MIN_CONTENT)
+            : NULL;
+        const measure_entry *measured_before =
+            measure_key ? measure_cache_lookup(measure_key) : NULL;
+        if (measured_before && measure_cache_mode() == 1) {
+            box->inline_min_cache_style = parent_style;
+            box->inline_min_cache_width = measured_before->height;
+            box->inline_min_cache_valid = TRUE;
+            g_bytes_unref(measure_key);
+            return box->inline_min_cache_width;
+        }
         NsPangoLayout *layout = make_pango_layout(parent_style);
         ns_pango_layout_set_width(layout, 1);
         ns_pango_layout_set_wrap(layout, NS_PANGO_WRAP_WORD);
@@ -7663,6 +7897,12 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
             box->inline_min_cache_style = parent_style;
             box->inline_min_cache_width = pw;
             box->inline_min_cache_valid = TRUE;
+        }
+        measure_cache_check(measured_before, box, pw, 0,
+                            NS_MEASURE_MIN_CONTENT);
+        if (measure_key) {
+            measure_cache_store(measure_key, parent_style, pw, 0);
+            g_bytes_unref(measure_key);
         }
         return pw;
     }

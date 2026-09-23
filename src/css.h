@@ -1125,6 +1125,7 @@ typedef struct ns_style {
     struct ns_style *file_selector_button;
     guint64 share_id;
     int   ref;
+    guint32 mutation_gen;
     guint32 currentcolor_bits;
     struct ns_var_map *vars;
 } ns_style;

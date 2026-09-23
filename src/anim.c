@@ -1041,6 +1041,7 @@ style_set_value(ns_style *st, int prop, ns_css_value *v)
     if (st->values[prop] == v) return;
     ns_css_value_free(st->values[prop]);
     st->values[prop] = ns_css_value_dup(v);
+    st->mutation_gen++;
 }
 
 static void
@@ -1071,6 +1072,7 @@ apply_animated_value(GHashTable *styles, ns_anim_state *s, ns_style *st,
         g_hash_table_insert(s->base_values, GINT_TO_POINTER(prop),
                             base ? ns_css_value_dup(base) : g_new0(ns_css_value, 1));
     st->values[prop] = ns_css_value_dup(current);
+    st->mutation_gen++;
     if (base) apply_propagate(styles, s->node, prop, base, current);
     ns_css_value_free(base);
 }

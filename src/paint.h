@@ -49,6 +49,7 @@ NsPangoLayout *ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b);
 void ns_paint_sync_inline_atomic_offsets(ns_box *root);
 
 void ns_paint_register_font_oracle(void);
+guint64 ns_paint_font_generation(void);
 
 void ns_paint_apply_inline_font(NsPangoLayout *layout, const ns_style *style);
 int ns_paint_pango_font_size(double size_px);

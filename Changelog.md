@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A change to a page no longer breaks every paragraph into lines again.
+  The layout tree is rebuilt on each change, and with it every text
+  run's measurement, so a counter updating on a page of 400 cards spent
+  40 ms per update re-measuring text that had not changed. Text
+  measurements now outlive the rebuild, keyed by everything they depend
+  on; the same update takes 6.5 ms, and `NS_LAYOUT_CACHE=verify` checks
+  every reused measurement.
 * Animated images, canvas drawing, video frames, element scrolling and
   the blinking caret repaint only the part of the page they change, and
   scrolling the page shifts the previous frame and paints only the rows

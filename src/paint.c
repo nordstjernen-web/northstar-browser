@@ -2152,7 +2152,7 @@ ns_paint_font_metrics(const char *family, double size_px, int weight,
     *out = m;
 }
 
-static guint64
+guint64
 ns_paint_font_generation(void)
 {
     NsPangoFontMap *fm = ns_pango_cairo_font_map_get_default();
