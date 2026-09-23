@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `getElementById` answers repeat lookups of a duplicated id at once.
+  When two elements shared an id every call walked the whole document to
+  find the first one, so 2,000 lookups on a 60,000-node page took 4
+  seconds; the answer is now remembered until an element with that id is
+  added, removed or renamed, and the same loop takes 4 ms. The tag and
+  class indexes behind `getElementsByTagName`, `getElementsByClassName`
+  and simple `querySelectorAll` calls no longer search a whole list to
+  drop or place one element: a large list keeps a set of its members and
+  is put back in document order the next time it is read.
 * A style sheet pulled in with `@import` is parsed once, like a
   `<link>` sheet, instead of again on every layout. Every relayout
   re-parsed each imported sheet from its bytes, so a page that imports
