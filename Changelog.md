@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* WebCrypto AES-CTR honours the `length` parameter: a length outside
+  1..128 is an `OperationError`, the counter wraps within its low
+  `length` bits instead of carrying into the nonce, and a message long
+  enough to reuse a counter block is refused.
 * A comment or a `display: none` element (a `<script>`, a hidden
   `<span>`) between pieces of inline content no longer ends the line:
   `foo<!-- -->bar` and `a<script></script>b` lay out as one line of text
