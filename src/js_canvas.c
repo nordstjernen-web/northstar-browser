@@ -3513,6 +3513,15 @@ ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
     JSValue blob = JS_NULL;
     if (el && js_from_ctx(ctx)) {
         ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
+        if (st && !st->origin_clean) {
+            ns_throw_security_error(ctx, "Tainted canvases may not be exported.");
+            JSValue exc = JS_GetException(ctx);
+            JS_Call(ctx, resolvers[1], JS_UNDEFINED, 1, &exc);
+            JS_FreeValue(ctx, exc);
+            JS_FreeValue(ctx, resolvers[0]);
+            JS_FreeValue(ctx, resolvers[1]);
+            return promise;
+        }
         if (st) blob = ns_canvas_blob_from_surface(ctx, st->surf);
     }
     JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, &blob);

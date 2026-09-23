@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `OffscreenCanvas.convertToBlob()` rejects with a `SecurityError` when
+  a cross-origin image has been drawn into the canvas. `getImageData`,
+  `toDataURL` and `toBlob` already refused a tainted canvas, but
+  `convertToBlob` still resolved with a PNG of its pixels, so a page could
+  read another site's image through an OffscreenCanvas.
 * `structuredClone()` and `postMessage()` keep a `DOMException`: the
   copy is a `DOMException` with the same `name`, `message` and `code`,
   where it used to arrive as an empty plain object.
