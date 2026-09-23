@@ -188,6 +188,56 @@ viewport_resolve(double v, ns_css_unit unit)
     }
 }
 
+static void
+viewport_unit_coeff(ns_css_unit unit, double v, double *vw, double *vh,
+                    double *vmin, double *vmax)
+{
+    switch (unit) {
+    case NS_CSS_UNIT_VW:
+    case NS_CSS_UNIT_SVW:
+    case NS_CSS_UNIT_LVW:
+    case NS_CSS_UNIT_DVW:
+    case NS_CSS_UNIT_VI:
+    case NS_CSS_UNIT_SVI:
+    case NS_CSS_UNIT_LVI:
+    case NS_CSS_UNIT_DVI:
+        *vw += v;
+        break;
+    case NS_CSS_UNIT_VH:
+    case NS_CSS_UNIT_SVH:
+    case NS_CSS_UNIT_LVH:
+    case NS_CSS_UNIT_DVH:
+    case NS_CSS_UNIT_VB:
+    case NS_CSS_UNIT_SVB:
+    case NS_CSS_UNIT_LVB:
+    case NS_CSS_UNIT_DVB:
+        *vh += v;
+        break;
+    case NS_CSS_UNIT_VMIN:
+    case NS_CSS_UNIT_SVMIN:
+    case NS_CSS_UNIT_LVMIN:
+    case NS_CSS_UNIT_DVMIN:
+        *vmin += v;
+        break;
+    case NS_CSS_UNIT_VMAX:
+    case NS_CSS_UNIT_SVMAX:
+    case NS_CSS_UNIT_LVMAX:
+    case NS_CSS_UNIT_DVMAX:
+        *vmax += v;
+        break;
+    default:
+        break;
+    }
+}
+
+static double
+viewport_coeff_px(double vw, double vh, double vmin, double vmax,
+                  double width, double height)
+{
+    return (vw * width + vh * height + vmin * MIN(width, height) +
+            vmax * MAX(width, height)) / 100.0;
+}
+
 static char *g_target_fragment = NULL;
 
 void
@@ -1529,7 +1579,7 @@ typedef enum {
 } ns_calc_kind;
 
 typedef struct ns_calc_linear {
-    double px, pct, em, rem, lh, rlh;
+    double px, pct, em, rem, lh, rlh, vw, vh, vmin, vmax;
 } ns_calc_linear;
 
 typedef struct ns_calc_term {
@@ -1540,6 +1590,7 @@ typedef struct ns_calc_term {
     double rem;
     double lh;
     double rlh;
+    double vw, vh, vmin, vmax;
     double num;
     gboolean unresolved;
     guint8 fn;
@@ -4755,7 +4806,7 @@ static ns_css_value *parse_calc(const char *text);
 static ns_css_value *parse_calc_any(const char *text);
 static ns_css_value *parse_calc_inner(const char *text);
 
-typedef struct { double em, rem, lh, rlh; } ns_font_units;
+typedef struct { double em, rem, lh, rlh, vw, vh, vmin, vmax; } ns_font_units;
 
 static void
 font_units_set(ns_font_units *font, ns_css_unit unit, double v,
@@ -4792,6 +4843,10 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
             font->rem = v->u.calc.rem;
             font->lh = v->u.calc.lh;
             font->rlh = v->u.calc.rlh;
+            font->vw = v->u.calc.vw;
+            font->vh = v->u.calc.vh;
+            font->vmin = v->u.calc.vmin;
+            font->vmax = v->u.calc.vmax;
             *out_px = v->u.calc.px;
         } else {
             *out_px = v->u.calc.px +
@@ -4839,6 +4894,10 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
         case NS_CSS_UNIT_LVMAX:
         case NS_CSS_UNIT_DVMAX:
             *out_px = viewport_resolve(v->u.length.v, v->u.length.unit);
+            if (font)
+                viewport_unit_coeff(v->u.length.unit, v->u.length.v,
+                                    &font->vw, &font->vh, &font->vmin,
+                                    &font->vmax);
             break;
         case NS_CSS_UNIT_DEG:
         case NS_CSS_UNIT_MS:
@@ -4890,6 +4949,9 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
         case NS_CSS_UNIT_LVMAX:
         case NS_CSS_UNIT_DVMAX:
             *out_px = viewport_resolve(num, u);
+            if (font)
+                viewport_unit_coeff(u, num, &font->vw, &font->vh,
+                                    &font->vmin, &font->vmax);
             break;
         case NS_CSS_UNIT_CQW:
         case NS_CSS_UNIT_CQI:
@@ -4943,6 +5005,10 @@ calc_linear_add(ns_calc_linear *l, const ns_calc_term *t, double sign)
     l->rem += sign * t->rem;
     l->lh += sign * t->lh;
     l->rlh += sign * t->rlh;
+    l->vw += sign * t->vw;
+    l->vh += sign * t->vh;
+    l->vmin += sign * t->vmin;
+    l->vmax += sign * t->vmax;
 }
 
 static void
@@ -4961,6 +5027,10 @@ calc_term_fn_scale(ns_calc_term *v, double m)
         l->rem *= m;
         l->lh *= m;
         l->rlh *= m;
+        l->vw *= m;
+        l->vh *= m;
+        l->vmin *= m;
+        l->vmax *= m;
     }
     if (m >= 0) return;
     if (v->fn == 1 || v->fn == 2) {
@@ -5010,6 +5080,10 @@ calc_term_scale(ns_calc_term *v, double m)
         v->rem *= m;
         v->lh *= m;
         v->rlh *= m;
+        v->vw *= m;
+        v->vh *= m;
+        v->vmin *= m;
+        v->vmax *= m;
     } else {
         if (v->px  != 0) v->px  *= m;
         if (v->pct != 0) v->pct *= m;
@@ -5017,6 +5091,10 @@ calc_term_scale(ns_calc_term *v, double m)
         if (v->rem != 0) v->rem *= m;
         if (v->lh  != 0) v->lh  *= m;
         if (v->rlh != 0) v->rlh *= m;
+        v->vw = 0;
+        v->vh = 0;
+        v->vmin = 0;
+        v->vmax = 0;
     }
 }
 
@@ -5115,6 +5193,7 @@ calc_unit_value(const char *unit, double num, ns_calc_term *out)
     case NS_CSS_UNIT_LVMAX:
     case NS_CSS_UNIT_DVMAX:
         out->px = viewport_resolve(v, u);
+        viewport_unit_coeff(u, v, &out->vw, &out->vh, &out->vmin, &out->vmax);
         break;
     case NS_CSS_UNIT_CQW:
     case NS_CSS_UNIT_CQI:
@@ -5204,6 +5283,10 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             out->rem = v->u.calc.rem;
             out->lh = v->u.calc.lh;
             out->rlh = v->u.calc.rlh;
+            out->vw = v->u.calc.vw;
+            out->vh = v->u.calc.vh;
+            out->vmin = v->u.calc.vmin;
+            out->vmax = v->u.calc.vmax;
             if (v->u.calc.fn >= 1 && v->u.calc.fn <= 3 &&
                 v->u.calc.n_args > 0 && v->u.calc.n_args <= 4) {
                 out->fn = v->u.calc.fn;
@@ -5216,6 +5299,10 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
                     out->args[k].rem = v->u.calc.args[k].rem;
                     out->args[k].lh = v->u.calc.args[k].lh;
                     out->args[k].rlh = v->u.calc.args[k].rlh;
+                    out->args[k].vw = v->u.calc.args[k].vw;
+                    out->args[k].vh = v->u.calc.args[k].vh;
+                    out->args[k].vmin = v->u.calc.args[k].vmin;
+                    out->args[k].vmax = v->u.calc.args[k].vmax;
                 }
             }
         } else if (v->kind == NS_CSS_V_LENGTH) {
@@ -5255,6 +5342,8 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             case NS_CSS_UNIT_LVMAX:
             case NS_CSS_UNIT_DVMAX:
                 out->px = viewport_resolve(num, v->u.length.unit);
+                viewport_unit_coeff(v->u.length.unit, num, &out->vw, &out->vh,
+                                    &out->vmin, &out->vmax);
                 break;
             case NS_CSS_UNIT_CQW:
             case NS_CSS_UNIT_CQI:
@@ -5384,6 +5473,10 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             out->rem += rhs.rem;
             out->lh += rhs.lh;
             out->rlh += rhs.rlh;
+            out->vw += rhs.vw;
+            out->vh += rhs.vh;
+            out->vmin += rhs.vmin;
+            out->vmax += rhs.vmax;
         } else {
             out->px -= rhs.px;
             out->pct -= rhs.pct;
@@ -5391,6 +5484,10 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             out->rem -= rhs.rem;
             out->lh -= rhs.lh;
             out->rlh -= rhs.rlh;
+            out->vw -= rhs.vw;
+            out->vh -= rhs.vh;
+            out->vmin -= rhs.vmin;
+            out->vmax -= rhs.vmax;
         }
         *pp = p;
     }
@@ -5849,7 +5946,8 @@ calc_compare_lengths(int fn, char *const *parts, int n)
     gboolean font_dependent = FALSE;
     for (int i = 0; i < n; i++) {
         const ns_font_units *f = &values_font[i];
-        if (f->em != 0 || f->rem != 0 || f->lh != 0 || f->rlh != 0)
+        if (f->em != 0 || f->rem != 0 || f->lh != 0 || f->rlh != 0 ||
+            f->vw != 0 || f->vh != 0 || f->vmin != 0 || f->vmax != 0)
             font_dependent = TRUE;
         keys[i] = values_px[i] + (f->em + f->rem) * 16.0 +
                   (f->lh + f->rlh) * 19.2 +
@@ -5887,6 +5985,8 @@ calc_compare_lengths(int fn, char *const *parts, int n)
     mv->u.calc.px = out_px;
     mv->u.calc.fn = (guint8)fn;
     mv->u.calc.n_args = (guint8)n;
+    mv->u.calc.parsed_vw = g_viewport_w;
+    mv->u.calc.parsed_vh = g_viewport_h;
     for (int i = 0; i < n; i++) {
         mv->u.calc.args[i].px  = values_px[i];
         mv->u.calc.args[i].pct = values_pct[i];
@@ -5894,6 +5994,10 @@ calc_compare_lengths(int fn, char *const *parts, int n)
         mv->u.calc.args[i].rem = values_font[i].rem;
         mv->u.calc.args[i].lh  = values_font[i].lh;
         mv->u.calc.args[i].rlh = values_font[i].rlh;
+        mv->u.calc.args[i].vw  = values_font[i].vw;
+        mv->u.calc.args[i].vh  = values_font[i].vh;
+        mv->u.calc.args[i].vmin = values_font[i].vmin;
+        mv->u.calc.args[i].vmax = values_font[i].vmax;
         if (is_none[i]) mv->u.calc.arg_none |= (guint8)(1u << i);
     }
     return mv;
@@ -6068,6 +6172,8 @@ parse_calc_inner(const char *text)
     if (term.kind != CALC_LENGTH) return calc_scalar_value(term.kind, term.num);
     ns_css_value *v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_CALC;
+    v->u.calc.parsed_vw = g_viewport_w;
+    v->u.calc.parsed_vh = g_viewport_h;
     if (term.fn) {
         v->u.calc.px = calc_term_key(&term);
         v->u.calc.fn = term.fn;
@@ -6080,6 +6186,10 @@ parse_calc_inner(const char *text)
             v->u.calc.args[k].rem = term.args[k].rem;
             v->u.calc.args[k].lh = term.args[k].lh;
             v->u.calc.args[k].rlh = term.args[k].rlh;
+            v->u.calc.args[k].vw = term.args[k].vw;
+            v->u.calc.args[k].vh = term.args[k].vh;
+            v->u.calc.args[k].vmin = term.args[k].vmin;
+            v->u.calc.args[k].vmax = term.args[k].vmax;
         }
         return v;
     }
@@ -6089,6 +6199,10 @@ parse_calc_inner(const char *text)
     v->u.calc.rem = term.rem;
     v->u.calc.lh  = term.lh;
     v->u.calc.rlh = term.rlh;
+    v->u.calc.vw = term.vw;
+    v->u.calc.vh = term.vh;
+    v->u.calc.vmin = term.vmin;
+    v->u.calc.vmax = term.vmax;
     return v;
 }
 
@@ -27886,14 +28000,17 @@ style_line_height_px(const ns_style *s, double font_px, double root_px,
 }
 
 static gboolean
-calc_has_font_units(const ns_css_value *v)
+calc_has_deferred_units(const ns_css_value *v)
 {
     if (v->u.calc.em != 0 || v->u.calc.rem != 0 || v->u.calc.lh != 0 ||
-        v->u.calc.rlh != 0)
+        v->u.calc.rlh != 0 || v->u.calc.vw != 0 || v->u.calc.vh != 0 ||
+        v->u.calc.vmin != 0 || v->u.calc.vmax != 0)
         return TRUE;
     for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
         if (v->u.calc.args[i].em != 0 || v->u.calc.args[i].rem != 0 ||
-            v->u.calc.args[i].lh != 0 || v->u.calc.args[i].rlh != 0)
+            v->u.calc.args[i].lh != 0 || v->u.calc.args[i].rlh != 0 ||
+            v->u.calc.args[i].vw != 0 || v->u.calc.args[i].vh != 0 ||
+            v->u.calc.args[i].vmin != 0 || v->u.calc.args[i].vmax != 0)
             return TRUE;
     return FALSE;
 }
@@ -27935,26 +28052,52 @@ calc_fold_percent(ns_css_value *v, double basis)
     v->u.calc.pct = 0;
 }
 
-static void
-calc_fold_font_units(ns_css_value *v, double font_px, double root_px,
-                     double lh_px, double rlh_px)
+static double
+calc_viewport_refresh_px(double vw, double vh, double vmin, double vmax,
+                         double parsed_w, double parsed_h)
 {
+    if (vw == 0 && vh == 0 && vmin == 0 && vmax == 0) return 0;
+    return viewport_coeff_px(vw, vh, vmin, vmax, g_viewport_w, g_viewport_h) -
+           viewport_coeff_px(vw, vh, vmin, vmax, parsed_w, parsed_h);
+}
+
+static void
+calc_fold_deferred_units(ns_css_value *v, double font_px, double root_px,
+                         double lh_px, double rlh_px)
+{
+    double parsed_w = v->u.calc.parsed_vw, parsed_h = v->u.calc.parsed_vh;
     v->u.calc.px += v->u.calc.em * font_px + v->u.calc.rem * root_px +
-                    v->u.calc.lh * lh_px + v->u.calc.rlh * rlh_px;
+                    v->u.calc.lh * lh_px + v->u.calc.rlh * rlh_px +
+                    calc_viewport_refresh_px(v->u.calc.vw, v->u.calc.vh,
+                                             v->u.calc.vmin, v->u.calc.vmax,
+                                             parsed_w, parsed_h);
     v->u.calc.em = 0;
     v->u.calc.rem = 0;
     v->u.calc.lh = 0;
     v->u.calc.rlh = 0;
+    v->u.calc.vw = 0;
+    v->u.calc.vh = 0;
+    v->u.calc.vmin = 0;
+    v->u.calc.vmax = 0;
     if (!v->u.calc.fn || v->u.calc.n_args == 0) return;
     gboolean pct = FALSE;
     for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
         double *px = &v->u.calc.args[i].px;
         *px += v->u.calc.args[i].em * font_px + v->u.calc.args[i].rem * root_px +
-               v->u.calc.args[i].lh * lh_px + v->u.calc.args[i].rlh * rlh_px;
+               v->u.calc.args[i].lh * lh_px + v->u.calc.args[i].rlh * rlh_px +
+               calc_viewport_refresh_px(v->u.calc.args[i].vw,
+                                        v->u.calc.args[i].vh,
+                                        v->u.calc.args[i].vmin,
+                                        v->u.calc.args[i].vmax,
+                                        parsed_w, parsed_h);
         v->u.calc.args[i].em = 0;
         v->u.calc.args[i].rem = 0;
         v->u.calc.args[i].lh = 0;
         v->u.calc.args[i].rlh = 0;
+        v->u.calc.args[i].vw = 0;
+        v->u.calc.args[i].vh = 0;
+        v->u.calc.args[i].vmin = 0;
+        v->u.calc.args[i].vmax = 0;
         if (v->u.calc.args[i].pct != 0) pct = TRUE;
     }
     v->u.calc.px = ns_css_calc_math_fn_px(v, g_viewport_w);
@@ -27969,7 +28112,7 @@ calc_font_size_px(const ns_css_value *fs, double parent_px, double root_px,
                   double lh_px, double rlh_px)
 {
     ns_css_value tmp = *fs;
-    calc_fold_font_units(&tmp, parent_px, root_px, lh_px, rlh_px);
+    calc_fold_deferred_units(&tmp, parent_px, root_px, lh_px, rlh_px);
     if (tmp.u.calc.fn && tmp.u.calc.n_args)
         return ns_css_calc_math_fn_px(&tmp, parent_px);
     return tmp.u.calc.px + tmp.u.calc.pct * parent_px / 100.0;
@@ -28095,7 +28238,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * font_rem_px;
     } else if (out->values[NS_CSS_FONT_SIZE] &&
                out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_CALC &&
-               calc_has_font_units(out->values[NS_CSS_FONT_SIZE])) {
+               calc_has_deferred_units(out->values[NS_CSS_FONT_SIZE])) {
         const ns_css_value *fsv = out->values[NS_CSS_FONT_SIZE];
         double parent_px = 16;
         if (parent_style && parent_style->values[NS_CSS_FONT_SIZE] &&
@@ -28206,13 +28349,13 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         }
         if (v->kind == NS_CSS_V_CALC) {
             gboolean line_pct = i == NS_CSS_LINE_HEIGHT && calc_has_percent(v);
-            if (!calc_has_font_units(v) && !line_pct) continue;
+            if (!calc_has_deferred_units(v) && !line_pct) continue;
             v = ns_css_value_cow(out, i);
             double lh_base = i == NS_CSS_LINE_HEIGHT
                 ? initial_line_px : my_line_px;
             double rlh_base = i == NS_CSS_LINE_HEIGHT && !parent_style
                 ? initial_line_px : root_line_px;
-            calc_fold_font_units(v, my_font_px, root_px, lh_base, rlh_base);
+            calc_fold_deferred_units(v, my_font_px, root_px, lh_base, rlh_base);
             if (line_pct) calc_fold_percent(v, my_font_px);
             continue;
         }
@@ -30798,6 +30941,59 @@ strip_native_widget_decorations(const ns_node *el, ns_style *s)
     }
 }
 
+static double
+frame_edge_px(const ns_style *s, ns_css_prop prop)
+{
+    const ns_css_value *v = s->values[prop];
+    if (!v || v->kind != NS_CSS_V_LENGTH || v->u.length.unit != NS_CSS_UNIT_PX)
+        return 0;
+    return v->u.length.v;
+}
+
+static double
+frame_border_px(const ns_style *s, ns_css_prop width_prop,
+                ns_css_prop style_prop)
+{
+    const ns_css_value *st = s->values[style_prop];
+    if (!st || (st->kind == NS_CSS_V_KEYWORD && st->u.keyword &&
+                (strcmp(st->u.keyword, "none") == 0 ||
+                 strcmp(st->u.keyword, "hidden") == 0)))
+        return 0;
+    return frame_edge_px(s, width_prop);
+}
+
+static gboolean
+frame_viewport_from_style(const ns_style *s, double *w, double *h)
+{
+    if (!s) return FALSE;
+    const ns_css_value *wv = s->values[NS_CSS_WIDTH];
+    const ns_css_value *hv = s->values[NS_CSS_HEIGHT];
+    if (!wv || wv->kind != NS_CSS_V_LENGTH ||
+        wv->u.length.unit != NS_CSS_UNIT_PX ||
+        !hv || hv->kind != NS_CSS_V_LENGTH ||
+        hv->u.length.unit != NS_CSS_UNIT_PX)
+        return FALSE;
+    double fw = wv->u.length.v, fh = hv->u.length.v;
+    if (ns_css_keyword_is(s->values[NS_CSS_BOX_SIZING], "border-box")) {
+        fw -= frame_edge_px(s, NS_CSS_PADDING_LEFT) +
+              frame_edge_px(s, NS_CSS_PADDING_RIGHT) +
+              frame_border_px(s, NS_CSS_BORDER_LEFT_WIDTH,
+                              NS_CSS_BORDER_LEFT_STYLE) +
+              frame_border_px(s, NS_CSS_BORDER_RIGHT_WIDTH,
+                              NS_CSS_BORDER_RIGHT_STYLE);
+        fh -= frame_edge_px(s, NS_CSS_PADDING_TOP) +
+              frame_edge_px(s, NS_CSS_PADDING_BOTTOM) +
+              frame_border_px(s, NS_CSS_BORDER_TOP_WIDTH,
+                              NS_CSS_BORDER_TOP_STYLE) +
+              frame_border_px(s, NS_CSS_BORDER_BOTTOM_WIDTH,
+                              NS_CSS_BORDER_BOTTOM_STYLE);
+    }
+    if (fw <= 0 || fh <= 0) return FALSE;
+    *w = fw;
+    *h = fh;
+    return TRUE;
+}
+
 static void
 cascade_walk(ns_node *node,
              const ns_css_stylesheet *ua,
@@ -30816,7 +31012,8 @@ cascade_walk(ns_node *node,
     gboolean frame_viewport = FALSE;
     if (node->kind == NS_NODE_DOCUMENT && node->parent && g_frame_viewport_cb) {
         double fw = 0, fh = 0;
-        g_frame_viewport_cb(node->parent, &fw, &fh);
+        if (!frame_viewport_from_style(parent_style, &fw, &fh))
+            g_frame_viewport_cb(node->parent, &fw, &fh);
         if (fw > 0 && fh > 0 &&
             (fabs(fw - g_viewport_w) > 0.01 ||
              fabs(fh - g_viewport_h) > 0.01)) {

@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Viewport units inside an iframe measure the iframe. `vw`, `vh`,
+  `vmin` and the `sv*`/`lv*`/`dv*` variants in a frame's document
+  resolved against the top-level window unless the frame's size came
+  from its `style` attribute; the frame's own computed width and height
+  now define its viewport. A `calc()`, `min()`, `max()` or `clamp()`
+  mixing viewport units with other units also recomputes them for the
+  current viewport, where it used to keep the size the window had when
+  the stylesheet was first parsed -- so `calc(100vh - 60px)` follows a
+  window resize and resolves per frame.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
