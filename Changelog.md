@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The CSS `font-family` list of a text run is turned into a font name
+  once rather than three or four times per run on every layout and
+  paint. The answer is remembered per family list until the system font
+  set changes or a web font finishes loading; laying out a page of 3,000
+  paragraphs with long font stacks is 12% faster.
 * Relayouts no longer redo work on unchanged style sheets. Each one
   re-resolved every `url()` in every cached sheet, copied every linked
   sheet to scan it for viewport media queries, and built the lookup key
