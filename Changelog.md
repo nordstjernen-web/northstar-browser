@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `repeat(auto-fill, ...)` and `repeat(auto-fit, ...)` count their
+  repetitions from the space the other tracks and gaps leave, and size a
+  `minmax()` track by its fixed maximum; `10px 20% repeat(auto-fill,
+  35px)` in a 200px grid made five repetitions that overflowed instead
+  of four. Columns an item adds past the explicit grid take their size
+  from `grid-auto-columns` instead of always being `auto`.
 * Math functions keep the sign of zero. `calc(-0)` was rewritten to
   `calc(0)` before it was evaluated, so `1 / sign(calc(-0))` came out
   as `infinity` instead of `-infinity`; `min()`, `max()` and `clamp()`
