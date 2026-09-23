@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A media query containing `/*` inside a quoted string no longer crashes
+  the browser. Stripping comments from a query called the matcher again
+  on the result, and a `/*` inside quotes survives the stripping, so
+  `matchMedia("(x: '/*')")` or `@media (x: "/*") {}` recursed until the
+  stack overflowed. The comments are stripped once and the result is
+  evaluated directly.
 * A frame's `window` event listeners hear only its own document's
   events. Listeners added through any window were kept in one list and
   every one of them ran for every window-level event, so a frame --

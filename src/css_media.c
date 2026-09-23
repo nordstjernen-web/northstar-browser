@@ -1061,16 +1061,9 @@ mq_strip_comments(const char *query)
     return g_string_free(out, FALSE);
 }
 
-gboolean
-ns_css_media_query_matches(const char *query)
+static gboolean
+mq_query_list_matches(const char *query)
 {
-    if (!query) return TRUE;
-    if (strstr(query, "/*")) {
-        char *clean = mq_strip_comments(query);
-        gboolean matches = ns_css_media_query_matches(clean);
-        g_free(clean);
-        return matches;
-    }
     const char *end = query + strlen(query);
     const char *p = mq_skip_ws(query, end);
     if (p == end) return TRUE;
@@ -1085,6 +1078,17 @@ ns_css_media_query_matches(const char *query)
         p = next;
     }
     return any;
+}
+
+gboolean
+ns_css_media_query_matches(const char *query)
+{
+    if (!query) return TRUE;
+    if (!strstr(query, "/*")) return mq_query_list_matches(query);
+    char *clean = mq_strip_comments(query);
+    gboolean matches = mq_query_list_matches(clean);
+    g_free(clean);
+    return matches;
 }
 
 static void
