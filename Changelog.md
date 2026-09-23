@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An `<iframe>` has the 2px inset border the rendering section gives it,
+  which `frameborder="0"` (or any value that is not a non-zero integer)
+  removes, and `<video>` computes `object-fit: contain`.
 * `<fieldset>` has the rendering section's default style -- a 2px
   groove border, 2px inline margins, `0.35em 0.625em` block and `0.75em`
   inline padding and a `min-content` minimum inline size -- instead of a
