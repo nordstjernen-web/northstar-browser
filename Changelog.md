@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A `position: fixed` box inside a transformed element belongs to that
+  element: it is placed against it and scrolls with it, as CSS
+  Transforms says, instead of being pinned to the window. Slide-in menus
+  and modals built inside a `transform`ed wrapper now open where the
+  page puts them.
 * `<center>` and `align="center"` (or `"right"`) line up the blocks
   inside them, not just images and tables: `<center><div
   style="width: 200px">` is centred, as is a table nested in a
