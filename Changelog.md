@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `rem` in the root element's own `font-size` is measured against the
+  initial 16px, as the spec requires, instead of against the size it is
+  in the middle of computing. `html { font-size: 1.25rem }` came out at
+  25px rather than 20px, and a fluid
+  `clamp(1rem, 0.9rem + 0.5vw, 1.25rem)` settled on the wrong size --
+  which then scaled every other `rem` on the page with it.
 * A percentage `line-height` is worked out once, on the element that
   sets it, and descendants inherit the resulting length. It was handed
   down as a percentage and each child resolved it again against its own

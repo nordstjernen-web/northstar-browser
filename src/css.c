@@ -26462,11 +26462,11 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
 {
     double my_font_px = resolve_font_size_px(out, parent_style);
     if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
-    if (root_px <= 0) root_px = my_font_px;
+    double font_rem_px = root_px > 0 ? root_px : 16.0;
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
         out->values[NS_CSS_FONT_SIZE]->u.length.unit == NS_CSS_UNIT_REM) {
-        my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * root_px;
+        my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * font_rem_px;
     } else if (out->values[NS_CSS_FONT_SIZE] &&
                out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_CALC &&
                calc_has_font_units(out->values[NS_CSS_FONT_SIZE])) {
@@ -26477,15 +26477,16 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             parent_style->values[NS_CSS_FONT_SIZE]->u.length.unit ==
                 NS_CSS_UNIT_PX)
             parent_px = parent_style->values[NS_CSS_FONT_SIZE]->u.length.v;
-        double root_line = g_root_line_px > 0 ? g_root_line_px
-                                              : normal_line_height_px(root_px);
+        double root_line = g_root_line_px > 0
+            ? g_root_line_px : normal_line_height_px(font_rem_px);
         my_font_px = calc_font_size_px(
-            fsv, parent_px, root_px,
-            style_line_height_px(parent_style, parent_px, root_px,
+            fsv, parent_px, font_rem_px,
+            style_line_height_px(parent_style, parent_px, font_rem_px,
                                  normal_line_height_px(parent_px), root_line),
             root_line);
     }
     if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
+    if (root_px <= 0) root_px = my_font_px;
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH) {
         ns_css_value *fs = ns_css_value_cow(out, NS_CSS_FONT_SIZE);
