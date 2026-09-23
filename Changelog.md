@@ -4,6 +4,8 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `sibling-index()` and `sibling-count()` in a container size query
+  resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
   along the vertical inline axis and `column` along the horizontal block
   axis, and vertical items take a central baseline for baseline
