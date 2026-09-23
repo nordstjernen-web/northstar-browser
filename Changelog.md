@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* URL setters behave as the URL Standard describes where the parser
+  library does not: `url.host = "example.com:"` or `"example.com:abc"`
+  changes the host and keeps the port, an out-of-range port still sets
+  the host, clearing the host of a non-special URL with credentials or a
+  port is refused, and a URL with an empty host cannot gain a username,
+  password or port. `new URL("??a=b").searchParams` keeps the second
+  `?`. Links (`<a>`, `<area>`) whose `href` does not parse now report
+  `":"` as the protocol and ignore setters instead of working on the raw
+  string, and an `href` containing a NUL character is no longer cut
+  short there.
 * An iframe whose `load` handler navigates it again (for example to
   `about:blank`) no longer freezes the page. Each reload ran inside the
   same loop that processed the previous one, so timers and rendering
