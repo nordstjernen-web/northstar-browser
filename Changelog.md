@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An `<iframe>` whose source is an image shows it in an image document,
+  as a top-level navigation does, instead of parsing the image bytes as
+  HTML text.
 * Images in the page start downloading as soon as the document is laid
   out, not at the first paint; each `<img>` fires its `load` or `error`
   event when its image arrives, `complete` and `naturalWidth` report

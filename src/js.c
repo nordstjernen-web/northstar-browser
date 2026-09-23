@@ -54908,7 +54908,13 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 }
             } else if (resp && resp->body &&
                 (resp->status == 200 || resp->status == 0) && !resp->error) {
-                if (resp->body->len > 0) {
+                if (resp->body->len > 0 && resp->content_type &&
+                    g_ascii_strncasecmp(resp->content_type, "image/", 6) == 0 &&
+                    !ns_html_mime_is_xml(resp->content_type)) {
+                    decoded = ns_html_image_document(
+                        resp->final_url ? resp->final_url : abs_url);
+                    ns_element_set_attr(iframe, "data-nd-frame-charset", "UTF-8");
+                } else if (resp->body->len > 0) {
                     decoded = ns_html_decode_body_full(
                         (const char *)resp->body->data, resp->body->len,
                         resp->content_type, NULL);
