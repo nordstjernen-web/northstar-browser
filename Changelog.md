@@ -11,6 +11,10 @@ Significant changes in each release:
   `localStorage`; it now gets the same restricted window proxy as a
   cross-origin frame, where anything but `postMessage`, the `location`
   setter and a few navigation properties throws `SecurityError`.
+* `--dump=print:FILE` works under the Linux sandbox. The output directory
+  of a print dump was not made writable the way a `png:` or `pdf:` dump's
+  is, so the pagination check `docs/building.md` describes failed with
+  "failed to create PDF surface" and wrote nothing.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
