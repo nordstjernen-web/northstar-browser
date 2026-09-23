@@ -202,13 +202,11 @@ mq_feature_lookup(const char *name)
 typedef enum { MQOP_EQ, MQOP_LT, MQOP_LE, MQOP_GT, MQOP_GE } mq_op;
 
 typedef struct {
-    mq_feature_type kind;
     double num;
     double serialized_num;
     double denom;
     char   unit[8];
     char   ident[24];
-    gboolean is_ident;
     gboolean calculated;
 } mq_value;
 
@@ -391,7 +389,6 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
     while (e > s && mq_is_ws(e[-1])) e--;
     if (s >= e) return FALSE;
     memset(out, 0, sizeof *out);
-    out->kind = type;
     out->denom = 1;
 
     if (type == MQF_DISCRETE) {
@@ -401,7 +398,6 @@ mq_value_parse(const char *s, const char *e, mq_feature_type type,
         for (gsize i = 0; i < f->nkw; i++)
             if (strcmp(ident, f->kw[i]) == 0) {
                 g_strlcpy(out->ident, f->kw[i], sizeof out->ident);
-                out->is_ident = TRUE;
                 return TRUE;
             }
         return FALSE;
@@ -588,7 +584,6 @@ mq_parse_feature(const char *s, const char *e)
                 mq_skip_ws(ve, e) != e)
                 return NULL;
             memset(&v, 0, sizeof v);
-            v.kind = MQF_RESOLUTION;
             v.denom = 1;
             v.num = ratio;
             v.serialized_num = ratio;

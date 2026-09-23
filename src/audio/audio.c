@@ -57,7 +57,6 @@ typedef struct {
     int     loop;
     float  *pcm;
     size_t  frames;
-    size_t  pcm_cap;
     size_t  cursor;
     float   volume;
     int     reached_end;
@@ -613,7 +612,6 @@ load_audio_bytes(ns_audio_player *p, const unsigned char *bytes, size_t n)
     audio_lock();
     p->pcm = dev;
     p->frames = dev_frames;
-    p->pcm_cap = dev_frames * 2;
     p->cursor = 0;
     p->reached_end = 0;
     p->playing = 0;
@@ -845,7 +843,6 @@ cmd_reload(NsAudioContext *context, const char *token, const char *url)
     char *old_tmp = p->tmp_path;
     p->pcm = fresh.pcm;
     p->frames = fresh.frames;
-    p->pcm_cap = fresh.frames * 2;
     if (p->cursor > p->frames) p->cursor = p->frames;
     if (p->reached_end && p->cursor < p->frames) {
         p->reached_end = 0;
@@ -920,7 +917,6 @@ cmd_reload_bytes(NsAudioContext *context, const char *token, GBytes *bytes)
     float *old_pcm = p->pcm;
     p->pcm = fresh.pcm;
     p->frames = fresh.frames;
-    p->pcm_cap = fresh.frames * 2;
     if (p->cursor > p->frames) p->cursor = p->frames;
     if (p->reached_end && p->cursor < p->frames) {
         p->reached_end = 0;

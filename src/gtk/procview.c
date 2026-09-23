@@ -125,7 +125,6 @@ typedef struct {
     double           fallback_y;
     gboolean         animating;
     gboolean         caret_blinking;
-    gboolean         frame_unchanged;
     int              requested_scroll_y, requested_scroll_x;
     int              find_total, find_current, find_scroll_y;
     char            *media_url;
@@ -165,8 +164,6 @@ struct NsProcView {
     gboolean    opened;
 
     cairo_surface_t *frame;
-    cairo_surface_t *stage[2];
-    int              stage_next;
 
     gboolean    render_inflight;
     gboolean    render_pending;
@@ -721,7 +718,6 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
         res->ph = fr.page_h;
         res->requested_scroll_y = fr.scroll_y;
         res->requested_scroll_x = fr.scroll_x;
-        res->frame_unchanged = fr.unchanged ? TRUE : FALSE;
         if (!fr.unchanged)
             res->surface = stage_fill(v, fr.pixels, fr.width, fr.height,
                                       fr.stride);
