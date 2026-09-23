@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `:focus` and `:focus-visible` are up to date when a `focus` listener
+  reads styles: `getComputedStyle()` inside the handler described the
+  element as unfocused, a focused button input switched to a text
+  input did not start matching `:focus-visible`, and headless
+  rendering matched `:focus` against the last field it had typed into
+  instead of the page's focused element.
 * Links, buttons, checkboxes, radio buttons and `<summary>` respond to
   the keyboard: Enter activates a focused link, button or summary, and
   Space (on release) a focused button, checkbox, radio button or

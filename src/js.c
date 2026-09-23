@@ -38254,11 +38254,11 @@ ns_js_set_focus(ns_js *js, const ns_node *el)
     }
     js->focused_node = el;
     ns_js_update_focus_visible(js);
+    js->mutated = TRUE;
     if (el) {
         ns_js_dispatch_focus_event(js, el, old, "focus", FALSE);
         ns_js_dispatch_focus_event(js, el, old, "focusin", TRUE);
     }
-    js->mutated = TRUE;
 }
 
 void
@@ -39572,6 +39572,8 @@ static void
 ns_popover_attr_changed(ns_js *js, ns_node *el, const char *attr,
                         const char *old_value, const char *new_value)
 {
+    if (el == js->focused_node && g_ascii_strcasecmp(attr, "type") == 0)
+        ns_js_update_focus_visible(js);
     if (!old_value && new_value && g_ascii_strcasecmp(attr, "src") == 0 &&
         ns_node_is_script_element(el) && ns_node_is_html_element(el)) {
         ns_js_script_needs_prepare(js, el);
