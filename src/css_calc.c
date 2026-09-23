@@ -746,7 +746,10 @@ calc_function_canonical(const char *start, const char *end, gboolean keep_calc)
     }
     GString *out = g_string_new(NULL);
     gboolean exact = TRUE;
-    if (root->kind == CALC_NODE_FUNCTION && !keep_calc) {
+    gboolean comparison = root->kind == CALC_NODE_FUNCTION &&
+        (strcmp(root->text, "min") == 0 || strcmp(root->text, "max") == 0 ||
+         strcmp(root->text, "clamp") == 0);
+    if (root->kind == CALC_NODE_FUNCTION && (!keep_calc || comparison)) {
         calc_serialize(out, root, &exact);
     } else {
         g_string_append(out, "calc(");
