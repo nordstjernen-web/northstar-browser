@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An image with a CSS `filter` is filtered once, not on every paint.
+  The filtered copy was rebuilt from the full-resolution pixels each
+  time the image was drawn -- once per `<img>` when a page repeats an
+  image -- and is now kept with the decoded image until the filter
+  changes. A page showing one 800x800 image forty times in grayscale
+  renders in 2.0 s instead of 4.0 s, as fast as without the filter.
 * The CSS `font-family` list of a text run is turned into a font name
   once rather than three or four times per run on every layout and
   paint. The answer is remembered per family list until the system font
