@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `getComputedStyle().transform` resolves only the `transform`
+  property; the individual `translate`, `rotate` and `scale` properties
+  stay separate as CSS Transforms 2 says, instead of being folded into
+  the reported matrix.
 * In a `<picture>`, the `width` and `height` of the `<source>` that is
   selected size the `<img>`, as HTML's dimension attribute source rule
   says, so art-directed images with different proportions per
