@@ -568,6 +568,8 @@ pv_media_pump(NsProcView *v, Res *res)
     if (!res->audio_blobs && !has_lines) return;
     if (!v->audio)
         v->audio = ns_audio_context_new();
+    ns_audio_context_set_local_files(v->audio,
+        v->current_url && g_ascii_strncasecmp(v->current_url, "file:", 5) == 0);
     if (res->audio_blobs)
         for (guint i = 0; i < res->audio_blobs->len; i++) {
             AudioBlob *b = g_ptr_array_index(res->audio_blobs, i);

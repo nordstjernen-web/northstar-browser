@@ -68,6 +68,7 @@ typedef struct {
 struct NsAudioContext {
     gint generation;
     gint destroyed;
+    gint local_files;
 };
 
 typedef enum {
@@ -86,6 +87,7 @@ typedef struct {
     char                 *token;
     GBytes               *bytes;
     gboolean              reload;
+    gboolean              local_files;
 } ns_audio_command;
 
 static SDL_AudioDeviceID g_dev;
@@ -751,14 +753,30 @@ write_temp_from_url(NsAudioContext *context, const char *url)
     return strdup(tmpl);
 }
 
+static char *
+local_file_path(const char *url)
+{
+    char *host = NULL;
+    char *path = g_filename_from_uri(url, &host, NULL);
+    gboolean remote = host && *host && g_ascii_strcasecmp(host, "localhost") != 0;
+    g_free(host);
+    if (remote) {
+        g_free(path);
+        return NULL;
+    }
+    return path;
+}
+
 static const char *
-local_path_for(NsAudioContext *context, const char *url, char **tmp_out)
+local_path_for(NsAudioContext *context, const char *url, gboolean local_files,
+               char **tmp_out, char **file_out)
 {
     *tmp_out = NULL;
-    if (strncmp(url, "file://", 7) == 0) {
-        const char *p = url + 7;
-        if (strncmp(p, "localhost", 9) == 0) p += 9;
-        return p;
+    *file_out = NULL;
+    if (g_ascii_strncasecmp(url, "file:", 5) == 0) {
+        if (!local_files) return NULL;
+        *file_out = local_file_path(url);
+        return *file_out;
     }
     if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0 ||
         strncmp(url, "data:", 5) == 0) {
@@ -772,7 +790,8 @@ local_path_for(NsAudioContext *context, const char *url, char **tmp_out)
 
 
 static void
-cmd_open(NsAudioContext *context, const char *token, const char *url)
+cmd_open(NsAudioContext *context, const char *token, const char *url,
+         gboolean local_files)
 {
     ns_audio_player *p = player_alloc(context, token);
     if (!p) { emit("error %s too-many-players", token); return; }
@@ -787,7 +806,9 @@ cmd_open(NsAudioContext *context, const char *token, const char *url)
     }
 
     char *tmp = NULL;
-    const char *path = local_path_for(context, url, &tmp);
+    g_autofree char *file_path = NULL;
+    const char *path = local_path_for(context, url, local_files, &tmp,
+                                      &file_path);
     if (!path) { emit("error %s fetch-failed", token); return; }
     p->tmp_path = tmp;
 
@@ -805,13 +826,16 @@ cmd_open(NsAudioContext *context, const char *token, const char *url)
 }
 
 static void
-cmd_reload(NsAudioContext *context, const char *token, const char *url)
+cmd_reload(NsAudioContext *context, const char *token, const char *url,
+           gboolean local_files)
 {
     ns_audio_player *p = player_find(context, token);
-    if (!p) { cmd_open(context, token, url); return; }
+    if (!p) { cmd_open(context, token, url, local_files); return; }
 
     char *tmp = NULL;
-    const char *path = local_path_for(context, url, &tmp);
+    g_autofree char *file_path = NULL;
+    const char *path = local_path_for(context, url, local_files, &tmp,
+                                      &file_path);
     if (!path) { emit("error %s fetch-failed", token); free(tmp); return; }
 
 
@@ -1053,7 +1077,7 @@ release_context_players(NsAudioContext *context)
 }
 
 static void
-process_line(NsAudioContext *context, char *line)
+process_line(NsAudioContext *context, char *line, gboolean local_files)
 {
     char *cur = line;
     char *op = next_token(&cur);
@@ -1067,7 +1091,7 @@ process_line(NsAudioContext *context, char *line)
 
     if (strcmp(op, "open") == 0) {
         while (*cur == ' ') cur++;
-        cmd_open(context, token, cur);
+        cmd_open(context, token, cur, local_files);
     } else if (strcmp(op, "play") == 0) {
         cmd_play(context, token);
     } else if (strcmp(op, "pause") == 0) {
@@ -1085,7 +1109,7 @@ process_line(NsAudioContext *context, char *line)
         cmd_stop(context, token);
     } else if (strcmp(op, "reload") == 0) {
         while (*cur == ' ') cur++;
-        cmd_reload(context, token, cur);
+        cmd_reload(context, token, cur, local_files);
     }
 }
 
@@ -1116,7 +1140,8 @@ audio_worker(gpointer data)
                     cmd_open_bytes(command->context, command->token,
                                    command->bytes);
             } else {
-                process_line(command->context, command->line);
+                process_line(command->context, command->line,
+                             command->local_files);
             }
         }
         g_free(command->line);
@@ -1165,6 +1190,8 @@ queue_command(ns_audio_command_type type, NsAudioContext *context,
     command->context = context;
     command->generation = context
         ? g_atomic_int_get(&context->generation) : 0;
+    command->local_files = context
+        ? g_atomic_int_get(&context->local_files) : FALSE;
     command->line = g_strdup(line);
     g_async_queue_push(g_commands, command);
 }
@@ -1208,6 +1235,13 @@ ns_audio_context_dispatch_blob(NsAudioContext *context,
     command->bytes = g_bytes_ref(bytes);
     command->reload = reload;
     g_async_queue_push(g_commands, command);
+}
+
+void
+ns_audio_context_set_local_files(NsAudioContext *context, gboolean allowed)
+{
+    if (context)
+        g_atomic_int_set(&context->local_files, allowed ? 1 : 0);
 }
 
 void

@@ -14,6 +14,8 @@ void ns_audio_context_dispatch(NsAudioContext *context, const char *command);
 void ns_audio_context_dispatch_blob(NsAudioContext *context,
                                     const char *token, GBytes *bytes,
                                     gboolean reload);
+void ns_audio_context_set_local_files(NsAudioContext *context,
+                                      gboolean allowed);
 void ns_audio_context_reset(NsAudioContext *context);
 void ns_audio_context_destroy(NsAudioContext *context);
 void ns_audio_shutdown(void);

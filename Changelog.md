@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* The audio worker checks `file:` URLs itself. It opened any `file://`
+  path it was handed, relying on the script bindings alone to refuse
+  local files to `http(s)` pages; the page view now tells it whether the
+  page is a `file:` document, and the worker refuses local paths
+  otherwise. It also decodes the URL properly, so a local file whose name
+  holds a space or other escaped character plays instead of failing to
+  open.
 * `OfflineAudioContext` and `createBuffer` refuse a channel count outside
   1-32, a sample rate outside 3000-768000 Hz, or more than 64 Mi samples
   in all, with the `NotSupportedError` the Web Audio specification names.
