@@ -156,7 +156,6 @@ static const cfg_field cfg_fields[] = {
     FB(images_enabled,        TRUE),
     FB(javascript_enabled,    TRUE),
     FB(camera_enabled,        FALSE),
-    FB(microphone_enabled,    FALSE),
     FB(local_storage_enabled, TRUE),
     FB(cache_enabled,         TRUE),
     FB(tls_allow_insecure_override, FALSE),
@@ -165,9 +164,6 @@ static const cfg_field cfg_fields[] = {
     FI(js_eval_budget_ms,     60000),
     FI(js_memory_cap_mb,      2048),
     FI(max_redirects,         NS_MAX_REDIRECTS),
-    FI(window_width_px,       1280),
-    FI(window_height_px,      800),
-    FI(layout_viewport_px,    1000),
 };
 
 #undef FS
@@ -494,7 +490,6 @@ ns_config_dump(void)
     g_string_append_printf(s, "async_image_decode    = %s\n", c->async_image_decode ? "true" : "false");
     g_string_append_printf(s, "images_enabled        = %s\n", c->images_enabled ? "true" : "false");
     g_string_append_printf(s, "camera_enabled        = %s\n", c->camera_enabled ? "true" : "false");
-    g_string_append_printf(s, "microphone_enabled    = %s\n", c->microphone_enabled ? "true" : "false");
     g_string_append_printf(s, "local_storage_enabled = %s\n", c->local_storage_enabled ? "true" : "false");
     g_string_append_printf(s, "cache_enabled         = %s\n", c->cache_enabled ? "true" : "false");
     g_string_append_printf(s, "tls_allow_insecure_override = %s\n", c->tls_allow_insecure_override ? "true" : "false");
@@ -504,8 +499,5 @@ ns_config_dump(void)
     g_string_append_printf(s, "js_eval_budget_ms     = %d\n", c->js_eval_budget_ms);
     g_string_append_printf(s, "js_memory_cap_mb      = %d\n", c->js_memory_cap_mb);
     g_string_append_printf(s, "max_redirects         = %d\n", c->max_redirects);
-    g_string_append_printf(s, "window_width_px       = %d\n", c->window_width_px);
-    g_string_append_printf(s, "window_height_px      = %d\n", c->window_height_px);
-    g_string_append_printf(s, "layout_viewport_px    = %d\n", c->layout_viewport_px);
     return g_string_free(s, FALSE);
 }

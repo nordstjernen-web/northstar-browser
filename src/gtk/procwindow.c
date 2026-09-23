@@ -70,8 +70,13 @@ configure_media_inputs(void)
     }
     ns_css_set_media_device(&device);
 
+    ns_reduced_motion_pref motion = ns_config_get()->reduced_motion;
     GtkSettings *settings = gtk_settings_get_default();
-    if (settings) {
+    if (motion != NS_REDUCED_MOTION_PREF_AUTO) {
+        ns_css_set_reduced_motion(motion == NS_REDUCED_MOTION_PREF_REDUCE
+            ? NS_CSS_REDUCED_MOTION_REDUCE
+            : NS_CSS_REDUCED_MOTION_NO_PREFERENCE);
+    } else if (settings) {
         gboolean animations = TRUE;
         g_object_get(settings, "gtk-enable-animations", &animations, NULL);
         ns_css_set_reduced_motion(animations
@@ -599,7 +604,11 @@ update_bookmark_indicator(ProcWindow *pw)
 static void
 apply_color_scheme(ProcWindow *pw)
 {
-    ns_css_color_scheme want = desktop_color_scheme(pw->window);
+    ns_color_scheme_pref pref = ns_config_get()->color_scheme;
+    ns_css_color_scheme want =
+        pref == NS_COLOR_SCHEME_PREF_LIGHT ? NS_CSS_COLOR_SCHEME_LIGHT :
+        pref == NS_COLOR_SCHEME_PREF_DARK  ? NS_CSS_COLOR_SCHEME_DARK :
+        desktop_color_scheme(pw->window);
     if (want == ns_css_get_color_scheme())
         return;
     ns_css_set_color_scheme(want);

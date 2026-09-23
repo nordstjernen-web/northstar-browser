@@ -60,7 +60,6 @@ typedef struct ns_config {
     gboolean images_enabled;
     gboolean javascript_enabled;
     gboolean camera_enabled;
-    gboolean microphone_enabled;
     gboolean local_storage_enabled;
     gboolean cache_enabled;
     gboolean tls_allow_insecure_override;
@@ -70,9 +69,6 @@ typedef struct ns_config {
     int      js_eval_budget_ms;
     int      js_memory_cap_mb;
     int      max_redirects;
-    int      window_width_px;
-    int      window_height_px;
-    int      layout_viewport_px;
 } ns_config;
 
 void             ns_config_init(void);
