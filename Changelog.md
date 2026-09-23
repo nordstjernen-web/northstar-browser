@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Links on pages in legacy encodings (Shift_JIS, EUC-JP, EUC-KR, Big5,
+  windows-1252, ...) encode non-ASCII characters in their query string
+  in the page's encoding, as the HTML standard requires and servers of
+  such sites expect, instead of always in UTF-8. This applies to
+  `a.href`/`a.search` and to following the link.
 * `Object.prototype.toString` names the natively implemented interfaces:
   a `MessagePort`, `XMLHttpRequest`, `MessageChannel`, `DOMParser` and
   the like read `[object MessagePort]` and so on instead of

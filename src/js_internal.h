@@ -104,6 +104,7 @@ struct ns_js {
     guint64       nav_key_seq;
     JSValue       navigation;
     char         *current_url;
+    char         *doc_charset;
     ns_node       *current_doc;
     ns_node       *current_script;
     char         *early_inject_src;

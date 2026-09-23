@@ -37486,6 +37486,21 @@ ns_js_doc_base_url(ns_js *js)
     return ns_js_document_base_url(js, js->current_doc, js->current_url);
 }
 
+static const char *
+ns_js_node_charset(ns_js *js, const ns_node *n)
+{
+    const ns_node *root = n;
+    while (root && root->kind != NS_NODE_DOCUMENT && root->parent)
+        root = root->parent;
+    if (root && root->kind == NS_NODE_DOCUMENT && root->parent &&
+        root->parent->kind == NS_NODE_ELEMENT) {
+        const char *cs = ns_element_get_attr(root->parent,
+                                             "data-nd-frame-charset");
+        if (cs && *cs) return cs;
+    }
+    return js && js->doc_charset ? js->doc_charset : NULL;
+}
+
 static char *
 ns_element_anchor_url(const ns_node *n, ns_js *js)
 {
@@ -37494,7 +37509,8 @@ ns_element_anchor_url(const ns_node *n, ns_js *js)
     const char *raw = ns_element_get_attr_len(n, "href", &len);
     if (!raw) return NULL;
     g_autofree char *base = ns_js_doc_base_url(js);
-    return ns_url_resolve_len(base && *base ? base : NULL, raw, len);
+    return ns_url_resolve_encoded(base && *base ? base : NULL, raw, len,
+                                  ns_js_node_charset(js, n));
 }
 
 static char *
@@ -51834,6 +51850,8 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
     ns_dom_set_active_modal(NULL);
     g_free(js->current_url);
     js->current_url = g_strdup(base_url ? base_url : "");
+    g_free(js->doc_charset);
+    js->doc_charset = g_strdup(charset && *charset ? charset : "UTF-8");
 
     if (doc) {
         ns_doc_id_index_build(doc);
@@ -52225,6 +52243,7 @@ ns_js_free(ns_js *js)
     g_free(js->cookie_value);
     g_free(js->referrer);
     g_free(js->current_url);
+    g_free(js->doc_charset);
     g_free(js->selection_text);
     if (js->document_write_states) {
         g_ptr_array_free(js->document_write_states, TRUE);

@@ -670,8 +670,9 @@ ns_url_parser_close(lxb_url_parser_t *parser)
     lxb_url_parser_clean(parser);
 }
 
-char *
-ns_url_resolve_len(const char *base, const char *href, size_t href_len)
+static char *
+ns_url_resolve_in(const char *base, const char *href, size_t href_len,
+                  lxb_encoding_t encoding)
 {
     if (!href) return NULL;
     if (href_len == 0 && !(base && *base)) return NULL;
@@ -689,8 +690,11 @@ ns_url_resolve_len(const char *base, const char *href, size_t href_len)
             return NULL;
         }
     }
-    lxb_url_t *resolved = lxb_url_parse(parser, base_url,
-                                        (const lxb_char_t *)href, href_len);
+    lxb_url_t *resolved = NULL;
+    if (lxb_url_parse_basic(parser, NULL, base_url, (const lxb_char_t *)href,
+                            href_len, LXB_URL_STATE__UNDEF, encoding)
+        == LXB_STATUS_OK)
+        resolved = parser->url;
     char *out = NULL;
     if (resolved) {
         GString *s = g_string_new(NULL);
@@ -702,6 +706,28 @@ ns_url_resolve_len(const char *base, const char *href, size_t href_len)
     }
     ns_url_parser_close(parser);
     return out;
+}
+
+char *
+ns_url_resolve_len(const char *base, const char *href, size_t href_len)
+{
+    return ns_url_resolve_in(base, href, href_len, LXB_ENCODING_AUTO);
+}
+
+char *
+ns_url_resolve_encoded(const char *base, const char *href, size_t href_len,
+                       const char *charset)
+{
+    lxb_encoding_t encoding = LXB_ENCODING_AUTO;
+    const lxb_encoding_data_t *data = charset
+        ? lxb_encoding_data_by_pre_name((const lxb_char_t *)charset,
+                                        strlen(charset))
+        : NULL;
+    if (data && data->encoding != LXB_ENCODING_UTF_16BE &&
+        data->encoding != LXB_ENCODING_UTF_16LE &&
+        data->encoding != LXB_ENCODING_REPLACEMENT)
+        encoding = data->encoding;
+    return ns_url_resolve_in(base, href, href_len, encoding);
 }
 
 char *
