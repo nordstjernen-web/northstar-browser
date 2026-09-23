@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `element.style.color` and the other colour properties read a colour
+  back in the form CSS Color 4 and 5 give it. `lab(20 0 10/50%)` came
+  back exactly as typed and `color(srgb 10% 10% 10%)` kept its
+  percentages; they now read `lab(20 0 10 / 0.5)` and
+  `color(srgb 0.1 0.1 0.1)`. A `color-mix()` lists its colours and
+  percentages in normalised form, a relative colour keeps its `from`
+  form around a normalised origin, and a `calc()` inside a colour reads
+  back as its simplified value.
 * `color-mix()` and relative colors that use `currentcolor` paint in
   the element's own text colour. The colour parser knew nothing of
   `currentcolor` inside a function, so a Tailwind-style

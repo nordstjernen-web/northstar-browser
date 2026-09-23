@@ -1563,6 +1563,7 @@ typedef struct {
     gboolean percent;
     gboolean angle;
     gboolean none;
+    gboolean math;
 } ns_color_arg;
 
 typedef struct {
@@ -2470,6 +2471,7 @@ color_read_arg(const char **pp, const char *end, ns_color_arg *out)
             ? color_math_arg(p + 1, close, out)
             : color_math_arg(id, close + 1, out);
         if (!ok) return FALSE;
+        out->math = TRUE;
         *pp = close + 1;
         return TRUE;
     }
@@ -3368,6 +3370,271 @@ color_append_value(GString *s, const ns_css_value *v)
         color_append_number(s, v->u.color.c[3]);
     }
     g_string_append_c(s, ')');
+}
+
+static gboolean color_specified_append(GString *out, const char *s,
+                                       const char *end, int depth);
+
+static void
+color_append_lower(GString *out, const char *p, const char *end)
+{
+    for (; p < end; p++) g_string_append_c(out, g_ascii_tolower(*p));
+}
+
+static const char *
+color_fn_name(ns_color_fn fn)
+{
+    switch (fn) {
+    case NS_COLOR_FN_RGB:   return "rgb";
+    case NS_COLOR_FN_HSL:   return "hsl";
+    case NS_COLOR_FN_HWB:   return "hwb";
+    case NS_COLOR_FN_LAB:   return "lab";
+    case NS_COLOR_FN_LCH:   return "lch";
+    case NS_COLOR_FN_OKLAB: return "oklab";
+    case NS_COLOR_FN_OKLCH: return "oklch";
+    default:                return "color";
+    }
+}
+
+static void
+color_append_token(GString *out, const char *p, const char *end)
+{
+    const char *num_end = color_number_end(p, end);
+    if (num_end != p) {
+        char *text = g_strndup(p, (gsize)(num_end - p));
+        color_append_number(out, g_ascii_strtod(text, NULL));
+        g_free(text);
+        color_append_lower(out, num_end, end);
+        return;
+    }
+    const char *q = p;
+    while (q < end && is_ident(*q)) q++;
+    if (q < end && *q == '(') {
+        g_string_append_len(out, p, end - p);
+        return;
+    }
+    color_append_lower(out, p, end);
+}
+
+static gboolean
+color_relative_specified_append(GString *out, ns_color_fn fn, const char *p,
+                                const char *end, int depth)
+{
+    p = color_skip_ws(p, end);
+    const char *origin_end = color_component_end(p, end);
+    g_string_append_printf(out, "%s(from ", color_fn_name(fn));
+    if (!color_specified_append(out, p, origin_end, depth + 1)) return FALSE;
+    p = origin_end;
+    while (1) {
+        p = color_skip_ws(p, end);
+        if (p >= end) break;
+        if (*p == '/') {
+            g_string_append(out, " /");
+            p++;
+            continue;
+        }
+        const char *e = p;
+        int nest = 0;
+        while (e < end) {
+            if (*e == '(') nest++;
+            else if (*e == ')') nest--;
+            else if (nest == 0 && (is_ws(*e) || *e == '/')) break;
+            e++;
+        }
+        g_string_append_c(out, ' ');
+        color_append_token(out, p, e);
+        p = e;
+    }
+    g_string_append_c(out, ')');
+    return TRUE;
+}
+
+static void
+color_append_math_arg(GString *out, const ns_color_arg *a)
+{
+    g_string_append(out, "calc(");
+    if (isnan(a->v)) g_string_append(out, "NaN");
+    else if (isinf(a->v)) g_string_append(out, a->v > 0 ? "infinity" : "-infinity");
+    else color_append_number(out, a->v);
+    if (a->percent) g_string_append_c(out, '%');
+    else if (a->angle) g_string_append(out, "deg");
+    g_string_append_c(out, ')');
+}
+
+static gboolean
+color_absolute_specified_append(GString *out, ns_color_fn fn, const char *p,
+                                const char *end, const ns_color *col)
+{
+    if (fn == NS_COLOR_FN_COLOR) {
+        p = color_space_ident_end(color_skip_ws(p, end), end);
+        g_string_append_printf(out, "color(%s ", color_space_name(col->space));
+    } else {
+        g_string_append_printf(out, "%s(", color_fn_name(fn));
+    }
+    ns_color_args args;
+    if (!color_args_parse(p, end, &args)) return FALSE;
+    for (int i = 0; i < 3; i++) {
+        if (i) g_string_append_c(out, ' ');
+        if (args.args[i].math) color_append_math_arg(out, &args.args[i]);
+        else if (col->none & (1 << i)) g_string_append(out, "none");
+        else color_append_number(out, col->c[i]);
+    }
+    if (args.has_alpha && args.args[3].math) {
+        g_string_append(out, " / ");
+        color_append_math_arg(out, &args.args[3]);
+    } else if (col->none & NS_COLOR_NONE_ALPHA) {
+        g_string_append(out, " / none");
+    } else if (col->alpha < 1.0) {
+        g_string_append(out, " / ");
+        color_append_number(out, col->alpha);
+    }
+    g_string_append_c(out, ')');
+    return TRUE;
+}
+
+static gboolean
+color_mix_specified_append(GString *out, const char *p, const char *end,
+                           int depth)
+{
+    char *parts[NS_COLOR_MIX_MAX + 1] = {0};
+    int n = calc_split_args(p, end, parts, G_N_ELEMENTS(parts));
+    gboolean ok = n >= 1 && n <= NS_COLOR_MIX_MAX;
+    int first = 0;
+    g_string_append(out, "color-mix(");
+    if (ok && g_ascii_strncasecmp(parts[0], "in", 2) == 0 &&
+        is_ws(parts[0][2])) {
+        static const char *const methods[] = {
+            "shorter", "longer", "increasing", "decreasing",
+        };
+        ns_css_color_space space;
+        ns_hue_method hue;
+        ok = color_parse_method(parts[0], &space, &hue);
+        if (ok && (space != NS_CSS_COLOR_OKLAB || hue != NS_HUE_SHORTER)) {
+            g_string_append_printf(out, "in %s", color_space_name(space));
+            if (hue != NS_HUE_SHORTER)
+                g_string_append_printf(out, " %s hue", methods[hue]);
+            g_string_append(out, ", ");
+        }
+        first = 1;
+    }
+    int count = ok ? n - first : 0;
+    const char *color_start[NS_COLOR_MIX_MAX], *color_end[NS_COLOR_MIX_MAX];
+    const char *pct_start[NS_COLOR_MIX_MAX], *pct_end[NS_COLOR_MIX_MAX];
+    double pcts[NS_COLOR_MIX_MAX];
+    gboolean given[NS_COLOR_MIX_MAX], math = FALSE;
+    double given_sum = 0.0;
+    int omitted = 0;
+    for (int i = 0; i < count; i++) {
+        given[i] = color_mix_item_split(parts[first + i], &color_start[i],
+                                        &color_end[i], &pct_start[i],
+                                        &pct_end[i], &pcts[i]);
+        if (!given[i]) {
+            omitted++;
+            continue;
+        }
+        given_sum += pcts[i];
+        for (const char *c = pct_start[i]; c < pct_end[i]; c++)
+            if (*c == '(') math = TRUE;
+    }
+    gboolean print_pcts = FALSE;
+    if (!math && omitted < count) {
+        for (int i = 0; i < count; i++)
+            if (!given[i])
+                pcts[i] = MAX(0.0, (100.0 - given_sum) / omitted);
+        for (int i = 0; i < count; i++)
+            if (fabs(pcts[i] - 100.0 / count) > 1e-9) print_pcts = TRUE;
+    }
+    for (int i = 0; ok && i < count; i++) {
+        if (i) g_string_append(out, ", ");
+        ok = color_specified_append(out, color_start[i], color_end[i],
+                                    depth + 1);
+        if (!ok) break;
+        if (math && given[i]) {
+            g_string_append_c(out, ' ');
+            g_string_append_len(out, pct_start[i], pct_end[i] - pct_start[i]);
+        } else if (print_pcts) {
+            g_string_append_c(out, ' ');
+            color_append_number(out, pcts[i]);
+            g_string_append_c(out, '%');
+        }
+    }
+    g_string_append_c(out, ')');
+    for (int i = 0; i < n; i++) g_free(parts[i]);
+    return ok;
+}
+
+static gboolean
+color_light_dark_specified_append(GString *out, const char *p,
+                                  const char *end, int depth)
+{
+    char *parts[2] = {0};
+    int n = calc_split_args(p, end, parts, 2);
+    gboolean ok = n == 2;
+    g_string_append(out, "light-dark(");
+    for (int i = 0; ok && i < 2; i++) {
+        if (i) g_string_append(out, ", ");
+        ok = color_specified_append(out, parts[i], parts[i] + strlen(parts[i]),
+                                    depth + 1);
+    }
+    g_string_append_c(out, ')');
+    for (int i = 0; i < n; i++) g_free(parts[i]);
+    return ok;
+}
+
+static gboolean
+color_specified_append(GString *out, const char *s, const char *end, int depth)
+{
+    if (depth > NS_COLOR_MAX_DEPTH) return FALSE;
+    s = color_skip_ws(s, end);
+    while (end > s && is_ws(end[-1])) end--;
+    ns_color col;
+    if (!color_parse_range(s, end, &col, depth)) return FALSE;
+    const char *p = s;
+    while (p < end && is_ident(*p)) p++;
+    if (*s != '#' && p == end) {
+        color_append_lower(out, s, end);
+        return TRUE;
+    }
+    ns_color_fn fn = *s == '#' ? NS_COLOR_FN_RGB
+                               : color_fn_by_name(s, (gsize)(p - s));
+    if (*s != '#') {
+        const char *body = p + 1, *close = end - 1;
+        if (fn == NS_COLOR_FN_MIX)
+            return color_mix_specified_append(out, body, close, depth);
+        if (fn == NS_COLOR_FN_LIGHT_DARK)
+            return color_light_dark_specified_append(out, body, close, depth);
+        const char *q = color_skip_ws(body, close);
+        if (close - q > 4 && g_ascii_strncasecmp(q, "from", 4) == 0 &&
+            is_ws(q[4]))
+            return color_relative_specified_append(out, fn, q + 4, close,
+                                                   depth);
+        gboolean legacy_fn = fn == NS_COLOR_FN_RGB || fn == NS_COLOR_FN_HSL ||
+                             fn == NS_COLOR_FN_HWB;
+        if (!legacy_fn ||
+            (fn != NS_COLOR_FN_RGB && col.none && depth == 0))
+            return color_absolute_specified_append(out, fn, body, close,
+                                                   &col);
+    }
+    if (col.legacy) col.none = 0;
+    ns_css_value tmp;
+    memset(&tmp, 0, sizeof tmp);
+    color_value_store(&tmp, &col);
+    color_append_value(out, &tmp);
+    return TRUE;
+}
+
+static char *
+color_specified_serialize(const char *text)
+{
+    if (!text || strstr(text, "var(") || strstr(text, "attr(") ||
+        strstr(text, "sibling-") || strstr(text, "/*"))
+        return NULL;
+    GString *out = g_string_new(NULL);
+    if (!color_specified_append(out, text, text + strlen(text), 0)) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
 }
 
 static gboolean
@@ -11360,6 +11627,48 @@ prop_name_is_color(const char *prop)
     return FALSE;
 }
 
+static char *
+color_computed_text(const char *text)
+{
+    ns_color col;
+    if (!color_parse_text(text, &col)) return NULL;
+    ns_css_value tmp;
+    memset(&tmp, 0, sizeof tmp);
+    color_value_store(&tmp, &col);
+    GString *s = g_string_new(NULL);
+    color_append_value(s, &tmp);
+    return g_string_free(s, FALSE);
+}
+
+static gboolean
+color_text_has_math(const char *p)
+{
+    while (*p) {
+        if (!is_ident_start(*p)) {
+            p++;
+            continue;
+        }
+        const char *id = p;
+        while (*p && is_ident(*p)) p++;
+        if (*p == '(' &&
+            color_fn_by_name(id, (gsize)(p - id)) == NS_COLOR_FN_UNKNOWN)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+color_canonical_keeps_value(const char *raw, const char *canonical)
+{
+    if (color_text_has_math(raw)) return FALSE;
+    char *a = color_computed_text(raw);
+    char *b = color_computed_text(canonical);
+    gboolean same = a && b && strcmp(a, b) == 0;
+    g_free(a);
+    g_free(b);
+    return same;
+}
+
 char *
 ns_css_specified_canonical(const char *prop, const char *value)
 {
@@ -11411,22 +11720,8 @@ ns_css_specified_canonical(const char *prop, const char *value)
         ns_css_value_free(v);
     }
     if (prop && value && prop_name_is_color(prop)) {
-        guint8 r, g, b, a;
-        if (text_is_ident(value)) {
-            if (parse_color(value, &r, &g, &b, &a) ||
-                g_ascii_strcasecmp(value, "currentcolor") == 0)
-                return g_ascii_strdown(value, -1);
-        } else if ((value[0] == '#' ||
-                    g_ascii_strncasecmp(value, "rgb", 3) == 0 ||
-                    g_ascii_strncasecmp(value, "hsl", 3) == 0 ||
-                    g_ascii_strncasecmp(value, "hwb(", 4) == 0) &&
-                   !strstr(value, "var(") && !strstr(value, "calc(") &&
-                   !strstr(value, "none") &&
-                   parse_color(value, &r, &g, &b, &a)) {
-            GString *out = g_string_new(NULL);
-            ns_css_append_color(out, r, g, b, a);
-            return g_string_free(out, FALSE);
-        }
+        char *canon = color_specified_serialize(value);
+        if (canon) return canon;
     }
     if (prop && (strcmp(prop, "border-radius") == 0 ||
                  strcmp(prop, "-webkit-border-radius") == 0)) {
@@ -23973,6 +24268,11 @@ inline_decl_list_parse(const char *style)
         value = css_inline_value_canonical(name, value);
         char *canonical = custom ? NULL
             : ns_css_specified_canonical(name, value);
+        if (canonical && prop_name_is_color(name) &&
+            !color_canonical_keeps_value(value, canonical)) {
+            g_free(canonical);
+            canonical = NULL;
+        }
         if (canonical) {
             g_free(value);
             value = canonical;
