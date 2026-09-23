@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Each `<style>` element is its own style sheet again. Adjacent inline
+  sheets were joined into one text before parsing, so a sheet that ended
+  inside an unclosed block, string or comment swallowed every sheet after
+  it; such a sheet is now parsed on its own, where the end of the sheet
+  closes whatever it left open. `<style type="text/foo">` and a
+  `<link rel=stylesheet>` whose `type` is not CSS no longer apply, a
+  `<link>` with the `disabled` attribute is not loaded, and
+  `styleEl.disabled = true` or `sheet.disabled = true` switches a sheet
+  off -- the getter was a stub that always said `false`.
 * The `dir` attribute sets the CSS `direction`, as the HTML rendering
   rules map it. Only the text shaper read the attribute, so on a
   right-to-left page the words ran right to left but a table still put
