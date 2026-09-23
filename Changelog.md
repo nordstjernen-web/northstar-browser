@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `<hr>` is drawn by its borders, as the HTML rendering rules style it:
+  a 1px inset rule in grey with `0.5em auto` margins. It used to be a
+  1px grey background with a line of its own painted 4px below the top
+  whenever it had no border -- so Bootstrap's `border: 0; border-top:
+  1px solid` rule showed a second, grey line under the first, and an
+  `<hr>` restyled as a coloured bar had a stripe drawn across it. The
+  `color`, `noshade` and `size` attributes follow the rendering rules
+  too: `size` is the rule's full height, including its borders.
 * Each `<style>` element is its own style sheet again. Adjacent inline
   sheets were joined into one text before parsing, so a sheet that ended
   inside an unclosed block, string or comment swallowed every sheet after
