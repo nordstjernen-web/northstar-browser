@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A grid row with a fixed size keeps it. Rows declared as `20px` (or a
+  resolvable percentage, or `minmax()` of two fixed sizes) grew to fit
+  taller content like `auto` rows do, pushing every later row down;
+  now the content overflows the row, and an item spanning a fixed row
+  and an `auto` one grows only the `auto` row.
 * Grid items given both a row and a column claim their cell before the
   automatically placed items flow in, as the grid placement algorithm
   orders it. An item pinned to row 1, column 1 that came later in the
