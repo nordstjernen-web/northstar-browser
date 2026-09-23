@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `font-weight: bolder` and `lighter` are worked out from the parent's
+  weight, using the table in CSS Fonts 4, when the style is computed.
+  They were kept as keywords and measured later against a fixed 400
+  with the old thresholds, so `bolder` inside bold text stayed at 700
+  instead of 900, `lighter` inside bold fell to 100 instead of 400, and
+  children inherited the keyword rather than the weight.
 * `color: currentColor` takes the parent's colour, which is what the
   keyword means on the `color` property itself. It was left unresolved,
   so it was handed down as a word, getComputedStyle reported
