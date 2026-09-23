@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A flex item with a height of its own keeps it in a row. Stretching
+  ignored whether the item's height was `auto`, so two 20px-tall items
+  in a 100px-tall row both came out 100px tall -- and the second layout
+  that stretch triggered sized them from their `width` again instead of
+  the flexed width, so two `width: 200px` items squeezed into 300px
+  overlapped. Only an item with an automatic height stretches now, the
+  stretched height respects its `min-height` and `max-height`, and the
+  flexed width survives the relayout.
 * A multi-column block splits a list, not just a run of siblings. The
   column code distributed a container's own children and gave up when
   there were fewer than two, so `column-width` on a wrapper holding a
