@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A cross-origin frame can no longer read the embedding site's images
+  through a canvas. Whether an image was cross-origin was judged against
+  the top-level page even when a frame's script had loaded it, because
+  the frame's canvas calls run through the page's own functions: a frame
+  could draw and read back images from the embedding page's origin, and
+  got a `SecurityError` for images from its own. An image is now judged
+  against the document that requested it.
 * A deep Web Audio graph no longer crashes the browser when an
   `OfflineAudioContext` renders it. Each node with inputs takes a scratch
   buffer the length of the render, one per level of the graph, and a

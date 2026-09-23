@@ -40346,6 +40346,7 @@ typedef struct ns_js_image_load {
     ns_node   *el;
     ns_image  *img;
     char      *requested_url;
+    char      *client_url;
     double     start_ms;
     guint      ready_idle;
 } ns_js_image_load;
@@ -40457,6 +40458,7 @@ ns_js_image_load_free(gpointer data)
     if (r->js && r->js->image_cache)
         ns_image_cache_cancel_cb(r->js->image_cache, r);
     g_free(r->requested_url);
+    g_free(r->client_url);
     g_free(r);
 }
 
@@ -40558,6 +40560,7 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
     r->js = js;
     r->el = el;
     r->requested_url = abs_url;
+    r->client_url = g_strdup(ns_js_node_doc_base(js, el));
     r->start_ms = ns_perf_now_ms(js);
     g_hash_table_insert(js->js_image_loads, el, r);
     ns_fetch_policy *policy = ns_js_fetch_policy(js, el);
@@ -40633,23 +40636,16 @@ ns_js_urls_same_origin(const char *a, const char *b)
 }
 
 static const char *
-ns_js_ctx_document_url(ns_js *js, JSContext *ctx)
+ns_js_image_client_url(ns_js *js, const ns_node *el, const ns_image *im)
 {
-    if (js->frame_contexts) {
-        GHashTableIter it;
-        gpointer frame, fctx;
-        g_hash_table_iter_init(&it, js->frame_contexts);
-        while (g_hash_table_iter_next(&it, &frame, &fctx)) {
-            if (fctx != ctx) continue;
-            const char *fu = ns_element_get_attr(frame, "data-nd-frame-url");
-            if (fu && *fu) return fu;
-        }
-    }
-    return js->current_url;
+    ns_js_image_load *r = js->js_image_loads
+        ? g_hash_table_lookup(js->js_image_loads, el) : NULL;
+    if (r && r->img == im && r->client_url) return r->client_url;
+    return ns_js_node_doc_base(js, el);
 }
 
 gboolean
-ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im,
+ns_js_image_origin_clean(ns_js *js, const ns_node *el, const ns_image *im,
                          gboolean cors_requested)
 {
     if (!im) return TRUE;
@@ -40657,7 +40653,7 @@ ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im,
     if (!url || g_str_has_prefix(url, "data:") ||
         g_str_has_prefix(url, "blob:"))
         return TRUE;
-    const char *doc_url = ns_js_ctx_document_url(js, ctx);
+    const char *doc_url = ns_js_image_client_url(js, el, im);
     if (ns_js_urls_same_origin(url, doc_url)) return TRUE;
     return cors_requested && im->cors_allow_origin &&
            cors_allows(doc_url, url, im->cors_allow_origin);
