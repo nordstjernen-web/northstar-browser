@@ -40851,6 +40851,39 @@ ns_js_activate_element(ns_js *js, const ns_node *el)
     ns_js_click_with_activation(js, el);
 }
 
+gboolean
+ns_js_keyboard_activate(ns_js *js, const ns_node *el, const char *key,
+                        gboolean keyup)
+{
+    if (!js || !js->ctx || !el || !key || el->kind != NS_NODE_ELEMENT)
+        return FALSE;
+    gboolean enter = strcmp(key, "Enter") == 0;
+    gboolean space = strcmp(key, " ") == 0;
+    if ((!enter || keyup) && (!space || !keyup)) return FALSE;
+    if (ns_element_effectively_inert(el) ||
+        ns_element_effectively_disabled(el))
+        return FALSE;
+    gboolean link = (ns_node_is_element_named(el, "a") ||
+                     ns_node_is_element_named(el, "area")) &&
+                    ns_element_get_attr(el, "href");
+    gboolean summary = ns_summary_toggle_target(el) != NULL;
+    gboolean button = ns_node_is_button(el);
+    gboolean checkable = ns_checkable_input_kind(el) != 0;
+    if (enter ? !(link || button || summary)
+              : !(button || checkable || summary))
+        return FALSE;
+    ns_js_activate_element(js, el);
+    return TRUE;
+}
+
+gboolean
+ns_js_keyboard_activates(const ns_node *el, const char *key)
+{
+    if (!el || !key || strcmp(key, " ") != 0) return FALSE;
+    return ns_node_is_button(el) || ns_checkable_input_kind(el) != 0 ||
+           ns_summary_toggle_target(el) != NULL;
+}
+
 void
 ns_js_click_begin(ns_js *js, const ns_node *node, ns_js_click_state *state)
 {

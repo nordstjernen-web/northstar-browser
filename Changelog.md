@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Links, buttons, checkboxes, radio buttons and `<summary>` respond to
+  the keyboard: Enter activates a focused link, button or summary, and
+  Space (on release) a focused button, checkbox, radio button or
+  summary, with a trusted `click` like a mouse press. Enter on a
+  focused link or summary used to do nothing, Enter on a button
+  submitted its form without a click, and Space scrolled the page.
 * `String(link)` and `link + ""` give the URL of an `<a>` or `<area>`
   element, as their `href` stringifier requires, instead of
   "[object HTMLAnchorElement]".
