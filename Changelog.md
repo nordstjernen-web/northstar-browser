@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `Object.prototype.toString` names the natively implemented interfaces:
+  a `MessagePort`, `XMLHttpRequest`, `MessageChannel`, `DOMParser` and
+  the like read `[object MessagePort]` and so on instead of
+  `[object Object]`, which scripts use to tell platform objects apart.
 * URL setters behave as the URL Standard describes where the parser
   library does not: `url.host = "example.com:"` or `"example.com:abc"`
   changes the host and keeps the port, an out-of-range port still sets

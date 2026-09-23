@@ -8950,6 +8950,9 @@ ns_bind_fn_if_not_callable(JSContext *ctx, JSValueConst obj, const char *name,
         ns_bind_fn(ctx, obj, name, fn, argc);
 }
 
+static void ns_set_tostring_tag(JSContext *ctx, JSValueConst obj,
+                                const char *tag);
+
 static JSValue
 ns_make_ctor(JSContext *ctx, JSCFunction *fn, const char *name, int argc)
 {
@@ -8959,6 +8962,7 @@ ns_make_ctor(JSContext *ctx, JSCFunction *fn, const char *name, int argc)
     JS_DefinePropertyValueStr(ctx, proto, "constructor",
                               JS_DupValue(ctx, func),
                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    ns_set_tostring_tag(ctx, proto, name);
     JS_DefinePropertyValueStr(ctx, func, "prototype", proto, JS_PROP_WRITABLE);
     return func;
 }
@@ -8992,9 +8996,6 @@ ns_bind_fns(JSContext *ctx, JSValueConst obj, JSCFunction *fn,
     for (gsize i = 0; i < n; i++)
         ns_bind_fn(ctx, obj, defs[i].name, fn, defs[i].argc);
 }
-
-static void ns_set_tostring_tag(JSContext *ctx, JSValueConst obj,
-                                const char *tag);
 
 static void
 ns_install_namespace_object(JSContext *ctx, JSValueConst global,
