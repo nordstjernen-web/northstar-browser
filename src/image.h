@@ -81,6 +81,14 @@ ns_image       *ns_image_cache_insert_encoded(ns_image_cache *cache,
                                               const guchar   *data,
                                               gsize           len);
 
+typedef struct ns_image_decoding ns_image_decoding;
+
+ns_image_decoding *ns_image_decode_encoded(const guchar *data, gsize len);
+ns_image       *ns_image_cache_insert_decoding(ns_image_cache    *cache,
+                                               const char        *url,
+                                               ns_image_decoding *decoding);
+void            ns_image_decoding_free(ns_image_decoding *decoding);
+
 ns_texture *ns_image_decode_bytes(const guchar *data, gsize len,
                                   int *out_w, int *out_h);
 

@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Images and MPEG-1 video that a page fetches are decoded on a worker
+  thread. They were decoded on the engine thread as each download
+  finished, so a video clip froze the page's scripts, timers and
+  rendering for as long as it took to decode every frame -- over half a
+  second for three seconds of 720p.
 * The audio worker checks `file:` URLs itself. It opened any `file://`
   path it was handed, relying on the script bindings alone to refuse
   local files to `http(s)` pages; the page view now tells it whether the

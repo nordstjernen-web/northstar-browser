@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "config.h"
 #include "css.h"
 #include "css_syntax.h"
 #include "debuglog.h"
@@ -968,6 +969,45 @@ typedef struct img_async_item {
 } img_async_item;
 
 static void
+img_async_item_finish(img_async_item *it)
+{
+    ns_engine_img_session *s = it->session;
+    if (s->outstanding > 0) s->outstanding--;
+    if (!s->dead && s->arrived_cb)
+        s->arrived_cb(s->user_data);
+    img_session_unref(s);
+    g_free(it->abs);
+    g_free(it);
+}
+
+static void
+image_decode_in_worker(GTask *task, gpointer source, gpointer task_data,
+                       GCancellable *cancellable)
+{
+    (void)source;
+    (void)cancellable;
+    gsize len = 0;
+    const guchar *data = g_bytes_get_data(task_data, &len);
+    g_task_return_pointer(task, ns_image_decode_encoded(data, len),
+                          (GDestroyNotify)ns_image_decoding_free);
+}
+
+static void
+on_image_decoded_async(GObject *src, GAsyncResult *result, gpointer user_data)
+{
+    (void)src;
+    img_async_item *it = user_data;
+    ns_engine_img_session *s = it->session;
+    ns_image_decoding *decoding =
+        g_task_propagate_pointer(G_TASK(result), NULL);
+    if (s->dead)
+        ns_image_decoding_free(decoding);
+    else
+        ns_image_cache_insert_decoding(s->cache, it->abs, decoding);
+    img_async_item_finish(it);
+}
+
+static void
 on_image_fetch_async_done(GObject *src, GAsyncResult *result,
                           gpointer user_data)
 {
@@ -976,19 +1016,23 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
     ns_engine_img_session *s = it->session;
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
-    if (!s->dead && resp && !resp->error && resp->body &&
-        resp->body->len > 0) {
+    g_clear_error(&err);
+    gboolean usable = !s->dead && resp && !resp->error && resp->body &&
+                      resp->body->len > 0;
+    if (usable && ns_config_get()->async_image_decode) {
+        GBytes *body = g_bytes_new(resp->body->data, resp->body->len);
+        ns_response_free(resp);
+        GTask *task = g_task_new(NULL, NULL, on_image_decoded_async, it);
+        g_task_set_task_data(task, body, (GDestroyNotify)g_bytes_unref);
+        g_task_run_in_thread(task, image_decode_in_worker);
+        g_object_unref(task);
+        return;
+    }
+    if (usable)
         ns_image_cache_insert_encoded(s->cache, it->abs,
                                       resp->body->data, resp->body->len);
-    }
     if (resp) ns_response_free(resp);
-    g_clear_error(&err);
-    if (s->outstanding > 0) s->outstanding--;
-    if (!s->dead && s->arrived_cb)
-        s->arrived_cb(s->user_data);
-    img_session_unref(s);
-    g_free(it->abs);
-    g_free(it);
+    img_async_item_finish(it);
 }
 
 ns_engine_img_session *

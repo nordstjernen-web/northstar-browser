@@ -184,8 +184,11 @@ partitioning and permission model.
 
 ## Images
 
-`image.c` decodes on demand, on a worker task unless
-`async_image_decode` is off. Multi-frame sources come first: an MPEG-1
+`image.c` decodes on a worker task unless `async_image_decode` is off,
+both for images the page fetches (`engine.c` hands the bytes to
+`ns_image_decode_encoded` and inserts the result on the engine thread) and
+for images looked up on demand; `data:` images layout needs at once, and
+headless runs, decode in place. Multi-frame sources come first: an MPEG-1
 stream (`video.c`), an animated GIF or an APNG becomes a frame list.
 Everything else goes down a fixed chain:
 
