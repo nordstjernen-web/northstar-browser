@@ -689,6 +689,9 @@ JSValue ns_perf_supported_entry_types(JSContext *ctx);
 void ns_encoding_install(JSContext *ctx, JSValueConst global);
 gboolean ns_js_buffer_source_bytes(JSContext *ctx, JSValueConst v,
                                    const uint8_t **data, size_t *len);
+void ns_webcrypto_install(JSContext *ctx, JSValueConst global,
+                          JSValueConst crypto);
+JSValue ns_webcrypto_clone_key(JSContext *ctx, JSValueConst v);
 JSValue ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv);
 JSValue ns_perf_observer_observe(JSContext *ctx, JSValueConst this_val,

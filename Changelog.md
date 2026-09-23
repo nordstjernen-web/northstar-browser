@@ -4,6 +4,23 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `crypto.subtle` follows the Web Cryptography API's algorithm
+  normalization and error rules. Algorithm dictionaries are read the
+  WebIDL way (a missing member or an out-of-range length is a
+  TypeError, an unknown algorithm or hash a NotSupportedError), usages
+  that do not fit the key are a SyntaxError, bad key material a
+  DataError and a key used for the wrong algorithm, usage or key type
+  an InvalidAccessError, where many of these used to come back as
+  OperationError or as a plain Error. Keys are real `CryptoKey` objects
+  whose `algorithm` carries `length`, `hash`, `modulusLength`,
+  `publicExponent` or `namedCurve` as the key type requires; JWK import
+  checks `kty`, `use`, `key_ops`, `ext`, `alg` and `crv` and rejects
+  mismatched EC and Ed25519 key pairs; JWK export sets `alg`;
+  `deriveBits` honours an absent, zero or non-byte length; Ed25519
+  verification refuses small-order keys and signatures; compressed EC
+  points import and export uncompressed; `wrapKey`/`unwrapKey` with JWK
+  no longer fail to parse the unwrapped text; and `structuredClone()`
+  copies a `CryptoKey`.
 * `crypto.getRandomValues()` throws the errors the Web Cryptography API
   specifies: a `TypeMismatchError` DOMException for a `DataView` (it
   was a plain TypeError) and a `QuotaExceededError` for more than 65536

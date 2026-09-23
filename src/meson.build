@@ -74,6 +74,7 @@ northstar_engine_sources = files(
   'js_encoding.c',
   'js_perf.c',
   'js_realm.c',
+  'js_webcrypto.c',
   'quickjs_compat.c',
   'layout.c',
   'mathml.c',

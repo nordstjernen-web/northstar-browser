@@ -70,6 +70,47 @@ ns_crypto_key_new(ns_ck_type type, const char *algo, const char *hash,
     return k;
 }
 
+ns_crypto_key *
+ns_crypto_secret_new(const char *algo, const char *hash, const guint8 *data,
+                     gsize len, int bits, gboolean extractable, guint32 usages)
+{
+    ns_crypto_key *k = ns_crypto_key_new(NS_CK_SECRET, algo, hash, NULL, bits,
+                                         extractable, usages);
+    k->raw = g_malloc(len ? len : 1);
+    if (len) memcpy(k->raw, data, len);
+    k->raw_len = len;
+    return k;
+}
+
+const char *
+ns_crypto_key_kind(const ns_crypto_key *k)
+{
+    if (!k || !k->pkey) return NULL;
+    if (EVP_PKEY_is_a(k->pkey, "RSA")) return "RSA";
+    if (EVP_PKEY_is_a(k->pkey, "EC")) return "EC";
+    if (EVP_PKEY_is_a(k->pkey, "ED25519")) return "Ed25519";
+    if (EVP_PKEY_is_a(k->pkey, "X25519")) return "X25519";
+    return NULL;
+}
+
+const char *
+ns_crypto_key_curve(const ns_crypto_key *k)
+{
+    static const struct { const char *group; const char *name; } curves[] = {
+        { "prime256v1", "P-256" },
+        { "secp384r1", "P-384" },
+        { "secp521r1", "P-521" },
+    };
+    char group[64];
+    if (!k || !k->pkey ||
+        EVP_PKEY_get_utf8_string_param(k->pkey, OSSL_PKEY_PARAM_GROUP_NAME,
+                                       group, sizeof group, NULL) <= 0)
+        return NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(curves); i++)
+        if (!g_ascii_strcasecmp(group, curves[i].group)) return curves[i].name;
+    return NULL;
+}
+
 static const EVP_MD *
 ns_crypto_md(const char *hash)
 {
@@ -240,6 +281,15 @@ ns_crypto_generate_keypair(const char *algo, const char *hash, const char *curve
     return TRUE;
 }
 
+static void
+ns_crypto_ec_uncompressed(EVP_PKEY *pkey)
+{
+    if (pkey && EVP_PKEY_is_a(pkey, "EC"))
+        EVP_PKEY_set_utf8_string_param(pkey,
+            OSSL_PKEY_PARAM_EC_POINT_CONVERSION_FORMAT,
+            OSSL_PKEY_EC_POINT_CONVERSION_FORMAT_UNCOMPRESSED);
+}
+
 static EVP_PKEY *
 ns_crypto_pkey_from_der(const char *format, const guint8 *data, gsize len)
 {
@@ -301,6 +351,7 @@ ns_crypto_import_raw(const char *format, const guint8 *data, gsize len,
         OSSL_PARAM_free(params);
         OSSL_PARAM_BLD_free(bld);
         EVP_PKEY_CTX_free(ctx);
+        ns_crypto_ec_uncompressed(pkey);
         ns_crypto_key *k = ns_crypto_key_new(NS_CK_PUBLIC, algo, hash, curve,
                                              EVP_PKEY_get_bits(pkey), extractable,
                                              usages);
@@ -321,6 +372,7 @@ ns_crypto_import_raw(const char *format, const guint8 *data, gsize len,
 
     EVP_PKEY *pkey = ns_crypto_pkey_from_der(format, data, len);
     if (!pkey) return ns_crypto_err(err, "DataError: key import");
+    ns_crypto_ec_uncompressed(pkey);
     ns_ck_type t = !g_strcmp0(format, "pkcs8") ? NS_CK_PRIVATE : NS_CK_PUBLIC;
     ns_crypto_key *k = ns_crypto_key_new(t, algo, hash, curve,
                                          EVP_PKEY_get_bits(pkey), extractable,
@@ -392,6 +444,16 @@ ns_crypto_import_rsa_jwk(const guint8 *n, gsize n_len, const guint8 *e, gsize e_
     return k;
 }
 
+static gboolean
+ns_crypto_pairwise_ok(EVP_PKEY *pkey)
+{
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_pkey(NULL, pkey, NULL);
+    gboolean ok = ctx && EVP_PKEY_pairwise_check(ctx) > 0;
+    EVP_PKEY_CTX_free(ctx);
+    ERR_clear_error();
+    return ok;
+}
+
 ns_crypto_key *
 ns_crypto_import_ec_jwk(const char *curve, const guint8 *x, gsize x_len,
                         const guint8 *y, gsize y_len, const guint8 *d, gsize d_len,
@@ -429,7 +491,8 @@ ns_crypto_import_ec_jwk(const char *curve, const guint8 *x, gsize x_len,
     int selection = private ? EVP_PKEY_KEYPAIR : EVP_PKEY_PUBLIC_KEY;
     ns_crypto_key *k = NULL;
     if (ctx && EVP_PKEY_fromdata_init(ctx) > 0 &&
-        EVP_PKEY_fromdata(ctx, &pkey, selection, params) > 0) {
+        EVP_PKEY_fromdata(ctx, &pkey, selection, params) > 0 &&
+        (!private || ns_crypto_pairwise_ok(pkey))) {
         k = ns_crypto_key_new(private ? NS_CK_PRIVATE : NS_CK_PUBLIC, algo, NULL,
                               curve, EVP_PKEY_get_bits(pkey), extractable, usages);
         k->pkey = pkey;
@@ -578,6 +641,14 @@ ns_crypto_bn_export(const EVP_PKEY *pkey, const char *param, gsize *out_len)
     *out_len = n;
     BN_clear_free(bn);
     return out;
+}
+
+guint8 *
+ns_crypto_rsa_exponent(const ns_crypto_key *k, gsize *len)
+{
+    *len = 0;
+    return k && k->pkey ? ns_crypto_bn_export(k->pkey, OSSL_PKEY_PARAM_RSA_E, len)
+                        : NULL;
 }
 
 gboolean
@@ -819,6 +890,50 @@ ns_crypto_sign(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *
     return der;
 }
 
+static gboolean
+ns_crypto_ed25519_small_order(const guint8 *point)
+{
+    static const guint8 blocked[][32] = {
+        { 0 },
+        { 0x01 },
+        { 0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4,
+          0x89, 0xf2, 0xef, 0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6,
+          0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53, 0xfc, 0x05 },
+        { 0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b,
+          0x76, 0x0d, 0x10, 0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39,
+          0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac, 0x03, 0x7a },
+        { 0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
+        { 0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
+        { 0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(blocked); i++) {
+        if (memcmp(point, blocked[i], 31) == 0 &&
+            (point[31] & 0x7f) == blocked[i][31])
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_crypto_ed25519_weak(const ns_crypto_key *k, const guint8 *sig, gsize sig_len)
+{
+    guint8 pub[32];
+    size_t n = sizeof pub;
+    if (sig_len != 64 ||
+        EVP_PKEY_get_raw_public_key(k->pkey, pub, &n) <= 0 || n != 32) {
+        ERR_clear_error();
+        return TRUE;
+    }
+    return ns_crypto_ed25519_small_order(pub) ||
+           ns_crypto_ed25519_small_order(sig);
+}
+
 int
 ns_crypto_verify(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *sig,
                  gsize sig_len, const guint8 *data, gsize len, char **err)
@@ -835,6 +950,7 @@ ns_crypto_verify(const ns_crypto_key *k, const ns_crypto_params *p, const guint8
 
     if (!g_strcmp0(k->algo, "Ed25519")) {
         if (!k->pkey) { if (err) *err = g_strdup("NotSupportedError: verify"); return -1; }
+        if (ns_crypto_ed25519_weak(k, sig, sig_len)) return 0;
         EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
         int rc = -1;
         if (mdctx && EVP_DigestVerifyInit(mdctx, NULL, NULL, NULL, k->pkey) > 0) {
