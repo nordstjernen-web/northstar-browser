@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Grids that use `grid-template-areas` are laid out by the full grid
+  algorithm. They went through a separate, reduced code path that gave
+  `fr` rows no share of a fixed container height (a header / `1fr` /
+  footer page left the footer under the header instead of at the
+  bottom), sized every column the areas added as `1fr` instead of by
+  `grid-auto-columns`, and ignored `align-content`, `align-items` and
+  `grid-auto-rows`. Area names also resolve as line names, so
+  `grid-row: main` and `grid-column: main-start / main-end` place items
+  on a named area.
 * `getComputedStyle()` reads the `grid-area`, `grid-row` and
   `grid-column` shorthands (they read empty), and `grid-template`
   reports a declared track list as declared, falling back to the
