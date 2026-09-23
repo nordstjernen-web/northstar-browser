@@ -150,8 +150,6 @@ tmp_week_of_year(int y, int m, int d)
     return (int)((ord - w1) / 7) + 1;
 }
 
-/* ---- field population --------------------------------------------------- */
-
 static void
 tmp_fill_date(JSContext *ctx, JSValueConst obj, ns_temporal *t)
 {
@@ -244,8 +242,6 @@ tmp_fill(JSContext *ctx, JSValueConst obj, ns_temporal *t)
     }
 }
 
-/* ---- ISO breakdown for Instant/Zoned ----------------------------------- */
-
 static void
 tmp_breakdown(int64_t epoch_sec, int *y, int *mo, int *d,
               int *h, int *mi, int *s)
@@ -265,8 +261,6 @@ tmp_epoch_of(int y, int mo, int d, int h, int mi, int s)
            h * 3600 + mi * 60 + s;
 }
 
-/* ---- toString helpers --------------------------------------------------- */
-
 static void
 tmp_append_frac(GString *str, int ms, int us, int ns)
 {
@@ -279,8 +273,6 @@ tmp_append_frac(GString *str, int ms, int us, int ns)
     g_string_append_c(str, '.');
     g_string_append_len(str, buf, len);
 }
-
-/* ---- parsing ------------------------------------------------------------ */
 
 static gboolean
 tmp_parse_datetime(const char *s, int *y, int *mo, int *d,
@@ -334,8 +326,6 @@ tmp_parse_datetime(const char *s, int *y, int *mo, int *d,
     }
     return TRUE;
 }
-
-/* ---- Instant ------------------------------------------------------------ */
 
 static JSValue
 tmp_instant_from(JSContext *ctx, JSValueConst this_val,
@@ -473,8 +463,6 @@ tmp_instant_subtract(JSContext *ctx, JSValueConst this_val, int argc, JSValueCon
 {
     return tmp_instant_add_impl(ctx, this_val, argc >= 1 ? argv[0] : JS_UNDEFINED, -1);
 }
-
-/* ---- PlainDate / PlainDateTime / PlainTime ----------------------------- */
 
 static void
 tmp_set_date_fields(ns_temporal *t, int y, int mo, int d)
@@ -688,8 +676,6 @@ tmp_date_toPlainDateTime(JSContext *ctx, JSValueConst this_val, int argc, JSValu
     return out;
 }
 
-/* ---- PlainTime ---------------------------------------------------------- */
-
 static void
 tmp_norm_time(ns_temporal *t)
 {
@@ -794,8 +780,6 @@ tmp_time_add(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
 static JSValue
 tmp_time_subtract(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 { return tmp_time_add_impl(ctx, this_val, argc >= 1 ? argv[0] : JS_UNDEFINED, -1); }
-
-/* ---- PlainDateTime ------------------------------------------------------ */
 
 static JSValue
 tmp_datetime_from(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
@@ -938,8 +922,6 @@ tmp_datetime_toPlainTime(JSContext *ctx, JSValueConst this_val, int argc, JSValu
     return out;
 }
 
-/* ---- PlainYearMonth / PlainMonthDay ------------------------------------ */
-
 static JSValue
 tmp_yearmonth_from(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -1027,8 +1009,6 @@ tmp_monthday_toString(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
     g_snprintf(buf, sizeof buf, "%02d-%02d", t->month, t->day);
     return JS_NewString(ctx, buf);
 }
-
-/* ---- ZonedDateTime ------------------------------------------------------ */
 
 static JSValue
 tmp_zoned_from(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
@@ -1131,8 +1111,6 @@ tmp_zoned_toPlainDateTime(JSContext *ctx, JSValueConst this_val, int argc, JSVal
     JS_FreeValue(ctx, temporal); JS_FreeValue(ctx, glob);
     return out;
 }
-
-/* ---- Duration ----------------------------------------------------------- */
 
 static JSValue
 tmp_duration_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
@@ -1281,8 +1259,6 @@ static JSValue
 tmp_duration_abs(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 { (void)argc; (void)argv; return tmp_duration_unary(ctx, this_val, 1); }
 
-/* ---- Temporal.Now ------------------------------------------------------- */
-
 static JSValue
 tmp_now_make_dt(JSContext *ctx, const char *ctor_name, int kind)
 {
@@ -1322,8 +1298,6 @@ static JSValue tmp_now_pt(JSContext *ctx, JSValueConst t, int c, JSValueConst *a
 { (void)t; (void)c; (void)a; return tmp_now_make_dt(ctx, "PlainTime", TK_PLAINTIME); }
 static JSValue tmp_now_tz(JSContext *ctx, JSValueConst t, int c, JSValueConst *a)
 { (void)t; (void)c; (void)a; return JS_NewString(ctx, "UTC"); }
-
-/* ---- registration ------------------------------------------------------- */
 
 typedef struct { const char *name; JSCFunction *fn; int argc; } tmp_method;
 

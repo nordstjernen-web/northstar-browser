@@ -27,11 +27,8 @@ void ns_print_setup_default(ns_print_setup *setup);
 void ns_print_setup_apply_page_rule(ns_print_setup *setup,
                                     const ns_css_page_rule *rule);
 
-/* Y offsets in root coordinates where each sheet starts; always at least one
-   entry, the first being 0. */
 GArray *ns_print_page_offsets(const ns_box *root, double page_content_height);
 
-/* Where sheet i stops: the next sheet's offset, or a full sheet for the last. */
 double ns_print_page_bottom(const GArray *offsets, guint i,
                             double page_content_height);
 

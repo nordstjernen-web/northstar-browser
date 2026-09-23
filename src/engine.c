@@ -123,7 +123,7 @@ ns_engine_post_blocking(const char *url, const char *top_url,
 static gboolean
 content_type_is_css(const char *ct)
 {
-    if (!ct || !*ct) return TRUE; /* missing type: be lenient */
+    if (!ct || !*ct) return TRUE;
     while (*ct == ' ' || *ct == '\t') ct++;
     return g_ascii_strncasecmp(ct, "text/css", 8) == 0 &&
            (ct[8] == '\0' || ct[8] == ';' || ct[8] == ' ' || ct[8] == '\t');

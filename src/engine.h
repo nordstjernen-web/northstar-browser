@@ -72,8 +72,6 @@ int ns_engine_write_pdf(const ns_box *root, const char *path);
 int ns_engine_write_pdf_paged(const ns_box *root, const char *path,
                               const struct ns_print_setup *setup);
 
-/* Renders each sheet into its own cairo recording surface, in CSS pixels.
-   The caller owns the array and must destroy every surface in it. */
 GPtrArray *ns_engine_print_recordings(const ns_box *root,
                                       const struct ns_print_setup *setup);
 

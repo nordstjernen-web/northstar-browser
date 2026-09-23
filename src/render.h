@@ -50,13 +50,9 @@ typedef struct ns_render_profile {
     gboolean container_pass;
 } ns_render_profile;
 
-/* Whether the most recently relaid-out page's stylesheets contain any :hover
- * selector. Lets a renderer skip hover-driven restyle/repaint work on pages
- * that have no hover styling. */
 gboolean ns_render_page_uses_hover(void);
 gboolean ns_render_page_uses_active(void);
 
-/* The @page rule in force for the page most recently laid out, or NULL. */
 const ns_css_page_rule *ns_render_page_rule(void);
 
 GHashTable *ns_render_relayout(const ns_render_ctx *c, ns_box **out_layout);

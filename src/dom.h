@@ -106,9 +106,6 @@ struct ns_node {
 
     guint32 flags;
 
-    /* 1-based source line/column of this element's content in the parsed
-       document (0 = unknown). Used so inline <script> stack traces report
-       document-relative positions like a real browser. */
     int src_line;
     int src_col;
 

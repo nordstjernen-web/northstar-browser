@@ -323,7 +323,6 @@ typedef struct ns_draw_path_ud {
     cairo_fill_rule_t fill_rule;
 } ns_draw_path_ud;
 
-/* Helpers defined in js.c, used by js_canvas.c */
 double ns_arg_d(JSContext *ctx, JSValueConst v);
 void ns_bind_fn(JSContext *ctx, JSValueConst obj, const char *name, JSCFunction *fn, int argc);
 const ns_box *ns_box_find_by_dom(const ns_box *root, const ns_node *target);
@@ -334,7 +333,6 @@ void ns_js_promise_reject(JSContext *ctx, JSValue resolvers[2], const char *mess
 JSValue ns_make_element(JSContext *ctx, const ns_node *cnode);
 const ns_node *ns_unwrap_element(JSValueConst val);
 
-/* Canvas API implemented in js_canvas.c */
 void
 ns_path2d_finalizer(JSRuntime *rt, JSValue val);
 void
@@ -674,7 +672,6 @@ void ns_canvas_register_path2d_class(JSRuntime *rt);
 void ns_make_interface_object(JSContext *ctx, JSValueConst global,
                               const char *name, JSValueConst proto);
 
-/* Performance API (js_perf.c) and the js.c helpers it shares. */
 void ns_bind_fn_if_not_callable(JSContext *ctx, JSValueConst obj, const char *name,
                                 JSCFunction *fn, int argc);
 gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,

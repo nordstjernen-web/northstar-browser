@@ -284,8 +284,6 @@ intl_register(JSContext *ctx, JSValueConst intl, const char *name,
     return func;
 }
 
-/* ---- locale canonicalization ------------------------------------------- */
-
 static char *
 intl_canonicalize(const char *tag)
 {
@@ -394,8 +392,6 @@ intl_supportedValuesOf(JSContext *ctx, JSValueConst this_val,
     return out;
 }
 
-/* ---- Intl.Locale -------------------------------------------------------- */
-
 static char *
 intl_subtag_after(const char *tag, char kind)
 {
@@ -498,8 +494,6 @@ intl_locale_identity(JSContext *ctx, JSValueConst this_val,
     (void)ctx; (void)argc; (void)argv;
     return JS_DupValue(ctx, this_val);
 }
-
-/* ---- Intl.Collator ------------------------------------------------------ */
 
 static JSValue
 intl_collator_ctor(JSContext *ctx, JSValueConst this_val,
@@ -637,8 +631,6 @@ intl_collator_resolved(JSContext *ctx, JSValueConst this_val,
     g_free(loc); g_free(usage); g_free(sens); g_free(cf);
     return o;
 }
-
-/* ---- Intl.NumberFormat -------------------------------------------------- */
 
 static void
 intl_nf_separators(const char *locale, const char **group, const char **decimal)
@@ -953,8 +945,6 @@ intl_nf_resolved(JSContext *ctx, JSValueConst this_val,
     g_free(loc); g_free(style); g_free(notation); g_free(cur);
     return o;
 }
-
-/* ---- Intl.DateTimeFormat ----------------------------------------------- */
 
 static const char *const intl_months[] = {
     "January","February","March","April","May","June","July","August",
@@ -1367,8 +1357,6 @@ intl_dtf_resolved(JSContext *ctx, JSValueConst this_val,
     return o;
 }
 
-/* ---- Intl.PluralRules --------------------------------------------------- */
-
 static JSValue
 intl_pr_ctor(JSContext *ctx, JSValueConst this_val,
              int argc, JSValueConst *argv)
@@ -1484,8 +1472,6 @@ intl_pr_resolved(JSContext *ctx, JSValueConst this_val,
     return o;
 }
 
-/* ---- Intl.ListFormat ---------------------------------------------------- */
-
 static JSValue
 intl_lf_ctor(JSContext *ctx, JSValueConst this_val,
              int argc, JSValueConst *argv)
@@ -1578,8 +1564,6 @@ intl_lf_resolved(JSContext *ctx, JSValueConst this_val,
     g_free(loc); g_free(type); g_free(style);
     return o;
 }
-
-/* ---- Intl.RelativeTimeFormat ------------------------------------------- */
 
 static JSValue
 intl_rtf_ctor(JSContext *ctx, JSValueConst this_val,
@@ -1694,8 +1678,6 @@ intl_rtf_resolved(JSContext *ctx, JSValueConst this_val,
     return o;
 }
 
-/* ---- Intl.DisplayNames -------------------------------------------------- */
-
 static const char *
 intl_region_name(const char *code)
 {
@@ -1805,8 +1787,6 @@ intl_dn_resolved(JSContext *ctx, JSValueConst this_val,
     return o;
 }
 
-/* ---- Intl.DurationFormat ------------------------------------------------ */
-
 static JSValue
 intl_df_ctor(JSContext *ctx, JSValueConst this_val,
              int argc, JSValueConst *argv)
@@ -1910,8 +1890,6 @@ intl_df_resolved(JSContext *ctx, JSValueConst this_val,
     return o;
 }
 
-/* ---- Intl.Segmenter ----------------------------------------------------- */
-
 static JSValue
 intl_seg_ctor(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv)
@@ -2004,8 +1982,6 @@ intl_seg_segment(JSContext *ctx, JSValueConst this_val,
     g_free(locale);
     return arr;
 }
-
-/* ---- toLocale* prototype hooks ----------------------------------------- */
 
 static JSValue
 intl_number_toLocaleString(JSContext *ctx, JSValueConst this_val,
@@ -2177,8 +2153,6 @@ intl_install_proto_hook(JSContext *ctx, JSValueConst global, const char *ctor,
     JS_FreeValue(ctx, proto);
     JS_FreeValue(ctx, c);
 }
-
-/* ---- install ------------------------------------------------------------ */
 
 void
 ns_js_intl_install(JSContext *ctx, JSValueConst global)

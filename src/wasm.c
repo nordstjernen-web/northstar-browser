@@ -2441,4 +2441,4 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
     JS_FreeValue(ctx, boot);
 }
 
-#endif /* NS_HAVE_WAMR */
+#endif

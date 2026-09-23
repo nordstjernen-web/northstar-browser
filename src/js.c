@@ -399,10 +399,6 @@ static void ns_document_use_document_prototype(JSContext *ctx,
 #define NS_SANDBOX_ALLOW_POINTER_LOCK  (1u << 10)
 #define NS_SANDBOX_ALLOW_PRESENTATION  (1u << 11)
 #define NS_SANDBOX_ALLOW_ORIENTATION   (1u << 12)
-/* Internal flag, never produced by the sandbox-attribute parser: set when the
-   frame is cross-origin to its embedder, to deny it the embedding origin's
-   localStorage/sessionStorage/cookies (the runtime's storage is keyed to the
-   top origin). Must match the (sandbox & 8192) checks in the realm bootstraps. */
 #define NS_FRAME_CROSS_ORIGIN          (1u << 13)
 
 static const struct { const char *token; unsigned flag; } ns_sandbox_tokens[] = {
@@ -1340,11 +1336,6 @@ ns_timer_fire(gpointer data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
 
-    /* The callback can clear its own timer (clearInterval(myId)) — or, via a
-       re-entrant relayout/fetch, another timer that shares state — which would
-       drop the last reference and free the function while it is still running.
-       Hold owned copies of the callback, its code and its extra args for the
-       duration of the call so the engine never executes freed memory. */
     JSValue cb = JS_IsUndefined(t->cb) ? JS_UNDEFINED
                                        : JS_DupValue(callback_ctx, t->cb);
     char *code = t->code ? g_strdup(t->code) : NULL;
@@ -30769,7 +30760,7 @@ ns_node_set_popover_open(JSContext *ctx, ns_node *n, gboolean open)
         gboolean prevented = FALSE;
         ns_js_dispatch_toggle_event(_j, n, "beforetoggle",
                                     old_state, new_state,
-                                    /* cancelable on open: */ open,
+                                    open,
                                     &prevented);
         if (open && prevented) return;
     }
@@ -52376,7 +52367,6 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         }
         if (JS_IsException(fn)) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
         JS_FreeValue(js->ctx, fn);
-        /* fall through: run unwrapped so a script that can't be wrapped still runs */
     }
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();

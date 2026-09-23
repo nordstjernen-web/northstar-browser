@@ -2452,9 +2452,6 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     if (rw < 0) { ox += rw; rw = -rw; }
     if (rh < 0) { oy += rh; rh = -rh; }
     if (rw == 0 || rh == 0) {
-        /* A zero-area region yields an ImageData with an empty pixel
-           buffer rather than null, so callers that immediately read
-           .data (e.g. gif.js) don't fault. */
         JSValue global = JS_GetGlobalObject(ctx);
         JSValue u8c = JS_GetPropertyStr(ctx, global, "Uint8ClampedArray");
         JS_FreeValue(ctx, global);
@@ -2473,8 +2470,6 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     int dw = (int)rw, dh = (int)rh;
     uint8_t *out = g_try_malloc0((size_t)dw * (size_t)dh * 4u);
     if (!out) return JS_ThrowRangeError(ctx, "getImageData allocation failed");
-    /* A canvas with no backing surface (never drawn to) reads as
-       transparent black, not null. */
     cairo_surface_t *surf = (st && st->surf) ? st->surf : NULL;
     const uint8_t *cd = NULL;
     int cw = 0, ch = 0, cs = 0;

@@ -574,7 +574,6 @@ main(int argc, char **argv)
             ns_config_shutdown();
             return 0;
         } else if (g_strcmp0(argv[i], "--headless") == 0) {
-            /* headless dispatch is driven by proc_mode below */
         } else if (g_str_has_prefix(argv[i], "--dump=")) {
             const char *v = argv[i] + 7;
             dump_set = TRUE;

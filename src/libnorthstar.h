@@ -32,15 +32,10 @@ char *ns_browser_dump_layout(ns_browser *browser);
 char *ns_browser_dump_performance(ns_browser *browser);
 int ns_browser_render_image(ns_browser *browser, const char *path);
 
-/* Lays the page out for paper, renders one recording surface per sheet and
-   restores the on-screen layout. The caller destroys every surface. */
 GPtrArray *ns_browser_print_pages(ns_browser *browser,
                                   ns_print_setup *out_setup);
 int ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height);
 
-/* CSS Scroll Snap for the viewport, whose scroll offsets the shell owns:
-   scroll_x and scroll_y carry the proposed position in and the snapped one
-   out, and the return is non-zero only when the position moved. */
 int ns_browser_snap_document(ns_browser *browser, double viewport_w,
                              double viewport_h, int prev_x, int prev_y,
                              int *scroll_x, int *scroll_y);

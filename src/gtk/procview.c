@@ -262,8 +262,6 @@ set_accessible_label(GtkWidget *w, const char *label)
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, label, -1);
 }
 
-/* Closed silhouette of both glass bulbs, drawn around centre (16,16) so the
-   whole glyph fits a compact 32px cursor with rounded bulbs. */
 static void
 hourglass_bulbs_path(cairo_t *cr, double ox, double oy)
 {

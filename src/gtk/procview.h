@@ -14,9 +14,6 @@ typedef struct NsProcView NsProcView;
 
 const char *ns_app_self_exe(void);
 
-/* Re-present a popover menu once its sections have been built, so it takes
-   the height its items need instead of scrolling the last one. Call once,
-   at construction. */
 void ns_popover_menu_fit(GtkWidget *popover);
 
 typedef enum {
@@ -53,13 +50,9 @@ const char *ns_proc_view_url(NsProcView *view);
 const char *ns_proc_view_title(NsProcView *view);
 gboolean    ns_proc_view_is_loading(NsProcView *view);
 
-/* Connection security of the current page (ns_security in net.h:
-   0 none, 1 secure, 2 invalid, 3 plain) and the server IP (owned by the view,
-   or NULL). */
 int         ns_proc_view_security(NsProcView *view);
 const char *ns_proc_view_remote_ip(NsProcView *view);
 
-/* Ask the user for a destination and write the current page there. */
 void   ns_proc_view_print(NsProcView *view);
 void   ns_proc_view_save_pdf(NsProcView *view);
 void   ns_proc_view_save_image(NsProcView *view);
@@ -68,13 +61,10 @@ void   ns_proc_view_zoom_in(NsProcView *view);
 void   ns_proc_view_zoom_out(NsProcView *view);
 void   ns_proc_view_zoom_reset(NsProcView *view);
 
-/* Current page zoom as a percentage; 100 when the page is unscaled. */
 int    ns_proc_view_zoom_percent(NsProcView *view);
 void   ns_proc_view_focus(NsProcView *view);
 void   ns_proc_view_find_open(NsProcView *view);
 
-/* Close the find bar if it is showing. TRUE when it was, so a caller
-   handling Escape knows the key was consumed. */
 gboolean ns_proc_view_find_close(NsProcView *view);
 
 
