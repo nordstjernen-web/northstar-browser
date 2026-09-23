@@ -24941,6 +24941,7 @@ match_cmp(gconstpointer a_, gconstpointer b_)
     if (a->origin    != b->origin)
         return a->important ? (a->origin > b->origin ? -1 : 1)
                             : (a->origin < b->origin ? -1 : 1);
+    if (a->inline_style != b->inline_style) return a->inline_style ? 1 : -1;
     int layer_cmp = css_layer_cmp(a->layer_order, b->layer_order, a->important);
     if (layer_cmp != 0) return layer_cmp;
     if (a->spec_a    != b->spec_a)    return a->spec_a < b->spec_a ? -1 : 1;
@@ -25403,6 +25404,7 @@ var_match_cmp(gconstpointer a_, gconstpointer b_)
     if (a->origin    != b->origin)
         return a->important ? (a->origin > b->origin ? -1 : 1)
                             : (a->origin < b->origin ? -1 : 1);
+    if (a->inline_style != b->inline_style) return a->inline_style ? 1 : -1;
     int layer_cmp = css_layer_cmp(a->layer_order, b->layer_order, a->important);
     if (layer_cmp != 0) return layer_cmp;
     if (a->spec_a    != b->spec_a)    return a->spec_a < b->spec_a ? -1 : 1;
@@ -25476,6 +25478,7 @@ pending_match_cmp(gconstpointer a_, gconstpointer b_)
     if (a->origin    != b->origin)
         return ai ? (a->origin > b->origin ? -1 : 1)
                   : (a->origin < b->origin ? -1 : 1);
+    if (a->inline_style != b->inline_style) return a->inline_style ? 1 : -1;
     int layer_cmp = css_layer_cmp(a->layer_order, b->layer_order, ai);
     if (layer_cmp != 0) return layer_cmp;
     if (a->spec_a    != b->spec_a)    return a->spec_a < b->spec_a ? -1 : 1;

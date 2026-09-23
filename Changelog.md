@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An element's own `style` attribute outranks cascade layers, for
+  `!important` declarations as well as normal ones. Layers were
+  compared before the inline flag, so
+  `@layer base { .x { color: red !important } }` beat
+  `style="color: green !important"`.
 * A translation that mixes a percentage with a length, such as
   `translateX(calc(-50% + 10px))`, moves by both. The percentage was
   dropped whenever a length was present, which left centred pop-ups and
