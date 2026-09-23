@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A child's bottom margin stays inside a parent it must not escape. It
+  collapsed through any parent without bottom padding or border, so an
+  `overflow: hidden` box, a float or an inline-block lost its last
+  child's bottom margin from its own height, and a parent with a fixed
+  `height` pushed the next block down by that margin as if it were its
+  own. Margins now only collapse through a parent whose height is
+  `auto` and whose `min-height` is zero, and never through one that
+  starts a new formatting context or the root element -- so the
+  document is as tall as the body's margins say, as in other browsers.
 * An absolutely positioned box sized by its content is as wide as that
   content again: its own padding and border were being taken out of the
   measured width, so a box with `padding: 10px; border: 5px` around a
