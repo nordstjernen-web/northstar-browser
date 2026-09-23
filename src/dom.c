@@ -2760,7 +2760,8 @@ collect_all_text(const ns_node *n, GString *out, int depth)
         return;
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        collect_all_text(c, out, depth + 1);
+        if (!ns_node_is_shadow_root_marked(c))
+            collect_all_text(c, out, depth + 1);
 }
 
 char *

@@ -138,6 +138,69 @@ Significant changes in each release:
   `docs/compliance.md` leads with the latest reading per area and drops
   gaps that have closed, `docs/building.md` documents every command-line
   option and environment variable, and the manual page does the same.
+* `reportError(value)` reports the value the way an uncaught exception
+  is reported: it fires a cancelable `error` event at the window with
+  the caller's file, line and column and `event.error` set to the value,
+  and logs it only if no listener cancels the event. It used to print
+  the value to the console and nothing else, so error trackers never
+  saw it. The `error` events for uncaught exceptions are now
+  `ErrorEvent` instances.
+* `Object.prototype.toString` names the natively implemented interfaces:
+  a `MessagePort`, `XMLHttpRequest`, `MessageChannel`, `DOMParser` and
+  the like read `[object MessagePort]` and so on instead of
+  `[object Object]`, which scripts use to tell platform objects apart.
+* URL setters behave as the URL Standard describes where the parser
+  library does not: `url.host = "example.com:"` or `"example.com:abc"`
+  changes the host and keeps the port, an out-of-range port still sets
+  the host, clearing the host of a non-special URL with credentials or a
+  port is refused, and a URL with an empty host cannot gain a username,
+  password or port. `new URL("??a=b").searchParams` keeps the second
+  `?`. Links (`<a>`, `<area>`) whose `href` does not parse now report
+  `":"` as the protocol and ignore setters instead of working on the raw
+  string, and an `href` containing a NUL character is no longer cut
+  short there.
+* An iframe whose `load` handler navigates it again (for example to
+  `about:blank`) no longer freezes the page. Each reload ran inside the
+  same loop that processed the previous one, so timers and rendering
+  never got a turn; the next load now waits for the following frame.
+* `structuredClone()` and `postMessage()` follow the HTML serialization
+  rules more closely. Transferring an `ArrayBuffer` detaches it (a
+  detached one, a duplicate, or an object that cannot be transferred
+  throws `DataCloneError`), resizable buffers keep their
+  `maxByteLength`, views of one buffer still share a buffer in the
+  copy, sparse arrays keep their length, `BigInt` wrappers survive, and
+  errors keep only an own `message` and a standard name. A page that
+  replaces `window.structuredClone` no longer changes what
+  `postMessage()` sends.
+* `Blob` and `File` follow the File API. The constructors accept any
+  iterable of parts and reject strings, numbers and plain objects,
+  honour `endings: "native"`, read their options in the specified
+  order, drop a `type` with non-printable characters and copy
+  `ArrayBuffer` parts (a detached one is empty); `size`, `type`, `name`
+  and `lastModified` are prototype getters, `slice()` clamps like other
+  browsers and validates its content type, `blob.bytes()` exists, and
+  `String(blob)` is `[object Blob]`. Calling `Blob()` without `new`
+  throws.
+* Setting `meta.content`, `textarea.rows` or `frameset.rows` from script
+  changes the attribute; the assignments were silently ignored.
+  `role`, `ariaLabel`, `ariaBusy` and the other ARIA properties read
+  `null` when the attribute is absent (as in other browsers) instead of
+  an empty string or a default such as `"false"`, setting them to
+  `null` removes the attribute, and the numeric and text ARIA
+  properties such as `ariaValueNow` and `ariaLevel` exist at all.
+  `font.size` is a string, `textarea.cols = 0` falls back to the
+  default, `progress.max` ignores non-positive values and parses its
+  attribute with the HTML number rules (`"5%"` is 5), assigning `null`
+  to the legacy colour and margin attributes clears them, `object.data`
+  resolves an empty value against the base URL, and setting `label` or
+  `defaultValue` is seen by mutation observers.
+* `innerText` and `textContent` of a shadow host no longer include the
+  shadow tree's text, text inside an inline `<svg>`'s `<text>` elements
+  is part of `innerText`, a `visibility: hidden` paragraph or `<br>`
+  adds no line breaks of its own, and an `<optgroup>` outside a
+  `<select>` keeps its text. Setting `innerText` or `outerText` to a
+  string with a NUL character keeps the text after it instead of
+  cutting it off there.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
