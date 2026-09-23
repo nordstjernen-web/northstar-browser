@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Grid items given both a row and a column claim their cell before the
+  automatically placed items flow in, as the grid placement algorithm
+  orders it. An item pinned to row 1, column 1 that came later in the
+  source used to land on top of whichever auto-placed item had already
+  taken that cell.
 * A `position: fixed` box inside a transformed element belongs to that
   element: it is placed against it and scrolls with it, as CSS
   Transforms says, instead of being pinned to the window. Slide-in menus
