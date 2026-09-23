@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Every layer of a multi-image `background` in an external stylesheet
+  is fetched relative to that stylesheet. Only the first `url()` was
+  resolved against the sheet's address and the rest against the page,
+  so the second image of `url(img/a.png), url(img/b.png)` in
+  `/css/site.css` was requested from `/img/b.png`.
 * `font-weight: bolder` and `lighter` are worked out from the parent's
   weight, using the table in CSS Fonts 4, when the style is computed.
   They were kept as keywords and measured later against a fixed 400
