@@ -823,6 +823,8 @@ typedef struct ns_css_pseudo_pred {
 
 typedef struct ns_css_simple {
     char *type;
+    char *type_lower;
+    gboolean type_has_colon;
     char *namespace_uri;
     char *id;
     GPtrArray *classes;

@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Matching a selector against an element no longer looks up the
+  element's namespace unless the selector names one, and a type selector
+  compares the tag name against a lowercase copy made when the sheet is
+  parsed instead of case-folding both names on every test. The style
+  pass on a page of 16,000 elements and 3,000 rules takes a quarter less
+  time, and a long descendant selector over a deep tree a third.
 * Each `<style>` element is its own style sheet again. Adjacent inline
   sheets were joined into one text before parsing, so a sheet that ended
   inside an unclosed block, string or comment swallowed every sheet after

@@ -2698,6 +2698,7 @@ ns_css_simple_free(ns_css_simple *s)
 {
     if (!s) return;
     g_free(s->type);
+    g_free(s->type_lower);
     g_free(s->namespace_uri);
     g_free(s->id);
     g_ptr_array_free(s->classes, TRUE);
@@ -3577,6 +3578,10 @@ parse_one_selector_rel(const char **pp, const char *end, int depth,
             if (p == tok_start) break;
         }
         if (!any) { ns_css_simple_free(cmp); break; }
+        if (cmp->type && strcmp(cmp->type, "*") != 0) {
+            cmp->type_lower = g_ascii_strdown(cmp->type, -1);
+            cmp->type_has_colon = strchr(cmp->type, ':') != NULL;
+        }
         g_ptr_array_add(sel->compounds, cmp);
         g_array_append_val(sel->combinators, pending);
         pending = NS_CSS_COMB_NONE;
@@ -21349,6 +21354,38 @@ ns_css_attr_value_matches(const ns_css_attr_pred *a, const char *value,
     return FALSE;
 }
 
+static const char *
+css_element_namespace(const ns_node *el)
+{
+    const char *element_namespace =
+        ns_element_get_attr(el, "data-nd-ns-uri");
+    if (element_namespace && *element_namespace) return element_namespace;
+    if (el->flags & NS_NODE_SVG_NS) return "http://www.w3.org/2000/svg";
+    if (!(el->flags & (NS_NODE_FOREIGN_NS | NS_NODE_XML_DOC)))
+        return "http://www.w3.org/1999/xhtml";
+    return NULL;
+}
+
+static const char *
+css_element_local_name(const ns_node *el)
+{
+    const char *colon = strchr(el->name, ':');
+    if (colon && ns_element_get_attr(el, "data-nd-ns-prefix"))
+        return colon + 1;
+    return el->name;
+}
+
+static inline gboolean
+css_name_equals_lower(const char *name, const char *lower)
+{
+    for (;; name++, lower++) {
+        unsigned char c = (unsigned char)*name;
+        if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + ('a' - 'A'));
+        if (c != (unsigned char)*lower) return FALSE;
+        if (!c) return TRUE;
+    }
+}
+
 static gboolean
 match_simple(const ns_css_simple *sel, const ns_node *el)
 {
@@ -21364,17 +21401,8 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
         }
         return FALSE;
     }
-    const char *element_namespace =
-        ns_element_get_attr(el, "data-nd-ns-uri");
-    if (!element_namespace || !*element_namespace) {
-        if (el->flags & NS_NODE_SVG_NS)
-            element_namespace = "http://www.w3.org/2000/svg";
-        else if (!(el->flags & (NS_NODE_FOREIGN_NS | NS_NODE_XML_DOC)))
-            element_namespace = "http://www.w3.org/1999/xhtml";
-        else
-            element_namespace = NULL;
-    }
     if (!sel->namespace_any) {
+        const char *element_namespace = css_element_namespace(el);
         const char *wanted_namespace = sel->namespace_uri;
         if (wanted_namespace && !*wanted_namespace) wanted_namespace = NULL;
         if ((wanted_namespace == NULL) != (element_namespace == NULL) ||
@@ -21382,20 +21410,17 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                                         element_namespace) != 0))
             return FALSE;
     }
-    if (sel->type && strcmp(sel->type, "*") != 0) {
+    if (sel->type_lower) {
         if (!el->name) return FALSE;
-        const char *local_name = el->name;
-        const char *colon = strchr(local_name, ':');
-        if (colon && ns_element_get_attr(el, "data-nd-ns-prefix"))
-            local_name = colon + 1;
         if (el->flags & (NS_NODE_XML_DOC | NS_NODE_SVG_NS |
                          NS_NODE_FOREIGN_NS)) {
-            if (strcmp(sel->type, local_name) != 0) return FALSE;
-        }
-        else if (g_ascii_tolower((unsigned char)local_name[0]) !=
-                     g_ascii_tolower((unsigned char)sel->type[0]) ||
-                 g_ascii_strcasecmp(sel->type, local_name) != 0) {
-            return FALSE;
+            if (strcmp(sel->type, css_element_local_name(el)) != 0)
+                return FALSE;
+        } else if (sel->type_has_colon ||
+                   !css_name_equals_lower(el->name, sel->type_lower)) {
+            if (!css_name_equals_lower(css_element_local_name(el),
+                                       sel->type_lower))
+                return FALSE;
         }
     }
     if (sel->id) {
