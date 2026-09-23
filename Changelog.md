@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Lists follow the HTML rendering rules. A nested `<ul>` draws a
+  circle and the next level a square instead of a disc at every depth; a
+  list inside a list has no block margins of its own; `<dir>` and `<menu>`
+  are block lists indented 40px like `<ul>`; and `ul`/`li` `type="none"`
+  hides the marker. The marker is chosen from the computed
+  `list-style-type` rather than from whether the parent is an `<ol>`, so
+  `ol { list-style-type: disc }` draws bullets. The 2px margin the
+  default stylesheet put around every `<li>`, and the bold and extra top
+  margin on every `<dt>`, are gone -- no browser has them.
 * `width`, `height`, `hspace` and `vspace` attributes are read with the
   HTML rules for parsing dimension values. They went through `strtod`,
   so `width="+200"` and `width=".5"` produced a width where no browser
