@@ -229,6 +229,8 @@ struct ns_js {
     gboolean      module_load_capped;
     GPtrArray    *import_map;
     gint64        time_origin_us;
+    gint64        frame_time_us;
+    gint64        last_raf_time_us;
     double        time_origin_real_ms;
     ns_js_navigation_timing navigation_timing;
     GPtrArray    *perf_entries;

@@ -26663,6 +26663,16 @@ ns_js_flush_scrollend(ns_js *js)
     }
 }
 
+static gint64
+ns_js_animation_frame_time(ns_js *js)
+{
+    gint64 t = js->frame_time_us > 0 ? js->frame_time_us
+                                     : g_get_monotonic_time();
+    if (t < js->last_raf_time_us) t = js->last_raf_time_us;
+    js->last_raf_time_us = t;
+    return t;
+}
+
 gboolean
 ns_js_run_animation_frame(ns_js *js)
 {
@@ -26682,7 +26692,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
     ns_drain_microtasks(js);
     if (!js->raf_pending || js->raf_pending->len == 0)
         return js->mutated ? TRUE : FALSE;
-    gint64 now_us = g_get_monotonic_time();
+    gint64 now_us = ns_js_animation_frame_time(js);
     GArray *fired = js->raf_pending;
     js->raf_pending = g_array_new(FALSE, FALSE, sizeof(ns_raf_entry));
     double ts_ms = ns_perf_relative_ms(now_us, js->time_origin_us);
@@ -26771,6 +26781,25 @@ gboolean
 ns_js_has_pending_animation_frame(const ns_js *js)
 {
     return js && js->raf_pending && js->raf_pending->len > 0;
+}
+
+gboolean
+ns_js_wants_frame(const ns_js *js)
+{
+    if (!js || js->halted) return FALSE;
+    if (js->mutated) return TRUE;
+    if (js->raf_pending && js->raf_pending->len > 0) return TRUE;
+    if (js->pending_scrollend_doc ||
+        (js->pending_scrollend && js->pending_scrollend->len > 0))
+        return TRUE;
+    return js->pending_iframe_loads && js->pending_iframe_loads->len > 0 &&
+           js->iframe_load_depth == 0 && js->eval_depth == 0;
+}
+
+void
+ns_js_set_frame_time(ns_js *js, gint64 frame_time_us)
+{
+    if (js) js->frame_time_us = frame_time_us;
 }
 
 gboolean
@@ -54426,6 +54455,14 @@ ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_dat
     if (!js) return;
     js->layout_flush_cb = cb;
     js->layout_flush_user_data = user_data;
+}
+
+void
+ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->repaint_cb = cb;
+    js->repaint_user_data = user_data;
 }
 
 void

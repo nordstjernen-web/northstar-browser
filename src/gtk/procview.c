@@ -89,6 +89,7 @@ typedef struct {
     gboolean history;
     gboolean user_activated;
     gboolean caret_active;
+    gint64  frame_time_us;
 } Req;
 
 typedef enum {
@@ -137,7 +138,7 @@ typedef struct {
 } Res;
 
 struct NsProcView {
-    grefcount   rc;
+    gatomicrefcount rc;
 
     GtkWidget     *root;
     GtkWidget     *area;
@@ -168,6 +169,14 @@ struct NsProcView {
 
     gboolean    render_inflight;
     gboolean    render_pending;
+
+    gboolean    viewport_inflight;
+    gboolean    viewport_pending;
+
+    gboolean    scroll_inflight;
+    gboolean    scroll_pending;
+    int         scroll_seq;
+    double      scroll_pending_dx, scroll_pending_dy;
 
     gboolean    link_inflight;
     gboolean    link_pending;
@@ -251,7 +260,7 @@ enum {
     NS_PV_ZOOM_MAX_PERMILLE = (int)(NS_PROC_ZOOM_MAX * 1000.0 + 0.5)
 };
 
-static NsProcView *pv_ref(NsProcView *v) { g_ref_count_inc(&v->rc); return v; }
+static NsProcView *pv_ref(NsProcView *v) { g_atomic_ref_count_inc(&v->rc); return v; }
 
 static void
 set_accessible_label(GtkWidget *w, const char *label)
@@ -485,7 +494,7 @@ pv_free(NsProcView *v)
     g_free(v);
 }
 
-static void pv_unref(NsProcView *v) { if (g_ref_count_dec(&v->rc)) pv_free(v); }
+static void pv_unref(NsProcView *v) { if (g_atomic_ref_count_dec(&v->rc)) pv_free(v); }
 
 typedef struct {
     char    *token;
@@ -712,6 +721,7 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
 {
     Res *res = res_new(v, RES_FRAME, req->seq);
     ns_page_frame fr;
+    ns_page_session_set_frame_time(s, req->frame_time_us);
     if (ns_page_session_render(s, req->w, req->h, req->sx, req->sy,
                                req->scale, req->caret_active, &fr) == 0) {
         res->ok = TRUE;
@@ -739,6 +749,26 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
     post(res);
 }
 
+static void arm_anim(NsProcView *v);
+
+static gboolean
+pv_wake_idle(gpointer data)
+{
+    NsProcView *v = data;
+    if (!v->closed && v->opened) {
+        v->last_anim_frame_us = 0;
+        arm_anim(v);
+    }
+    pv_unref(v);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+pv_session_wake(gpointer data)
+{
+    g_idle_add(pv_wake_idle, pv_ref(data));
+}
+
 static void
 run_req(gpointer data)
 {
@@ -751,9 +781,11 @@ run_req(gpointer data)
         g_idle_add(pv_unref_idle, v);
         return;
     }
-    if (!v->session)
+    if (!v->session) {
         v->session = ns_page_session_new(NS_PROC_MAX_WIDTH,
                                          NS_PROC_MAX_HEIGHT);
+        ns_page_session_set_wake(v->session, pv_session_wake, v);
+    }
     ns_page_session *s = v->session;
     Res *res;
     switch (req->type) {
@@ -1007,6 +1039,8 @@ start_render(NsProcView *v)
     req->sy = v->scroll_y;
     req->scale = cur_scale(v);
     req->caret_active = gtk_widget_has_focus(v->area);
+    GdkFrameClock *clock = gtk_widget_get_frame_clock(v->area);
+    req->frame_time_us = clock ? gdk_frame_clock_get_frame_time(clock) : 0;
     push_req(v, req);
 }
 
@@ -1061,6 +1095,7 @@ disarm_anim(NsProcView *v)
 }
 
 static void start_link(NsProcView *v, int x, int y, LinkAct action);
+static void start_scroll(NsProcView *v, double dx, double dy);
 static void show_context_menu(NsProcView *v, const char *href);
 static void build_search_bar(NsProcView *v);
 static void console_append(NsProcView *v, const char *text);
@@ -1345,6 +1380,11 @@ start_viewport(NsProcView *v, int width, int height)
 {
     if (!v->opened)
         return;
+    if (v->viewport_inflight) {
+        v->viewport_pending = TRUE;
+        return;
+    }
+    v->viewport_inflight = TRUE;
     Req *req = g_new0(Req, 1);
     req->type = REQ_VIEWPORT;
     req->seq = ++v->viewport_seq;
@@ -1406,6 +1446,12 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     ++v->hover_seq;
     v->render_pending = FALSE;
     v->render_inflight = FALSE;
+    v->viewport_inflight = FALSE;
+    v->viewport_pending = FALSE;
+    ++v->scroll_seq;
+    v->scroll_inflight = FALSE;
+    v->scroll_pending = FALSE;
+    v->scroll_pending_dx = v->scroll_pending_dy = 0.0;
     v->link_inflight = FALSE;
     v->link_pending = FALSE;
     v->link_pending_action = ACT_HOVER;
@@ -1737,11 +1783,16 @@ on_result(gpointer data)
     } else if (res->type == RES_VIEWPORT) {
         if (res->seq != v->viewport_seq)
             goto done;
+        v->viewport_inflight = FALSE;
         if (res->ok) {
             v->page_w = res->pw;
             v->page_h = res->ph;
             configure_adjustments(v);
             request_render(v);
+        }
+        if (v->viewport_pending) {
+            v->viewport_pending = FALSE;
+            start_viewport(v, v->last_vp_w, v->last_vp_h);
         }
     } else if (res->type == RES_SELECT) {
         if (res->seq == v->select_seq)
@@ -1835,6 +1886,9 @@ on_result(gpointer data)
         if (res->ok)
             request_render(v);
     } else if (res->type == RES_SCROLL) {
+        if (res->seq != v->scroll_seq)
+            goto done;
+        v->scroll_inflight = FALSE;
         if (res->ok)
             request_render(v);
         else {
@@ -1844,6 +1898,12 @@ on_result(gpointer data)
             gtk_adjustment_set_value(
                 v->vadj,
                 gtk_adjustment_get_value(v->vadj) + res->fallback_y * 60.0);
+        }
+        if (v->scroll_pending && v->opened) {
+            double dx = v->scroll_pending_dx, dy = v->scroll_pending_dy;
+            v->scroll_pending = FALSE;
+            v->scroll_pending_dx = v->scroll_pending_dy = 0.0;
+            start_scroll(v, dx, dy);
         }
     } else if (res->type == RES_SCROLLBAR) {
         if (res->kind == 0) {
@@ -2021,6 +2081,29 @@ on_resize(GtkDrawingArea *area, int width, int height, gpointer data)
     }
 }
 
+static void
+start_scroll(NsProcView *v, double dx, double dy)
+{
+    if (v->scroll_inflight) {
+        v->scroll_pending = TRUE;
+        v->scroll_pending_dx += dx;
+        v->scroll_pending_dy += dy;
+        return;
+    }
+    v->scroll_inflight = TRUE;
+    double s = cur_scale(v);
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_SCROLL;
+    req->seq = v->scroll_seq;
+    req->x = v->scroll_x + (int)(v->pointer_x / s);
+    req->y = v->scroll_y + (int)(v->pointer_y / s);
+    req->dx = (int)(dx * 60.0 / s);
+    req->dy = (int)(dy * 60.0 / s);
+    req->fallback_x = dx;
+    req->fallback_y = dy;
+    push_req(v, req);
+}
+
 static gboolean
 on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
 {
@@ -2043,16 +2126,7 @@ on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
         return TRUE;
     }
     if (v->opened) {
-        double s = cur_scale(v);
-        Req *req = g_new0(Req, 1);
-        req->type = REQ_SCROLL;
-        req->x = v->scroll_x + (int)(v->pointer_x / s);
-        req->y = v->scroll_y + (int)(v->pointer_y / s);
-        req->dx = (int)(dx * 60.0 / s);
-        req->dy = (int)(dy * 60.0 / s);
-        req->fallback_x = dx;
-        req->fallback_y = dy;
-        push_req(v, req);
+        start_scroll(v, dx, dy);
         return TRUE;
     }
     gtk_adjustment_set_value(v->hadj,
@@ -3198,7 +3272,7 @@ NsProcView *
 ns_proc_view_new(void)
 {
     NsProcView *v = g_new0(NsProcView, 1);
-    g_ref_count_init(&v->rc);
+    g_atomic_ref_count_init(&v->rc);
     v->history = g_ptr_array_new_with_free_func(g_free);
     v->hist_index = -1;
     v->link_pending_action = ACT_HOVER;

@@ -6,6 +6,7 @@
 
 #include "page_session.h"
 #include "libnorthstar.h"
+#include "mainctx.h"
 #include "net.h"
 #include "trace.h"
 
@@ -33,7 +34,89 @@ struct ns_page_session {
     char          *post_body;
     size_t         post_len;
     char          *post_ct;
+    GSource       *wake;
+    ns_page_session_wake_cb wake_cb;
+    gpointer       wake_data;
+    gboolean       rendering;
+    gboolean       wake_posted;
 };
+
+typedef struct {
+    GSource          source;
+    ns_page_session *session;
+} session_wake_source;
+
+static gboolean
+session_wake_due(ns_page_session *s)
+{
+    return s->cur && s->wake_cb && !s->rendering && !s->wake_posted &&
+           ns_browser_needs_frame(s->cur);
+}
+
+static gboolean
+session_wake_prepare(GSource *source, gint *timeout)
+{
+    ns_page_session *s = ((session_wake_source *)source)->session;
+    *timeout = -1;
+    if (session_wake_due(s))
+        return TRUE;
+    gint64 due = s->cur && !s->wake_posted ? ns_browser_next_wake_us(s->cur)
+                                           : 0;
+    if (due > 0) {
+        gint64 wait_ms = (due - g_get_monotonic_time() + 999) / 1000;
+        *timeout = (gint)CLAMP(wait_ms, 0, G_MAXINT);
+    }
+    return FALSE;
+}
+
+static gboolean
+session_wake_check(GSource *source)
+{
+    return session_wake_due(((session_wake_source *)source)->session);
+}
+
+static gboolean
+session_wake_dispatch(GSource *source, GSourceFunc callback,
+                      gpointer user_data)
+{
+    (void)callback;
+    (void)user_data;
+    ns_page_session *s = ((session_wake_source *)source)->session;
+    if (session_wake_due(s)) {
+        s->wake_posted = TRUE;
+        s->wake_cb(s->wake_data);
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+static GSourceFuncs session_wake_funcs = {
+    .prepare = session_wake_prepare,
+    .check = session_wake_check,
+    .dispatch = session_wake_dispatch,
+};
+
+void
+ns_page_session_set_wake(ns_page_session *s, ns_page_session_wake_cb cb,
+                         gpointer user_data)
+{
+    if (!s)
+        return;
+    s->wake_cb = cb;
+    s->wake_data = user_data;
+    s->wake_posted = FALSE;
+    if (s->wake || !cb)
+        return;
+    s->wake = g_source_new(&session_wake_funcs, sizeof(session_wake_source));
+    ((session_wake_source *)s->wake)->session = s;
+    g_source_attach(s->wake, ns_engine_context());
+}
+
+void
+ns_page_session_set_frame_time(ns_page_session *s, gint64 frame_time_us)
+{
+    if (s && s->cur)
+        ns_browser_set_frame_time(s->cur, frame_time_us);
+}
 
 static void
 session_bfcache_park_or_close(ns_page_session *s, ns_browser *b)
@@ -169,11 +252,19 @@ ns_page_session_free(ns_page_session *s)
 {
     if (!s)
         return;
+    if (s->wake) {
+        g_source_destroy(s->wake);
+        g_source_unref(s->wake);
+        s->wake = NULL;
+    }
     session_clear_post(s);
     for (int i = 0; i < s->bf_n; i++)
         ns_browser_close(s->bf[i]);
-    if (s->cur)
-        ns_browser_close(s->cur);
+    if (s->cur) {
+        ns_browser *cur = s->cur;
+        s->cur = NULL;
+        ns_browser_close(cur);
+    }
     free(s->fb);
     free(s);
 }
@@ -224,8 +315,9 @@ ns_page_session_open(ns_page_session *s, const char *url, int width,
                                             : NULL;
     char *referrer = (!history && s->cur) ? ns_browser_url(s->cur) : NULL;
     if (s->cur) {
-        session_bfcache_park_or_close(s, s->cur);
+        ns_browser *previous = s->cur;
         s->cur = NULL;
+        session_bfcache_park_or_close(s, previous);
     }
     if (!restored)
         ns_browser_set_next_navigation(
@@ -248,6 +340,7 @@ ns_page_session_open(ns_page_session *s, const char *url, int width,
                      : NULL;
     }
     session_clear_post(s);
+    s->wake_posted = FALSE;
     fill_page_info(s, url, out);
     return s->cur ? 0 : -1;
 }
@@ -302,6 +395,7 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     int vh = clamp(height, 1, s->max_h);
     int stride = vw * 4;
     long sx = scroll_x, sy = scroll_y;
+    s->rendering = TRUE;
     gint64 frame_start = ns_trace_now();
     gint64 phase_start = frame_start;
     int ticked = s->frame_valid ? ns_browser_tick(s->cur, s->tick_budget_ms)
@@ -375,11 +469,13 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     out->download = empty_to_null(ns_browser_take_pending_download(s->cur));
     scrub_line_breaks(out->download);
     out->audio = empty_to_null(ns_browser_take_pending_audio(s->cur));
-    out->animating = ns_browser_animating(s->cur) ? 1 : 0;
+    out->animating = ns_browser_continuous(s->cur) ? 1 : 0;
     out->caret_blinking = ns_browser_caret_blinking(s->cur) ? 1 : 0;
     out->clipboard = ns_browser_has_pending_clipboard(s->cur) ? 1 : 0;
     ns_trace_complete("frame", unchanged ? "frame (unchanged)" : "frame",
                       frame_start, NULL);
+    s->rendering = FALSE;
+    s->wake_posted = FALSE;
     return 0;
 }
 

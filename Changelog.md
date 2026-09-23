@@ -4,6 +4,22 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* An idle page no longer costs a frame every 16 ms. The window used to
+  ask the engine for a frame at 60 Hz whenever the page had any timer,
+  fetch or socket outstanding, and most of those frames came back
+  unchanged; a page with a 50 ms `setInterval` that never touches the
+  DOM made 443 frame requests in eight seconds and now makes one. The
+  engine now wakes the window when there is something to show -- a DOM
+  change, a `requestAnimationFrame`, an image or canvas update, a scroll,
+  a navigation or an audio command -- and the 60 Hz loop runs only while
+  something animates. `requestAnimationFrame` timestamps and CSS
+  animations follow the display's frame clock (callbacks are 16.7 ms
+  apart instead of wherever the engine thread happened to run), canvas
+  drawing repaints without relaying out the page, and wheel scrolls and
+  window resizes that arrive while the engine is busy are merged instead
+  of queued one by one. Element `scrollTop` and paint-only `<img>` changes
+  made from a timer now repaint at once; they were drawn only when
+  something else happened to repaint.
 * Forms submitted from pages in a legacy encoding send their fields in
   that encoding (or the first valid `accept-charset` label) as the
   Encoding Standard's encoders produce them. A single character the

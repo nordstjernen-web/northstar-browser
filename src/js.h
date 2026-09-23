@@ -84,6 +84,7 @@ void   ns_js_set_fragment_nav_cb(ns_js *js, ns_js_fragment_nav_cb cb,
 void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb,
                              gpointer user_data);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
+void   ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data);
 void   ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data);
 void   ns_js_set_style_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);
@@ -151,6 +152,8 @@ gboolean ns_js_run_animation_frame(ns_js *js);
 
 gboolean ns_js_has_pending_animation_frame(const ns_js *js);
 gboolean ns_js_has_pending_work(const ns_js *js);
+gboolean ns_js_wants_frame(const ns_js *js);
+void     ns_js_set_frame_time(ns_js *js, gint64 frame_time_us);
 
 void ns_js_dump_stats(ns_js *js, GString *out);
 

@@ -68,6 +68,17 @@ space.
 - **Page session** (`page_session.c`) — owns the open page, a
   back/forward cache of up to four suspended pages, the pending POST body
   and the last frame. The view drives it on the engine thread.
+- **Frame scheduling.** The view does not poll. A wake source on the
+  engine context asks the view for a frame only when the page has
+  something to show: a DOM mutation, a pending `requestAnimationFrame`, a
+  loaded image, a canvas draw, a scroll, a navigation or an audio command.
+  The view then renders at the next GTK frame-clock tick, and it keeps a
+  per-tick callback only while the page animates continuously (CSS
+  animations, animated images or video, `requestAnimationFrame` loops,
+  layout the dampener deferred) or a caret blinks. `requestAnimationFrame`
+  and CSS animations are sampled at the frame clock's time. Canvas
+  drawing repaints without a relayout, and wheel scrolls and resizes that
+  arrive while one is in flight are merged into the next request.
 - **Page host** (`libnorthstar.c`) — the `ns_browser` object beneath the
   session: one document, its QuickJS runtime, input dispatch, the settle
   loop, find-in-page, printing and viewport scroll snapping. It is an
