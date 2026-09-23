@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* In a column flexbox an image, video or SVG stretches across the
+  container like any other item (keeping its aspect ratio, capped by
+  `max-width`), and a stretched item's percentage `max-width` resolves
+  against the container instead of being applied a second time to the
+  item's own width.
 * Headless `--wpt`, `--inspect` and image dumps load the document's
   images before its scripts run and fire their `load` events, so tests
   and scripts that measure images at `load` see their real sizes.
