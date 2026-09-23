@@ -75,6 +75,7 @@ northstar_engine_sources = files(
   'quickjs_compat.c',
   'layout.c',
   'mathml.c',
+  'media_types.c',
   'net.c',
   'netutil.c',
   'paint.c',

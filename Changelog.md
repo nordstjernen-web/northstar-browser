@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `canPlayType`, `navigator.mediaCapabilities` and
+  `MediaSource.isTypeSupported` answer from one table of what the build
+  can decode (`src/media_types.c`). `decodingInfo` claimed WebM, VP8, VP9,
+  WAV and Opus played and MPEG and MP3 did not -- the reverse of the
+  truth -- and `encodingInfo` claimed the same though nothing encodes.
+  `canPlayType` now answers for the element it is called on (a `<video>`
+  does not play an MP3), says "probably" to `mp2v` no longer (pl_mpeg is
+  MPEG-1 only), and a build without the SDL2 mixer no longer advertises
+  any audio type.
 * A build configured with `-Daudio=disabled` links again. The audio stub
   that replaces the SDL2 mixer lacked `ns_audio_context_dispatch_blob`,
   which the page view calls for `blob:` media, so the final link failed.

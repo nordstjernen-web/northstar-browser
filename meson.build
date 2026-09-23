@@ -192,10 +192,13 @@ libopusfile = dependency('opusfile', required: false)
 if libopusfile.found()
   add_project_arguments('-DNS_HAVE_OPUSFILE=1', language: 'c')
 endif
-# canPlayType/mediaCapabilities may honestly advertise native Ogg audio only
-# where the decoder that plays it is built: the SDL2 in-process mixer.
+# src/media_types.c may advertise an audio type only where the decoder that
+# plays it is built: the SDL2 in-process mixer.
 if get_option('audio').allowed()
   sdl2_probe = dependency('sdl2', required: false)
+  if sdl2_probe.found()
+    add_project_arguments('-DNS_AUDIO_PLAYBACK=1', language: 'c')
+  endif
   if sdl2_probe.found() and libvorbisfile.found()
     add_project_arguments('-DNS_AUDIO_NATIVE_VORBIS=1', language: 'c')
   endif

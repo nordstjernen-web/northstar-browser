@@ -39,16 +39,6 @@ ns_video_bytes_are_mpeg1(const guchar *data, gsize len)
            bytes_are_elementary_stream(data, len);
 }
 
-gboolean
-ns_video_supports_mime(const char *mime)
-{
-    if (!mime) return FALSE;
-    return g_ascii_strcasecmp(mime, "video/mpeg") == 0 ||
-           g_ascii_strcasecmp(mime, "video/mpg") == 0 ||
-           g_ascii_strcasecmp(mime, "video/x-mpeg") == 0 ||
-           g_ascii_strcasecmp(mime, "video/mpeg-1") == 0;
-}
-
 typedef struct {
     plm_t       *program;
     plm_video_t *elementary;
