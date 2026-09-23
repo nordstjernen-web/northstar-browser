@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A deep Web Audio graph no longer crashes the browser when an
+  `OfflineAudioContext` renders it. Each node with inputs takes a scratch
+  buffer the length of the render, one per level of the graph, and a
+  failed allocation aborted the process: a long context feeding an
+  oscillator through thirty gain nodes took the browser down even within
+  the new buffer limits. A level whose buffer cannot be allocated is now
+  rendered silent instead.
 * Drawing an image into a canvas is back to its old speed. The
   cross-origin check parsed the image's URL and the page's URL on every
   `drawImage` call, which nearly doubled its cost for sprite-heavy pages
