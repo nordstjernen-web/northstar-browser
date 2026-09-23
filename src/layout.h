@@ -120,6 +120,7 @@ typedef struct ns_box_media {
     char  *video_audio_src;
     gboolean declared_image_size;
     gboolean intrinsic_ratio_only;
+    double   image_density;
 } ns_box_media;
 
 typedef enum ns_fragment_context_kind {
@@ -277,6 +278,7 @@ gboolean ns_box_inline_rect_for_dom(const ns_box *root, const ns_node *target,
                                     double *w, double *h);
 
 char *ns_img_chosen_url(const ns_node *n);
+double ns_img_chosen_density(const ns_node *n);
 
 guint ns_box_count_matches(const ns_box *root, const char *needle,
                            gboolean case_sensitive);

@@ -33415,10 +33415,19 @@ ns_element_img_complete(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
-ns_element_img_natural_width(JSContext *ctx, JSValueConst this_val)
+ns_img_natural_dimension(JSContext *ctx, JSValueConst this_val, gboolean width)
 {
     const ns_image *im = ns_image_for_element(ctx, this_val);
-    return JS_NewInt32(ctx, im ? im->natural_width : 0);
+    int natural = im ? (width ? im->natural_width : im->natural_height) : 0;
+    if (natural <= 0) return JS_NewInt32(ctx, 0);
+    double density = ns_img_chosen_density(ns_unwrap_element(this_val));
+    return JS_NewInt32(ctx, (int32_t)(natural / density));
+}
+
+static JSValue
+ns_element_img_natural_width(JSContext *ctx, JSValueConst this_val)
+{
+    return ns_img_natural_dimension(ctx, this_val, TRUE);
 }
 
 static JSValue
@@ -33426,11 +33435,7 @@ ns_element_img_current_src(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_NewString(ctx, "");
-    const ns_node *sel = n;
-    if (n->parent && n->parent->name &&
-        strcmp(n->parent->name, "picture") == 0)
-        sel = n->parent;
-    char *chosen = ns_img_chosen_url(sel);
+    char *chosen = ns_img_chosen_url(n);
     if (!chosen || !*chosen) { g_free(chosen); return JS_NewString(ctx, ""); }
     ns_js *js = js_from_ctx(ctx);
     char *base = js ? ns_js_node_document_base_url(js, n) : NULL;
@@ -33445,8 +33450,7 @@ ns_element_img_current_src(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_img_natural_height(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_image *im = ns_image_for_element(ctx, this_val);
-    return JS_NewInt32(ctx, im ? im->natural_height : 0);
+    return ns_img_natural_dimension(ctx, this_val, FALSE);
 }
 
 static JSValue

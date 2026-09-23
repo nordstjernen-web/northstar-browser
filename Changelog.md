@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `srcset` is parsed as the HTML standard describes. The old splitter
+  cut every candidate at its first comma, so a `data:` URL or any URL
+  with a comma in it was truncated, descriptors in parentheses or with
+  junk after them were not rejected, and a `src` lost to a `1x`
+  candidate. An image chosen from a `2x` or `w` candidate is now laid
+  out at its density-corrected size (a `srcset="big.jpg 800w"
+  sizes="400px"` image is 400 pixels wide, not 800), `naturalWidth`
+  and `naturalHeight` report the same corrected size, and a
+  `<picture>` only considers the `<source>` elements before its
+  `<img>`.
 * Popovers and invoker commands work as the HTML standard describes.
   `showPopover()` only showed an element and never closed anything, a
   `popover=auto` stayed open when another opened, `popovertarget`
