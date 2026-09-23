@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A comment inside a media query no longer disables it. `@media
+  (min-width: 100px) /* desktop */ { ... }` was never applied, and the
+  same went for `<link media>`, `<style media>` and `matchMedia()`; the
+  media query parser now treats a comment as whitespace, as `@supports`
+  already did.
 * `<meta charset="utf-16">` no longer turns a page into CJK mojibake. A
   document that declares UTF-16 in a meta tag is necessarily ASCII-
   compatible, and the HTML encoding sniffing rules read it as UTF-8, but
