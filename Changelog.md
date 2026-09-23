@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `OfflineAudioContext` and `createBuffer` refuse a channel count outside
+  1-32, a sample rate outside 3000-768000 Hz, or more than 64 Mi samples
+  in all, with the `NotSupportedError` the Web Audio specification names.
+  A page could ask for `new OfflineAudioContext(1, 2e9, 44100)`, or raise
+  `length` before `startRendering()`, and the renderer's 8 GB allocation
+  aborted the whole browser.
 * `canPlayType`, `navigator.mediaCapabilities` and
   `MediaSource.isTypeSupported` answer from one table of what the build
   can decode (`src/media_types.c`). `decodingInfo` claimed WebM, VP8, VP9,
