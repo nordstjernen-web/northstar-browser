@@ -36253,19 +36253,52 @@ ns_js_doc_base_url(ns_js *js)
     return ns_js_document_base_url(js, js->current_doc, js->current_url);
 }
 
-static const char *
+static char *
+ns_js_foreign_document_charset(ns_js *js, const ns_node *root)
+{
+    if (!js || !js->ctx || !root->js_wrapper) return NULL;
+    JSContext *ctx = js->ctx;
+    JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, root->js_wrapper);
+    JSValue doc = root->kind == NS_NODE_DOCUMENT
+        ? JS_DupValue(ctx, wrapper)
+        : JS_GetPropertyStr(ctx, wrapper, "__ndOwnerDoc");
+    JSValue cs = JS_IsObject(doc) ? JS_GetPropertyStr(ctx, doc, "characterSet")
+                                  : JS_UNDEFINED;
+    char *out = NULL;
+    if (JS_IsString(cs)) {
+        const char *str = JS_ToCString(ctx, cs);
+        if (str) {
+            out = g_strdup(str);
+            JS_FreeCString(ctx, str);
+        }
+    } else if (JS_IsException(cs) || JS_IsException(doc)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, cs);
+    JS_FreeValue(ctx, doc);
+    return out;
+}
+
+static char *
 ns_js_node_charset(ns_js *js, const ns_node *n)
 {
     const ns_node *root = n;
     while (root && root->kind != NS_NODE_DOCUMENT && root->parent)
         root = root->parent;
-    if (root && root->kind == NS_NODE_DOCUMENT && root->parent &&
-        root->parent->kind == NS_NODE_ELEMENT) {
+    if (!root) return NULL;
+    gboolean in_document = root->kind == NS_NODE_DOCUMENT;
+    if (in_document && root->parent && root->parent->kind == NS_NODE_ELEMENT) {
         const char *cs = ns_element_get_attr(root->parent,
                                              "data-nd-frame-charset");
-        if (cs && *cs) return cs;
+        if (cs && *cs) return g_strdup(cs);
     }
-    return js && js->doc_charset ? js->doc_charset : NULL;
+    gboolean foreign = in_document && js && root != js->current_doc;
+    if (foreign || !in_document) {
+        char *cs = ns_js_foreign_document_charset(js, root);
+        if (cs) return cs;
+        if (foreign) return g_strdup("UTF-8");
+    }
+    return g_strdup(js && js->doc_charset ? js->doc_charset : NULL);
 }
 
 static char *
@@ -36275,8 +36308,8 @@ ns_element_anchor_url(const ns_node *n, ns_js *js)
     const char *raw = ns_element_get_attr(n, "href");
     if (!raw) return NULL;
     g_autofree char *base = ns_js_doc_base_url(js);
-    return ns_url_resolve_encoded(base && *base ? base : NULL, raw,
-                                  ns_js_node_charset(js, n));
+    g_autofree char *charset = ns_js_node_charset(js, n);
+    return ns_url_resolve_encoded(base && *base ? base : NULL, raw, charset);
 }
 
 static char *

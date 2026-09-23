@@ -64,7 +64,10 @@ Significant changes in each release:
   `?q=%E9` rather than `?q=%C3%A9`, Shift_JIS, EUC-KR or Big5 pages
   send their own multi-byte sequences, and a character the encoding
   cannot represent becomes `%26%23NNNN%3B`. The fragment and every
-  other part of the URL stay UTF-8.
+  other part of the URL stay UTF-8. A link in an iframe uses the
+  iframe document's encoding, and one in a document made by
+  `new Document()`, `createHTMLDocument()` or `DOMParser` uses that
+  document's (UTF-8), even before it is inserted.
 * `crypto.subtle` follows the Web Cryptography API's algorithm
   normalization and error rules. Algorithm dictionaries are read the
   WebIDL way (a missing member or an out-of-range length is a
