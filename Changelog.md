@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A percentage `line-height` is worked out once, on the element that
+  sets it, and descendants inherit the resulting length. It was handed
+  down as a percentage and each child resolved it again against its own
+  font size, so a heading inside `font-size: 14px; line-height: 150%`
+  got a 48px line instead of 21px -- the opposite of what the spec (and
+  every browser) does, and the reason a percentage is not the same as a
+  plain number there.
 * A multi-column block splits a list, not just a run of siblings. The
   column code distributed a container's own children and gave up when
   there were fewer than two, so `column-width` on a wrapper holding a

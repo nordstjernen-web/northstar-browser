@@ -26282,6 +26282,33 @@ calc_has_font_units(const ns_css_value *v)
     return FALSE;
 }
 
+static gboolean
+calc_has_percent(const ns_css_value *v)
+{
+    if (v->u.calc.pct != 0) return TRUE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
+        if (v->u.calc.args[i].pct != 0) return TRUE;
+    return FALSE;
+}
+
+static void
+calc_fold_percent(ns_css_value *v, double basis)
+{
+    if (v->u.calc.fn && v->u.calc.n_args) {
+        for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
+            v->u.calc.args[i].px += v->u.calc.args[i].pct * basis / 100.0;
+            v->u.calc.args[i].pct = 0;
+        }
+        v->u.calc.px = ns_css_calc_math_fn_px(v, basis);
+        v->u.calc.fn = 0;
+        v->u.calc.n_args = 0;
+        v->u.calc.arg_none = 0;
+    } else {
+        v->u.calc.px += v->u.calc.pct * basis / 100.0;
+    }
+    v->u.calc.pct = 0;
+}
+
 static void
 calc_fold_font_units(ns_css_value *v, double font_px, double root_px,
                      double lh_px, double rlh_px)
@@ -26537,13 +26564,15 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             continue;
         }
         if (v->kind == NS_CSS_V_CALC) {
-            if (!calc_has_font_units(v)) continue;
+            gboolean line_pct = i == NS_CSS_LINE_HEIGHT && calc_has_percent(v);
+            if (!calc_has_font_units(v) && !line_pct) continue;
             v = ns_css_value_cow(out, i);
             double lh_base = i == NS_CSS_LINE_HEIGHT
                 ? initial_line_px : my_line_px;
             double rlh_base = i == NS_CSS_LINE_HEIGHT && !parent_style
                 ? initial_line_px : root_line_px;
             calc_fold_font_units(v, my_font_px, root_px, lh_base, rlh_base);
+            if (line_pct) calc_fold_percent(v, my_font_px);
             continue;
         }
         if (v->kind == NS_CSS_V_SIZE && !v->u.size.w_auto && !v->u.size.h_auto) {
@@ -26565,6 +26594,12 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         }
         if (v->kind != NS_CSS_V_LENGTH) continue;
         switch (v->u.length.unit) {
+        case NS_CSS_UNIT_PERCENT:
+            if (i != NS_CSS_LINE_HEIGHT) break;
+            v = ns_css_value_cow(out, i);
+            v->u.length.v *= my_font_px / 100.0;
+            v->u.length.unit = NS_CSS_UNIT_PX;
+            break;
         case NS_CSS_UNIT_EM:
             v = ns_css_value_cow(out, i);
             v->u.length.v *= my_font_px;
