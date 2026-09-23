@@ -726,6 +726,13 @@ node_has_media_metadata(const ns_node *n)
 
 #define NS_LAYOUT_MAX_DEPTH 512
 #define NS_TABLE_MAX_COLS 4096
+#define BIDI_LRI "\xe2\x81\xa6"
+#define BIDI_RLI "\xe2\x81\xa7"
+#define BIDI_FSI "\xe2\x81\xa8"
+#define BIDI_PDI "\xe2\x81\xa9"
+#define BIDI_PDF "\xe2\x80\xac"
+#define BIDI_LRO "\xe2\x80\xad"
+#define BIDI_RLO "\xe2\x80\xae"
 
 static gboolean tag_is_non_rendering(const char *name);
 static gboolean node_is_non_rendering(const ns_node *n);
@@ -3369,12 +3376,11 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                              !ns_element_get_attr(n, "dir"));
         if (bidi_isolate || bidi_plaintext)
             g_string_append(ctx->out,
-                (bidi_plaintext || dir_auto) ? "\xe2\x81\xa8"   /* FSI */
-                : rtl                        ? "\xe2\x81\xa7"   /* RLI */
-                                             : "\xe2\x81\xa6"); /* LRI */
+                (bidi_plaintext || dir_auto) ? BIDI_FSI
+                : rtl                        ? BIDI_RLI
+                                             : BIDI_LRI);
         if (bidi_override)
-            g_string_append(ctx->out, rtl ? "\xe2\x80\xae"   /* RLO */
-                                           : "\xe2\x80\xad"); /* LRO */
+            g_string_append(ctx->out, rtl ? BIDI_RLO : BIDI_LRO);
     }
 
     double rise_outer = ctx->rise_px;
@@ -3501,9 +3507,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (small_caps && ctx->out->len > sc_start)
         emit_attr(ctx->attrs, NS_INLINE_SMALL_CAPS, sc_start, ctx->out->len);
     if (bidi_override)
-        g_string_append(ctx->out, "\xe2\x80\xac");   /* PDF */
+        g_string_append(ctx->out, BIDI_PDF);
     if (bidi_isolate || bidi_plaintext)
-        g_string_append(ctx->out, "\xe2\x81\xa9");   /* PDI */
+        g_string_append(ctx->out, BIDI_PDI);
     if (is_q) {
         ctx->q_depth--;
         char *close_q = quotes_string_for(s, ctx->q_depth, TRUE);
@@ -5067,11 +5073,6 @@ apply_inline_spacing(NsPangoAttrList *list, const ns_style *style, const char *t
         ns_pango_attr_list_insert(list, ls);
     }
     if (ws_px != 0) {
-        /* ns-pango applies this at the word separators CSS Text names, on the
-         * separator's own advance. Emulating it with a letter-spacing attribute
-         * per space, as this used to, split the paragraph into an item per word
-         * and only ever found ASCII space, never U+00A0.
-         */
         NsPangoAttribute *ws = ns_pango_attr_word_spacing_new(
             (int)(ws_px * NS_PANGO_SCALE));
         ws->start_index = 0;

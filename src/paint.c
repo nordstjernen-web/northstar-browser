@@ -1916,11 +1916,6 @@ font_metrics_key_free(gpointer v)
     g_free(k);
 }
 
-/* Resolving one ex, ch, cap or ic shapes four probe glyphs, and a stylesheet
- * asks for the same font over and over -- once per element the rule matches.
- * The answer depends on nothing but the four arguments, so it is measured
- * once per font and kept until the font map changes under it.
- */
 static void
 font_metrics_measure(const char *family, double size_px, int weight,
                      gboolean italic, ns_css_font_metrics *out)
@@ -1992,12 +1987,6 @@ ns_paint_font_metrics(const char *family, double size_px, int weight,
         return;
     }
 
-    /* A probe glyph a font does not cover measures zero, and the ratios below
-     * are what CSS Values names as the fallback for exactly that case. Filling
-     * them in here rather than leaving the caller's own defaults standing is
-     * what makes the answer a function of the arguments alone, and so worth
-     * keeping.
-     */
     ns_css_font_metrics m = {
         .ex_px  = size_px * 0.5,
         .ch_px  = size_px * 0.5,
@@ -2559,9 +2548,6 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
         ns_pango_attr_list_insert(attrs, ls);
     }
     if (ws_px != 0) {
-        /* See apply_inline_spacing() in layout.c: ns-pango puts this on the
-         * separator's advance, so no attribute per space and no item per word.
-         */
         NsPangoAttribute *ws = ns_pango_attr_word_spacing_new(
             (int)(ws_px * NS_PANGO_SCALE));
         ws->start_index = 0;

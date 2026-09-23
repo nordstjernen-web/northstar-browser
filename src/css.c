@@ -17573,22 +17573,20 @@ ns_css_supports_condition(const char *condition,
     return result;
 }
 
-/* Container query context: a stack of ancestor query containers, innermost
- * last, plus a node->info map populated from the laid-out box tree. */
 #define NS_CQ_TYPE_INLINE 1
 #define NS_CQ_TYPE_SIZE   2
 
 typedef struct {
-    char  *names;   /* space-separated container-name list, verbatim */
+    char  *names;
     double width;
     double height;
-    int    type;    /* NS_CQ_TYPE_* */
+    int    type;
     gboolean vertical;
 } ns_cq_container;
 
-static __thread GHashTable *g_cq_map;     /* ns_node* -> ns_cq_container* */
-static __thread GArray     *g_cq_stack;   /* ns_cq_container (by value) */
-static __thread GHashTable *g_var_adjust_cache; /* parent ns_var_map* -> adjusted ns_var_map* */
+static __thread GHashTable *g_cq_map;
+static __thread GArray     *g_cq_stack;
+static __thread GHashTable *g_var_adjust_cache;
 static __thread gboolean    g_container_features_used;
 
 void
@@ -17657,7 +17655,6 @@ cq_names_contain(const char *names, const char *name, gsize nlen)
     return FALSE;
 }
 
-/* Resolve a length token (px/em/rem/% of container axis) to px; -1 on failure. */
 static char *
 cq_spacify(const char *s)
 {
@@ -17678,8 +17675,6 @@ cq_spacify(const char *s)
     return g_string_free(o, FALSE);
 }
 
-/* Pick the query container for a query: nearest ancestor (innermost) that
- * matches the requested name (or any container, if unnamed). */
 static const ns_cq_container *
 cq_select_container(const char *name, gsize nlen)
 {
@@ -20456,13 +20451,6 @@ index_add_subject(ns_css_rule_index *idx, const css_index_counts *counts,
     return FALSE;
 }
 
-/* A subject that is only :is()/:where() carries no name of its own, so it
- * lands in the universal bucket and is then tested against every element.
- * An element can only match it by matching one of the arms, so when every arm
- * ends in something indexable the rule can be filed under each arm's key
- * instead. Any arm without a key -- a bare pseudo-class, `*` -- makes the
- * group unindexable, and the caller falls back to universal.
- */
 static gboolean
 index_add_matches_any(ns_css_rule_index *idx, const css_index_counts *counts,
                       const ns_css_simple *subj, guint ri, guint si)
@@ -25084,12 +25072,6 @@ selector_cache_equal(gconstpointer a, gconstpointer b)
            left->pseudo == right->pseudo;
 }
 
-/* A full cascade never probes the same (rule, selector, element, pseudo)
- * twice, so every insert in the first pass is a miss that exists only to
- * serve the container-query pass that follows. Entries come from a bump
- * arena rather than two allocations each: on a page like github.com that is
- * about 1.5 million allocations saved per relayout.
- */
 static void
 selector_cache_reset_arena(void)
 {
