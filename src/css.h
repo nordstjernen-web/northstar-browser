@@ -401,6 +401,8 @@ char *ns_css_animation_shorthand_canonical(const char *text, gboolean is_animati
 char *ns_css_ident_serialize(const char *name);
 char *ns_css_list_style_serialize(const char *type, const char *position,
                                   const char *image);
+char *ns_css_grid_shorthand_compose(char *const values[6], gboolean full);
+char *ns_css_grid_placement_compose(char *const values[4], gboolean area);
 char *ns_css_animation_range_serialize(const char *start_list, const char *end_list);
 char *ns_css_timing_serialize(const ns_css_timing *t);
 const char *ns_css_initial_value_text(const char *name);
@@ -456,6 +458,7 @@ typedef struct ns_css_track {
     double min_v;
     double min_em, min_rem, min_pct;
     gboolean has_min;
+    gboolean fit_content;
 } ns_css_track;
 
 typedef enum ns_css_auto_repeat {
@@ -478,6 +481,8 @@ typedef struct ns_css_tracks {
     ns_css_auto_repeat auto_repeat;
     int auto_repeat_start;
     int auto_repeat_count;
+    int auto_repeat_names_start;
+    int auto_repeat_names_end;
     gboolean subgrid;
     int n_line_names;
     ns_css_line_name line_names[NS_CSS_LINE_NAMES_MAX];
@@ -715,10 +720,14 @@ typedef struct ns_css_value {
             double rem;
             double lh;
             double rlh;
+            double vw, vh, vmin, vmax;
+            double parsed_vw, parsed_vh;
             guint8 fn;
             guint8 n_args;
             guint8 arg_none;
-            struct { double px, pct, em, rem, lh, rlh; } args[4];
+            struct {
+                double px, pct, em, rem, lh, rlh, vw, vh, vmin, vmax;
+            } args[4];
         } calc;
         ns_css_shadow_list shadow;
         ns_css_gradient  gradient;
@@ -1315,6 +1324,10 @@ char *ns_css_value_serialize(const ns_css_value *v);
 char *ns_css_value_serialize_specified(const ns_css_value *v);
 char *ns_css_individual_transform_serialize(const ns_css_value *v, int prop);
 char *ns_css_math_canonical(const char *value);
+char *ns_css_calc_canonical(const char *text);
+char *ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
+                                       int prop);
+char *ns_css_negative_zero_normalize(char *value);
 char *ns_css_transform_canonical(const char *value);
 char *ns_css_display_canonical(const char *value);
 char *ns_css_specified_canonical(const char *prop, const char *value);

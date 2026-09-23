@@ -1748,6 +1748,7 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
         ? ns_css_specified_canonical(css, val) : NULL;
     g_free(css);
     if (canon) { g_free(val); val = canon; }
+    val = ns_css_negative_zero_normalize(val);
     if (desc) {
         desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE | JS_PROP_WRITABLE;
         desc->value  = JS_NewString(ctx, val ? val : "");
@@ -3061,7 +3062,11 @@ static JSValue
 ns_style_get_cssText(JSContext *ctx, JSValueConst this_val)
 {
     ns_style_back *back = ns_style_sync(ctx, this_val, NULL);
-    return JS_NewString(ctx, back && back->css_text ? back->css_text : "");
+    char *text = ns_css_negative_zero_normalize(
+        g_strdup(back && back->css_text ? back->css_text : ""));
+    JSValue ret = JS_NewString(ctx, text);
+    g_free(text);
+    return ret;
 }
 
 static JSValue
@@ -3090,6 +3095,7 @@ ns_style_getPropertyValue(JSContext *ctx, JSValueConst this_val,
         ? ns_css_specified_canonical(name, val) : NULL;
     JS_FreeCString(ctx, name);
     if (canon) { g_free(val); val = canon; }
+    val = ns_css_negative_zero_normalize(val);
     JSValue ret = JS_NewString(ctx, val ? val : "");
     g_free(val);
     return ret;
@@ -14151,6 +14157,52 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(col);
         return out;
     }
+    if (strcmp(name, "grid-area") == 0 || strcmp(name, "grid-row") == 0 ||
+        strcmp(name, "grid-column") == 0) {
+        static const char *const area_parts[4] = {
+            "grid-row-start", "grid-column-start", "grid-row-end",
+            "grid-column-end",
+        };
+        gboolean area = name[5] == 'a';
+        gboolean column = name[5] == 'c';
+        char *values[4] = { NULL };
+        for (int i = 0; i < (area ? 4 : 2); i++) {
+            int part = area ? i : i * 2 + (column ? 1 : 0);
+            values[i] = ns_computed_lookup(ctx, n, area_parts[part]);
+        }
+        char *out = ns_css_grid_placement_compose(values, area);
+        for (int i = 0; i < 4; i++) g_free(values[i]);
+        return out;
+    }
+    if (strcmp(name, "grid-template") == 0 || strcmp(name, "grid") == 0) {
+        static const char *const parts[6] = {
+            "grid-template-rows", "grid-template-columns",
+            "grid-template-areas", "grid-auto-flow", "grid-auto-rows",
+            "grid-auto-columns",
+        };
+        ns_js *grid_js = js_from_ctx(ctx);
+        if (grid_js) ns_js_flush_style(grid_js);
+        if (!grid_js || !grid_js->style_table ||
+            !g_hash_table_lookup(grid_js->style_table, n))
+            return g_strdup("");
+        gboolean full = name[4] == '\0';
+        const ns_style *grid_style =
+            g_hash_table_lookup(grid_js->style_table, n);
+        char *values[6] = { NULL };
+        for (int i = 0; i < (full ? 6 : 3); i++) {
+            const ns_css_value *tracks = i < 2
+                ? grid_style->values[i == 0 ? NS_CSS_GRID_TEMPLATE_ROWS
+                                            : NS_CSS_GRID_TEMPLATE_COLUMNS]
+                : NULL;
+            if (tracks && tracks->kind == NS_CSS_V_TRACKS)
+                values[i] = ns_css_value_serialize(tracks);
+            else
+                values[i] = ns_computed_lookup(ctx, n, parts[i]);
+        }
+        char *out = ns_css_grid_shorthand_compose(values, full);
+        for (int i = 0; i < 6; i++) g_free(values[i]);
+        return out;
+    }
 
     ns_js *js = js_from_ctx(ctx);
     if (js) {
@@ -14172,6 +14224,19 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
                  strcmp(resolved_name, "grid-template-rows") == 0)) {
         char *tracks = ns_layout_grid_resolved_tracks(
             lbox, strcmp(resolved_name, "grid-template-columns") == 0);
+        if (tracks) return tracks;
+    }
+    if (computed && (resolved_id == NS_CSS_GRID_TEMPLATE_COLUMNS ||
+                     resolved_id == NS_CSS_GRID_TEMPLATE_ROWS ||
+                     resolved_id == NS_CSS_GRID_AUTO_COLUMNS ||
+                     resolved_id == NS_CSS_GRID_AUTO_ROWS)) {
+        const ns_node *root = n;
+        while (root->parent && root->parent->kind == NS_NODE_ELEMENT)
+            root = root->parent;
+        const ns_style *root_style = js && js->style_table
+            ? g_hash_table_lookup(js->style_table, root) : NULL;
+        char *tracks = ns_css_tracks_computed_serialize(computed, root_style,
+                                                        resolved_id);
         if (tracks) return tracks;
     }
 

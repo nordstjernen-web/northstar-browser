@@ -201,6 +201,134 @@ Significant changes in each release:
   `<select>` keeps its text. Setting `innerText` or `outerText` to a
   string with a NUL character keeps the text after it instead of
   cutting it off there.
+* A `fit-content(<length>)` grid track sizes to its content up to the
+  limit. It behaved like `minmax(auto, <length>)` and always grew to
+  the limit, so `fit-content(70px)` holding 30px of text was 70px wide
+  and an empty one kept its full size instead of collapsing.
+* Rows repeated by `grid-template-rows: repeat(auto-fit, ...)` that no
+  item occupies collapse to zero height, as auto-fit columns already
+  did, instead of keeping their size like `auto-fill`.
+* Line names inside `repeat(auto-fill, ...)` and `repeat(auto-fit,
+  ...)` are repeated with the tracks. They were kept only once and the
+  names after the repetition kept their unrepeated line numbers, so
+  `grid-column: b 3` and names following the `repeat()` placed items on
+  the wrong lines, and the resolved `grid-template-columns` of such a
+  grid dropped every line name.
+* `getComputedStyle()` reports `grid-template-columns` and
+  `grid-template-rows` of an element that is not a grid, and
+  `grid-auto-columns` and `grid-auto-rows` of any element, as the
+  computed track list: `repeat()`, `minmax()`, `fit-content()` and line
+  names stay as written and only lengths become pixels, so `[a] 1em
+  repeat(2, 2em [b] 3em)` reads back as `[a] 16px repeat(2, 32px [b]
+  48px)` instead of an expanded list with the functions dropped.
+* Flexible grid tracks honour their fixed minimums. `minmax(40px, 1fr)
+  minmax(0, 1fr)` in a 60px grid gave the second column 30px and
+  overflowed; a track whose share falls below its minimum now keeps the
+  minimum and the others split what is left (40px and 20px). Space that
+  `fr` factors summing below 1 leave over stretches `auto` tracks, and
+  in a grid with a fixed height a `minmax(0, 1fr)` row no longer grows
+  to fit its content, nor does an item spanning several rows including a
+  flexible one stretch them.
+* `calc()`, `min()`, `max()` and `clamp()` values set from script read
+  back simplified the way CSS Values 4 serializes them: terms of the
+  same unit are combined, absolute units become `px`, and a sum lists
+  its number, then its percentage, then its dimensions sorted by unit,
+  so `calc(1vh + 2px + 3%)` reads back as `calc(3% + 2px + 1vh)` and
+  `min(1px + 1%)` as `calc(1% + 1px)`. Only a value whose rounded
+  six-digit form is exact is rewritten, so `calc(100% / 3)` keeps its
+  full precision for layout.
+* `grid-template-rows: repeat(auto-fill, ...)` repeats its rows. Only
+  columns expanded an automatic repetition; rows kept a single copy of
+  the pattern. Rows now repeat as many times as fit the grid's height,
+  or its `max-height` or `min-height` when the height is not fixed.
+* `repeat(auto-fill, ...)` and `repeat(auto-fit, ...)` count their
+  repetitions from the space the other tracks and gaps leave, and size a
+  `minmax()` track by its fixed maximum; `10px 20% repeat(auto-fill,
+  35px)` in a 200px grid made five repetitions that overflowed instead
+  of four. Columns an item adds past the explicit grid take their size
+  from `grid-auto-columns` instead of always being `auto`.
+* Math functions keep the sign of zero. `calc(-0)` was rewritten to
+  `calc(0)` before it was evaluated, so `1 / sign(calc(-0))` came out
+  as `infinity` instead of `-infinity`; `min()`, `max()` and `clamp()`
+  now order `-0` below `0`, `round()` with an infinite step, `mod()`
+  and `rem()` return the signed zero CSS Values 4 specifies, and `-0`
+  still reads back as `0` through `element.style`.
+* A `calc()` that evaluates to NaN or an infinity no longer produces
+  NaN geometry. `width: calc(NaN * 1px)` laid out and read back as
+  `nanpx` and `calc(infinity * 1px)` as an unusable infinite length;
+  computed values now clamp NaN to 0 and infinities to the largest
+  (or most negative) representable length, as CSS Values 4 specifies,
+  for lengths, percentages, numbers and the `scale` and `translate`
+  properties.
+* Grid items that span several `auto`, `min-content` or `max-content`
+  columns size those columns. Only single-column items were measured,
+  so a heading spanning two content-sized columns could overflow them;
+  a spanning item's minimum and maximum content widths are now spread
+  over the columns it crosses (narrower spans first, respecting each
+  column's maximum), as the grid sizing algorithm specifies.
+* `grid-template-columns/-rows: subgrid` checks its line-name list:
+  only `[names]` groups and `repeat(N | auto-fill, [names]...)` may
+  follow `subgrid` (so `subgrid 1px` or `subgrid repeat(2, 1px)` is
+  dropped), the names -- including empty `[]` groups -- are kept for
+  `getComputedStyle()`, and `subgrid` on an element whose parent is not
+  a grid reports `none`, as it is laid out as an ordinary grid.
+* A grid with only a `min-height` grows its `fr` rows to fill it. The
+  common page skeleton `min-height: 100vh; grid-template-rows: auto 1fr
+  auto` sized the middle row to its content and left the footer halfway
+  up the screen; the flexible rows now share the space the minimum
+  height leaves, as they already did for a fixed `height`.
+* Grids that use `grid-template-areas` are laid out by the full grid
+  algorithm. They went through a separate, reduced code path that gave
+  `fr` rows no share of a fixed container height (a header / `1fr` /
+  footer page left the footer under the header instead of at the
+  bottom), sized every column the areas added as `1fr` instead of by
+  `grid-auto-columns`, and ignored `align-content`, `align-items` and
+  `grid-auto-rows`. Area names also resolve as line names, so
+  `grid-row: main` and `grid-column: main-start / main-end` place items
+  on a named area.
+* `getComputedStyle()` reads the `grid-area`, `grid-row` and
+  `grid-column` shorthands (they read empty), and `grid-template`
+  reports a declared track list as declared, falling back to the
+  laid-out tracks only when no template is set.
+* `align-self` and `justify-self` values `self-start` and `self-end` on
+  a grid item use the item's own writing mode. A `vertical-rl` item
+  aligned with `justify-self: self-start` sits at the right edge of its
+  area, and a vertical item with `direction: rtl` aligns to the bottom;
+  only the item's `direction` was considered before, as if every item
+  were horizontal.
+* The `grid` and `grid-template` shorthands follow their grammar and
+  set every longhand they cover. Rows written in the template form
+  without a size (`"a a" "b b" 1fr`) are `auto`, where the first size
+  given was applied to the first row; line names between rows merge
+  (`"a" [x] [y] "b"` names one line `x y`); omitted longhands are reset,
+  so `grid-template: auto / 1fr 1fr` clears an earlier
+  `grid-template-areas` and `grid: auto-flow / ...` resets
+  `grid-template-rows`; and invalid values (`grid-template: 10px`,
+  `"a" 10px 10px`, `none / "a"`) are dropped instead of partially
+  applied. `grid-auto-flow` rejects `auto` and repeated keywords.
+  `element.style` and `getComputedStyle()` read both shorthands back,
+  composed from their longhands, and a track list keeps its
+  `repeat()` and `fit-content()` when read back from a stylesheet or a
+  style attribute.
+* `grid-row`, `grid-column`, `grid-area` and their `-start`/`-end`
+  longhands follow the `<grid-line>` grammar. Values such as `0`,
+  `span`, `span -2`, `1 2`, `auto 1` or a fifth `grid-area` part were
+  accepted and could override a valid earlier declaration; they are now
+  dropped. Omitted parts are filled in as the spec says (a named line
+  repeats, anything else becomes `auto`), so `grid-row: 2` also resets
+  an earlier `grid-row-end`, and `element.style` reads the values back
+  in their shortest canonical form (`2 i span` reads `span 2 i`, `1 /
+  auto` reads `1`). Line and area names keep their case, as custom
+  identifiers are case-sensitive.
+* Viewport units inside an iframe measure the iframe. `vw`, `vh`,
+  `vmin` and the `sv*`/`lv*`/`dv*` variants in a frame's document
+  resolved against the top-level window unless the frame's size came
+  from its `style` attribute; the frame's own computed width and height
+  now define its viewport. A `calc()`, `min()`, `max()` or `clamp()`
+  mixing viewport units with other units also recomputes them for the
+  current viewport, where it used to keep the size the window had when
+  the stylesheet was first parsed -- so `calc(100vh - 60px)` follows a
+  window resize and resolves per frame.
 * `sibling-index()` and `sibling-count()` in a container size query
   resolve against the container element, instead of always counting 1.
 * Flexbox follows `writing-mode`: in a vertical container `row` runs
