@@ -29,6 +29,9 @@ void ns_decoder_free(ns_decoder *dec);
 
 char *ns_encoding_decode(const ns_encoding *enc, const char *data, gsize len,
                          gsize *out_len);
+char *ns_encoding_decode_sniffed(const ns_encoding *enc, const char *data,
+                                 gsize len, gsize *out_len);
+char *ns_encoding_mime_charset(const char *mime);
 
 G_END_DECLS
 

@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `XMLHttpRequest.responseText` decodes the body in the charset named by
+  `overrideMimeType()` or the response's `Content-Type`, and a byte-order
+  mark overrides both, as the XHR standard specifies. The body was
+  always read as UTF-8, so Shift_JIS or windows-1252 text came back as
+  mojibake; `x-user-defined` now maps bytes 0x80-0xFF to U+F780-U+F7FF
+  as the Encoding Standard defines.
 * `TextDecoder` accepts every label of the Encoding Standard, not just
   UTF-8, UTF-16 and windows-1252, so `new TextDecoder("shift_jis")` or
   `"gbk"` no longer throws a RangeError, and it decodes with the same

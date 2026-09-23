@@ -1275,3 +1275,64 @@ ns_encoding_decode(const ns_encoding *enc, const char *data, gsize len,
     if (out_len) *out_len = out->len;
     return g_string_free(out, FALSE);
 }
+
+char *
+ns_encoding_decode_sniffed(const ns_encoding *enc, const char *data, gsize len,
+                           gsize *out_len)
+{
+    if (len >= 3 && memcmp(data, "\xEF\xBB\xBF", 3) == 0)
+        return ns_encoding_decode(&ns_encodings[NS_ENC_UTF_8], data + 3,
+                                  len - 3, out_len);
+    if (len >= 2 && memcmp(data, "\xFE\xFF", 2) == 0)
+        return ns_encoding_decode(&ns_encodings[NS_ENC_UTF_16BE], data + 2,
+                                  len - 2, out_len);
+    if (len >= 2 && memcmp(data, "\xFF\xFE", 2) == 0)
+        return ns_encoding_decode(&ns_encodings[NS_ENC_UTF_16LE], data + 2,
+                                  len - 2, out_len);
+    return ns_encoding_decode(enc, data, len, out_len);
+}
+
+static gboolean
+mime_is_space(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+char *
+ns_encoding_mime_charset(const char *mime)
+{
+    const char *p = mime ? strchr(mime, ';') : NULL;
+    while (p) {
+        p++;
+        while (mime_is_space(*p)) p++;
+        const char *name = p;
+        while (*p && *p != '=' && *p != ';') p++;
+        gsize name_len = (gsize)(p - name);
+        if (*p != '=') {
+            p = *p ? p : NULL;
+            continue;
+        }
+        p++;
+        GString *value = g_string_new(NULL);
+        if (*p == '"') {
+            p++;
+            while (*p && *p != '"') {
+                if (*p == '\\' && p[1]) p++;
+                g_string_append_c(value, *p++);
+            }
+            p = strchr(p, ';');
+        } else {
+            const char *start = p;
+            while (*p && *p != ';') p++;
+            const char *end = p;
+            while (end > start && mime_is_space(end[-1])) end--;
+            g_string_append_len(value, start, end - start);
+            p = *p ? p : NULL;
+        }
+        if (name_len == 7 && g_ascii_strncasecmp(name, "charset", 7) == 0 &&
+            value->len > 0)
+            return g_string_free(value, FALSE);
+        g_string_free(value, TRUE);
+    }
+    return NULL;
+}

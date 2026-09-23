@@ -33,6 +33,7 @@
 #include "css.h"
 #include "datetime.h"
 #include "debuglog.h"
+#include "encoding.h"
 #include "engine.h"
 #include "ext.h"
 #include "html.h"
@@ -17478,46 +17479,25 @@ ns_xhr_overrideMimeType(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static gboolean
-ns_xhr_mime_is_user_defined(const char *mime)
-{
-    if (!mime) return FALSE;
-    char *lower = g_ascii_strdown(mime, -1);
-    gboolean yes = lower && strstr(lower, "x-user-defined") != NULL;
-    g_free(lower);
-    return yes;
-}
-
-static gboolean
-ns_xhr_uses_user_defined_text(JSContext *ctx, JSValueConst obj,
-                              const char *content_type)
-{
-    JSValue mv = JS_GetPropertyStr(ctx, obj, "_mimeOverride");
-    const char *mime = JS_ToCString(ctx, mv);
-    gboolean yes = ns_xhr_mime_is_user_defined(mime) ||
-                   ns_xhr_mime_is_user_defined(content_type);
-    if (mime) JS_FreeCString(ctx, mime);
-    JS_FreeValue(ctx, mv);
-    return yes;
-}
-
 static JSValue
 ns_xhr_response_text_value(JSContext *ctx, JSValueConst obj,
                            const guint8 *body, gsize blen,
                            const char *content_type)
 {
-    if (!ns_xhr_uses_user_defined_text(ctx, obj, content_type))
-        return JS_NewStringLen(ctx, body ? (const char *)body : "", blen);
-    if (blen == 0)
-        return JS_NewStringLen(ctx, "", 0);
-    if (blen > G_MAXSIZE / sizeof(uint16_t))
-        return JS_ThrowRangeError(ctx, "responseText is too large");
-    uint16_t *wide = g_try_new(uint16_t, blen);
-    if (!wide) return JS_ThrowOutOfMemory(ctx);
-    for (gsize i = 0; i < blen; i++)
-        wide[i] = body ? body[i] : 0;
-    JSValue v = JS_NewStringUTF16(ctx, wide, blen);
-    g_free(wide);
+    JSValue mv = JS_GetPropertyStr(ctx, obj, "_mimeOverride");
+    const char *override = JS_IsUndefined(mv) ? NULL : JS_ToCString(ctx, mv);
+    char *label = override ? ns_encoding_mime_charset(override) : NULL;
+    if (!label) label = ns_encoding_mime_charset(content_type);
+    const ns_encoding *enc = label ? ns_encoding_for_label(label) : NULL;
+    gsize len = 0;
+    char *text = ns_encoding_decode_sniffed(enc ? enc : ns_encoding_utf8(),
+                                            body ? (const char *)body : "",
+                                            blen, &len);
+    JSValue v = JS_NewStringLen(ctx, text, len);
+    g_free(text);
+    g_free(label);
+    if (override) JS_FreeCString(ctx, override);
+    JS_FreeValue(ctx, mv);
     return v;
 }
 
