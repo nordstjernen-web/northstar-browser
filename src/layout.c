@@ -9515,7 +9515,7 @@ flex_column_item_shrinks_to_fit(const ns_box *c, const char *align)
 }
 
 static void
-flex_column_layout_item(ns_box *c, double cw, double line_w, gboolean fit,
+flex_column_layout_item(ns_box *c, double line_w, gboolean fit,
                         const ns_style *child_inherited)
 {
     const ns_css_value *wv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
@@ -9533,7 +9533,6 @@ flex_column_layout_item(ns_box *c, double cw, double line_w, gboolean fit,
                    c->padding.left + c->padding.right +
                    c->border.left + c->border.right;
     }
-    (void)cw;
     c->definite_height = 0;
     c->measured_content_height = -1;
     layout_box(c, parent_w, child_inherited);
@@ -9553,7 +9552,7 @@ layout_flex_column(ns_box *box, double cw,
                    double inner_x, double inner_y,
                    const ns_style *child_inherited,
                    gboolean reverse,
-                   double parent_content_height,
+                   double parent_content_width,
                    double *cursor_y_out)
 {
     GPtrArray *items = g_ptr_array_new();
@@ -9586,8 +9585,8 @@ layout_flex_column(ns_box *box, double cw,
     double row_gap = flex_gap_row_of(box->style,
                                      explicit_h > 0 ? explicit_h : 0);
     double col_gap = flex_gap_of(box->style, cw);
-    double min_h = resolve_used_height(box, mnh, parent_content_height, -1);
-    double max_h = resolve_used_height(box, mxh, parent_content_height, -1);
+    double min_h = resolve_used_height(box, mnh, parent_content_width, -1);
+    double max_h = resolve_used_height(box, mxh, parent_content_width, -1);
     if (keyword_is(box->style ? box->style->values[NS_CSS_BOX_SIZING] : NULL,
                    "border-box")) {
         double vex = box->border.top + box->border.bottom +
@@ -9617,7 +9616,7 @@ layout_flex_column(ns_box *box, double cw,
         edges_from_style(c->style, cw, &c->margin, &c->padding, &c->border);
         c->x = inner_x;
         c->y = inner_y;
-        flex_column_layout_item(c, cw, cw,
+        flex_column_layout_item(c, cw,
                                 multi_line ||
                                 flex_column_item_shrinks_to_fit(c, align),
                                 child_inherited);
@@ -9787,7 +9786,7 @@ layout_flex_column(ns_box *box, double cw,
                 fabs(flex_item_outer_width(c) - ln->cross) > 0.01) {
                 c->x = inner_x;
                 c->y = inner_y;
-                flex_column_layout_item(c, cw, ln->cross, FALSE, child_inherited);
+                flex_column_layout_item(c, ln->cross, FALSE, child_inherited);
             }
             double item_outer_w = flex_item_outer_width(c);
             double cx = ln->x;
@@ -11750,17 +11749,11 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                    ns_css_display_of(box->style))) {
         double avail = parent_content_width - horiz_total;
         if (avail < 0) avail = 0;
-        if (height_keyword_stretches(wv)) {
-            cw = avail;
-            explicit_width = TRUE;
-            intrinsic_width = TRUE;
-        } else {
-            double natural = measure_natural_width(box,
-                                                   inherited_style ? inherited_style : box->style);
-            double input_width = text_input_intrinsic_width(box);
-            if (natural < input_width) natural = input_width;
-            cw = natural < avail ? natural : avail;
-        }
+        double natural = measure_natural_width(box,
+                                               inherited_style ? inherited_style : box->style);
+        double input_width = text_input_intrinsic_width(box);
+        if (natural < input_width) natural = input_width;
+        cw = natural < avail ? natural : avail;
         if (cw < 0) cw = 0;
     } else {
         cw = parent_content_width - horiz_total;
@@ -11977,7 +11970,6 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             else
                 c->x = inner_x + cw - right_off - tentative_outer;
             c->y = float_y;
-            double saved_cw = c->content_width;
             c->content_width = cw_for_float;
             gboolean explicit_float_w = wv2 &&
                 (wv2->kind == NS_CSS_V_LENGTH || wv2->kind == NS_CSS_V_CALC);
@@ -11988,7 +11980,6 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                          + c->border.left + c->border.right
                          + c->margin.left + c->margin.right,
                        child_inherited);
-            (void)saved_cw;
             double actual_outer = c->content_width
                 + c->padding.left + c->padding.right
                 + c->border.left + c->border.right
