@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Headless `--wpt`, `--inspect` and image dumps load the document's
+  images before its scripts run and fire their `load` events, so tests
+  and scripts that measure images at `load` see their real sizes.
 * An `<iframe>` whose source is an image shows it in an image document,
   as a top-level navigation does, instead of parsing the image bytes as
   HTML text.

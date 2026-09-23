@@ -1854,8 +1854,12 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_js_set_layout_flush_cb(js, headless_flush_layout, &flush_ctx);
         ns_js_set_style_flush_cb(js, headless_flush_style, &flush_ctx);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
+        headless_relayout(&flush_ctx);
+        ns_engine_fetch_images(layout, flush_base, image_cache);
         ns_js_run_scripts_in_doc(js, doc, resp->final_url,
                                  g_headless_doc_charset, resp->content_type);
+        headless_relayout(&flush_ctx);
+        ns_js_fire_media_load_events(js, layout);
     }
 
     if (opts->settle_ms > 0) settle_main_loop(opts->settle_ms, &flush_ctx);
