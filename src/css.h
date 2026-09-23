@@ -425,6 +425,8 @@ typedef struct ns_css_transform_op {
     gboolean a_is_percent, b_is_percent;
     gboolean e_is_percent, f_is_percent;
     gboolean is_3d;
+    double a_pct, b_pct;
+    double em[3], rem[3];
 } ns_css_transform_op;
 
 #define NS_CSS_TRANSFORM_OPS_MAX 8
@@ -897,12 +899,14 @@ typedef struct ns_css_decl {
     ns_css_prop prop;
     ns_css_value *value;
     gboolean important;
+    int order;
 } ns_css_decl;
 
 typedef struct ns_css_pending_decl {
     char     *pname;
     char     *raw_vtext;
     gboolean  important;
+    int       order;
 } ns_css_pending_decl;
 
 typedef struct ns_css_rule {

@@ -378,7 +378,7 @@ static const ns_css_property_meta kProperty[NS_CSS_PROP_COUNT] = {
     [NS_CSS_TRANSITION]           = P("transition"),
     [NS_CSS_ANIMATION]            = P("animation"),
     [NS_CSS_ASPECT_RATIO]         = P("aspect-ratio"),
-    [NS_CSS_TEXT_SHADOW]          = P("text-shadow"),
+    [NS_CSS_TEXT_SHADOW]          = PI("text-shadow"),
     [NS_CSS_OVERFLOW_WRAP]        = PI("overflow-wrap"),
     [NS_CSS_WORD_BREAK]           = PI("word-break"),
     [NS_CSS_HYPHENS]              = PI("hyphens"),
@@ -432,8 +432,8 @@ static const ns_css_property_meta kProperty[NS_CSS_PROP_COUNT] = {
     [NS_CSS_ANIMATION_COMPOSITION] = P("animation-composition"),
     [NS_CSS_COUNTER_SET]          = P("counter-set"),
     [NS_CSS_OVERFLOW_CLIP_MARGIN] = P("overflow-clip-margin"),
-    [NS_CSS_ORPHANS]              = P("orphans"),
-    [NS_CSS_WIDOWS]               = P("widows"),
+    [NS_CSS_ORPHANS]              = PI("orphans"),
+    [NS_CSS_WIDOWS]               = PI("widows"),
     [NS_CSS_MAX_LINES]            = P("max-lines"),
     [NS_CSS_HYPHENATE_LIMIT_LINES] = P("hyphenate-limit-lines"),
     [NS_CSS_COLUMN_SPAN]          = P("column-span"),
@@ -516,7 +516,7 @@ static const ns_css_property_meta kProperty[NS_CSS_PROP_COUNT] = {
     [NS_CSS_STOP_OPACITY]         = P("stop-opacity"),
     [NS_CSS_CLIP_RULE]            = PI("clip-rule"),
     [NS_CSS_TEXT_ANCHOR]          = PI("text-anchor"),
-    [NS_CSS_DOMINANT_BASELINE]    = P("dominant-baseline"),
+    [NS_CSS_DOMINANT_BASELINE]    = PI("dominant-baseline"),
     [NS_CSS_PAINT_ORDER]          = PI("paint-order"),
     [NS_CSS_VECTOR_EFFECT]        = P("vector-effect"),
     [NS_CSS_SHAPE_RENDERING]      = PI("shape-rendering"),
@@ -1256,6 +1256,15 @@ ns_css_font_family_for_pango(const char *css_family)
     return fallback ? fallback : g_strdup("sans-serif");
 }
 
+static int
+font_weight_relative(int parent, gboolean bolder)
+{
+    if (bolder)
+        return parent < 350 ? 400 : parent < 550 ? 700 : 900;
+    if (parent < 100) return parent;
+    return parent < 550 ? 100 : parent < 750 ? 400 : 700;
+}
+
 int
 ns_css_font_weight_number(const ns_css_value *v, int fallback)
 {
@@ -1263,18 +1272,9 @@ ns_css_font_weight_number(const ns_css_value *v, int fallback)
     const char *kw = v->u.keyword;
     if (strcmp(kw, "normal") == 0) return 400;
     if (strcmp(kw, "bold") == 0) return 700;
-    if (strcmp(kw, "bolder") == 0) {
-        int base = fallback > 0 ? fallback : 400;
-        if (base < 400) return 400;
-        if (base < 600) return 700;
-        return 900;
-    }
-    if (strcmp(kw, "lighter") == 0) {
-        int base = fallback > 0 ? fallback : 400;
-        if (base < 600) return 100;
-        if (base < 800) return 400;
-        return 700;
-    }
+    if (strcmp(kw, "bolder") == 0 || strcmp(kw, "lighter") == 0)
+        return font_weight_relative(fallback > 0 ? fallback : 400,
+                                    kw[0] == 'b');
     if (g_ascii_isdigit(kw[0])) {
         return ns_parse_int(kw, fallback > 0 ? fallback : 400, 1, 1000);
     }
@@ -2528,6 +2528,10 @@ typedef enum {
     CALC_FLEX,
 } ns_calc_kind;
 
+typedef struct ns_calc_linear {
+    double px, pct, em, rem, lh, rlh;
+} ns_calc_linear;
+
 typedef struct ns_calc_term {
     ns_calc_kind kind;
     double px;
@@ -2538,6 +2542,10 @@ typedef struct ns_calc_term {
     double rlh;
     double num;
     gboolean unresolved;
+    guint8 fn;
+    guint8 n_args;
+    guint8 arg_none;
+    ns_calc_linear args[4];
 } ns_calc_term;
 
 static __thread gboolean calc_unresolved;
@@ -3880,8 +3888,72 @@ calc_skip_ws(const char **pp, const char *end)
 }
 
 static void
+calc_linear_add(ns_calc_linear *l, const ns_calc_term *t, double sign)
+{
+    l->px += sign * t->px;
+    l->pct += sign * t->pct;
+    l->em += sign * t->em;
+    l->rem += sign * t->rem;
+    l->lh += sign * t->lh;
+    l->rlh += sign * t->rlh;
+}
+
+static void
+calc_term_fn_scale(ns_calc_term *v, double m)
+{
+    if (!v->fn) return;
+    if (!isfinite(m)) {
+        v->fn = 0;
+        return;
+    }
+    for (int i = 0; i < v->n_args; i++) {
+        ns_calc_linear *l = &v->args[i];
+        l->px *= m;
+        l->pct *= m;
+        l->em *= m;
+        l->rem *= m;
+        l->lh *= m;
+        l->rlh *= m;
+    }
+    if (m >= 0) return;
+    if (v->fn == 1 || v->fn == 2) {
+        v->fn = v->fn == 1 ? 2 : 1;
+        return;
+    }
+    ns_calc_linear lo = v->args[0];
+    v->args[0] = v->args[2];
+    v->args[2] = lo;
+    guint8 none = v->arg_none;
+    v->arg_none = (guint8)((none & 2u) | ((none & 1u) << 2) | ((none & 4u) >> 2));
+}
+
+static void
+calc_term_fn_add(ns_calc_term *out, const ns_calc_term *rhs, double sign)
+{
+    if (out->fn && rhs->fn) {
+        out->fn = 0;
+        return;
+    }
+    if (out->fn) {
+        for (int i = 0; i < out->n_args; i++)
+            calc_linear_add(&out->args[i], rhs, sign);
+        return;
+    }
+    if (!rhs->fn) return;
+    ns_calc_term r = *rhs;
+    calc_term_fn_scale(&r, sign);
+    for (int i = 0; i < r.n_args; i++)
+        calc_linear_add(&r.args[i], out, 1.0);
+    out->fn = r.fn;
+    out->n_args = r.n_args;
+    out->arg_none = r.arg_none;
+    memcpy(out->args, r.args, sizeof out->args);
+}
+
+static void
 calc_term_scale(ns_calc_term *v, double m)
 {
+    calc_term_fn_scale(v, m);
     if (v->kind != CALC_LENGTH) {
         v->num *= m;
     } else if (isfinite(m)) {
@@ -4085,6 +4157,20 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             out->rem = v->u.calc.rem;
             out->lh = v->u.calc.lh;
             out->rlh = v->u.calc.rlh;
+            if (v->u.calc.fn >= 1 && v->u.calc.fn <= 3 &&
+                v->u.calc.n_args > 0 && v->u.calc.n_args <= 4) {
+                out->fn = v->u.calc.fn;
+                out->n_args = v->u.calc.n_args;
+                out->arg_none = v->u.calc.arg_none;
+                for (int k = 0; k < out->n_args; k++) {
+                    out->args[k].px = v->u.calc.args[k].px;
+                    out->args[k].pct = v->u.calc.args[k].pct;
+                    out->args[k].em = v->u.calc.args[k].em;
+                    out->args[k].rem = v->u.calc.args[k].rem;
+                    out->args[k].lh = v->u.calc.args[k].lh;
+                    out->args[k].rlh = v->u.calc.args[k].rlh;
+                }
+            }
         } else if (v->kind == NS_CSS_V_LENGTH) {
             double num = v->u.length.v;
             switch (v->u.length.unit) {
@@ -4243,6 +4329,7 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             *pp = p;
             continue;
         }
+        calc_term_fn_add(out, &rhs, op == '+' ? 1.0 : -1.0);
         if (op == '+') {
             out->px += rhs.px;
             out->pct += rhs.pct;
@@ -4934,6 +5021,21 @@ parse_calc_inner(const char *text)
     if (term.kind != CALC_LENGTH) return calc_scalar_value(term.kind, term.num);
     ns_css_value *v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_CALC;
+    if (term.fn) {
+        v->u.calc.px = calc_term_key(&term);
+        v->u.calc.fn = term.fn;
+        v->u.calc.n_args = term.n_args;
+        v->u.calc.arg_none = term.arg_none;
+        for (int k = 0; k < term.n_args; k++) {
+            v->u.calc.args[k].px = term.args[k].px;
+            v->u.calc.args[k].pct = term.args[k].pct;
+            v->u.calc.args[k].em = term.args[k].em;
+            v->u.calc.args[k].rem = term.args[k].rem;
+            v->u.calc.args[k].lh = term.args[k].lh;
+            v->u.calc.args[k].rlh = term.args[k].rlh;
+        }
+        return v;
+    }
     v->u.calc.pct = term.pct;
     v->u.calc.px  = term.px;
     v->u.calc.em  = term.em;
@@ -7880,6 +7982,40 @@ parse_transform_len(const char *s, double *out, gboolean *is_percent)
 }
 
 static gboolean
+parse_translate_len(const char *s, ns_css_transform_op *op, int axis)
+{
+    if (!s) return FALSE;
+    double *field = axis == 0 ? &op->a : axis == 1 ? &op->b : &op->c;
+    gboolean *is_percent = axis == 0 ? &op->a_is_percent
+                         : axis == 1 ? &op->b_is_percent : NULL;
+    double px = 0, pct = 0;
+    ns_font_units font = { 0 };
+    if (!resolve_to_px_pct_font(s, strlen(s), &px, &pct, &font)) {
+        gboolean fallback_pct = FALSE;
+        if (!parse_transform_len(s, field, &fallback_pct)) return FALSE;
+        if (is_percent) *is_percent = fallback_pct;
+        return is_percent || !fallback_pct;
+    }
+    px += (font.lh + font.rlh) * 19.2;
+    op->em[axis] = font.em;
+    op->rem[axis] = font.rem;
+    if (!is_percent) {
+        *field = px;
+        return pct == 0;
+    }
+    if (pct != 0 && px == 0 && font.em == 0 && font.rem == 0) {
+        *field = pct;
+        *is_percent = TRUE;
+        return TRUE;
+    }
+    *field = px;
+    *is_percent = FALSE;
+    if (axis == 0) op->a_pct = pct;
+    else op->b_pct = pct;
+    return TRUE;
+}
+
+static gboolean
 parse_angle_any(const char *s, double *deg_out)
 {
     if (!s) return FALSE;
@@ -7964,13 +8100,13 @@ parse_transform(const char *text)
             op->a = 0; op->b = 0; op->c = 0;
             op->a_is_percent = FALSE; op->b_is_percent = FALSE;
             if (strcmp(fn_lc, "translatey") == 0) {
-                if (nt >= 1) parse_transform_len(targs[0], &op->b, &op->b_is_percent);
+                if (nt >= 1) parse_translate_len(targs[0], op, 1);
             } else if (strcmp(fn_lc, "translatez") == 0) {
-                if (nt >= 1) parse_transform_len(targs[0], &op->c, &dummy_pct);
+                if (nt >= 1) parse_translate_len(targs[0], op, 2);
                 op->is_3d = TRUE;
             } else {
-                if (nt >= 1) parse_transform_len(targs[0], &op->a, &op->a_is_percent);
-                if (nt >= 2) parse_transform_len(targs[1], &op->b, &op->b_is_percent);
+                if (nt >= 1) parse_translate_len(targs[0], op, 0);
+                if (nt >= 2) parse_translate_len(targs[1], op, 1);
             }
             accept = TRUE;
         } else if (strcmp(fn_lc, "rotate") == 0 ||
@@ -8049,9 +8185,9 @@ parse_transform(const char *text)
             op->kind = NS_CSS_TFN_TRANSLATE;
             op->a = 0; op->b = 0; op->c = 0;
             op->a_is_percent = FALSE; op->b_is_percent = FALSE;
-            parse_transform_len(targs[0], &op->a, &op->a_is_percent);
-            parse_transform_len(targs[1], &op->b, &op->b_is_percent);
-            if (nt >= 3) parse_transform_len(targs[2], &op->c, &dummy_pct);
+            parse_translate_len(targs[0], op, 0);
+            parse_translate_len(targs[1], op, 1);
+            if (nt >= 3) parse_translate_len(targs[2], op, 2);
             op->is_3d = TRUE;
             accept = TRUE;
         } else if (strcmp(fn_lc, "scale3d") == 0 && nt >= 2) {
@@ -8184,13 +8320,9 @@ parse_translate_prop(const char *text)
     ns_css_transform_op op;
     memset(&op, 0, sizeof(op));
     op.kind = NS_CSS_TFN_TRANSLATE;
-    gboolean dummy = FALSE;
-    gboolean ok = parse_transform_len(toks[0], &op.a, &op.a_is_percent);
-    if (ok && nt >= 2)
-        ok = parse_transform_len(toks[1], &op.b, &op.b_is_percent);
-    if (ok && nt >= 3) {
-        ok = parse_transform_len(toks[2], &op.c, &dummy) && !dummy;
-    }
+    gboolean ok = parse_translate_len(toks[0], &op, 0);
+    if (ok && nt >= 2) ok = parse_translate_len(toks[1], &op, 1);
+    if (ok && nt >= 3) ok = parse_translate_len(toks[2], &op, 2);
     for (int i = 0; i < nt; i++) g_free(toks[i]);
     if (!ok) return NULL;
     return transform_value_one_op(&op);
@@ -8310,13 +8442,43 @@ append_scale_number(GString *s, double n)
     g_free(t);
 }
 
-static void
-append_transform_length(GString *s, double v, gboolean is_percent)
+static gboolean
+translate_axis_is_mixed(const ns_css_transform_op *op, int axis)
 {
-    char *t = ns_css_number_str(v);
-    g_string_append(s, t);
-    g_free(t);
-    g_string_append(s, is_percent ? "%" : "px");
+    double pct = axis == 0 ? op->a_pct : axis == 1 ? op->b_pct : 0;
+    return pct != 0 || op->em[axis] != 0 || op->rem[axis] != 0;
+}
+
+static void
+append_translate_length(GString *s, const ns_css_transform_op *op, int axis)
+{
+    double v = axis == 0 ? op->a : axis == 1 ? op->b : op->c;
+    gboolean is_percent = axis == 0 ? op->a_is_percent
+                        : axis == 1 && op->b_is_percent;
+    if (is_percent || !translate_axis_is_mixed(op, axis)) {
+        char *t = ns_css_number_str(v);
+        g_string_append(s, t);
+        g_free(t);
+        g_string_append(s, is_percent ? "%" : "px");
+        return;
+    }
+    const double parts[4] = {
+        axis == 0 ? op->a_pct : axis == 1 ? op->b_pct : 0,
+        v, op->em[axis], op->rem[axis],
+    };
+    static const char *const units[4] = { "%", "px", "em", "rem" };
+    gboolean first = TRUE;
+    g_string_append(s, "calc(");
+    for (int k = 0; k < 4; k++) {
+        if (parts[k] == 0) continue;
+        if (!first) g_string_append(s, parts[k] < 0 ? " - " : " + ");
+        char *t = ns_css_number_str(first ? parts[k] : fabs(parts[k]));
+        g_string_append(s, t);
+        g_free(t);
+        g_string_append(s, units[k]);
+        first = FALSE;
+    }
+    g_string_append_c(s, ')');
 }
 
 char *
@@ -8365,16 +8527,17 @@ ns_css_individual_transform_serialize(const ns_css_value *v, int prop)
             g_string_append(s, "deg");
         }
     } else if (prop == NS_CSS_TRANSLATE) {
-        append_transform_length(s, op->a, op->a_is_percent);
-        gboolean need_c = (op->c != 0);
-        gboolean need_b = need_c || (op->b != 0) || op->b_is_percent;
+        append_translate_length(s, op, 0);
+        gboolean need_c = op->c != 0 || translate_axis_is_mixed(op, 2);
+        gboolean need_b = need_c || op->b != 0 || op->b_is_percent ||
+                          translate_axis_is_mixed(op, 1);
         if (need_b) {
             g_string_append_c(s, ' ');
-            append_transform_length(s, op->b, op->b_is_percent);
+            append_translate_length(s, op, 1);
         }
         if (need_c) {
             g_string_append_c(s, ' ');
-            append_transform_length(s, op->c, FALSE);
+            append_translate_length(s, op, 2);
         }
     } else {
         g_string_free(s, TRUE);
@@ -8400,7 +8563,7 @@ ns_css_transform_is_3d(const ns_css_transform *tf)
         const ns_css_transform_op *op = &tf->ops[i];
         switch (op->kind) {
         case NS_CSS_TFN_TRANSLATE:
-            if (op->c != 0) return TRUE;
+            if (op->c != 0 || translate_axis_is_mixed(op, 2)) return TRUE;
             break;
         case NS_CSS_TFN_SCALE:
             if (op->c != 0 && op->c != 1) return TRUE;
@@ -8452,15 +8615,22 @@ ns_css_transform_to_mat4(const ns_css_transform *tf,
         ns_css_transform_op sane = tf->ops[i];
         double dflt = sane.kind == NS_CSS_TFN_SCALE ? 1.0 : 0.0;
         double *fields[] = { &sane.a, &sane.b, &sane.c, &sane.d,
-                             &sane.e, &sane.f };
+                             &sane.e, &sane.f, &sane.a_pct, &sane.b_pct,
+                             &sane.em[0], &sane.em[1], &sane.em[2],
+                             &sane.rem[0], &sane.rem[1], &sane.rem[2] };
         for (gsize k = 0; k < G_N_ELEMENTS(fields); k++)
             if (!isfinite(*fields[k])) *fields[k] = dflt;
         const ns_css_transform_op *op = &sane;
         switch (op->kind) {
         case NS_CSS_TFN_TRANSLATE: {
-            double dx = op->a_is_percent ? op->a / 100.0 * bw : op->a;
-            double dy = op->b_is_percent ? op->b / 100.0 * bh : op->b;
-            ns_mat4_translate(out, dx, dy, op->c);
+            double dx = (op->a_is_percent ? op->a / 100.0 * bw : op->a) +
+                        op->a_pct / 100.0 * bw +
+                        (op->em[0] + op->rem[0]) * 16.0;
+            double dy = (op->b_is_percent ? op->b / 100.0 * bh : op->b) +
+                        op->b_pct / 100.0 * bh +
+                        (op->em[1] + op->rem[1]) * 16.0;
+            double dz = op->c + (op->em[2] + op->rem[2]) * 16.0;
+            ns_mat4_translate(out, dx, dy, dz);
             break;
         }
         case NS_CSS_TFN_ROTATE:
@@ -9430,7 +9600,7 @@ ns_css_initial_value_text(const char *name)
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
         { "gap",                        "normal" },
-        { "color",                      "rgb(26, 26, 26)" },
+        { "color",                      "rgb(0, 0, 0)" },
         { "font-family",                "serif" },
         { "font-size",                  "16px" },
         { "text-wrap-style",            "auto" },
@@ -14952,12 +15122,40 @@ transform_origin_canonical(const char *value, gboolean two_only)
 }
 
 static void
+stamp_declaration_order(GArray *decls, const ns_css_rule *capture,
+                        guint *decl_mark, guint *pending_mark, int *seq)
+{
+    for (guint i = *decl_mark; i < decls->len; i++)
+        g_array_index(decls, ns_css_decl, i).order = (*seq)++;
+    *decl_mark = decls->len;
+    GArray *pending = capture ? capture->pending : NULL;
+    if (!pending) return;
+    for (guint i = *pending_mark; i < pending->len; i++) {
+        g_array_index(pending, ns_css_pending_decl, i).order = *seq;
+        *seq += NS_CSS_PROP_COUNT;
+    }
+    *pending_mark = pending->len;
+}
+
+static void
 parse_declaration_block(const char **pp, const char *end,
                         GArray *decls_out, ns_css_rule *capture)
 {
+    GArray *prior_pending = capture ? capture->pending : NULL;
+    guint decl_mark = decls_out->len;
+    guint pending_mark = prior_pending ? prior_pending->len : 0;
+    int seq = 0;
+    if (decl_mark > 0)
+        seq = g_array_index(decls_out, ns_css_decl, decl_mark - 1).order + 1;
+    if (pending_mark > 0)
+        seq = MAX(seq, g_array_index(prior_pending, ns_css_pending_decl,
+                                     pending_mark - 1).order +
+                           NS_CSS_PROP_COUNT);
 
     const char *p = *pp;
     while (p < end && *p != '}') {
+        stamp_declaration_order(decls_out, capture, &decl_mark, &pending_mark,
+                                &seq);
         p = css_skip_ws_comments(p, end);
         while (p < end && *p == ';') {
             p++;
@@ -16536,6 +16734,8 @@ parse_declaration_block(const char **pp, const char *end,
         g_free(vtext);
         if (p < end && *p == ';') p++;
     }
+    stamp_declaration_order(decls_out, capture, &decl_mark, &pending_mark,
+                            &seq);
     if (p < end && *p == '}') p++;
     *pp = p;
 }
@@ -19932,14 +20132,15 @@ css_url_should_resolve(const char *url)
 static void
 css_value_resolve_url(ns_css_value *v, const char *base_url)
 {
-    if (!v || !base_url || v->kind != NS_CSS_V_URL)
-        return;
-    if (!css_url_should_resolve(v->u.url))
-        return;
-    char *abs_url = ns_url_resolve(base_url, v->u.url);
-    if (!abs_url) return;
-    g_free(v->u.url);
-    v->u.url = abs_url;
+    if (!base_url) return;
+    for (; v; v = v->next_layer) {
+        if (v->kind != NS_CSS_V_URL || !css_url_should_resolve(v->u.url))
+            continue;
+        char *abs_url = ns_url_resolve(base_url, v->u.url);
+        if (!abs_url) continue;
+        g_free(v->u.url);
+        v->u.url = abs_url;
+    }
 }
 
 static char *
@@ -24213,15 +24414,47 @@ keyword_lerp(const char *ka, const char *kb, double t, char **out)
     return FALSE;
 }
 
+static void
+translate_axis_lerp(const ns_css_transform_op *x, const ns_css_transform_op *y,
+                    double t, int axis, ns_css_transform_op *o)
+{
+    gboolean xp = axis == 0 ? x->a_is_percent : x->b_is_percent;
+    gboolean yp = axis == 0 ? y->a_is_percent : y->b_is_percent;
+    double xv = axis == 0 ? x->a : x->b;
+    double yv = axis == 0 ? y->a : y->b;
+    double xpct = (xp ? xv : 0) + (axis == 0 ? x->a_pct : x->b_pct);
+    double ypct = (yp ? yv : 0) + (axis == 0 ? y->a_pct : y->b_pct);
+    double xpx = xp ? 0 : xv;
+    double ypx = yp ? 0 : yv;
+    gboolean pure_percent = xp && yp;
+    double v = pure_percent ? xv + (yv - xv) * t : xpx + (ypx - xpx) * t;
+    double pct = pure_percent ? 0 : xpct + (ypct - xpct) * t;
+    if (axis == 0) {
+        o->a = v;
+        o->a_is_percent = pure_percent;
+        o->a_pct = pct;
+    } else {
+        o->b = v;
+        o->b_is_percent = pure_percent;
+        o->b_pct = pct;
+    }
+}
+
 static ns_css_value *
 transform_identity_like(const ns_css_value *src)
 {
-    ns_css_value *v = ns_css_value_dup(src);
-    if (!v) return NULL;
+    if (!src || src->kind != NS_CSS_V_TRANSFORM) return NULL;
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_TRANSFORM;
+    v->u.transform = src->u.transform;
     for (int i = 0; i < v->u.transform.n_ops; i++) {
         ns_css_transform_op *op = &v->u.transform.ops[i];
         switch (op->kind) {
-        case NS_CSS_TFN_TRANSLATE: op->a = op->b = op->c = 0; break;
+        case NS_CSS_TFN_TRANSLATE:
+            op->a = op->b = op->c = op->a_pct = op->b_pct = 0;
+            memset(op->em, 0, sizeof op->em);
+            memset(op->rem, 0, sizeof op->rem);
+            break;
         case NS_CSS_TFN_ROTATE:    op->a = 0; break;
         case NS_CSS_TFN_ROTATE3D:  op->d = 0; break;
         case NS_CSS_TFN_SCALE:     op->a = op->b = op->c = 1; break;
@@ -24337,6 +24570,13 @@ ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
             o->f = x->f + (y->f - x->f) * t;
             for (int k = 0; k < 16; k++)
                 o->m3d[k] = x->m3d[k] + (y->m3d[k] - x->m3d[k]) * t;
+            if (x->kind != NS_CSS_TFN_TRANSLATE) continue;
+            translate_axis_lerp(x, y, t, 0, o);
+            translate_axis_lerp(x, y, t, 1, o);
+            for (int k = 0; k < 3; k++) {
+                o->em[k] = x->em[k] + (y->em[k] - x->em[k]) * t;
+                o->rem[k] = x->rem[k] + (y->rem[k] - x->rem[k]) * t;
+            }
         }
         return out;
     }
@@ -24601,7 +24841,19 @@ value_serialize_one(const ns_css_value *v)
             if (i) g_string_append_c(s, ' ');
             switch (op->kind) {
             case NS_CSS_TFN_TRANSLATE:
-                if (op->is_3d)
+                if (translate_axis_is_mixed(op, 0) ||
+                    translate_axis_is_mixed(op, 1) ||
+                    translate_axis_is_mixed(op, 2)) {
+                    g_string_append(s, op->is_3d ? "translate3d(" : "translate(");
+                    append_translate_length(s, op, 0);
+                    g_string_append(s, ", ");
+                    append_translate_length(s, op, 1);
+                    if (op->is_3d) {
+                        g_string_append(s, ", ");
+                        append_translate_length(s, op, 2);
+                    }
+                    g_string_append_c(s, ')');
+                } else if (op->is_3d)
                     g_string_append_printf(s, "translate3d(%g%s, %g%s, %gpx)",
                         op->a, op->a_is_percent ? "%" : "px",
                         op->b, op->b_is_percent ? "%" : "px", op->c);
@@ -24870,6 +25122,7 @@ match_cmp(gconstpointer a_, gconstpointer b_)
     if (a->origin    != b->origin)
         return a->important ? (a->origin > b->origin ? -1 : 1)
                             : (a->origin < b->origin ? -1 : 1);
+    if (a->inline_style != b->inline_style) return a->inline_style ? 1 : -1;
     int layer_cmp = css_layer_cmp(a->layer_order, b->layer_order, a->important);
     if (layer_cmp != 0) return layer_cmp;
     if (a->spec_a    != b->spec_a)    return a->spec_a < b->spec_a ? -1 : 1;
@@ -25265,7 +25518,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                     .layer_order = acc->layer_order,
                     .scope_order = acc->scope_order[dd],
                     .source_order = r->source_order,
-                    .decl_order = (int)di,
+                    .decl_order = d->order,
                     .important = d->important,
                     .rule = r,
                     .value = d->value,
@@ -25311,7 +25564,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                         .layer_order = acc->layer_order,
                         .scope_order = acc->scope_order[dd],
                         .source_order = r->source_order,
-                        .decl_order_base = (int)(r->decls->len + pi),
+                        .decl_order_base = pd->order,
                         .rule = r,
                         .pd = pd,
                     };
@@ -25332,6 +25585,7 @@ var_match_cmp(gconstpointer a_, gconstpointer b_)
     if (a->origin    != b->origin)
         return a->important ? (a->origin > b->origin ? -1 : 1)
                             : (a->origin < b->origin ? -1 : 1);
+    if (a->inline_style != b->inline_style) return a->inline_style ? 1 : -1;
     int layer_cmp = css_layer_cmp(a->layer_order, b->layer_order, a->important);
     if (layer_cmp != 0) return layer_cmp;
     if (a->spec_a    != b->spec_a)    return a->spec_a < b->spec_a ? -1 : 1;
@@ -25405,6 +25659,7 @@ pending_match_cmp(gconstpointer a_, gconstpointer b_)
     if (a->origin    != b->origin)
         return ai ? (a->origin > b->origin ? -1 : 1)
                   : (a->origin < b->origin ? -1 : 1);
+    if (a->inline_style != b->inline_style) return a->inline_style ? 1 : -1;
     int layer_cmp = css_layer_cmp(a->layer_order, b->layer_order, ai);
     if (layer_cmp != 0) return layer_cmp;
     if (a->spec_a    != b->spec_a)    return a->spec_a < b->spec_a ? -1 : 1;
@@ -26082,6 +26337,68 @@ pending_uses_attr(const GArray *pending_matches)
     return FALSE;
 }
 
+static gboolean
+append_pending_decls(const pending_match *pm, const char *value_text,
+                     GArray *matches, GPtrArray *owned_values)
+{
+    char *synth = g_strdup_printf("%s: %s;}", pm->pd->pname, value_text);
+    GArray *temp = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
+    const char *sp = synth;
+    parse_declaration_block(&sp, synth + strlen(synth), temp, NULL);
+    g_free(synth);
+    gboolean any = FALSE;
+    for (guint i = 0; i < temp->len; i++) {
+        ns_css_decl *d = &g_array_index(temp, ns_css_decl, i);
+        if (!d->value) continue;
+        g_ptr_array_add(owned_values, d->value);
+        match_entry me = {
+            .origin = pm->origin,
+            .spec_a = pm->spec_a, .spec_b = pm->spec_b, .spec_c = pm->spec_c,
+            .sheet_index = pm->sheet_index,
+            .layer_order = pm->layer_order,
+            .scope_order = pm->scope_order,
+            .source_order = pm->source_order,
+            .decl_order = pm->decl_order_base + (int)i,
+            .important = pm->pd->important || d->important,
+            .inline_style = pm->inline_style,
+            .rule = pm->rule,
+            .value = d->value,
+            .prop  = d->prop,
+        };
+        g_array_append_val(matches, me);
+        any = TRUE;
+    }
+    g_array_free(temp, TRUE);
+    return any;
+}
+
+static char *
+pending_substituted_value(const pending_match *pm, const ns_var_map *vars,
+                          const ns_node *node)
+{
+    gboolean custom = pm->pd->pname[0] == '-' && pm->pd->pname[1] == '-';
+    char *substituted = substitute_vars_with(pm->pd->raw_vtext, vars, 0);
+    if (substituted && strstr(substituted, "attr(")) {
+        gboolean tainted = FALSE;
+        char *with_attrs = substitute_attrs(substituted, node, 0, &tainted);
+        g_free(substituted);
+        substituted = with_attrs;
+        if (substituted && tainted && !custom) {
+            g_free(substituted);
+            substituted = NULL;
+        }
+    }
+    if (substituted) {
+        gboolean important = FALSE;
+        css_strip_important(substituted, &important);
+        if (important) {
+            g_free(substituted);
+            substituted = NULL;
+        }
+    }
+    return substituted;
+}
+
 static void
 resolve_pending_into_matches(GArray *pending_matches,
                              const ns_var_map *vars,
@@ -26094,53 +26411,12 @@ resolve_pending_into_matches(GArray *pending_matches,
     for (guint pmi = 0; pmi < pending_matches->len; pmi++) {
         pending_match *pm = &g_array_index(pending_matches, pending_match, pmi);
         if (!pm->pd || !pm->pd->pname || !pm->pd->raw_vtext) continue;
-        char *substituted = substitute_vars_with(pm->pd->raw_vtext, vars, 0);
-        if (!substituted) continue;
-        if (strstr(substituted, "attr(")) {
-            gboolean tainted = FALSE;
-            char *with_attrs = substitute_attrs(substituted, node, 0, &tainted);
-            g_free(substituted);
-            if (!with_attrs) continue;
-            if (tainted && !(pm->pd->pname[0] == '-' && pm->pd->pname[1] == '-')) {
-                g_free(with_attrs);
-                continue;
-            }
-            substituted = with_attrs;
-        }
-        gboolean ignored_important = FALSE;
-        css_strip_important(substituted, &ignored_important);
-        if (ignored_important) {
-            g_free(substituted);
-            continue;
-        }
-        char *synth = g_strdup_printf("%s: %s;}", pm->pd->pname, substituted);
+        char *substituted = pending_substituted_value(pm, vars, node);
+        gboolean applied = substituted &&
+            append_pending_decls(pm, substituted, matches, owned_values);
         g_free(substituted);
-        GArray *temp = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
-        const char *sp = synth;
-        const char *se = synth + strlen(synth);
-        parse_declaration_block(&sp, se, temp, NULL);
-        g_free(synth);
-        for (guint i = 0; i < temp->len; i++) {
-            ns_css_decl *d = &g_array_index(temp, ns_css_decl, i);
-            if (!d->value) continue;
-            g_ptr_array_add(owned_values, d->value);
-            match_entry me = {
-                .origin = pm->origin,
-                .spec_a = pm->spec_a, .spec_b = pm->spec_b, .spec_c = pm->spec_c,
-                .sheet_index = pm->sheet_index,
-                .layer_order = pm->layer_order,
-                .scope_order = pm->scope_order,
-                .source_order = pm->source_order,
-                .decl_order = pm->decl_order_base + (int)i,
-                .important = pm->pd->important || d->important,
-                .inline_style = pm->inline_style,
-                .rule = pm->rule,
-                .value = d->value,
-                .prop  = d->prop,
-            };
-            g_array_append_val(matches, me);
-        }
-        g_array_free(temp, TRUE);
+        if (!applied && !(pm->pd->pname[0] == '-' && pm->pd->pname[1] == '-'))
+            append_pending_decls(pm, "unset", matches, owned_values);
     }
 }
 
@@ -26350,6 +26626,43 @@ calc_has_font_units(const ns_css_value *v)
     return FALSE;
 }
 
+static gboolean
+transform_has_font_units(const ns_css_transform *tf)
+{
+    for (int k = 0; k < tf->n_ops; k++)
+        for (int m = 0; m < 3; m++)
+            if (tf->ops[k].em[m] != 0 || tf->ops[k].rem[m] != 0)
+                return TRUE;
+    return FALSE;
+}
+
+static gboolean
+calc_has_percent(const ns_css_value *v)
+{
+    if (v->u.calc.pct != 0) return TRUE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
+        if (v->u.calc.args[i].pct != 0) return TRUE;
+    return FALSE;
+}
+
+static void
+calc_fold_percent(ns_css_value *v, double basis)
+{
+    if (v->u.calc.fn && v->u.calc.n_args) {
+        for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
+            v->u.calc.args[i].px += v->u.calc.args[i].pct * basis / 100.0;
+            v->u.calc.args[i].pct = 0;
+        }
+        v->u.calc.px = ns_css_calc_math_fn_px(v, basis);
+        v->u.calc.fn = 0;
+        v->u.calc.n_args = 0;
+        v->u.calc.arg_none = 0;
+    } else {
+        v->u.calc.px += v->u.calc.pct * basis / 100.0;
+    }
+    v->u.calc.pct = 0;
+}
+
 static void
 calc_fold_font_units(ns_css_value *v, double font_px, double root_px,
                      double lh_px, double rlh_px)
@@ -26503,11 +26816,11 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
 {
     double my_font_px = resolve_font_size_px(out, parent_style);
     if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
-    if (root_px <= 0) root_px = my_font_px;
+    double font_rem_px = root_px > 0 ? root_px : 16.0;
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
         out->values[NS_CSS_FONT_SIZE]->u.length.unit == NS_CSS_UNIT_REM) {
-        my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * root_px;
+        my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * font_rem_px;
     } else if (out->values[NS_CSS_FONT_SIZE] &&
                out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_CALC &&
                calc_has_font_units(out->values[NS_CSS_FONT_SIZE])) {
@@ -26518,15 +26831,16 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             parent_style->values[NS_CSS_FONT_SIZE]->u.length.unit ==
                 NS_CSS_UNIT_PX)
             parent_px = parent_style->values[NS_CSS_FONT_SIZE]->u.length.v;
-        double root_line = g_root_line_px > 0 ? g_root_line_px
-                                              : normal_line_height_px(root_px);
+        double root_line = g_root_line_px > 0
+            ? g_root_line_px : normal_line_height_px(font_rem_px);
         my_font_px = calc_font_size_px(
-            fsv, parent_px, root_px,
-            style_line_height_px(parent_style, parent_px, root_px,
+            fsv, parent_px, font_rem_px,
+            style_line_height_px(parent_style, parent_px, font_rem_px,
                                  normal_line_height_px(parent_px), root_line),
             root_line);
     }
     if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
+    if (root_px <= 0) root_px = my_font_px;
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH) {
         ns_css_value *fs = ns_css_value_cow(out, NS_CSS_FONT_SIZE);
@@ -26604,14 +26918,30 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
             }
             continue;
         }
+        if (v->kind == NS_CSS_V_TRANSFORM) {
+            if (!transform_has_font_units(&v->u.transform)) continue;
+            v = ns_css_value_cow(out, i);
+            for (int k = 0; k < v->u.transform.n_ops; k++) {
+                ns_css_transform_op *op = &v->u.transform.ops[k];
+                double *axes[3] = { &op->a, &op->b, &op->c };
+                for (int m = 0; m < 3; m++) {
+                    *axes[m] += op->em[m] * my_font_px + op->rem[m] * root_px;
+                    op->em[m] = 0;
+                    op->rem[m] = 0;
+                }
+            }
+            continue;
+        }
         if (v->kind == NS_CSS_V_CALC) {
-            if (!calc_has_font_units(v)) continue;
+            gboolean line_pct = i == NS_CSS_LINE_HEIGHT && calc_has_percent(v);
+            if (!calc_has_font_units(v) && !line_pct) continue;
             v = ns_css_value_cow(out, i);
             double lh_base = i == NS_CSS_LINE_HEIGHT
                 ? initial_line_px : my_line_px;
             double rlh_base = i == NS_CSS_LINE_HEIGHT && !parent_style
                 ? initial_line_px : root_line_px;
             calc_fold_font_units(v, my_font_px, root_px, lh_base, rlh_base);
+            if (line_pct) calc_fold_percent(v, my_font_px);
             continue;
         }
         if (v->kind == NS_CSS_V_SIZE && !v->u.size.w_auto && !v->u.size.h_auto) {
@@ -26633,6 +26963,12 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         }
         if (v->kind != NS_CSS_V_LENGTH) continue;
         switch (v->u.length.unit) {
+        case NS_CSS_UNIT_PERCENT:
+            if (i != NS_CSS_LINE_HEIGHT) break;
+            v = ns_css_value_cow(out, i);
+            v->u.length.v *= my_font_px / 100.0;
+            v->u.length.unit = NS_CSS_UNIT_PX;
+            break;
         case NS_CSS_UNIT_EM:
             v = ns_css_value_cow(out, i);
             v->u.length.v *= my_font_px;
@@ -26854,6 +27190,19 @@ overflow_pair_normalize(ns_style *out)
     }
 }
 
+static ns_css_value *
+initial_value_of(int prop)
+{
+    static __thread ns_css_value *parsed[NS_CSS_PROP_COUNT];
+    static __thread gboolean tried[NS_CSS_PROP_COUNT];
+    if (!tried[prop]) {
+        tried[prop] = TRUE;
+        const char *text = ns_css_initial_value_text(ns_css_prop_name(prop));
+        if (text) parsed[prop] = parse_value_for((ns_css_prop)prop, text);
+    }
+    return ns_css_value_dup(parsed[prop]);
+}
+
 static void
 cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
@@ -26892,7 +27241,8 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
                              : NULL;
         } else if (value_is_initial(out->values[i])) {
             ns_css_value_free(out->values[i]);
-            out->values[i] = NULL;
+            out->values[i] = ns_css_prop_inherited(i) ? initial_value_of(i)
+                                                      : NULL;
             explicit_initial[i] = TRUE;
         } else if (value_is_unset(out->values[i])) {
             ns_css_value_free(out->values[i]);
@@ -26907,6 +27257,26 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             if (parent_style->values[i])
                 out->values[i] = ns_css_value_dup(parent_style->values[i]);
         }
+    }
+    if (ns_css_keyword_is(out->values[NS_CSS_COLOR], "currentcolor")) {
+        ns_css_value_free(out->values[NS_CSS_COLOR]);
+        out->values[NS_CSS_COLOR] = parent_style
+            ? ns_css_value_dup(parent_style->values[NS_CSS_COLOR])
+            : initial_value_of(NS_CSS_COLOR);
+    }
+    if (ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "bolder") ||
+        ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "lighter")) {
+        int parent_weight = parent_style
+            ? ns_css_font_weight_number(
+                  parent_style->values[NS_CSS_FONT_WEIGHT], 400)
+            : 400;
+        gboolean bolder =
+            ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "bolder");
+        char weight[16];
+        g_snprintf(weight, sizeof weight, "%d",
+                   font_weight_relative(parent_weight, bolder));
+        ns_css_value_free(out->values[NS_CSS_FONT_WEIGHT]);
+        out->values[NS_CSS_FONT_WEIGHT] = keyword_value(weight);
     }
     {
         const ns_css_prop color_props[] = {
@@ -28975,7 +29345,7 @@ cascade_walk(ns_node *node,
                         .spec_a = 0, .spec_b = 0, .spec_c = 0,
                         .layer_order = NS_CSS_LAYER_NONE,
                         .source_order = INT_MIN,
-                        .decl_order = (int)di,
+                        .decl_order = d->order,
                         .important = d->important,
                         .rule = r,
                         .value = d->value,
@@ -29013,7 +29383,7 @@ cascade_walk(ns_node *node,
                             .sheet_index = 0,
                             .layer_order = NS_CSS_LAYER_NONE,
                             .source_order = INT_MIN,
-                            .decl_order_base = (int)(r->decls->len + pi),
+                            .decl_order_base = pd->order,
                             .rule = r,
                             .pd = pd,
                         };
@@ -29037,7 +29407,7 @@ cascade_walk(ns_node *node,
                         .spec_a = 1000, .spec_b = 0, .spec_c = 0,
                         .layer_order = NS_CSS_LAYER_NONE,
                         .source_order = INT_MAX,
-                        .decl_order = (int)di,
+                        .decl_order = d->order,
                         .important = d->important,
                         .inline_style = TRUE,
                         .rule = r,
@@ -29077,7 +29447,7 @@ cascade_walk(ns_node *node,
                             .sheet_index = 0,
                             .layer_order = NS_CSS_LAYER_NONE,
                             .source_order = INT_MAX,
-                            .decl_order_base = (int)(r->decls->len + pi),
+                            .decl_order_base = pd->order,
                             .inline_style = TRUE,
                             .rule = r,
                             .pd = pd,

@@ -140,6 +140,84 @@ Significant changes in each release:
   and reach `<embed>`, `<object>`, `<marquee>` and `<input type=image>`,
   not only `<img>`; and an image's `border` attribute is no longer capped
   at 100px and applies to `<object>` and image buttons too.
+* A `min()`, `max()` or `clamp()` inside `calc()` resolves its
+  percentages against the box it sits in. The nested function was
+  reduced to a number up front, with any percentage taken of the window
+  width, so `width: calc(min(100%, 800px))` in a 500px column came out
+  800px wide. Additions and multiplications around the function, as in
+  `calc(100% - min(2rem, 5%))`, are now folded into it instead.
+* A declaration whose `var()` cannot be substituted -- the variable is
+  undefined and there is no fallback, or what it holds does not parse
+  for that property -- leaves the property `unset`, as the spec's
+  "invalid at computed-value time" rule says, instead of vanishing and
+  letting an earlier declaration win. `color: red` followed by
+  `color: var(--undefined)` now inherits the parent's colour, as in
+  every other browser, rather than staying red.
+* A declaration that uses `var()` keeps its place among the other
+  declarations of its rule. Such declarations are set aside until the
+  element's custom properties are known, and were then ranked after
+  every plain declaration of the rule, so
+  `padding: var(--gap); padding-top: 3px` ended up with the variable's
+  padding on top instead of 3px.
+* An element's own `style` attribute outranks cascade layers, for
+  `!important` declarations as well as normal ones. Layers were
+  compared before the inline flag, so
+  `@layer base { .x { color: red !important } }` beat
+  `style="color: green !important"`.
+* A translation that mixes a percentage with a length, such as
+  `translateX(calc(-50% + 10px))`, moves by both. The percentage was
+  dropped whenever a length was present, which left centred pop-ups and
+  tooltips off by half their width. `em` and `rem` in `translate()`, its
+  siblings and the `translate` property are measured against the
+  element's own font size and the root's, not a fixed 16px, and a
+  transition between a percentage and a length translation moves
+  through both instead of treating the percentage as pixels.
+* A transition between `transform: none` and a transform plays, and the
+  element keeps its transform when it ends. Building the identity
+  transform to animate from wrote zeros into the target value itself --
+  the one the element's computed style holds -- so a hover that slid or
+  scaled something from `none` left it where it was, for good.
+* `text-shadow` is inherited, as CSS Text Decoration specifies, so a
+  shadow set on a container reaches the text of the paragraphs, list
+  items and inline-blocks inside it rather than only the container's
+  own loose text. `orphans`, `widows` and `dominant-baseline` are
+  inherited too, as their specs say.
+* Every layer of a multi-image `background` in an external stylesheet
+  is fetched relative to that stylesheet. Only the first `url()` was
+  resolved against the sheet's address and the rest against the page,
+  so the second image of `url(img/a.png), url(img/b.png)` in
+  `/css/site.css` was requested from `/img/b.png`.
+* `font-weight: bolder` and `lighter` are worked out from the parent's
+  weight, using the table in CSS Fonts 4, when the style is computed.
+  They were kept as keywords and measured later against a fixed 400
+  with the old thresholds, so `bolder` inside bold text stayed at 700
+  instead of 900, `lighter` inside bold fell to 100 instead of 400, and
+  children inherited the keyword rather than the weight.
+* `color: currentColor` takes the parent's colour, which is what the
+  keyword means on the `color` property itself. It was left unresolved,
+  so it was handed down as a word, getComputedStyle reported
+  "currentcolor", and a border that takes its colour from the text was
+  drawn black.
+* `initial` on an inherited property means that property's initial
+  value -- black text, a 16px font, normal weight and style,
+  `line-height: normal` and so on -- instead of acting like `inherit`.
+  The cascade stored nothing for the keyword, and an inherited property
+  with nothing stored takes its parent's value, so `color: initial`
+  inside red text stayed red and `all: initial` barely reset anything a
+  reader could see.
+* `rem` in the root element's own `font-size` is measured against the
+  initial 16px, as the spec requires, instead of against the size it is
+  in the middle of computing. `html { font-size: 1.25rem }` came out at
+  25px rather than 20px, and a fluid
+  `clamp(1rem, 0.9rem + 0.5vw, 1.25rem)` settled on the wrong size --
+  which then scaled every other `rem` on the page with it.
+* A percentage `line-height` is worked out once, on the element that
+  sets it, and descendants inherit the resulting length. It was handed
+  down as a percentage and each child resolved it again against its own
+  font size, so a heading inside `font-size: 14px; line-height: 150%`
+  got a 48px line instead of 21px -- the opposite of what the spec (and
+  every browser) does, and the reason a percentage is not the same as a
+  plain number there.
 * A multi-column block splits a list, not just a run of siblings. The
   column code distributed a container's own children and gave up when
   there were fewer than two, so `column-width` on a wrapper holding a
