@@ -2700,15 +2700,11 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                     g_free(ns_pango_family);
                 }
                 break;
-            case NS_INLINE_SUPERSCRIPT:
-                attr_insert_range(attrs, ns_pango_attr_rise_new(4000),
-                                  r->start, r->len);
-                a = ns_pango_attr_scale_new(0.75);
+            case NS_INLINE_RISE:
+                a = ns_pango_attr_rise_new((int)(r->rise_px * NS_PANGO_SCALE));
                 break;
-            case NS_INLINE_SUBSCRIPT:
-                attr_insert_range(attrs, ns_pango_attr_rise_new(-3000),
-                                  r->start, r->len);
-                a = ns_pango_attr_scale_new(0.75);
+            case NS_INLINE_UPRIGHT:
+                a = ns_pango_attr_style_new(NS_PANGO_STYLE_NORMAL);
                 break;
             case NS_INLINE_SMALL_CAPS:
                 a = ns_pango_attr_variant_new(NS_PANGO_VARIANT_SMALL_CAPS);
@@ -3405,9 +3401,11 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
                     g_free(ns_pango_family);
                 }
                 break;
-            case NS_INLINE_SUPERSCRIPT:
-            case NS_INLINE_SUBSCRIPT:
-                a = ns_pango_attr_scale_new(0.75); break;
+            case NS_INLINE_RISE:
+                a = ns_pango_attr_rise_new((int)(r->rise_px * NS_PANGO_SCALE));
+                break;
+            case NS_INLINE_UPRIGHT:
+                a = ns_pango_attr_style_new(NS_PANGO_STYLE_NORMAL); break;
             case NS_INLINE_SMALL_CAPS:
                 a = ns_pango_attr_variant_new(NS_PANGO_VARIANT_SMALL_CAPS); break;
             default: break;

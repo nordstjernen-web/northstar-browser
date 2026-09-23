@@ -4,6 +4,20 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Italics, underlines, strike-throughs and superscripts come from CSS
+  rather than from the tag name. The text collector slanted every `<i>`,
+  `<em>`, `<cite>` and `<dfn>` whatever its `font-style` said -- so Font
+  Awesome's `<i class="fa">` icons were drawn slanted -- and a
+  `font-style: normal` span inside italic text stayed italic. `<sup>` and
+  `<sub>` were shrunk twice (the stylesheet's size and then a fixed 0.75
+  scale) and raised a fixed 4px, while `vertical-align: super` on any
+  other element did nothing. Now `font-style` alone decides, in both
+  directions; `vertical-align: super`, `sub` and lengths raise or lower
+  text by the amounts other browsers use, relative to the parent's font
+  size; a `position: relative` inline element's `top`/`bottom` moves its
+  text; and the default stylesheet gives `<u>`, `<ins>`, `<s>`, `<del>`
+  and `<strike>` their decorations, so `getComputedStyle` reports them.
+  `<ins>` and `<del>` are no longer tinted green and red.
 * `<hr>` is drawn by its borders, as the HTML rendering rules style it:
   a 1px inset rule in grey with `0.5em auto` margins. It used to be a
   1px grey background with a line of its own painted 4px below the top

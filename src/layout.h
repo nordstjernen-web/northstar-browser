@@ -65,8 +65,8 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_COLOR,
     NS_INLINE_FONT_FAMILY,
     NS_INLINE_BG_COLOR,
-    NS_INLINE_SUPERSCRIPT,
-    NS_INLINE_SUBSCRIPT,
+    NS_INLINE_RISE,
+    NS_INLINE_UPRIGHT,
     NS_INLINE_SMALL_CAPS,
     NS_INLINE_CARET,
     NS_INLINE_SELECTION,
@@ -79,6 +79,7 @@ typedef struct ns_inline_attr {
     gsize start;
     gsize len;
     double font_size_px;
+    double rise_px;
     int font_weight;
     int font_stretch;
     int font_kerning;

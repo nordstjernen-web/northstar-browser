@@ -1542,14 +1542,14 @@ typedef struct collector_ctx {
     GArray     *links;
     GArray     *attrs;
     int  bold_depth;
-    int  italic_depth;
+    gboolean italic_on;
+    double rise_px;
     int  mono_depth;
     int  underline_depth;
     int  overline_depth;
     int  strike_depth;
     int  q_depth;
     gsize bold_start;
-    gsize italic_start;
     gsize mono_start;
     gsize underline_start;
     gsize overline_start;
@@ -1677,13 +1677,6 @@ tag_is_bold(const char *name)
 }
 
 static gboolean
-tag_is_italic(const char *name)
-{
-    static const char *const set[] = { "i", "em", "cite", "dfn", NULL };
-    return name_in(name, set);
-}
-
-static gboolean
 tag_is_monospace(const char *name)
 {
     static const char *const set[] = { "code", "tt", "kbd", "samp", "pre", NULL };
@@ -1691,17 +1684,40 @@ tag_is_monospace(const char *name)
 }
 
 static gboolean
-tag_is_underline(const char *name)
+style_is_italic(const ns_style *s)
 {
-    static const char *const set[] = { "u", "ins", NULL };
-    return name_in(name, set);
+    return keyword_is(s->values[NS_CSS_FONT_STYLE], "italic") ||
+           keyword_is(s->values[NS_CSS_FONT_STYLE], "oblique");
 }
 
-static gboolean
-tag_is_strike(const char *name)
+static double
+inline_rise_px(const ns_node *n, const ns_style *s, GHashTable *styles)
 {
-    static const char *const set[] = { "s", "del", "strike", NULL };
-    return name_in(name, set);
+    if (!s) return 0;
+    double rise = 0;
+    const ns_css_value *va = s->values[NS_CSS_VERTICAL_ALIGN];
+    if (keyword_is(va, "super") || keyword_is(va, "sub")) {
+        const ns_style *ps = n->parent && styles
+            ? g_hash_table_lookup(styles, n->parent) : NULL;
+        double parent_px = length_or(ps ? ps->values[NS_CSS_FONT_SIZE] : NULL,
+                                     length_or(s->values[NS_CSS_FONT_SIZE], 16));
+        rise = keyword_is(va, "super") ? parent_px / 3 + 1
+                                       : -(parent_px / 5 + 1);
+    } else if (va && va->kind == NS_CSS_V_LENGTH &&
+               va->u.length.unit == NS_CSS_UNIT_PX) {
+        rise = va->u.length.v;
+    }
+    if (keyword_is(s->values[NS_CSS_POSITION], "relative")) {
+        const ns_css_value *top = s->values[NS_CSS_TOP];
+        const ns_css_value *bottom = s->values[NS_CSS_BOTTOM];
+        if (top && top->kind == NS_CSS_V_LENGTH &&
+            top->u.length.unit == NS_CSS_UNIT_PX)
+            rise -= top->u.length.v;
+        else if (bottom && bottom->kind == NS_CSS_V_LENGTH &&
+                 bottom->u.length.unit == NS_CSS_UNIT_PX)
+            rise += bottom->u.length.v;
+    }
+    return rise;
 }
 
 static gboolean
@@ -3279,11 +3295,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     double pr = length_or(s ? s->values[NS_CSS_PADDING_RIGHT] : NULL, 0);
     if (ml >= 3.0 || pl >= 3.0) g_string_append_c(ctx->out, ' ');
     gboolean bold   = tag_is_bold(n->name);
-    gboolean italic = tag_is_italic(n->name);
     gboolean mono   = tag_is_monospace(n->name);
-    gboolean uline  = tag_is_underline(n->name);
+    gboolean uline  = FALSE;
     gboolean oline  = FALSE;
-    gboolean strike = tag_is_strike(n->name);
+    gboolean strike = FALSE;
     const ns_css_value *fw = s ? s->values[NS_CSS_FONT_WEIGHT] : NULL;
     int font_weight_self = ns_css_font_weight_number(fw, -1);
     gboolean font_weight_active = font_weight_self > 0;
@@ -3293,11 +3308,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         const char *kw = fw->u.keyword;
         if (strcmp(kw, "bold") == 0 || strcmp(kw, "bolder") == 0) bold = TRUE;
     }
-    if (s && s->values[NS_CSS_FONT_STYLE] &&
-        s->values[NS_CSS_FONT_STYLE]->kind == NS_CSS_V_KEYWORD &&
-        (strcmp(s->values[NS_CSS_FONT_STYLE]->u.keyword, "italic") == 0 ||
-         strcmp(s->values[NS_CSS_FONT_STYLE]->u.keyword, "oblique") == 0))
-        italic = TRUE;
+    gboolean italic_outer = ctx->italic_on;
+    gboolean italic = s ? style_is_italic(s) : italic_outer;
+    gsize italic_start = ctx->out->len;
+    ctx->italic_on = italic;
     if (s && s->values[NS_CSS_TEXT_DECORATION] &&
         s->values[NS_CSS_TEXT_DECORATION]->kind == NS_CSS_V_KEYWORD) {
         const char *kw = s->values[NS_CSS_TEXT_DECORATION]->u.keyword;
@@ -3307,7 +3321,6 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         if (strstr(kw, "none")) { uline = FALSE; oline = FALSE; strike = FALSE; }
     }
     if (bold && ctx->bold_depth++ == 0) ctx->bold_start = ctx->out->len;
-    if (italic && ctx->italic_depth++ == 0) ctx->italic_start = ctx->out->len;
     if (mono && ctx->mono_depth++ == 0) ctx->mono_start = ctx->out->len;
     if (uline && ctx->underline_depth++ == 0) ctx->underline_start = ctx->out->len;
     if (oline && ctx->overline_depth++ == 0) ctx->overline_start = ctx->out->len;
@@ -3369,8 +3382,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                                            : "\xe2\x80\xad"); /* LRO */
     }
 
-    gboolean sup = strcmp(n->name, "sup") == 0;
-    gboolean sub = strcmp(n->name, "sub") == 0;
+    double rise_outer = ctx->rise_px;
+    double rise = rise_outer + inline_rise_px(n, s, ctx->styles);
+    ctx->rise_px = rise;
     gsize rise_start = ctx->out->len;
     gboolean small_caps = s && keyword_is(s->values[NS_CSS_FONT_VARIANT],
                                           "small-caps");
@@ -3470,8 +3484,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 
     if (bold && --ctx->bold_depth == 0)
         emit_attr(ctx->attrs, NS_INLINE_BOLD, ctx->bold_start, ctx->out->len);
-    if (italic && --ctx->italic_depth == 0)
-        emit_attr(ctx->attrs, NS_INLINE_ITALIC, ctx->italic_start, ctx->out->len);
+    ctx->italic_on = italic_outer;
+    if (italic != italic_outer && ctx->out->len > italic_start)
+        emit_attr(ctx->attrs, italic ? NS_INLINE_ITALIC : NS_INLINE_UPRIGHT,
+                  italic_start, ctx->out->len);
     if (mono && --ctx->mono_depth == 0)
         emit_attr(ctx->attrs, NS_INLINE_MONOSPACE, ctx->mono_start, ctx->out->len);
     if (uline && --ctx->underline_depth == 0)
@@ -3480,10 +3496,13 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         emit_attr(ctx->attrs, NS_INLINE_OVERLINE, ctx->overline_start, ctx->out->len);
     if (strike && --ctx->strike_depth == 0)
         emit_attr(ctx->attrs, NS_INLINE_STRIKETHROUGH, ctx->strike_start, ctx->out->len);
-    if (sup && ctx->out->len > rise_start)
-        emit_attr(ctx->attrs, NS_INLINE_SUPERSCRIPT, rise_start, ctx->out->len);
-    if (sub && ctx->out->len > rise_start)
-        emit_attr(ctx->attrs, NS_INLINE_SUBSCRIPT, rise_start, ctx->out->len);
+    ctx->rise_px = rise_outer;
+    if (rise != rise_outer && ctx->out->len > rise_start) {
+        ns_inline_attr ra = { .kind = NS_INLINE_RISE, .start = rise_start,
+                              .len = ctx->out->len - rise_start,
+                              .rise_px = rise };
+        g_array_append_val(ctx->attrs, ra);
+    }
     if (small_caps && ctx->out->len > sc_start)
         emit_attr(ctx->attrs, NS_INLINE_SMALL_CAPS, sc_start, ctx->out->len);
     if (bidi_override)
@@ -3555,6 +3574,7 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
     };
     if (first && first->parent) {
         const ns_style *ps = g_hash_table_lookup(styles, first->parent);
+        ctx.italic_on = ps && style_is_italic(ps);
         if (ps && ps->values[NS_CSS_TEXT_TRANSFORM] &&
             ps->values[NS_CSS_TEXT_TRANSFORM]->kind == NS_CSS_V_KEYWORD) {
             const char *kw = ps->values[NS_CSS_TEXT_TRANSFORM]->u.keyword;
@@ -5133,15 +5153,11 @@ apply_inline_layout_attrs(NsPangoAttrList *attrs, const ns_box *box)
                 g_free(ns_pango_family);
             }
             break;
-        case NS_INLINE_SUPERSCRIPT:
-            layout_attr_insert_range(attrs, ns_pango_attr_rise_new(4000),
-                                     r->start, r->len);
-            a = ns_pango_attr_scale_new(0.75);
+        case NS_INLINE_RISE:
+            a = ns_pango_attr_rise_new((int)(r->rise_px * NS_PANGO_SCALE));
             break;
-        case NS_INLINE_SUBSCRIPT:
-            layout_attr_insert_range(attrs, ns_pango_attr_rise_new(-3000),
-                                     r->start, r->len);
-            a = ns_pango_attr_scale_new(0.75);
+        case NS_INLINE_UPRIGHT:
+            a = ns_pango_attr_style_new(NS_PANGO_STYLE_NORMAL);
             break;
         case NS_INLINE_SMALL_CAPS:
             a = ns_pango_attr_variant_new(NS_PANGO_VARIANT_SMALL_CAPS);
@@ -5407,8 +5423,8 @@ inline_attr_affects_measure(ns_inline_attr_kind k)
     case NS_INLINE_FONT_FEATURES:
     case NS_INLINE_FONT_VARIATIONS:
     case NS_INLINE_FONT_FAMILY:
-    case NS_INLINE_SUPERSCRIPT:
-    case NS_INLINE_SUBSCRIPT:
+    case NS_INLINE_RISE:
+    case NS_INLINE_UPRIGHT:
     case NS_INLINE_SMALL_CAPS:
         return TRUE;
     default:
