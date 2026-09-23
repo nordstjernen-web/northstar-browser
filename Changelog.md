@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `display: contents` on an element that cannot be unboxed (`img`,
+  `input`, `iframe`, `video`, `br`, an outermost `svg` and the other
+  replaced elements and form controls CSS Display lists) computes to
+  `display: none`.
 * Documents in quirks mode get the extra user-agent rules HTML lists
   for them: tables reset font, line-height, white-space and text-align
   instead of inheriting them, forms keep a 1em bottom margin, stray list
