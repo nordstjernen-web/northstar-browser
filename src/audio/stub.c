@@ -13,6 +13,11 @@ struct NsAudioContext {
 NsAudioContext *ns_audio_context_new(void) { return g_new0(NsAudioContext, 1); }
 void ns_audio_context_dispatch(NsAudioContext *context, const char *command)
 { (void)context; (void)command; }
+void ns_audio_context_dispatch_blob(NsAudioContext *context, const char *token,
+                                    GBytes *bytes, gboolean reload)
+{ (void)context; (void)token; (void)bytes; (void)reload; }
+void ns_audio_context_set_local_files(NsAudioContext *context, gboolean allowed)
+{ (void)context; (void)allowed; }
 void ns_audio_context_reset(NsAudioContext *context) { (void)context; }
 void ns_audio_context_destroy(NsAudioContext *context) { g_free(context); }
 void ns_audio_shutdown(void) {}

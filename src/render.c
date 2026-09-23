@@ -4,6 +4,7 @@
  */
 
 #include "render.h"
+#include "trace.h"
 
 #include <math.h>
 #include <string.h>
@@ -313,18 +314,24 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
     for (guint i = 0; i < c->n_sheets && !cache_selectors; i++)
         cache_selectors = ns_css_stylesheet_has_container_rules(c->sheets[i]);
     if (cache_selectors) ns_css_selector_cache_begin();
+    gint64 trace_start = ns_trace_now();
     GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->n_sheets);
+    ns_trace_complete("style", "cascade", trace_start, NULL);
     gint64 t1 = profile ? g_get_monotonic_time() : 0;
 
+    trace_start = ns_trace_now();
     render_style_pass(c, styles);
+    ns_trace_complete("style", "style pass", trace_start, NULL);
     gint64 t2 = profile ? g_get_monotonic_time() : 0;
 
+    trace_start = ns_trace_now();
     ns_paint_list_ordinals_begin();
     ns_box *layout = ns_layout_build(c->doc, styles, viewport_width,
                                      c->focused_input, c->caret_byte,
                                      c->sel_anchor_byte,
                                      c->images, c->base_url);
     ns_paint_list_ordinals_end();
+    ns_trace_complete("layout", "layout", trace_start, NULL);
     gint64 t3 = profile ? g_get_monotonic_time() : 0;
     if (profile) {
         profile->css1_us = t1 - t0;
@@ -347,7 +354,10 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         ns_css_set_container_map(containers);
         ns_css_container_features_begin();
         gint64 t4 = profile ? g_get_monotonic_time() : 0;
+        trace_start = ns_trace_now();
         GHashTable *styles2 = ns_css_compute(c->doc, c->sheets, c->n_sheets);
+        ns_trace_complete("style", "cascade for container queries",
+                          trace_start, NULL);
         gint64 t5 = profile ? g_get_monotonic_time() : 0;
         gboolean container_features_used = ns_css_container_features_used();
         ns_css_set_container_map(NULL);
@@ -355,12 +365,15 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
             !render_style_tables_equal(styles, styles2)) {
             render_style_pass(c, styles2);
             gint64 t6 = profile ? g_get_monotonic_time() : 0;
+            trace_start = ns_trace_now();
             ns_paint_list_ordinals_begin();
             ns_box *layout2 = ns_layout_build(c->doc, styles2, viewport_width,
                                               c->focused_input, c->caret_byte,
                                               c->sel_anchor_byte,
                                               c->images, c->base_url);
             ns_paint_list_ordinals_end();
+            ns_trace_complete("layout", "layout for container queries",
+                              trace_start, NULL);
             gint64 t7 = profile ? g_get_monotonic_time() : 0;
             if (profile) {
                 profile->css2_us = t5 - t4;

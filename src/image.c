@@ -860,6 +860,53 @@ ns_image_cache_insert_loaded(ns_image_cache *cache, const char *url,
     return img;
 }
 
+struct ns_image_decoding {
+    ns_img_decoded decoded;
+};
+
+ns_image_decoding *
+ns_image_decode_encoded(const guchar *data, gsize len)
+{
+    ns_image_decoding *decoding = g_new(ns_image_decoding, 1);
+    decoding->decoded = ns_image_decode_body(data, len);
+    return decoding;
+}
+
+void
+ns_image_decoding_free(ns_image_decoding *decoding)
+{
+    if (!decoding) return;
+    if (decoding->decoded.frames) {
+        g_array_set_clear_func(decoding->decoded.frames,
+                               ns_image_anim_frame_clear);
+        g_array_free(decoding->decoded.frames, TRUE);
+    }
+    if (decoding->decoded.tex) ns_texture_unref(decoding->decoded.tex);
+    g_free(decoding);
+}
+
+ns_image *
+ns_image_cache_insert_decoding(ns_image_cache *cache, const char *url,
+                               ns_image_decoding *decoding)
+{
+    if (!cache || !url || !decoding) {
+        ns_image_decoding_free(decoding);
+        return NULL;
+    }
+    ns_image *existing = g_hash_table_lookup(cache->by_url, url);
+    if (existing || (!decoding->decoded.frames && !decoding->decoded.tex)) {
+        ns_image_decoding_free(decoding);
+        return existing;
+    }
+    ns_image *img = g_new0(ns_image, 1);
+    img->url = g_strdup(url);
+    ns_image_apply_decoded_state(img, &decoding->decoded, NULL, 0);
+    g_free(decoding);
+    g_hash_table_insert(cache->by_url, g_strdup(url), img);
+    ns_image_cache_account(cache, img);
+    return img;
+}
+
 ns_image *
 ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
                               const guchar *data, gsize len)
@@ -867,40 +914,8 @@ ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
     if (!cache || !url || !data || len == 0) return NULL;
     ns_image *existing = g_hash_table_lookup(cache->by_url, url);
     if (existing) return existing;
-
-    int w = 0, h = 0;
-    {
-        GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
-        if (pixel_frames && pixel_frames->len > 0) {
-            int fw = 0, fh = 0, total = 0;
-            GArray *frames = ns_image_anim_frames_from_pixels(pixel_frames,
-                                                              &fw, &fh, &total);
-            g_array_free(pixel_frames, TRUE);
-            if (frames && frames->len > 0) {
-                ns_image *img = g_new0(ns_image, 1);
-                img->url = g_strdup(url);
-                img->anim_frames = frames;
-                ns_image_anim_frame *f0 =
-                    &g_array_index(frames, ns_image_anim_frame, 0);
-                img->texture = f0->texture;
-                img->natural_width = fw;
-                img->natural_height = fh;
-                img->anim_total_ms = total;
-                img->anim_start_us = g_get_monotonic_time();
-                img->loaded = TRUE;
-                g_hash_table_insert(cache->by_url, g_strdup(url), img);
-                ns_image_cache_account(cache, img);
-                return img;
-            }
-            if (frames) g_array_free(frames, TRUE);
-        } else if (pixel_frames) {
-            g_array_free(pixel_frames, TRUE);
-        }
-    }
-
-    ns_texture *tex = ns_image_decode_bytes(data, len, &w, &h);
-    if (!tex) return NULL;
-    return ns_image_cache_insert_loaded(cache, url, tex, w, h);
+    return ns_image_cache_insert_decoding(cache, url,
+                                          ns_image_decode_encoded(data, len));
 }
 
 void

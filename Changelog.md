@@ -14,6 +14,50 @@ Significant changes in each release:
   Shift_JIS NEC/IBM duplicates (U+2170 is `FA40`, not `EEEF`), the
   GB18030-2022 mappings in gb18030 and GBK, and the ISO-2022-JP escape
   that must close a JIS X 0208 run before an unencodable character.
+* `--trace=FILE` writes a Chrome trace-event file of where the engine's
+  time goes -- each frame's tick, paint and copy, every cascade and
+  layout, script evaluations, fetches, image decodes and the GTK thread's
+  present -- for Perfetto or `chrome://tracing`, in the GUI as well as
+  headless. `scripts/sample-profile.sh` now samples the engine thread
+  instead of the GTK main thread, which in the GUI only ever waits.
+* The Windows process mitigations are the ones intended. The policies
+  were passed as bare numbers, and two were wrong: the call meant for
+  ASLR set DEP (always on for 64-bit) and the one meant for the
+  dynamic-code ban set Control Flow Guard (which cannot be enabled after
+  start), so neither took effect. The policies are now named, forced
+  image relocation applies everywhere, and headless and tooling runs --
+  which load no GPU driver or shell extension -- also refuse to create
+  executable memory.
+* Images and MPEG-1 video that a page fetches are decoded on a worker
+  thread. They were decoded on the engine thread as each download
+  finished, so a video clip froze the page's scripts, timers and
+  rendering for as long as it took to decode every frame -- over half a
+  second for three seconds of 720p.
+* The audio worker checks `file:` URLs itself. It opened any `file://`
+  path it was handed, relying on the script bindings alone to refuse
+  local files to `http(s)` pages; the page view now tells it whether the
+  page is a `file:` document, and the worker refuses local paths
+  otherwise. It also decodes the URL properly, so a local file whose name
+  holds a space or other escaped character plays instead of failing to
+  open.
+* `OfflineAudioContext` and `createBuffer` refuse a channel count outside
+  1-32, a sample rate outside 3000-768000 Hz, or more than 64 Mi samples
+  in all, with the `NotSupportedError` the Web Audio specification names.
+  A page could ask for `new OfflineAudioContext(1, 2e9, 44100)`, or raise
+  `length` before `startRendering()`, and the renderer's 8 GB allocation
+  aborted the whole browser.
+* `canPlayType`, `navigator.mediaCapabilities` and
+  `MediaSource.isTypeSupported` answer from one table of what the build
+  can decode (`src/media_types.c`). `decodingInfo` claimed WebM, VP8, VP9,
+  WAV and Opus played and MPEG and MP3 did not -- the reverse of the
+  truth -- and `encodingInfo` claimed the same though nothing encodes.
+  `canPlayType` now answers for the element it is called on (a `<video>`
+  does not play an MP3), says "probably" to `mp2v` no longer (pl_mpeg is
+  MPEG-1 only), and a build without the SDL2 mixer no longer advertises
+  any audio type.
+* A build configured with `-Daudio=disabled` links again. The audio stub
+  that replaces the SDL2 mixer lacked `ns_audio_context_dispatch_blob`,
+  which the page view calls for `blob:` media, so the final link failed.
 * Links in pages that use a legacy encoding put non-ASCII query text
   into the URL in that encoding, as HTML's URL parsing requires: on a
   windows-1252 page `<a href="?q=é">` now reads back and navigates as

@@ -11,7 +11,6 @@
 G_BEGIN_DECLS
 
 gboolean ns_video_bytes_are_mpeg1(const guchar *data, gsize len);
-gboolean ns_video_supports_mime(const char *mime);
 
 GArray *ns_video_decode_mpeg1_to_pixels(const guchar *data, gsize len,
                                         int *out_w, int *out_h);

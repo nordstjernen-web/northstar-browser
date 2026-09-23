@@ -4,6 +4,7 @@
  */
 
 #include "net.h"
+#include "trace.h"
 #include "cache.h"
 #include "config.h"
 #include "history.h"
@@ -6126,11 +6127,14 @@ ns_fetch_thread(GTask        *task,
     (void)source_object;
     ns_fetch_ctx *ctx = task_data;
     GError *err = NULL;
+    gint64 trace_start = ns_trace_now();
     ns_response *resp = ns_fetch_sync(ctx->url, ctx->top_url, ctx->method,
                                       ctx->body, ctx->body_len, ctx->content_type,
                                       ctx->extra_headers,
                                       cancellable, &err, ctx->navigation,
                                       ctx->user_activated);
+    ns_trace_complete("net", ctx->navigation ? "navigation fetch" : "fetch",
+                      trace_start, ctx->url);
     if (ctx->coalesce_key)
         ns_fetch_coalesce_deliver(ctx->coalesce_key, resp, err);
     if (!resp) {

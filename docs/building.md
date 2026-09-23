@@ -195,6 +195,7 @@ is the manual page.
 | `--gsk-renderer=gl\|ngl\|vulkan\|cairo` | GTK renderer. |
 | `--no-watchdog` | Run without the watchdog. |
 | `--print-config` | Print the effective configuration and exit. |
+| `--trace=FILE` | Write a Chrome trace-event JSON of frame phases, relayouts, scripts, fetches and decodes, for Perfetto (ui.perfetto.dev) or `chrome://tracing`. Works in the GUI and headless. |
 
 ## Headless mode (scripting / testing)
 

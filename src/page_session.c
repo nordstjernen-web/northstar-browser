@@ -7,6 +7,7 @@
 #include "page_session.h"
 #include "libnorthstar.h"
 #include "net.h"
+#include "trace.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -301,8 +302,11 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     int vh = clamp(height, 1, s->max_h);
     int stride = vw * 4;
     long sx = scroll_x, sy = scroll_y;
+    gint64 frame_start = ns_trace_now();
+    gint64 phase_start = frame_start;
     int ticked = s->frame_valid ? ns_browser_tick(s->cur, s->tick_budget_ms)
                                 : 0;
+    ns_trace_complete("frame", "tick", phase_start, NULL);
     int requested_scroll_y = -1;
     if (ns_browser_take_pending_scroll_y(s->cur, &requested_scroll_y))
         sy = requested_scroll_y;
@@ -336,8 +340,11 @@ ns_page_session_render(ns_page_session *s, int width, int height,
                     vw == s->frame_w && vh == s->frame_h &&
                     scale == s->frame_scale;
     if (!unchanged) {
-        if (ns_browser_render_argb32(s->cur, (int)sx, (int)sy, vw, vh, scale,
-                                     s->fb, stride) == 0) {
+        phase_start = ns_trace_now();
+        int painted = ns_browser_render_argb32(s->cur, (int)sx, (int)sy, vw, vh,
+                                               scale, s->fb, stride);
+        ns_trace_complete("frame", "paint", phase_start, NULL);
+        if (painted == 0) {
             s->frame_valid = 1;
             s->frame_sx = sx;
             s->frame_sy = sy;
@@ -371,6 +378,8 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     out->animating = ns_browser_animating(s->cur) ? 1 : 0;
     out->caret_blinking = ns_browser_caret_blinking(s->cur) ? 1 : 0;
     out->clipboard = ns_browser_has_pending_clipboard(s->cur) ? 1 : 0;
+    ns_trace_complete("frame", unchanged ? "frame (unchanged)" : "frame",
+                      frame_start, NULL);
     return 0;
 }
 

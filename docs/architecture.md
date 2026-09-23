@@ -184,8 +184,11 @@ partitioning and permission model.
 
 ## Images
 
-`image.c` decodes on demand, on a worker task unless
-`async_image_decode` is off. Multi-frame sources come first: an MPEG-1
+`image.c` decodes on a worker task unless `async_image_decode` is off,
+both for images the page fetches (`engine.c` hands the bytes to
+`ns_image_decode_encoded` and inserts the result on the engine thread) and
+for images looked up on demand; `data:` images layout needs at once, and
+headless runs, decode in place. Multi-frame sources come first: an MPEG-1
 stream (`video.c`), an animated GIF or an APNG becomes a frame list.
 Everything else goes down a fixed chain:
 
@@ -312,6 +315,15 @@ again and compares the two, warning on any difference;
 
 ## Diagnostics
 
+- **`--trace=FILE`** (GUI and headless, `trace.c`) writes a Chrome
+  trace-event JSON array that Perfetto (ui.perfetto.dev) or
+  `chrome://tracing` opens. Each frame on the engine thread shows as
+  `frame` with its `tick`, `paint` and `copy frame` phases (or as
+  `frame (unchanged)` when nothing needed repainting), relayouts as
+  `cascade`, `style pass` and `layout`, and scripts, fetches, image
+  decodes and the GTK thread's `present` as their own spans. The file is
+  flushed after every event and the closing bracket is optional in that
+  format, so a trace survives a crash or a kill.
 - **`--debug`** (headless only) streams engine events to stderr.
   `--debug=info,warn,error,render,net,js` selects levels and `--debug`
   alone selects all of them. With `net` selected, a headless run ends with
@@ -334,6 +346,8 @@ again and compares the two, warning on any difference;
 | File | Role |
 |------|------|
 | `i18n.c` | UI translation: English-source strings looked up in `data/i18n/*.lang` at startup, English as the fallback. No gettext. |
+| `media_types.c` | The one table of media types the compiled decoders play, which `canPlayType`, `navigator.mediaCapabilities` and `MediaSource.isTypeSupported` all answer from. |
+| `trace.c` | The `--trace=FILE` writer. |
 | `proc_limits.h` | Shell and engine limits: maximum frame size, settle time, zoom range, script-driven redirect cap. |
 | `mat4.h` | 4×4 matrices for CSS 3D transforms. |
 | `version.h` | `NS_VERSION` and `NS_BUILD_DATE`. |

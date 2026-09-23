@@ -5,6 +5,7 @@
 
 #include "enginethread.h"
 #include "mainctx.h"
+#include "trace.h"
 
 typedef struct {
     NsEngineJob fn;
@@ -61,6 +62,7 @@ engine_main(gpointer data)
     (void)data;
     g_main_context_push_thread_default(g_ctx);
     ns_engine_context_set(g_ctx);
+    ns_trace_thread_name("ns-engine");
     GSource *src = g_source_new(&jobs_funcs, sizeof(GSource));
     g_source_attach(src, g_ctx);
     g_source_unref(src);

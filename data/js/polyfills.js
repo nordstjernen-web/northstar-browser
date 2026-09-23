@@ -461,17 +461,8 @@
     };
 
     function ndSupportedMediaType(type) {
-        var raw = String(type || '').toLowerCase();
-        var mime = raw.split(';')[0].trim();
-        if (!mime) return false;
-        var probe = global.document && global.document.createElement &&
-            global.document.createElement(mime.indexOf('audio/') === 0 ? 'audio' : 'video');
-        if (probe && typeof probe.canPlayType === 'function' &&
-            probe.canPlayType(raw))
-            return true;
-        if (mime === 'audio/mpeg' || mime === 'audio/mp3')
-            return true;
-        return false;
+        return typeof global.__ndMediaSourceTypeSupported === 'function' &&
+            !!global.__ndMediaSourceTypeSupported(String(type || ''));
     }
 
 

@@ -39,6 +39,8 @@
 #include "html.h"
 #include "idb.h"
 #include "image.h"
+#include "media_types.h"
+#include "trace.h"
 #include "video.h"
 #include "js_date.h"
 #include "js_intl.h"
@@ -9929,47 +9931,52 @@ ns_eme_request_access(JSContext *ctx, JSValueConst this_val,
     return promise;
 }
 
-static JSValue
-ns_media_capabilities_info(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv)
+static gboolean
+ns_media_config_supported(JSContext *ctx, JSValueConst config)
 {
-    (void)this_val;
+    if (!JS_IsObject(config)) return FALSE;
+    JSValue type_v = JS_GetPropertyStr(ctx, config, "type");
+    const char *type_s = JS_IsString(type_v) ? JS_ToCString(ctx, type_v) : NULL;
+    gboolean file = type_s && strcmp(type_s, "file") == 0;
+    gboolean mse = type_s && strcmp(type_s, "media-source") == 0;
+    if (type_s) JS_FreeCString(ctx, type_s);
+    JS_FreeValue(ctx, type_v);
+    if (!file && !mse) return FALSE;
+    ns_media_source source = mse ? NS_MEDIA_SOURCE_MSE : NS_MEDIA_SOURCE_FILE;
+
+    JSValue video_v = JS_GetPropertyStr(ctx, config, "video");
+    JSValue audio_v = JS_GetPropertyStr(ctx, config, "audio");
+    gboolean has_video = JS_IsObject(video_v);
+    gboolean has_audio = JS_IsObject(audio_v);
+    gboolean supported = FALSE;
+    if (has_video != has_audio) {
+        JSValue ct = JS_GetPropertyStr(ctx, has_video ? video_v : audio_v,
+                                       "contentType");
+        const char *cs = JS_IsString(ct) ? JS_ToCString(ctx, ct) : NULL;
+        if (cs) {
+            supported = ns_media_type_support(
+                cs, has_video ? NS_MEDIA_ELEMENT_VIDEO : NS_MEDIA_ELEMENT_AUDIO,
+                source) != NS_MEDIA_CANNOT;
+            JS_FreeCString(ctx, cs);
+        }
+        JS_FreeValue(ctx, ct);
+    }
+    JS_FreeValue(ctx, video_v);
+    JS_FreeValue(ctx, audio_v);
+    return supported;
+}
+
+static JSValue
+ns_media_capabilities_result(JSContext *ctx, int argc, JSValueConst *argv,
+                             gboolean supported)
+{
     JSValue resolvers[2];
     JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
     if (JS_IsException(promise)) return promise;
     JSValue info = JS_NewObject(ctx);
-    gboolean supported = FALSE;
-    if (argc >= 1 && JS_IsObject(argv[0])) {
-        JSValue type_v = JS_GetPropertyStr(ctx, argv[0], "type");
-        const char *type_s = JS_IsString(type_v)
-            ? JS_ToCString(ctx, type_v) : NULL;
-        JSValue video_v = JS_GetPropertyStr(ctx, argv[0], "video");
-        JSValue audio_v = JS_GetPropertyStr(ctx, argv[0], "audio");
-        gboolean ok_type = !type_s || strcmp(type_s, "file") == 0 ||
-                           strcmp(type_s, "media-source") == 0;
-        gboolean any_media = JS_IsObject(video_v) || JS_IsObject(audio_v);
-        if (any_media && ok_type) {
-            JSValue ct = JS_IsObject(video_v)
-                ? JS_GetPropertyStr(ctx, video_v, "contentType")
-                : JS_GetPropertyStr(ctx, audio_v, "contentType");
-            const char *cs = JS_IsString(ct) ? JS_ToCString(ctx, ct) : NULL;
-            if (cs) {
-                if (strstr(cs, "video/webm") || strstr(cs, "vp8") ||
-                    strstr(cs, "vp9")        || strstr(cs, "audio/webm") ||
-                    strstr(cs, "audio/wav")  || strstr(cs, "opus"))
-                    supported = TRUE;
-                JS_FreeCString(ctx, cs);
-            }
-            JS_FreeValue(ctx, ct);
-        }
-        if (type_s) JS_FreeCString(ctx, type_s);
-        JS_FreeValue(ctx, type_v);
-        JS_FreeValue(ctx, video_v);
-        JS_FreeValue(ctx, audio_v);
-    }
     JS_SetPropertyStr(ctx, info, "supported",      JS_NewBool(ctx, supported));
     JS_SetPropertyStr(ctx, info, "smooth",         JS_NewBool(ctx, supported));
-    JS_SetPropertyStr(ctx, info, "powerEfficient", JS_NewBool(ctx, supported));
+    JS_SetPropertyStr(ctx, info, "powerEfficient", JS_FALSE);
     JS_SetPropertyStr(ctx, info, "supportedConfiguration",
                       argc >= 1 && JS_IsObject(argv[0])
                           ? JS_DupValue(ctx, argv[0]) : JS_NULL);
@@ -9978,6 +9985,37 @@ ns_media_capabilities_info(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, resolvers[0]);
     JS_FreeValue(ctx, resolvers[1]);
     return promise;
+}
+
+static JSValue
+ns_media_capabilities_decoding_info(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    return ns_media_capabilities_result(ctx, argc, argv,
+        argc >= 1 && ns_media_config_supported(ctx, argv[0]));
+}
+
+static JSValue
+ns_media_capabilities_encoding_info(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    return ns_media_capabilities_result(ctx, argc, argv, FALSE);
+}
+
+static JSValue
+ns_media_source_type_supported(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(argv[0])) return JS_FALSE;
+    const char *type = JS_ToCString(ctx, argv[0]);
+    if (!type) return JS_FALSE;
+    gboolean ok = ns_media_type_support(type, NS_MEDIA_ELEMENT_AUDIO,
+                                        NS_MEDIA_SOURCE_MSE) != NS_MEDIA_CANNOT;
+    JS_FreeCString(ctx, type);
+    return JS_NewBool(ctx, ok);
 }
 
 static JSValue
@@ -10275,6 +10313,18 @@ ns_audio_buffer_getChannelData(JSContext *ctx, JSValueConst this_val,
     return arr;
 }
 
+#define NS_WEBAUDIO_MAX_CHANNELS 32
+#define NS_WEBAUDIO_MAX_SAMPLES  (UINT64_C(1) << 26)
+
+static gboolean
+ns_audio_buffer_shape_ok(int32_t channels, int32_t length, double sample_rate)
+{
+    return channels >= 1 && channels <= NS_WEBAUDIO_MAX_CHANNELS &&
+           length >= 1 &&
+           (uint64_t)channels * (uint64_t)length <= NS_WEBAUDIO_MAX_SAMPLES &&
+           sample_rate >= 3000.0 && sample_rate <= 768000.0;
+}
+
 static JSValue
 ns_audio_createBuffer(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -10286,9 +10336,11 @@ ns_audio_createBuffer(JSContext *ctx, JSValueConst this_val,
     if (argc >= 1) JS_ToInt32(ctx, &channels, argv[0]);
     if (argc >= 2) JS_ToInt32(ctx, &length, argv[1]);
     if (argc >= 3) JS_ToFloat64(ctx, &sample_rate, argv[2]);
-    JSValue b = ns_audio_make_buffer(ctx, channels > 0 ? (uint32_t)channels : 1,
-                                     length > 0 ? (uint32_t)length : 1,
-                                     sample_rate);
+    if (!ns_audio_buffer_shape_ok(channels, length, sample_rate))
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+            "AudioBuffer channel count, length or sample rate out of range");
+    JSValue b = ns_audio_make_buffer(ctx, (uint32_t)channels,
+                                     (uint32_t)length, sample_rate);
     ns_bind_fn(ctx, b, "getChannelData", ns_audio_buffer_getChannelData, 1);
     return b;
 }
@@ -10385,14 +10437,18 @@ ns_offline_audio_startRendering(JSContext *ctx, JSValueConst this_val,
     JS_ToInt32(ctx, &length, v); JS_FreeValue(ctx, v);
     v = JS_GetPropertyStr(ctx, this_val, "sampleRate");
     JS_ToFloat64(ctx, &sample_rate, v); JS_FreeValue(ctx, v);
-    if (channels <= 0) channels = 1;
-    if (length <= 0) length = 1;
+    if (!ns_audio_buffer_shape_ok(channels, length, sample_rate))
+        return ns_promise_reject_dom(ctx, "NotSupportedError",
+            "OfflineAudioContext channel count, length or sample rate out of range");
+    float *mix = g_try_new0(float, (gsize)length);
+    if (!mix)
+        return ns_promise_reject_dom(ctx, "NotSupportedError",
+            "OfflineAudioContext rendering buffer could not be allocated");
     JSValue buf = ns_audio_make_buffer(ctx, (uint32_t)channels,
                                        (uint32_t)length, sample_rate);
     ns_bind_fn(ctx, buf, "getChannelData", ns_audio_buffer_getChannelData, 1);
     {
         JSValue dest = JS_GetPropertyStr(ctx, this_val, "destination");
-        float *mix = g_new0(float, (uint32_t)length);
         if (ns_webaudio_render_offline(ctx, dest, (uint32_t)length,
                                        sample_rate, mix)) {
             JSValue chans = JS_GetPropertyStr(ctx, buf, "_chans");
@@ -10453,9 +10509,9 @@ ns_offline_audio_context_ctor(JSContext *ctx, JSValueConst this_val,
         if (argc >= 2) JS_ToInt32(ctx, &length, argv[1]);
         if (argc >= 3) JS_ToFloat64(ctx, &sample_rate, argv[2]);
     }
-    if (channels <= 0) channels = 1;
-    if (length <= 0) length = 1;
-    if (!(sample_rate > 0)) sample_rate = 44100.0;
+    if (!ns_audio_buffer_shape_ok(channels, length, sample_rate))
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+            "OfflineAudioContext channel count, length or sample rate out of range");
     JSValue a = ns_audio_context_build(ctx, sample_rate);
     JS_SetPropertyStr(ctx, a, "state", JS_NewString(ctx, "suspended"));
     JS_SetPropertyStr(ctx, a, "length", JS_NewInt32(ctx, length));
@@ -39277,81 +39333,25 @@ ns_element_setCustomValidity(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static ns_media_element
+ns_media_element_kind(JSValueConst this_val)
+{
+    const ns_node *el = ns_unwrap_element(this_val);
+    return el && ns_node_is_element_named(el, "audio")
+        ? NS_MEDIA_ELEMENT_AUDIO : NS_MEDIA_ELEMENT_VIDEO;
+}
+
 static JSValue
 ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
-    (void)this_val;
     if (argc < 1 || !JS_IsString(argv[0])) return JS_NewString(ctx, "");
-    const char *raw = JS_ToCString(ctx, argv[0]);
-    if (!raw) return JS_NewString(ctx, "");
-    char *t = g_ascii_strdown(raw, -1);
-    JS_FreeCString(ctx, raw);
-
-    char *semi = strchr(t, ';');
-    char *container = semi ? g_strndup(t, (gsize)(semi - t)) : g_strdup(t);
-    g_strstrip(container);
-
-#ifdef NS_AUDIO_NATIVE_VORBIS
-    gboolean native_vorbis = TRUE;
-#else
-    gboolean native_vorbis = FALSE;
-#endif
-#ifdef NS_AUDIO_NATIVE_OPUS
-    gboolean native_opus = TRUE;
-#else
-    gboolean native_opus = FALSE;
-#endif
-    gboolean native_ogg = native_vorbis || native_opus;
-
-    gboolean container_ok =
-        strcmp(container, "audio/mpeg") == 0 ||
-        strcmp(container, "audio/mp3") == 0 ||
-        ns_video_supports_mime(container) ||
-        (native_ogg && (strcmp(container, "audio/ogg") == 0 ||
-                        strcmp(container, "application/ogg") == 0)) ||
-        (native_opus && strcmp(container, "audio/opus") == 0);
-
-    const char *out = "";
-    if (container_ok) {
-        char *codecs = NULL;
-        if (semi) {
-            char *c = strstr(semi, "codecs");
-            if (c && (c = strchr(c, '=')) != NULL) {
-                c++;
-                while (*c == ' ' || *c == '"' || *c == '\'') c++;
-                codecs = g_strdup(c);
-                char *q = codecs;
-                while (*q && *q != '"' && *q != '\'') q++;
-                *q = '\0';
-            }
-        }
-        if (codecs && *codecs) {
-            gboolean all_ok = TRUE;
-            char **parts = g_strsplit(codecs, ",", -1);
-            for (int i = 0; parts[i] && all_ok; i++) {
-                char *cd = g_strstrip(parts[i]);
-                gboolean ok =
-                    strstr(cd, "mp3") != NULL ||
-                    g_str_has_prefix(cd, "mp4a.69") ||
-                    g_str_has_prefix(cd, "mp4a.6b") ||
-                    strstr(cd, "mp1v") != NULL ||
-                    strstr(cd, "mp2v") != NULL ||
-                    strstr(cd, "mpeg1") != NULL ||
-                    (native_vorbis && strstr(cd, "vorbis") != NULL) ||
-                    (native_opus && strstr(cd, "opus") != NULL);
-                if (!ok) all_ok = FALSE;
-            }
-            g_strfreev(parts);
-            out = all_ok ? "probably" : "";
-        } else {
-            out = "maybe";
-        }
-        g_free(codecs);
-    }
-    g_free(container);
-    g_free(t);
-    return JS_NewString(ctx, out);
+    const char *type = JS_ToCString(ctx, argv[0]);
+    if (!type) return JS_NewString(ctx, "");
+    ns_media_answer answer = ns_media_type_support(
+        type, ns_media_element_kind(this_val), NS_MEDIA_SOURCE_FILE);
+    JS_FreeCString(ctx, type);
+    return JS_NewString(ctx, ns_media_answer_string(answer));
 }
 
 
@@ -45854,9 +45854,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     JSValue media_caps = JS_NewObject(ctx);
     ns_bind_fn(ctx, media_caps, "decodingInfo",
-               ns_media_capabilities_info, 1);
+               ns_media_capabilities_decoding_info, 1);
     ns_bind_fn(ctx, media_caps, "encodingInfo",
-               ns_media_capabilities_info, 1);
+               ns_media_capabilities_encoding_info, 1);
     JS_SetPropertyStr(ctx, navigator, "mediaCapabilities", media_caps);
 
     JS_SetPropertyStr(ctx, navigator, "vendorSub", JS_NewString(ctx, ""));
@@ -46072,6 +46072,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
     ns_bind_fn(ctx, global, "__ndUrlSet",            ns_window_url_set_internal,       3);
+    ns_bind_fn(ctx, global, "__ndMediaSourceTypeSupported",
+               ns_media_source_type_supported, 1);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
 
     ns_bind_ctor(ctx, global, "Event",        ns_event_ctor,        2);
@@ -50904,6 +50906,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 trace_start = ns_trace_now();
     js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
     js->eval_depth++;
 
@@ -50937,6 +50940,9 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         ns_js_flush_document_write(js);
         ns_js_schedule_pending_script_drain(js);
     }
+    ns_trace_complete("script", cache_hit ? "evaluate script (cached bytecode)"
+                                          : "evaluate script",
+                      trace_start, origin ? origin : "inline");
     if (profile)
         g_printerr("[profile] js eval     %6.1fms  %zub  %s%s\n",
                    (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,
@@ -51375,6 +51381,7 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 trace_start = ns_trace_now();
     js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
     js->eval_depth++;
     JSValue fn = ns_js_compile_module_cached(ctx, copy, len,
@@ -51389,6 +51396,8 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
         ns_js_flush_document_write(js);
         ns_js_schedule_pending_script_drain(js);
     }
+    ns_trace_complete("script", "evaluate module", trace_start,
+                      origin ? origin : "module");
     if (profile)
         g_printerr("[profile] js module   %6.1fms  %zub  %s\n",
                    (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,
