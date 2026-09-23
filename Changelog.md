@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Shrink-to-fit boxes -- inline-blocks, floats, flex items sized by
+  their content -- no longer come out wider than what they hold. A
+  child with a pixel `width` and `box-sizing: border-box` was measured
+  at its border-box width and then had its padding and border added a
+  second time, and every float inside was counted as at least 60px
+  wide, so an inline-block around a 16px floated icon was 60px wide.
 * Floated columns with `box-sizing: border-box` sit side by side again.
   Deciding where a float fits counted its padding and border twice for
   a border-box width, so the Bootstrap 3 grid -- `*{box-sizing:
