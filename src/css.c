@@ -30499,7 +30499,7 @@ incr_sheet_sig(const ns_css_stylesheet *ua,
 
 static GHashTable *g_style_share;
 static GByteArray *g_share_scratch;
-static guint g_style_share_next_id;
+static guint64 g_style_share_next_id;
 
 typedef struct {
     guint32  hash;
@@ -30711,7 +30711,7 @@ style_share_key(GByteArray *b,
                 const ns_pe_gather *pe_g, int n_pe)
 {
     g_byte_array_set_size(b, 0);
-    guint parent_id = parent_style ? parent_style->share_id : 0;
+    guint64 parent_id = parent_style ? parent_style->share_id : 0;
     g_byte_array_append(b, (const guint8 *)&parent_id, sizeof parent_id);
     g_byte_array_append(b, (const guint8 *)&root_px, sizeof root_px);
     guint cq_len = g_cq_stack &&
@@ -31067,12 +31067,14 @@ cascade_walk(ns_node *node,
         if (shared) {
             ns_style_free(s);
             s = ns_style_clone_shared(shared);
-            display_contents_to_none(node, s);
+            if (display_contents_to_none(node, s))
+                s->share_id = ++g_style_share_next_id;
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
             g_array_set_size(pending_matches, 0);
             g_ptr_array_set_size(owned_values, 0);
         } else {
+            s->share_id = ++g_style_share_next_id;
             s->vars = build_vars_for_element(parent_style, var_matches);
             resolve_pending_into_matches(pending_matches, s->vars,
                                          matches, owned_values, node);
@@ -31124,8 +31126,6 @@ cascade_walk(ns_node *node,
                 g_ptr_array_free(pe_owned, TRUE);
             }
             if (have_key) {
-                if (s->share_id == 0)
-                    s->share_id = ++g_style_share_next_id;
                 share_key_t *k = g_new(share_key_t, 1);
                 k->len  = probe.len;
                 k->hash = probe.hash;
@@ -31897,7 +31897,6 @@ ns_css_compute(ns_node *doc,
         g_share_scratch = g_byte_array_sized_new(512);
     g_style_share = g_hash_table_new_full(share_key_hash, share_key_equal,
                                           share_key_free, NULL);
-    g_style_share_next_id = 0;
     g_var_adjust_cache = g_hash_table_new_full(
         g_direct_hash, g_direct_equal,
         (GDestroyNotify)ns_var_map_unref, (GDestroyNotify)ns_var_map_unref);
