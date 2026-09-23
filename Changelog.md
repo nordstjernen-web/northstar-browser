@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `structuredClone()` and `postMessage()` follow the HTML serialization
+  rules more closely. Transferring an `ArrayBuffer` detaches it (a
+  detached one, a duplicate, or an object that cannot be transferred
+  throws `DataCloneError`), resizable buffers keep their
+  `maxByteLength`, views of one buffer still share a buffer in the
+  copy, sparse arrays keep their length, `BigInt` wrappers survive, and
+  errors keep only an own `message` and a standard name. A page that
+  replaces `window.structuredClone` no longer changes what
+  `postMessage()` sends.
 * `Blob` and `File` follow the File API. The constructors accept any
   iterable of parts and reject strings, numbers and plain objects,
   honour `endings: "native"`, read their options in the specified

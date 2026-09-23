@@ -108,6 +108,12 @@ ns_throw_security_error(JSContext *ctx, const char *message)
     return JS_Throw(ctx, err);
 }
 
+gboolean
+ns_image_bitmap_is(JSValueConst v)
+{
+    return JS_GetOpaque(v, ns_image_bitmap_class_id) != NULL;
+}
+
 JSValue
 ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
