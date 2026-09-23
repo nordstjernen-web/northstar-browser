@@ -2520,6 +2520,10 @@ typedef enum {
     CALC_FLEX,
 } ns_calc_kind;
 
+typedef struct ns_calc_linear {
+    double px, pct, em, rem, lh, rlh;
+} ns_calc_linear;
+
 typedef struct ns_calc_term {
     ns_calc_kind kind;
     double px;
@@ -2530,6 +2534,10 @@ typedef struct ns_calc_term {
     double rlh;
     double num;
     gboolean unresolved;
+    guint8 fn;
+    guint8 n_args;
+    guint8 arg_none;
+    ns_calc_linear args[4];
 } ns_calc_term;
 
 static __thread gboolean calc_unresolved;
@@ -3872,8 +3880,72 @@ calc_skip_ws(const char **pp, const char *end)
 }
 
 static void
+calc_linear_add(ns_calc_linear *l, const ns_calc_term *t, double sign)
+{
+    l->px += sign * t->px;
+    l->pct += sign * t->pct;
+    l->em += sign * t->em;
+    l->rem += sign * t->rem;
+    l->lh += sign * t->lh;
+    l->rlh += sign * t->rlh;
+}
+
+static void
+calc_term_fn_scale(ns_calc_term *v, double m)
+{
+    if (!v->fn) return;
+    if (!isfinite(m)) {
+        v->fn = 0;
+        return;
+    }
+    for (int i = 0; i < v->n_args; i++) {
+        ns_calc_linear *l = &v->args[i];
+        l->px *= m;
+        l->pct *= m;
+        l->em *= m;
+        l->rem *= m;
+        l->lh *= m;
+        l->rlh *= m;
+    }
+    if (m >= 0) return;
+    if (v->fn == 1 || v->fn == 2) {
+        v->fn = v->fn == 1 ? 2 : 1;
+        return;
+    }
+    ns_calc_linear lo = v->args[0];
+    v->args[0] = v->args[2];
+    v->args[2] = lo;
+    guint8 none = v->arg_none;
+    v->arg_none = (guint8)((none & 2u) | ((none & 1u) << 2) | ((none & 4u) >> 2));
+}
+
+static void
+calc_term_fn_add(ns_calc_term *out, const ns_calc_term *rhs, double sign)
+{
+    if (out->fn && rhs->fn) {
+        out->fn = 0;
+        return;
+    }
+    if (out->fn) {
+        for (int i = 0; i < out->n_args; i++)
+            calc_linear_add(&out->args[i], rhs, sign);
+        return;
+    }
+    if (!rhs->fn) return;
+    ns_calc_term r = *rhs;
+    calc_term_fn_scale(&r, sign);
+    for (int i = 0; i < r.n_args; i++)
+        calc_linear_add(&r.args[i], out, 1.0);
+    out->fn = r.fn;
+    out->n_args = r.n_args;
+    out->arg_none = r.arg_none;
+    memcpy(out->args, r.args, sizeof out->args);
+}
+
+static void
 calc_term_scale(ns_calc_term *v, double m)
 {
+    calc_term_fn_scale(v, m);
     if (v->kind != CALC_LENGTH) {
         v->num *= m;
     } else if (isfinite(m)) {
@@ -4077,6 +4149,20 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             out->rem = v->u.calc.rem;
             out->lh = v->u.calc.lh;
             out->rlh = v->u.calc.rlh;
+            if (v->u.calc.fn >= 1 && v->u.calc.fn <= 3 &&
+                v->u.calc.n_args > 0 && v->u.calc.n_args <= 4) {
+                out->fn = v->u.calc.fn;
+                out->n_args = v->u.calc.n_args;
+                out->arg_none = v->u.calc.arg_none;
+                for (int k = 0; k < out->n_args; k++) {
+                    out->args[k].px = v->u.calc.args[k].px;
+                    out->args[k].pct = v->u.calc.args[k].pct;
+                    out->args[k].em = v->u.calc.args[k].em;
+                    out->args[k].rem = v->u.calc.args[k].rem;
+                    out->args[k].lh = v->u.calc.args[k].lh;
+                    out->args[k].rlh = v->u.calc.args[k].rlh;
+                }
+            }
         } else if (v->kind == NS_CSS_V_LENGTH) {
             double num = v->u.length.v;
             switch (v->u.length.unit) {
@@ -4235,6 +4321,7 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             *pp = p;
             continue;
         }
+        calc_term_fn_add(out, &rhs, op == '+' ? 1.0 : -1.0);
         if (op == '+') {
             out->px += rhs.px;
             out->pct += rhs.pct;
@@ -4926,6 +5013,21 @@ parse_calc_inner(const char *text)
     if (term.kind != CALC_LENGTH) return calc_scalar_value(term.kind, term.num);
     ns_css_value *v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_CALC;
+    if (term.fn) {
+        v->u.calc.px = calc_term_key(&term);
+        v->u.calc.fn = term.fn;
+        v->u.calc.n_args = term.n_args;
+        v->u.calc.arg_none = term.arg_none;
+        for (int k = 0; k < term.n_args; k++) {
+            v->u.calc.args[k].px = term.args[k].px;
+            v->u.calc.args[k].pct = term.args[k].pct;
+            v->u.calc.args[k].em = term.args[k].em;
+            v->u.calc.args[k].rem = term.args[k].rem;
+            v->u.calc.args[k].lh = term.args[k].lh;
+            v->u.calc.args[k].rlh = term.args[k].rlh;
+        }
+        return v;
+    }
     v->u.calc.pct = term.pct;
     v->u.calc.px  = term.px;
     v->u.calc.em  = term.em;

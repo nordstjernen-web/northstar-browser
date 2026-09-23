@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A `min()`, `max()` or `clamp()` inside `calc()` resolves its
+  percentages against the box it sits in. The nested function was
+  reduced to a number up front, with any percentage taken of the window
+  width, so `width: calc(min(100%, 800px))` in a 500px column came out
+  800px wide. Additions and multiplications around the function, as in
+  `calc(100% - min(2rem, 5%))`, are now folded into it instead.
 * A declaration whose `var()` cannot be substituted -- the variable is
   undefined and there is no fallback, or what it holds does not parse
   for that property -- leaves the property `unset`, as the spec's
