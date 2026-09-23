@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `String(link)` and `link + ""` give the URL of an `<a>` or `<area>`
+  element, as their `href` stringifier requires, instead of
+  "[object HTMLAnchorElement]".
 * Client-side image maps work. Clicking, hovering or calling
   `elementFromPoint()` over an `<img usemap>` lands on the `<area>`
   under the pointer (rectangles, circles, polygons with the even-odd
