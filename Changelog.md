@@ -4,6 +4,30 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `<audio>` and `<video>` are real media elements now. Each has a player
+  object (`src/js_media.c`) with the HTML state machine: `networkState`
+  and `readyState` move through loading, metadata and playable,
+  `duration` is known once the file has decoded, `currentTime` is read
+  from the mixer or the frame timeline instead of a stored guess, and the
+  events arrive in order -- `loadstart`, `durationchange`,
+  `loadedmetadata`, `loadeddata`, `canplay`, `canplaythrough`, `play`,
+  `playing`, `timeupdate` every 250 ms, `pause`, `ended`, `error`.
+  `play()` returns a promise that resolves when playback starts and
+  rejects with `NotSupportedError` or `AbortError` when it cannot; before,
+  it resolved at once, a missing file failed silently and `ended` never
+  fired for audio. The mixer reports load, position, end and errors back
+  through `ns_audio_context_status`, and commands go straight to it
+  instead of waiting for the next rendered frame. `loop` is honoured for
+  audio and video, a video without `loop` stops at its end instead of
+  repeating forever, and a video without `autoplay` waits on its first
+  frame until `play()`. `autoplay` starts audio only when it is muted or
+  the user has interacted with the page, `muted` and `volume` apply
+  (`volume` outside 0-1 throws `IndexSizeError`), `videoWidth` and
+  `videoHeight` report the clip's size, a new `src` restarts loading, an
+  element removed from the page pauses, a page left in the back/forward
+  cache goes quiet, and a `new Audio(url)` that nothing references keeps
+  playing to the end. A `<source>` whose type cannot be played is skipped
+  instead of fetched.
 * Every subresource request now passes one policy check, in the network
   layer, before it is sent and again at each redirect. The request
   carries what it is for (image, stylesheet, font, media, frame, worker,
@@ -27,8 +51,8 @@ Significant changes in each release:
   unchanged; a page with a 50 ms `setInterval` that never touches the
   DOM made 443 frame requests in eight seconds and now makes one. The
   engine now wakes the window when there is something to show -- a DOM
-  change, a `requestAnimationFrame`, an image or canvas update, a scroll,
-  a navigation or an audio command -- and the 60 Hz loop runs only while
+  change, a `requestAnimationFrame`, an image or canvas update, a scroll
+  or a navigation -- and the 60 Hz loop runs only while
   something animates. `requestAnimationFrame` timestamps and CSS
   animations follow the display's frame clock (callbacks are 16.7 ms
   apart instead of wherever the engine thread happened to run), canvas

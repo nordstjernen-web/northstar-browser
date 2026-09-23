@@ -5,7 +5,6 @@
 
 #include "procview.h"
 #include "i18n.h"
-#include "audio/audio.h"
 
 #include "proc_limits.h"
 #include "trace.h"
@@ -112,8 +111,6 @@ typedef struct {
     char            *remote_ip;
     char            *camera;
     char            *download;
-    char            *audio;
-    GPtrArray       *audio_blobs;
     char            *clipboard;
     cairo_surface_t *surface;
     gboolean         surface_borrowed;
@@ -152,7 +149,6 @@ struct NsProcView {
     ns_page_session *session;
     gboolean    private_mode;
 
-    NsAudioContext *audio;
 
     NsProcNotify notify;
     gpointer     notify_ud;
@@ -473,7 +469,6 @@ static void print_run(NsProcView *v, GPtrArray *pages,
 static void
 pv_free(NsProcView *v)
 {
-    ns_audio_context_destroy(v->audio);
     if (v->frame)
         cairo_surface_destroy(v->frame);
     v->frame = NULL;
@@ -495,106 +490,6 @@ pv_free(NsProcView *v)
 }
 
 static void pv_unref(NsProcView *v) { if (g_atomic_ref_count_dec(&v->rc)) pv_free(v); }
-
-typedef struct {
-    char    *token;
-    GBytes  *bytes;
-    gboolean reload;
-} AudioBlob;
-
-static void
-audio_blob_free(gpointer data)
-{
-    AudioBlob *b = data;
-    g_free(b->token);
-    g_bytes_unref(b->bytes);
-    g_free(b);
-}
-
-static gboolean
-media_blob_line(const char *line, char **out_token, const char **out_url,
-                gboolean *out_reload)
-{
-    const char *cursor;
-    if (g_str_has_prefix(line, "open ")) {
-        *out_reload = FALSE;
-        cursor = line + 5;
-    } else if (g_str_has_prefix(line, "reload ")) {
-        *out_reload = TRUE;
-        cursor = line + 7;
-    } else {
-        return FALSE;
-    }
-    while (*cursor == ' ') cursor++;
-    const char *token_end = strchr(cursor, ' ');
-    if (!token_end) return FALSE;
-    const char *url = token_end + 1;
-    while (*url == ' ') url++;
-    if (!g_str_has_prefix(url, "blob:")) return FALSE;
-    *out_token = g_strndup(cursor, token_end - cursor);
-    *out_url = url;
-    return TRUE;
-}
-
-static void
-res_take_audio(Res *res, char *commands)
-{
-    if (!commands) return;
-    GString *rest = g_string_new(NULL);
-    char **lines = g_strsplit(commands, "\n", -1);
-    for (int i = 0; lines[i]; i++) {
-        if (!*lines[i]) continue;
-        char *token = NULL;
-        const char *url = NULL;
-        gboolean reload = FALSE;
-        if (media_blob_line(lines[i], &token, &url, &reload)) {
-            GBytes *bytes = ns_net_resolve_blob(url, NULL);
-            if (bytes) {
-                AudioBlob *b = g_new0(AudioBlob, 1);
-                b->token = token;
-                b->bytes = bytes;
-                b->reload = reload;
-                if (!res->audio_blobs)
-                    res->audio_blobs =
-                        g_ptr_array_new_with_free_func(audio_blob_free);
-                g_ptr_array_add(res->audio_blobs, b);
-            } else {
-                g_free(token);
-            }
-            continue;
-        }
-        g_string_append(rest, lines[i]);
-        g_string_append_c(rest, '\n');
-    }
-    g_strfreev(lines);
-    free(commands);
-    res->audio = g_string_free(rest, FALSE);
-}
-
-static void
-pv_media_pump(NsProcView *v, Res *res)
-{
-    gboolean has_lines = res->audio && *res->audio;
-    if (!res->audio_blobs && !has_lines) return;
-    if (!v->audio)
-        v->audio = ns_audio_context_new();
-    ns_audio_context_set_document(v->audio, v->current_url);
-    if (res->audio_blobs)
-        for (guint i = 0; i < res->audio_blobs->len; i++) {
-            AudioBlob *b = g_ptr_array_index(res->audio_blobs, i);
-            ns_audio_context_dispatch_blob(v->audio, b->token, b->bytes,
-                                           b->reload);
-        }
-    if (!has_lines) return;
-    char **lines = g_strsplit(res->audio, "\n", -1);
-    for (int i = 0; lines[i]; i++) {
-        if (!*lines[i]) continue;
-        if (g_getenv("NS_DBG_AUDIO"))
-            g_printerr("[audio-pump] cmd: %s\n", lines[i]);
-        ns_audio_context_dispatch(v->audio, lines[i]);
-    }
-    g_strfreev(lines);
-}
 
 static cairo_surface_t *
 stage_fill(NsProcView *v, const unsigned char *px, int w, int h, int stride)
@@ -739,8 +634,7 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
         res->nav = fr.nav;
         res->camera = fr.camera;
         res->download = fr.download;
-        res_take_audio(res, fr.audio);
-        fr.nav = fr.camera = fr.download = fr.audio = NULL;
+        fr.nav = fr.camera = fr.download = NULL;
         if (fr.clipboard)
             res->clipboard = ns_page_session_clipboard(s);
     }
@@ -1433,7 +1327,6 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     if (!url || !*url)
         return;
     pv_perm_resolve(v, FALSE);
-    ns_audio_context_reset(v->audio);
     v->pending_record = record;
     int seq = ++v->load_seq;
     ++v->render_seq;
@@ -1764,8 +1657,6 @@ on_result(gpointer data)
             pv_perm_bar_show(v, REQ_CAMERA, res->camera);
         if (current && res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
-        if (current && res->ok)
-            pv_media_pump(v, res);
         if (current && res->ok && res->clipboard && v->area) {
             gdk_clipboard_set_text(gtk_widget_get_clipboard(v->area),
                                    res->clipboard);
@@ -2023,9 +1914,6 @@ done:
     g_free(res->remote_ip);
     g_free(res->camera);
     g_free(res->download);
-    g_free(res->audio);
-    if (res->audio_blobs)
-        g_ptr_array_unref(res->audio_blobs);
     free(res->clipboard);
     free(res->href);
     free(res->cursor);

@@ -1858,6 +1858,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_engine_fetch_images(layout, flush_base, image_cache, js);
         ns_js_run_scripts_in_doc(js, doc, resp->final_url,
                                  g_headless_doc_charset, resp->content_type);
+        ns_media_scan(js, doc, resp->final_url);
         headless_relayout(&flush_ctx);
         ns_js_fire_media_load_events(js, layout);
     }

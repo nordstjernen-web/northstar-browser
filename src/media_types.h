@@ -8,6 +8,8 @@
 
 #include <glib.h>
 
+#include "dom.h"
+
 G_BEGIN_DECLS
 
 typedef enum {
@@ -30,6 +32,7 @@ ns_media_answer ns_media_type_support(const char *type,
                                       ns_media_element element,
                                       ns_media_source source);
 const char *ns_media_answer_string(ns_media_answer answer);
+const char *ns_media_select_source(const ns_node *element);
 
 G_END_DECLS
 

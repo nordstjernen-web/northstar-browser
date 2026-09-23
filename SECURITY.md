@@ -171,11 +171,11 @@ unconfined.
   `socket`, `mmap` and `mprotect` are allowed with any flags. TSYNC
   propagates the filter to every thread.
 - **Media / audio.** Northstar decodes audio **in-tree** in the browser
-  process (`src/audio/audio.c`), not via an external player. When a page
-  plays an `<audio>` element the engine returns
-  `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands with each
-  rendered frame, and the GTK view (`src/gtk/procview.c`) queues them to a
-  per-view audio context. A dedicated worker thread fetches and decodes
+  process (`src/audio/audio.c`), not via an external player. The media
+  controller (`src/js_media.c`) sends each `<audio>` element's commands
+  straight to its page's audio context, which the page owns and destroys
+  when it closes. An unmuted `autoplay` element starts only after a user
+  gesture on the page. A dedicated worker thread fetches and decodes
   media without blocking GTK; URLs are never handed to a shell or an
   external binary. The worker fetches through `net.c` like any other
   subresource of the page — the page's cookie partition, HSTS, the

@@ -65,25 +65,33 @@ struct NsAudioContext {
     GMutex        lock;
     char         *document_url;
     GCancellable *cancel;
+    GHashTable   *failures;
 };
 
 typedef enum {
-    NS_AUDIO_COMMAND_LINE,
-    NS_AUDIO_COMMAND_BLOB,
-    NS_AUDIO_COMMAND_RESET,
-    NS_AUDIO_COMMAND_DESTROY,
-    NS_AUDIO_COMMAND_QUIT,
-} ns_audio_command_type;
+    NS_AUDIO_OP_OPEN,
+    NS_AUDIO_OP_OPEN_BYTES,
+    NS_AUDIO_OP_RELOAD_BYTES,
+    NS_AUDIO_OP_PLAY,
+    NS_AUDIO_OP_PAUSE,
+    NS_AUDIO_OP_SEEK,
+    NS_AUDIO_OP_VOLUME,
+    NS_AUDIO_OP_LOOP,
+    NS_AUDIO_OP_CLOSE,
+    NS_AUDIO_OP_RESET,
+    NS_AUDIO_OP_DESTROY,
+    NS_AUDIO_OP_QUIT,
+} ns_audio_op;
 
 typedef struct {
-    ns_audio_command_type type;
-    NsAudioContext       *context;
-    int                   generation;
-    char                 *line;
-    char                 *token;
-    GBytes               *bytes;
-    gboolean              reload;
-    char                 *document_url;
+    ns_audio_op     op;
+    NsAudioContext *context;
+    int             generation;
+    char           *token;
+    char           *url;
+    char           *document_url;
+    GBytes         *bytes;
+    double          value;
 } ns_audio_command;
 
 static SDL_AudioDeviceID g_dev;
@@ -95,6 +103,7 @@ static ns_audio_player   g_players[NS_AUDIO_MAX_PLAYERS];
 static GAsyncQueue      *g_commands;
 static GThread          *g_worker;
 static gint              g_shutting_down;
+static gint              g_silent;
 
 #if defined(__GNUC__)
 #define NS_AUDIO_PRINTF(a, b) __attribute__((format(printf, a, b)))
@@ -641,11 +650,25 @@ context_cancel_fetches(NsAudioContext *context)
     g_mutex_lock(&context->lock);
     GCancellable *old = context->cancel;
     context->cancel = g_cancellable_new();
+    g_hash_table_remove_all(context->failures);
     g_mutex_unlock(&context->lock);
     if (old) {
         g_cancellable_cancel(old);
         g_object_unref(old);
     }
+}
+
+static void
+context_set_failure(NsAudioContext *context, const char *token,
+                    NsAudioError error)
+{
+    g_mutex_lock(&context->lock);
+    if (error == NS_AUDIO_ERROR_NONE)
+        g_hash_table_remove(context->failures, token);
+    else
+        g_hash_table_replace(context->failures, g_strdup(token),
+                             GINT_TO_POINTER(error));
+    g_mutex_unlock(&context->lock);
 }
 
 static GBytes *
@@ -693,118 +716,83 @@ fetch_audio_bytes(NsAudioContext *context, const char *url,
 }
 
 static void
-cmd_open(NsAudioContext *context, const char *token, const char *url,
-         const char *document_url)
+player_fail(NsAudioContext *context, ns_audio_player *p, const char *token,
+            NsAudioError error, const char *what)
 {
-    ns_audio_player *p = player_alloc(context, token);
-    if (!p) { emit("error %s too-many-players", token); return; }
-    audio_lock();
-    player_release(p);
-    audio_unlock();
-    p = player_alloc(context, token);
-
-    if (!g_dev_ok && !g_null_thread) {
-        emit("error %s no-audio-device", token);
-        return;
+    emit("error %s %s", token, what);
+    if (p) {
+        audio_lock();
+        player_release(p);
+        audio_unlock();
     }
+    context_set_failure(context, token, error);
+}
 
-    GBytes *bytes = fetch_audio_bytes(context, url, document_url);
-    if (!bytes) { emit("error %s fetch-failed", token); return; }
+static ns_audio_player *
+player_begin_load(NsAudioContext *context, const char *token)
+{
+    context_set_failure(context, token, NS_AUDIO_ERROR_NONE);
+    audio_lock();
+    ns_audio_player *p = player_find(context, token);
+    if (p) player_release(p);
+    p = player_alloc(context, token);
+    audio_unlock();
+    if (!p) {
+        player_fail(context, NULL, token, NS_AUDIO_ERROR_TOO_MANY,
+                    "too-many-players");
+        return NULL;
+    }
+    if (!g_dev_ok && !g_null_thread) {
+        player_fail(context, p, token, NS_AUDIO_ERROR_NO_DEVICE,
+                    "no-audio-device");
+        return NULL;
+    }
+    return p;
+}
+
+static void
+player_load_bytes(NsAudioContext *context, ns_audio_player *p,
+                  const char *token, GBytes *bytes)
+{
     gsize size = 0;
     const guint8 *data = g_bytes_get_data(bytes, &size);
-    int loaded = load_audio_bytes(p, data, size);
-    g_bytes_unref(bytes);
-    if (!loaded) {
-        emit("error %s decode-failed", token);
+    if (!load_audio_bytes(p, data, size)) {
+        player_fail(context, p, token, NS_AUDIO_ERROR_DECODE, "decode-failed");
+        return;
+    }
+    p->reload_size = (long)size;
+    p->reload_ticks = SDL_GetTicks();
+    emit("meta %s %.3f", token, (double)p->frames / NS_AUDIO_DEVICE_RATE);
+}
+
+static void
+cmd_open(NsAudioContext *context, const ns_audio_command *command)
+{
+    ns_audio_player *p = player_begin_load(context, command->token);
+    if (!p) return;
+    GBytes *bytes = fetch_audio_bytes(context, command->url,
+                                      command->document_url);
+    if (command->generation != g_atomic_int_get(&context->generation)) {
+        if (bytes) g_bytes_unref(bytes);
         audio_lock();
         player_release(p);
         audio_unlock();
         return;
     }
-    p->reload_size = (long)size;
-
-    double len = (double)p->frames / NS_AUDIO_DEVICE_RATE;
-    emit("meta %s %.3f", token, len);
-}
-
-static void
-cmd_reload(NsAudioContext *context, const char *token, const char *url,
-           const char *document_url)
-{
-    ns_audio_player *p = player_find(context, token);
-    if (!p) { cmd_open(context, token, url, document_url); return; }
-
-    GBytes *bytes = fetch_audio_bytes(context, url, document_url);
-    if (!bytes) { emit("error %s fetch-failed", token); return; }
-
-    gsize size = 0;
-    const guint8 *data = g_bytes_get_data(bytes, &size);
-    long size_now = (long)size;
-    Uint32 now = SDL_GetTicks();
-    int behind = p->reached_end || p->cursor + NS_AUDIO_DEVICE_RATE >= p->frames;
-    Uint32 min_gap = behind ? 1500 : 6000;
-    if ((size_now == p->reload_size && p->reload_ticks &&
-         now - p->reload_ticks < 30000) ||
-        (p->reload_ticks && now - p->reload_ticks < min_gap)) {
-        g_bytes_unref(bytes);
+    if (!bytes) {
+        player_fail(context, p, command->token, NS_AUDIO_ERROR_FETCH,
+                    "fetch-failed");
         return;
     }
-
-    ns_audio_player fresh;
-    memset(&fresh, 0, sizeof fresh);
-    int loaded = load_audio_bytes(&fresh, data, size);
+    player_load_bytes(context, p, command->token, bytes);
     g_bytes_unref(bytes);
-    if (!loaded) {
-        emit("error %s decode-failed", token);
-        return;
-    }
-
-    audio_lock();
-    float *old_pcm = p->pcm;
-    p->pcm = fresh.pcm;
-    p->frames = fresh.frames;
-    if (p->cursor > p->frames) p->cursor = p->frames;
-    if (p->reached_end && p->cursor < p->frames) {
-        p->reached_end = 0;
-        p->playing = 1;
-    }
-    p->reload_size = size_now;
-    p->reload_ticks = now;
-    audio_unlock();
-    free(old_pcm);
-
-    double len = (double)p->frames / NS_AUDIO_DEVICE_RATE;
-    emit("meta %s %.3f", token, len);
 }
 
 static void
 cmd_open_bytes(NsAudioContext *context, const char *token, GBytes *bytes)
 {
-    ns_audio_player *p = player_alloc(context, token);
-    if (!p) { emit("error %s too-many-players", token); return; }
-    audio_lock();
-    player_release(p);
-    audio_unlock();
-    p = player_alloc(context, token);
-
-    if (!g_dev_ok && !g_null_thread) {
-        emit("error %s no-audio-device", token);
-        return;
-    }
-
-    gsize size = 0;
-    const guint8 *data = g_bytes_get_data(bytes, &size);
-    if (!load_audio_bytes(p, data, size)) {
-        emit("error %s decode-failed", token);
-        audio_lock();
-        player_release(p);
-        audio_unlock();
-        return;
-    }
-    p->reload_size = (long)size;
-    p->reload_ticks = SDL_GetTicks();
-    emit("meta %s %.3f", token,
-         (double)p->frames / NS_AUDIO_DEVICE_RATE);
+    ns_audio_player *p = player_begin_load(context, token);
+    if (p) player_load_bytes(context, p, token, bytes);
 }
 
 static void
@@ -892,7 +880,7 @@ static void
 cmd_volume(NsAudioContext *context, const char *token, double vol)
 {
     ns_audio_player *p = player_find(context, token);
-    if (!p || !p->pcm) return;
+    if (!p) return;
     if (!(vol >= 0)) vol = 0;
     if (vol > 1) vol = 1;
     audio_lock();
@@ -901,7 +889,7 @@ cmd_volume(NsAudioContext *context, const char *token, double vol)
 }
 
 static void
-cmd_loop(NsAudioContext *context, const char *token, int on)
+cmd_loop(NsAudioContext *context, const char *token, gboolean on)
 {
     ns_audio_player *p = player_find(context, token);
     if (!p) return;
@@ -911,53 +899,13 @@ cmd_loop(NsAudioContext *context, const char *token, int on)
 }
 
 static void
-cmd_stop(NsAudioContext *context, const char *token)
+cmd_close(NsAudioContext *context, const char *token)
 {
+    context_set_failure(context, token, NS_AUDIO_ERROR_NONE);
+    audio_lock();
     ns_audio_player *p = player_find(context, token);
-    if (!p) return;
-    audio_lock();
-    player_release(p);
+    if (p) player_release(p);
     audio_unlock();
-}
-
-static void
-poll_players(NsAudioContext *context)
-{
-    struct { char token[64]; double pos; int ended; int active; }
-        snap[NS_AUDIO_MAX_PLAYERS];
-    int m = 0;
-    audio_lock();
-    for (int i = 0; i < NS_AUDIO_MAX_PLAYERS; i++) {
-        ns_audio_player *p = &g_players[i];
-        if (!p->used || p->owner != context || !p->pcm) continue;
-        if (p->playing || p->reached_end) {
-            memcpy(snap[m].token, p->token, sizeof snap[m].token);
-            snap[m].pos = (double)p->cursor / NS_AUDIO_DEVICE_RATE;
-            snap[m].ended = p->reached_end;
-            snap[m].active = p->playing;
-            p->reached_end = 0;
-            m++;
-        }
-    }
-    audio_unlock();
-
-    for (int i = 0; i < m; i++) {
-        if (snap[i].active) emit("pos %s %.3f", snap[i].token, snap[i].pos);
-        if (snap[i].ended) emit("ended %s", snap[i].token);
-    }
-}
-
-static char *
-next_token(char **cursor)
-{
-    char *s = *cursor;
-    while (*s == ' ' || *s == '\t') s++;
-    if (*s == '\0') { *cursor = s; return NULL; }
-    char *start = s;
-    while (*s && *s != ' ' && *s != '\t') s++;
-    if (*s) { *s = '\0'; s++; }
-    *cursor = s;
-    return start;
 }
 
 static void
@@ -971,50 +919,62 @@ release_context_players(NsAudioContext *context)
 }
 
 static void
-process_line(NsAudioContext *context, char *line, const char *document_url)
-{
-    char *cur = line;
-    char *op = next_token(&cur);
-    if (!op || strcmp(op, "poll") == 0) {
-        poll_players(context);
-        return;
-    }
-
-    char *token = next_token(&cur);
-    if (!token) return;
-
-    if (strcmp(op, "open") == 0) {
-        while (*cur == ' ') cur++;
-        cmd_open(context, token, cur, document_url);
-    } else if (strcmp(op, "play") == 0) {
-        cmd_play(context, token);
-    } else if (strcmp(op, "pause") == 0) {
-        cmd_pause(context, token);
-    } else if (strcmp(op, "seek") == 0) {
-        char *value = next_token(&cur);
-        cmd_seek(context, token, value ? atof(value) : 0.0);
-    } else if (strcmp(op, "volume") == 0) {
-        char *value = next_token(&cur);
-        cmd_volume(context, token, value ? atof(value) : 1.0);
-    } else if (strcmp(op, "loop") == 0) {
-        char *value = next_token(&cur);
-        cmd_loop(context, token, value ? atoi(value) : 0);
-    } else if (strcmp(op, "stop") == 0) {
-        cmd_stop(context, token);
-    } else if (strcmp(op, "reload") == 0) {
-        while (*cur == ' ') cur++;
-        cmd_reload(context, token, cur, document_url);
-    }
-}
-
-static void
 context_free(NsAudioContext *context)
 {
     if (!context) return;
     g_clear_object(&context->cancel);
+    g_clear_pointer(&context->failures, g_hash_table_destroy);
     g_free(context->document_url);
     g_mutex_clear(&context->lock);
     g_free(context);
+}
+
+static void
+command_free(ns_audio_command *command)
+{
+    g_free(command->token);
+    g_free(command->url);
+    g_free(command->document_url);
+    if (command->bytes) g_bytes_unref(command->bytes);
+    g_free(command);
+}
+
+static void
+run_command(const ns_audio_command *command)
+{
+    NsAudioContext *context = command->context;
+    const char *token = command->token;
+    switch (command->op) {
+    case NS_AUDIO_OP_OPEN:
+        cmd_open(context, command);
+        break;
+    case NS_AUDIO_OP_OPEN_BYTES:
+        cmd_open_bytes(context, token, command->bytes);
+        break;
+    case NS_AUDIO_OP_RELOAD_BYTES:
+        cmd_reload_bytes(context, token, command->bytes);
+        break;
+    case NS_AUDIO_OP_PLAY:
+        cmd_play(context, token);
+        break;
+    case NS_AUDIO_OP_PAUSE:
+        cmd_pause(context, token);
+        break;
+    case NS_AUDIO_OP_SEEK:
+        cmd_seek(context, token, command->value);
+        break;
+    case NS_AUDIO_OP_VOLUME:
+        cmd_volume(context, token, command->value);
+        break;
+    case NS_AUDIO_OP_LOOP:
+        cmd_loop(context, token, command->value != 0.0);
+        break;
+    case NS_AUDIO_OP_CLOSE:
+        cmd_close(context, token);
+        break;
+    default:
+        break;
+    }
 }
 
 static gpointer
@@ -1023,36 +983,22 @@ audio_worker(gpointer data)
     (void)data;
     for (;;) {
         ns_audio_command *command = g_async_queue_pop(g_commands);
-        if (command->type == NS_AUDIO_COMMAND_QUIT) {
-            g_free(command);
+        if (command->op == NS_AUDIO_OP_QUIT) {
+            command_free(command);
             break;
         }
-        if (command->type == NS_AUDIO_COMMAND_RESET) {
+        if (command->op == NS_AUDIO_OP_RESET) {
             release_context_players(command->context);
-        } else if (command->type == NS_AUDIO_COMMAND_DESTROY) {
+        } else if (command->op == NS_AUDIO_OP_DESTROY) {
             release_context_players(command->context);
             context_free(command->context);
         } else if (!g_atomic_int_get(&g_shutting_down) &&
                    !g_atomic_int_get(&command->context->destroyed) &&
                    command->generation ==
                        g_atomic_int_get(&command->context->generation)) {
-            if (command->type == NS_AUDIO_COMMAND_BLOB) {
-                if (command->reload)
-                    cmd_reload_bytes(command->context, command->token,
-                                     command->bytes);
-                else
-                    cmd_open_bytes(command->context, command->token,
-                                   command->bytes);
-            } else {
-                process_line(command->context, command->line,
-                             command->document_url);
-            }
+            run_command(command);
         }
-        g_free(command->line);
-        g_free(command->token);
-        g_free(command->document_url);
-        if (command->bytes) g_bytes_unref(command->bytes);
-        g_free(command);
+        command_free(command);
     }
     return NULL;
 }
@@ -1062,7 +1008,8 @@ audio_start(void)
 {
     if (g_worker) return TRUE;
     SDL_SetMainReady();
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
+    if (!g_atomic_int_get(&g_silent) &&
+        SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
         SDL_AudioSpec want, have;
         SDL_memset(&want, 0, sizeof want);
         want.freq = NS_AUDIO_DEVICE_RATE;
@@ -1085,77 +1032,149 @@ audio_start(void)
 }
 
 static void
-queue_command(ns_audio_command_type type, NsAudioContext *context,
-              const char *line)
+push_command(ns_audio_op op, NsAudioContext *context, const char *token,
+             const char *url, GBytes *bytes, double value)
 {
     ns_audio_command *command = g_new0(ns_audio_command, 1);
-    command->type = type;
+    command->op = op;
     command->context = context;
-    command->generation = context
-        ? g_atomic_int_get(&context->generation) : 0;
-    if (context) {
+    command->generation = context ? g_atomic_int_get(&context->generation)
+                                   : 0;
+    command->token = g_strdup(token);
+    command->url = g_strdup(url);
+    command->bytes = bytes ? g_bytes_ref(bytes) : NULL;
+    command->value = value;
+    if (context && op == NS_AUDIO_OP_OPEN) {
         g_mutex_lock(&context->lock);
         command->document_url = g_strdup(context->document_url);
         g_mutex_unlock(&context->lock);
     }
-    command->line = g_strdup(line);
     g_async_queue_push(g_commands, command);
 }
 
+static void
+queue_player_command(NsAudioContext *context, ns_audio_op op,
+                     const char *token, const char *url, GBytes *bytes,
+                     double value)
+{
+    if (!context || !token || !*token ||
+        g_atomic_int_get(&context->destroyed))
+        return;
+    gboolean opens = op == NS_AUDIO_OP_OPEN || op == NS_AUDIO_OP_OPEN_BYTES ||
+                     op == NS_AUDIO_OP_RELOAD_BYTES;
+    if (!g_worker && !opens) return;
+    if (!audio_start()) {
+        g_printerr("northstar: audio playback could not initialize\n");
+        return;
+    }
+    push_command(op, context, token, url, bytes, value);
+}
+
+void
+ns_audio_set_silent(gboolean silent)
+{
+    g_atomic_int_set(&g_silent, silent ? 1 : 0);
+}
+
 NsAudioContext *
-ns_audio_context_new(void)
+ns_audio_context_new(const char *document_url)
 {
     NsAudioContext *context = g_new0(NsAudioContext, 1);
     g_mutex_init(&context->lock);
     context->cancel = g_cancellable_new();
+    context->failures = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                              g_free, NULL);
+    context->document_url = g_strdup(document_url);
     return context;
 }
 
 void
-ns_audio_context_dispatch(NsAudioContext *context, const char *command)
+ns_audio_context_open(NsAudioContext *context, const char *token,
+                      const char *url)
 {
-    if (!context || !command || !*command ||
-        g_atomic_int_get(&context->destroyed))
-        return;
-    if (!audio_start()) {
-        g_printerr("northstar: audio playback could not initialize\n");
-        return;
-    }
-    queue_command(NS_AUDIO_COMMAND_LINE, context, command);
+    if (!url || !*url) return;
+    queue_player_command(context, NS_AUDIO_OP_OPEN, token, url, NULL, 0.0);
 }
 
 void
-ns_audio_context_dispatch_blob(NsAudioContext *context,
-                               const char *token, GBytes *bytes,
-                               gboolean reload)
+ns_audio_context_open_bytes(NsAudioContext *context, const char *token,
+                            GBytes *bytes, gboolean reload)
 {
-    if (!context || !token || !*token || !bytes ||
-        g_atomic_int_get(&context->destroyed))
-        return;
-    if (!audio_start()) {
-        g_printerr("northstar: audio playback could not initialize\n");
-        return;
-    }
-    ns_audio_command *command = g_new0(ns_audio_command, 1);
-    command->type = NS_AUDIO_COMMAND_BLOB;
-    command->context = context;
-    command->generation = g_atomic_int_get(&context->generation);
-    command->token = g_strdup(token);
-    command->bytes = g_bytes_ref(bytes);
-    command->reload = reload;
-    g_async_queue_push(g_commands, command);
+    if (!bytes) return;
+    queue_player_command(context,
+                         reload ? NS_AUDIO_OP_RELOAD_BYTES
+                                : NS_AUDIO_OP_OPEN_BYTES,
+                         token, NULL, bytes, 0.0);
 }
 
 void
-ns_audio_context_set_document(NsAudioContext *context, const char *url)
+ns_audio_context_play(NsAudioContext *context, const char *token)
 {
-    if (!context) return;
+    queue_player_command(context, NS_AUDIO_OP_PLAY, token, NULL, NULL, 0.0);
+}
+
+void
+ns_audio_context_pause(NsAudioContext *context, const char *token)
+{
+    queue_player_command(context, NS_AUDIO_OP_PAUSE, token, NULL, NULL, 0.0);
+}
+
+void
+ns_audio_context_seek(NsAudioContext *context, const char *token,
+                      double seconds)
+{
+    queue_player_command(context, NS_AUDIO_OP_SEEK, token, NULL, NULL,
+                         seconds);
+}
+
+void
+ns_audio_context_set_volume(NsAudioContext *context, const char *token,
+                            double volume)
+{
+    queue_player_command(context, NS_AUDIO_OP_VOLUME, token, NULL, NULL,
+                         volume);
+}
+
+void
+ns_audio_context_set_loop(NsAudioContext *context, const char *token,
+                          gboolean loop)
+{
+    queue_player_command(context, NS_AUDIO_OP_LOOP, token, NULL, NULL,
+                         loop ? 1.0 : 0.0);
+}
+
+void
+ns_audio_context_close(NsAudioContext *context, const char *token)
+{
+    queue_player_command(context, NS_AUDIO_OP_CLOSE, token, NULL, NULL, 0.0);
+}
+
+gboolean
+ns_audio_context_status(NsAudioContext *context, const char *token,
+                        NsAudioStatus *out)
+{
+    memset(out, 0, sizeof *out);
+    if (!context || !token) return FALSE;
     g_mutex_lock(&context->lock);
-    if (g_strcmp0(context->document_url, url) != 0) {
-        g_free(context->document_url);
-        context->document_url = g_strdup(url);
-    }
+    gpointer failure = g_hash_table_lookup(context->failures, token);
     g_mutex_unlock(&context->lock);
+    if (failure) {
+        out->state = NS_AUDIO_PLAYER_FAILED;
+        out->error = (NsAudioError)GPOINTER_TO_INT(failure);
+        return TRUE;
+    }
+    if (!g_worker) return FALSE;
+    audio_lock();
+    ns_audio_player *p = player_find(context, token);
+    if (p) {
+        out->state = p->pcm ? NS_AUDIO_PLAYER_READY : NS_AUDIO_PLAYER_LOADING;
+        out->duration = (double)p->frames / NS_AUDIO_DEVICE_RATE;
+        out->position = (double)p->cursor / NS_AUDIO_DEVICE_RATE;
+        out->playing = p->playing ? TRUE : FALSE;
+        out->ended = p->reached_end ? TRUE : FALSE;
+    }
+    audio_unlock();
+    return p != NULL;
 }
 
 void
@@ -1165,7 +1184,7 @@ ns_audio_context_reset(NsAudioContext *context)
     g_atomic_int_inc(&context->generation);
     context_cancel_fetches(context);
     if (g_worker)
-        queue_command(NS_AUDIO_COMMAND_RESET, context, NULL);
+        push_command(NS_AUDIO_OP_RESET, context, NULL, NULL, NULL, 0.0);
 }
 
 void
@@ -1177,7 +1196,7 @@ ns_audio_context_destroy(NsAudioContext *context)
     g_atomic_int_inc(&context->generation);
     context_cancel_fetches(context);
     if (g_worker)
-        queue_command(NS_AUDIO_COMMAND_DESTROY, context, NULL);
+        push_command(NS_AUDIO_OP_DESTROY, context, NULL, NULL, NULL, 0.0);
     else
         context_free(context);
 }
@@ -1187,7 +1206,7 @@ ns_audio_shutdown(void)
 {
     if (!g_worker) return;
     g_atomic_int_set(&g_shutting_down, 1);
-    queue_command(NS_AUDIO_COMMAND_QUIT, NULL, NULL);
+    push_command(NS_AUDIO_OP_QUIT, NULL, NULL, NULL, NULL, 0.0);
     g_thread_join(g_worker);
     g_worker = NULL;
     null_audio_stop();
@@ -1200,13 +1219,9 @@ ns_audio_shutdown(void)
         if (g_players[i].used) player_release(&g_players[i]);
     ns_audio_command *command;
     while ((command = g_async_queue_try_pop(g_commands))) {
-        if (command->type == NS_AUDIO_COMMAND_DESTROY)
+        if (command->op == NS_AUDIO_OP_DESTROY)
             context_free(command->context);
-        g_free(command->line);
-        g_free(command->token);
-        g_free(command->document_url);
-        if (command->bytes) g_bytes_unref(command->bytes);
-        g_free(command);
+        command_free(command);
     }
     g_async_queue_unref(g_commands);
     g_commands = NULL;

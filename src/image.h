@@ -53,6 +53,8 @@ struct ns_image {
     int          anim_total_ms;
     gboolean     anim_paused;
     int          anim_paused_phase_ms;
+    gboolean     anim_loop;
+    gboolean     anim_video;
 };
 
 typedef void (*ns_image_ready_cb)(ns_image *img, gpointer user_data);
@@ -127,6 +129,8 @@ double   ns_image_anim_position(const ns_image *img, gint64 now_us);
 void     ns_image_anim_set_paused(ns_image *img, gboolean paused,
                                   gint64 now_us);
 void     ns_image_anim_seek(ns_image *img, double seconds, gint64 now_us);
+gboolean ns_image_anim_ended(const ns_image *img, gint64 now_us);
+void     ns_image_anim_set_loop(ns_image *img, gboolean loop, gint64 now_us);
 gboolean ns_image_cache_animating(const ns_image_cache *cache);
 gboolean ns_image_cache_has_pending(const ns_image_cache *cache);
 

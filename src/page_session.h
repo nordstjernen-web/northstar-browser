@@ -42,7 +42,6 @@ typedef struct {
     char                *nav;
     char                *camera;
     char                *download;
-    char                *audio;
     int                  clipboard;
 } ns_page_frame;
 

@@ -57,8 +57,8 @@ space.
   It turns input into typed requests (`REQ_LOAD`, `REQ_RENDER`,
   `REQ_CLICK`, `REQ_KEY`, `REQ_SCROLL`, `REQ_PRINT`, …), posts each as a
   job to the engine thread (`enginethread.c`), and receives the matching
-  response — a frame surface plus title, URL, cursor, download, camera and
-  audio side information — back on the GTK main loop. Both ends are in
+  response — a frame surface plus title, URL, cursor, download and camera
+  side information — back on the GTK main loop. Both ends are in
   this process; nothing is serialised.
 - **Engine thread** (`src/gtk/enginethread.c`) — one dedicated thread
   with its own `GMainContext`, so page timers, fetch completions and
@@ -71,7 +71,7 @@ space.
 - **Frame scheduling.** The view does not poll. A wake source on the
   engine context asks the view for a frame only when the page has
   something to show: a DOM mutation, a pending `requestAnimationFrame`, a
-  loaded image, a canvas draw, a scroll, a navigation or an audio command.
+  loaded image, a canvas draw, a scroll or a navigation.
   The view then renders at the next GTK frame-clock tick, and it keeps a
   per-tick callback only while the page animates continuously (CSS
   animations, animated images or video, `requestAnimationFrame` loops,
@@ -84,12 +84,24 @@ space.
   loop, find-in-page, printing and viewport scroll snapping. It is an
   internal interface; the embeddable library API of the full Nordstjernen
   edition is not part of this one.
-- **Audio mixer** (`src/audio/audio.c`) — fetches `<audio>` through
-  `net.c` and decodes it on its own worker thread, and outputs through
-  SDL2. The engine returns
-  `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume` commands with each
-  rendered frame, and the view queues them to a per-view audio context.
-  Without SDL2 the build uses `src/audio/stub.c` and plays nothing.
+- **Media controller** (`js_media.c`) — the `HTMLMediaElement` state
+  machine: resource selection, `networkState`/`readyState`, `paused`,
+  `ended`, `seeking`, `error`, the event sequence from `loadstart` to
+  `ended`, the promise `play()` returns, `loop`, `muted`, `volume` and
+  `autoplay` (muted, video, or after a user gesture). Each element gets a
+  player whose backend is the audio mixer for `<audio>` and the decoded
+  frame timeline for `<video>`. Commands go straight to the backend; the
+  controller polls it every 50 ms while something loads or plays and
+  turns what it reports into events, `timeupdate` every 250 ms. An
+  element removed from the document pauses, a new `src` starts over,
+  and a page parked in the back/forward cache pauses everything.
+- **Audio mixer** (`src/audio/audio.c`) — one worker thread per process
+  fetches `<audio>` through `net.c`, decodes it into memory and mixes
+  every player into the SDL2 device; headless runs use a silent
+  clock-driven output instead. Each page owns an `NsAudioContext`, and
+  `ns_audio_context_status` reports a player's load state, error,
+  duration, position and end synchronously. Without SDL2 the build uses
+  `src/audio/stub.c`, and every player fails as having no device.
 
 ### Headless drivers
 
@@ -228,16 +240,19 @@ GIF produces, so the image cache's fetch, frame timing, repaint
 scheduling and eviction serve video unchanged, and `paint_video` draws
 the current frame (or a dark placeholder for a source it cannot decode).
 
-The media element API drives that timeline rather than sitting beside it.
-`ns_image_anim_duration`, `ns_image_anim_position`,
-`ns_image_anim_set_paused` and `ns_image_anim_seek` are the whole of the
-playback surface, and `duration`, `readyState`, `paused`, `play()`,
-`pause()` and `currentTime` in `src/js.c` resolve through them by looking
-the element's source up in the image cache. Because that cache is keyed by
-URL, two `<video>` elements with the same source share one timeline. A
-clip starts playing and loops whatever its `autoplay` and `loop`
-attributes say; its audio track is not decoded, so this is the muted
-autoplay browsers already permit, and there is no controls UI.
+The media controller (`js_media.c`) drives that timeline rather than
+sitting beside it. `ns_image_anim_duration`, `ns_image_anim_position`,
+`ns_image_anim_set_paused`, `ns_image_anim_seek`,
+`ns_image_anim_set_loop` and `ns_image_anim_ended` are the whole of the
+playback surface, found by looking the element's source up in the image
+cache. Because that cache is keyed by URL, two `<video>` elements with the
+same source share one timeline. A decoded clip waits paused on its first
+frame; the controller starts it when `autoplay` is set or the page calls
+`play()`, and it plays once unless `loop` is set, then fires `ended`. Its
+audio track is not decoded, so video autoplay is always the muted
+autoplay browsers permit, and there is no controls UI. A `<source>` whose
+`type` the build cannot play is skipped, in layout and in the
+controller alike.
 
 Decoding up front bounds a clip rather than streaming it: a clip larger
 than `NS_VIDEO_MAX_DIMENSION` (4096) on either side is rejected, and

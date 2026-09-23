@@ -80,7 +80,6 @@ struct ns_browser {
     char           *pending_nav;
     char           *pending_download;
     char           *pending_clipboard;
-    GString        *pending_audio;
     char           *refresh_url;
     gint64          refresh_due_us;
     char           *pending_post_body;
@@ -831,32 +830,6 @@ browser_js_selection_cmd(const char *command, gpointer ud)
     return ok;
 }
 
-#define NS_PENDING_AUDIO_MAX 15000
-
-static void
-browser_js_audio(const char *command, gpointer ud)
-{
-    ns_browser *b = ud;
-    if (!b || !command || !*command) return;
-    if (g_getenv("NS_DBG_AUDIO"))
-        g_printerr("[audio-cmd] %s\n", command);
-    if (!b->pending_audio) b->pending_audio = g_string_new(NULL);
-    if (b->pending_audio->len + strlen(command) + 1 > NS_PENDING_AUDIO_MAX)
-        return;
-    g_string_append(b->pending_audio, command);
-    g_string_append_c(b->pending_audio, '\n');
-}
-
-char *
-ns_browser_take_pending_audio(ns_browser *browser)
-{
-    if (!browser || !browser->pending_audio ||
-        browser->pending_audio->len == 0)
-        return NULL;
-    char *out = g_strdup(browser->pending_audio->str);
-    g_string_truncate(browser->pending_audio, 0);
-    return out;
-}
 
 int
 ns_browser_init(void)
@@ -1096,7 +1069,6 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_fragment_nav_cb(b->js, browser_js_fragment_navigate, b);
         ns_js_set_soft_nav_cb(b->js, browser_js_soft_navigate, b);
         ns_js_set_download_cb(b->js, browser_js_download, b);
-        ns_js_set_audio_cb(b->js, browser_js_audio, b);
         ns_js_set_clipboard_write_cb(b->js, browser_js_clipboard_write, b);
         ns_js_set_selection_cmd_cb(b->js, browser_js_selection_cmd, b);
         ns_js_add_csp_header(b->js, csp_header);
@@ -1105,6 +1077,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         if (!run_cfg || run_cfg->javascript_enabled)
             ns_js_run_scripts_in_doc(b->js, doc, base, b->doc_charset,
                                      content_type);
+        ns_media_scan(b->js, doc, base);
     }
     g_free(csp_header);
 
@@ -1643,8 +1616,7 @@ ns_browser_needs_frame(ns_browser *browser)
         browser->hover_restyle_pending || browser->pending_scroll)
         return 1;
     if (browser->pending_nav || browser->pending_download ||
-        browser->pending_clipboard ||
-        (browser->pending_audio && browser->pending_audio->len > 0))
+        browser->pending_clipboard)
         return 1;
     if (ns_camera_has_pending_origin()) return 1;
     if (browser->refresh_url && browser->refresh_due_us &&
@@ -3270,8 +3242,10 @@ void
 ns_browser_bfcache_park(ns_browser *browser)
 {
     if (!browser) return;
-    if (browser->js)
+    if (browser->js) {
         ns_js_fire_page_transition(browser->js, "pagehide", TRUE);
+        ns_js_suspend_media(browser->js);
+    }
 }
 
 void
@@ -3317,7 +3291,6 @@ ns_browser_close(ns_browser *browser)
     g_free(browser->pending_nav);
     g_free(browser->pending_download);
     g_free(browser->pending_clipboard);
-    if (browser->pending_audio) g_string_free(browser->pending_audio, TRUE);
     g_free(browser->refresh_url);
     g_free(browser->pending_post_body);
     g_free(browser->pending_post_ct);

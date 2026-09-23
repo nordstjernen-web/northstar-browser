@@ -373,7 +373,6 @@ ns_page_frame_clear(ns_page_frame *frame)
     free(frame->nav);
     free(frame->camera);
     free(frame->download);
-    free(frame->audio);
     memset(frame, 0, sizeof *frame);
 }
 
@@ -468,7 +467,6 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     scrub_line_breaks(out->camera);
     out->download = empty_to_null(ns_browser_take_pending_download(s->cur));
     scrub_line_breaks(out->download);
-    out->audio = empty_to_null(ns_browser_take_pending_audio(s->cur));
     out->animating = ns_browser_continuous(s->cur) ? 1 : 0;
     out->caret_blinking = ns_browser_caret_blinking(s->cur) ? 1 : 0;
     out->clipboard = ns_browser_has_pending_clipboard(s->cur) ? 1 : 0;

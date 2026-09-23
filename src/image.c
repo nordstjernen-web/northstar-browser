@@ -412,14 +412,16 @@ typedef struct {
     GArray     *frames;
     int         w;
     int         h;
+    gboolean    video;
 } ns_img_decoded;
 
 static ns_img_decoded
 ns_image_decode_body(const guchar *data, gsize len)
 {
-    ns_img_decoded d = { NULL, NULL, 0, 0 };
+    ns_img_decoded d = { NULL, NULL, 0, 0, FALSE };
     int w = 0, h = 0;
     GArray *frames = NULL;
+    d.video = ns_video_bytes_are_mpeg1(data, len);
     GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
     if (pixel_frames) {
         frames = ns_image_anim_frames_from_pixels(pixel_frames, &w, &h, NULL);
@@ -458,6 +460,10 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
             total += g_array_index(d->frames, ns_image_anim_frame, i).delay_ms;
         img->anim_total_ms = (int)CLAMP(total, 1, G_MAXINT / 2);
         img->anim_start_us = g_get_monotonic_time();
+        img->anim_video = d->video;
+        img->anim_loop = !d->video;
+        img->anim_paused = d->video;
+        img->anim_paused_phase_ms = 0;
         img->loaded = TRUE;
     } else if (d->tex) {
         img->texture = d->tex;
@@ -523,7 +529,7 @@ on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
         ns_decode_job_free(job);
         return;
     }
-    ns_img_decoded result = { NULL, NULL, 0, 0 };
+    ns_img_decoded result = { NULL, NULL, 0, 0, FALSE };
     if (d) {
         result = *d;
         g_free(d);
@@ -755,7 +761,27 @@ ns_image_anim_phase_ms(const ns_image *img, gint64 now_us)
     if (img->anim_paused) return img->anim_paused_phase_ms;
     gint64 elapsed_ms = (now_us - img->anim_start_us) / 1000;
     if (elapsed_ms < 0) elapsed_ms = 0;
+    if (!img->anim_loop)
+        return (int)MIN(elapsed_ms, (gint64)img->anim_total_ms);
     return (int)(elapsed_ms % img->anim_total_ms);
+}
+
+gboolean
+ns_image_anim_ended(const ns_image *img, gint64 now_us)
+{
+    return ns_image_is_animation(img) && !img->anim_loop &&
+           ns_image_anim_phase_ms(img, now_us) >= img->anim_total_ms;
+}
+
+void
+ns_image_anim_set_loop(ns_image *img, gboolean loop, gint64 now_us)
+{
+    if (!ns_image_is_animation(img) || img->anim_loop == loop) return;
+    int phase = ns_image_anim_phase_ms(img, now_us);
+    img->anim_loop = loop;
+    if (loop) phase %= img->anim_total_ms;
+    if (img->anim_paused) img->anim_paused_phase_ms = phase;
+    else img->anim_start_us = now_us - (gint64)phase * 1000;
 }
 
 double
@@ -783,8 +809,10 @@ ns_image_anim_seek(ns_image *img, double seconds, gint64 now_us)
     if (!ns_image_is_animation(img)) return;
     if (!(seconds >= 0.0)) seconds = 0.0;
     double total_s = img->anim_total_ms / 1000.0;
-    if (seconds > total_s) seconds = fmod(seconds, total_s);
-    int phase = (int)(seconds * 1000.0) % img->anim_total_ms;
+    if (seconds > total_s)
+        seconds = img->anim_loop ? fmod(seconds, total_s) : total_s;
+    int phase = (int)(seconds * 1000.0);
+    if (img->anim_loop) phase %= img->anim_total_ms;
     if (img->anim_paused) img->anim_paused_phase_ms = phase;
     else img->anim_start_us = now_us - (gint64)phase * 1000;
 }
@@ -832,9 +860,12 @@ ns_image_cache_animating(const ns_image_cache *cache)
     GHashTableIter it;
     gpointer key, value;
     g_hash_table_iter_init(&it, cache->by_url);
+    gint64 now = g_get_monotonic_time();
     while (g_hash_table_iter_next(&it, &key, &value)) {
         const ns_image *img = value;
-        if (ns_image_is_animation(img) && !img->anim_paused) return TRUE;
+        if (ns_image_is_animation(img) && !img->anim_paused &&
+            !ns_image_anim_ended(img, now))
+            return TRUE;
     }
     return FALSE;
 }

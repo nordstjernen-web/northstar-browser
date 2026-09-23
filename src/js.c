@@ -238,7 +238,6 @@ static JSValue ns_document_element_from_point(JSContext *ctx,
 static JSValue ns_document_elements_from_point(JSContext *ctx,
                                                JSValueConst this_val,
                                                int argc, JSValueConst *argv);
-static void ns_js_emit_audio(ns_js *js, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 static ns_worker_host *ns_sw_controller_for(ns_js *js, const char *abs_url);
 static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
                                      const char *url, const char *method,
@@ -281,7 +280,6 @@ static void ns_text_selection_set_state(JSContext *ctx,
                                         const char *direction);
 static void ns_js_process_pending_iframes(ns_js *js);
 static GBytes *ns_js_blob_url_lookup(ns_js *js, const char *url, char **out_type);
-static void ns_media_blob_updated(ns_js *js, const char *url);
 static void ns_js_record_child_change(ns_js *js, ns_node *parent,
                                       ns_node *added, ns_node *removed,
                                       ns_node *previous_sibling, ns_node *next_sibling);
@@ -349,8 +347,6 @@ static JSValue ns_window_url_create_object(JSContext *ctx, JSValueConst this_val
 static JSValue ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
 static const char *ns_http_status_text(int status);
-static gboolean ns_node_is_media_element(const ns_node *n);
-static char *ns_media_resolve_src(JSContext *ctx, ns_node *node);
 static void ns_attach_body_consumers(JSContext *ctx, JSValueConst obj);
 static void ns_set_instance_proto(JSContext *ctx, JSValueConst object,
                                   const char *constructor_name);
@@ -1087,7 +1083,6 @@ ns_js_attach_idle(ns_js *js, GSourceFunc func, gpointer data)
 static void ns_storage_drain_deferred_events(ns_js *js);
 static void ns_js_report_pending_rejections(ns_js *js);
 static void ns_js_drop_pending_rejections(ns_js *js);
-static void ns_drain_microtasks(ns_js *js);
 
 #define NS_MICROTASK_SLICE_US 8000
 #define NS_MICROTASK_SLICE_JOBS 256
@@ -1111,7 +1106,7 @@ ns_schedule_microtask_drain(ns_js *js)
         ns_js_attach_idle(js, ns_microtask_drain_idle, js);
 }
 
-static void
+void
 ns_drain_microtasks(ns_js *js)
 {
     if (!js || js->halted || js->draining_microtasks) return;
@@ -1920,8 +1915,6 @@ class_attr_contains(const char *cls, const char *token, gsize tlen,
     return FALSE;
 }
 
-static JSValue ns_throw_dom_exception(JSContext *ctx, const char *name,
-                                      int code, const char *message);
 
 static int
 ns_tlist_validate(JSContext *ctx, const char *token)
@@ -3343,6 +3336,8 @@ ns_invalidate_wrapper(ns_node *n)
         g_hash_table_remove(js->orphan_nodes, n);
     if (js && js->js_image_loads)
         g_hash_table_remove(js->js_image_loads, n);
+    if (js && js->media_players)
+        ns_media_node_released(js, n);
     n->js_invalidate = NULL;
 
     if (js && js->listeners) {
@@ -9216,7 +9211,7 @@ ns_event_composed_path(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
 static void ns_js_emit(ns_js *js, const char *prefix, JSContext *ctx,
                        int argc, JSValueConst *argv);
 
-static JSValue
+JSValue
 ns_returns_resolved_undefined(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
@@ -9509,7 +9504,7 @@ ns_navigator_get_battery(JSContext *ctx, JSValueConst this_val,
     return ns_promise_resolve_take(ctx, battery);
 }
 
-static JSValue
+JSValue
 ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
                        const char *message)
 {
@@ -9532,7 +9527,7 @@ ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
     return JS_Throw(ctx, err);
 }
 
-static JSValue
+JSValue
 ns_promise_reject_dom(JSContext *ctx, const char *name, const char *message)
 {
     JSValue resolvers[2];
@@ -38695,22 +38690,6 @@ ns_js_image_origin_clean(ns_js *js, JSContext *ctx, const ns_image *im)
     return ns_js_urls_same_origin(url, ns_js_ctx_document_url(js, ctx));
 }
 
-static ns_image *
-ns_media_animation_for(JSContext *ctx, JSValueConst this_val)
-{
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (!ns_node_is_media_element(el)) return NULL;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->image_cache) return NULL;
-    ns_image *img = (ns_image *)ns_js_image_for_node(js, el);
-    if (!ns_image_is_animation(img)) {
-        char *url = ns_media_resolve_src(ctx, el);
-        img = url ? ns_image_cache_peek(js->image_cache, url) : NULL;
-        g_free(url);
-    }
-    return ns_image_is_animation(img) ? img : NULL;
-}
-
 
 
 
@@ -39789,198 +39768,6 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
 
 
 static JSValue
-ns_media_get_paused(JSContext *ctx, JSValueConst this_val)
-{
-    const ns_image *anim = ns_media_animation_for(ctx, this_val);
-    if (anim) return JS_NewBool(ctx, anim->anim_paused);
-    JSValue playing_v = JS_GetPropertyStr(ctx, this_val, "_nd_playing");
-    gboolean playing = JS_ToBool(ctx, playing_v);
-    JS_FreeValue(ctx, playing_v);
-    return JS_NewBool(ctx, !playing);
-}
-
-static JSValue
-ns_media_get_readyState(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_readyState");
-    int32_t rs = 0;
-    if (!JS_IsUndefined(v)) JS_ToInt32(ctx, &rs, v);
-    JS_FreeValue(ctx, v);
-    if (rs == 0 && ns_media_animation_for(ctx, this_val)) rs = 4;
-    return JS_NewInt32(ctx, rs);
-}
-
-static JSValue
-ns_media_get_networkState(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_networkState");
-    int32_t nst = 0;
-    if (!JS_IsUndefined(v)) JS_ToInt32(ctx, &nst, v);
-    JS_FreeValue(ctx, v);
-    return JS_NewInt32(ctx, nst);
-}
-
-static char *
-ns_media_resolve_src(JSContext *ctx, ns_node *node)
-{
-    if (!node) return NULL;
-    const char *src = ns_element_get_attr(node, "src");
-    if (!src || !*src) {
-        for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
-            if (ns_node_is_element_named(c, "source")) {
-                const char *ss = ns_element_get_attr(c, "src");
-                if (ss && *ss) { src = ss; break; }
-            }
-        }
-    }
-    if (!src || !*src) return NULL;
-    ns_js *js = js_from_ctx(ctx);
-    char *abs = (js && js->current_url) ? ns_url_resolve(js->current_url, src)
-                                        : g_strdup(src);
-    if (!abs) return NULL;
-    char *upgraded = NULL;
-    ns_fetch_verdict verdict = ns_fetch_policy_check(
-        js ? ns_js_fetch_policy(js, node) : NULL, NS_FETCH_DEST_MEDIA,
-        js ? js->current_url : NULL, abs, &upgraded);
-    if (ns_fetch_verdict_blocks(verdict)) {
-        char *message = ns_fetch_verdict_message(verdict, NS_FETCH_DEST_MEDIA,
-                                                 abs);
-        ns_js_console_policy_refusal(js, message);
-        g_free(message);
-        g_free(abs);
-        return NULL;
-    }
-    if (upgraded) {
-        g_free(abs);
-        return upgraded;
-    }
-    return abs;
-}
-
-static void
-ns_media_blob_updated_node(ns_js *js, ns_node *node, const char *url,
-                           int depth)
-{
-    if (!node || depth >= 512) return;
-    if (ns_node_is_element_named(node, "audio")) {
-        char *src = ns_media_resolve_src(js->ctx, node);
-        gboolean matches = src && strcmp(src, url) == 0;
-        g_free(src);
-        if (matches) {
-            JSValue element = ns_make_element(js->ctx, node);
-            JSValue opened = JS_GetPropertyStr(js->ctx, element,
-                                               "_nd_audio_opened");
-            if (JS_ToBool(js->ctx, opened)) {
-                JSValue token = JS_GetPropertyStr(js->ctx, element,
-                                                  "_nd_audio_token");
-                if (JS_IsString(token)) {
-                    const char *value = JS_ToCString(js->ctx, token);
-                    if (value) {
-                        ns_js_emit_audio(js, "reload %s %s", value, url);
-                        JS_FreeCString(js->ctx, value);
-                    }
-                }
-                JS_FreeValue(js->ctx, token);
-            }
-            JS_FreeValue(js->ctx, opened);
-            JS_FreeValue(js->ctx, element);
-        }
-    }
-    for (ns_node *child = node->first_child; child;
-         child = child->next_sibling)
-        ns_media_blob_updated_node(js, child, url, depth + 1);
-}
-
-static void
-ns_media_blob_updated(ns_js *js, const char *url)
-{
-    if (!js || !js->current_doc || !url) return;
-    ns_media_blob_updated_node(js, js->current_doc, url, 0);
-}
-
-static char *
-ns_media_token(JSContext *ctx, ns_node *node)
-{
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !node) return NULL;
-    JSValue v = ns_make_element(ctx, node);
-    JSValue tv = JS_GetPropertyStr(ctx, v, "_nd_audio_token");
-    char *token = NULL;
-    if (JS_IsString(tv)) {
-        const char *s = JS_ToCString(ctx, tv);
-        token = g_strdup(s);
-        JS_FreeCString(ctx, s);
-    } else {
-        token = g_strdup_printf("a%u", ++js->next_audio_token);
-        JS_SetPropertyStr(ctx, v, "_nd_audio_token", JS_NewString(ctx, token));
-    }
-    JS_FreeValue(ctx, tv);
-    JS_FreeValue(ctx, v);
-    return token;
-}
-
-static JSValue
-ns_media_play(JSContext *ctx, JSValueConst this_val,
-              int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_TRUE);
-    JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    ns_js *js = js_from_ctx(ctx);
-    if (el && js) {
-        ns_js_dispatch_event(js, el, "play", NULL);
-        ns_image *anim = ns_media_animation_for(ctx, this_val);
-        if (anim) {
-            ns_image_anim_set_paused(anim, FALSE, g_get_monotonic_time());
-            ns_js_request_repaint(js);
-        }
-        char *url = ns_media_resolve_src(ctx, el);
-        gboolean audio_element = ns_node_is_element_named(el, "audio");
-        if (url && js->audio_cb && audio_element) {
-            char *token = ns_media_token(ctx, el);
-            JSValue opened = JS_GetPropertyStr(ctx, this_val, "_nd_audio_opened");
-            gboolean already = JS_ToBool(ctx, opened);
-            JS_FreeValue(ctx, opened);
-            if (!already) {
-                ns_js_emit_audio(js, "open %s %s", token, url);
-                JS_SetPropertyStr(ctx, this_val, "_nd_audio_opened", JS_TRUE);
-            }
-            ns_js_emit_audio(js, "play %s", token);
-            g_free(token);
-        } else {
-            ns_js_dispatch_event(js, el, "playing", NULL);
-        }
-        g_free(url);
-    }
-    return ns_returns_resolved_undefined(ctx, this_val, 0, NULL);
-}
-
-static JSValue
-ns_media_get_current_time(JSContext *ctx, JSValueConst this_val)
-{
-    const ns_image *anim = ns_media_animation_for(ctx, this_val);
-    if (anim)
-        return JS_NewFloat64(ctx,
-            ns_image_anim_position(anim, g_get_monotonic_time()));
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_pos");
-    if (JS_IsNumber(v)) return v;
-    JS_FreeValue(ctx, v);
-    return JS_NewFloat64(ctx, 0.0);
-}
-
-static JSValue
-ns_media_get_duration(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_duration");
-    if (JS_IsNumber(v)) return v;
-    JS_FreeValue(ctx, v);
-    const ns_image *anim = ns_media_animation_for(ctx, this_val);
-    if (anim) return JS_NewFloat64(ctx, ns_image_anim_duration(anim));
-    return JS_NewFloat64(ctx, NAN);
-}
-
-static JSValue
 ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv, int magic,
                     JSValue *func_data)
@@ -39997,7 +39784,7 @@ ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
     return JS_NewFloat64(ctx, magic == 0 ? 0.0 : dur);
 }
 
-static void
+void
 ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj, const char *iface)
 {
     JSValue global = JS_GetGlobalObject(ctx);
@@ -40011,7 +39798,7 @@ ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj, const char *iface)
     JS_FreeValue(ctx, global);
 }
 
-static JSValue
+JSValue
 ns_media_time_ranges_for(JSContext *ctx, double dur)
 {
     int len = dur > 0 ? 1 : 0;
@@ -40026,65 +39813,6 @@ ns_media_time_ranges_for(JSContext *ctx, double dur)
     JS_FreeValue(ctx, data[0]);
     JS_FreeValue(ctx, data[1]);
     return obj;
-}
-
-static double
-ns_media_prop_number(JSContext *ctx, JSValueConst this_val, const char *name)
-{
-    double out = 0;
-    JSValue v = JS_GetPropertyStr(ctx, this_val, name);
-    if (JS_IsNumber(v)) JS_ToFloat64(ctx, &out, v);
-    JS_FreeValue(ctx, v);
-    if (isnan(out) || out <= 0) out = 0;
-    return out;
-}
-
-static JSValue
-ns_media_get_seekable_ranges(JSContext *ctx, JSValueConst this_val)
-{
-    return ns_media_time_ranges_for(ctx,
-        ns_media_prop_number(ctx, this_val, "_nd_duration"));
-}
-
-static JSValue
-ns_media_get_buffered_ranges(JSContext *ctx, JSValueConst this_val)
-{
-    double end = ns_media_prop_number(ctx, this_val, "_nd_buffered");
-    return ns_media_time_ranges_for(ctx, end);
-}
-
-static JSValue
-ns_media_get_played_ranges(JSContext *ctx, JSValueConst this_val)
-{
-    (void)this_val;
-    return ns_media_time_ranges_for(ctx, 0);
-}
-
-static JSValue
-ns_media_get_ended(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_ended");
-    gboolean ended = JS_ToBool(ctx, v);
-    JS_FreeValue(ctx, v);
-    return JS_NewBool(ctx, ended);
-}
-
-static gboolean
-ns_node_is_media_element(const ns_node *n)
-{
-    return n && n->kind == NS_NODE_ELEMENT && n->name &&
-           (g_ascii_strcasecmp(n->name, "video") == 0 ||
-            g_ascii_strcasecmp(n->name, "audio") == 0);
-}
-
-static JSValue
-ns_media_get_error(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_error");
-    if (JS_IsObject(v)) return v;
-    JS_FreeValue(ctx, v);
-    const ns_node *n = ns_unwrap_element(this_val);
-    return ns_node_is_media_element(n) ? JS_NULL : JS_UNDEFINED;
 }
 
 static JSValue
@@ -40156,173 +39884,12 @@ ns_media_set_defaultPlaybackRate(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_media_load(JSContext *ctx, JSValueConst this_val,
-              int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (!ns_node_is_media_element(el)) return JS_UNDEFINED;
-    JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, 0.0));
-    JS_SetPropertyStr(ctx, this_val, "_nd_duration", JS_UNDEFINED);
-    JS_SetPropertyStr(ctx, this_val, "_nd_buffered", JS_UNDEFINED);
-    JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
-    JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_FALSE);
-    JS_SetPropertyStr(ctx, this_val, "_nd_error", JS_UNDEFINED);
-    JS_SetPropertyStr(ctx, this_val, "_nd_readyState", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, this_val, "_nd_networkState", JS_NewInt32(ctx, 2));
-    JS_DefinePropertyValueStr(ctx, this_val, "readyState",
-                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, this_val, "videoWidth",
-                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, this_val, "videoHeight",
-                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
-    ns_js *js = js_from_ctx(ctx);
-    if (js && el) {
-        ns_js_dispatch_event(js, el, "emptied", NULL);
-        ns_js_dispatch_event(js, el, "loadstart", NULL);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_get_volume(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_volume");
-    if (JS_IsNumber(v)) return v;
-    JS_FreeValue(ctx, v);
-    return JS_NewFloat64(ctx, 1.0);
-}
-
-static JSValue
-ns_media_set_volume(JSContext *ctx, JSValueConst this_val, JSValueConst val)
-{
-    double vol = 1.0;
-    if (JS_ToFloat64(ctx, &vol, val)) return JS_EXCEPTION;
-    if (isnan(vol)) vol = 1.0;
-    if (vol < 0) vol = 0;
-    if (vol > 1) vol = 1;
-    JS_SetPropertyStr(ctx, this_val, "_nd_volume", JS_NewFloat64(ctx, vol));
-    ns_js *js = js_from_ctx(ctx);
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (js && el) {
-        if (js->audio_cb) {
-            JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-            if (JS_IsString(tv)) {
-                const char *token = JS_ToCString(ctx, tv);
-                if (token) {
-                    ns_js_emit_audio(js, "volume %s %.3f", token, vol);
-                    JS_FreeCString(ctx, token);
-                }
-            }
-            JS_FreeValue(ctx, tv);
-        }
-        ns_js_dispatch_event(js, el, "volumechange", NULL);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_get_muted(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_muted");
-    if (!JS_IsUndefined(v)) {
-        gboolean m = JS_ToBool(ctx, v) ? TRUE : FALSE;
-        JS_FreeValue(ctx, v);
-        return JS_NewBool(ctx, m);
-    }
-    JS_FreeValue(ctx, v);
-    const ns_node *n = ns_unwrap_element(this_val);
-    return JS_NewBool(ctx, n && ns_element_get_attr(n, "muted") != NULL);
-}
-
-static JSValue
-ns_media_set_muted(JSContext *ctx, JSValueConst this_val, JSValueConst val)
-{
-    gboolean m = JS_ToBool(ctx, val) ? TRUE : FALSE;
-    JS_SetPropertyStr(ctx, this_val, "_nd_muted", JS_NewBool(ctx, m));
-    ns_js *js = js_from_ctx(ctx);
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (js && el) {
-        if (js->audio_cb) {
-            JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-            if (JS_IsString(tv)) {
-                const char *token = JS_ToCString(ctx, tv);
-                if (token) {
-                    double vol = 0.0;
-                    if (!m) {
-                        JSValue vv = JS_GetPropertyStr(ctx, this_val, "_nd_volume");
-                        if (JS_IsNumber(vv)) JS_ToFloat64(ctx, &vol, vv);
-                        else vol = 1.0;
-                        JS_FreeValue(ctx, vv);
-                    }
-                    ns_js_emit_audio(js, "volume %s %.3f", token, vol);
-                    JS_FreeCString(ctx, token);
-                }
-            }
-            JS_FreeValue(ctx, tv);
-        }
-        ns_js_dispatch_event(js, el, "volumechange", NULL);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
-                          JSValueConst val)
-{
-    double t = 0.0;
-    if (JS_ToFloat64(ctx, &t, val)) return JS_EXCEPTION;
-    if (isnan(t) || t < 0.0) t = 0.0;
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    ns_js *js = js_from_ctx(ctx);
-    if (!el || !js) return JS_UNDEFINED;
-    gboolean handled = FALSE;
-    ns_image *anim = ns_media_animation_for(ctx, this_val);
-    if (anim) {
-        ns_image_anim_seek(anim, t, g_get_monotonic_time());
-        ns_js_request_repaint(js);
-        handled = TRUE;
-    }
-    if (!handled && js->audio_cb) {
-        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-        if (JS_IsString(tv)) {
-            const char *token = JS_ToCString(ctx, tv);
-            if (token) {
-                ns_js_emit_audio(js, "seek %s %.3f", token, t);
-                handled = TRUE;
-                JS_FreeCString(ctx, token);
-            }
-        }
-        JS_FreeValue(ctx, tv);
-    }
-    JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, t));
-    if (handled) {
-        JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
-        ns_js_dispatch_event(js, el, "seeking", NULL);
-        ns_js_dispatch_event(js, el, "timeupdate", NULL);
-        ns_js_dispatch_event(js, el, "seeked", NULL);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_fast_seek(JSContext *ctx, JSValueConst this_val,
-                   int argc, JSValueConst *argv)
-{
-    if (argc < 1) return JS_UNDEFINED;
-    return ns_media_set_current_time(ctx, this_val, argv[0]);
-}
-
-static JSValue
 ns_media_get_video_playback_quality(JSContext *ctx, JSValueConst this_val,
                                     int argc, JSValueConst *argv)
 {
     (void)argc;
     (void)argv;
-    double pos = 0;
-    JSValue pv = JS_GetPropertyStr(ctx, this_val, "_nd_pos");
-    if (JS_IsNumber(pv)) JS_ToFloat64(ctx, &pos, pv);
-    JS_FreeValue(ctx, pv);
+    double pos = ns_media_position(ctx, this_val);
     JSValue q = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, q, "creationTime",
                       JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
@@ -40359,28 +39926,6 @@ ns_media_set_srcObject(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     }
     if (el && js && is_cam)
         ns_js_dispatch_event(js, el, "loadedmetadata", NULL);
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_media_pause(JSContext *ctx, JSValueConst this_val,
-               int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_FALSE);
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    ns_js *js = js_from_ctx(ctx);
-    if (el && js) {
-        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
-        if (JS_IsString(tv)) {
-            const char *token = JS_ToCString(ctx, tv);
-            if (token) { ns_js_emit_audio(js, "pause %s", token); JS_FreeCString(ctx, token); }
-        }
-        JS_FreeValue(ctx, tv);
-        ns_js_dispatch_event(js, el, "pause", NULL);
-        ns_image *anim = ns_media_animation_for(ctx, this_val);
-        if (anim) ns_image_anim_set_paused(anim, TRUE, g_get_monotonic_time());
-    }
     return JS_UNDEFINED;
 }
 
@@ -41463,7 +41008,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("duration",          ns_media_get_duration,            ns_element_noop_set),
     JS_CGETSET_DEF("paused",            ns_media_get_paused,              ns_element_noop_set),
     JS_CGETSET_DEF("ended",             ns_media_get_ended,               ns_element_noop_set),
-    JS_CGETSET_DEF("seeking",           ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("seeking",           ns_media_get_seeking,             ns_element_noop_set),
     JS_CGETSET_DEF("volume",            ns_media_get_volume,              ns_media_set_volume),
     JS_CGETSET_DEF("playbackRate",      ns_media_get_playbackRate,        ns_media_set_playbackRate),
     JS_CGETSET_DEF("defaultPlaybackRate", ns_media_get_defaultPlaybackRate, ns_media_set_defaultPlaybackRate),
@@ -41484,8 +41029,8 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("isContentEditable", ns_element_get_isContentEditable,  ns_element_noop_set),
     JS_CGETSET_DEF("translate",         ns_element_get_translate,         ns_element_set_translate),
     JS_CGETSET_DEF("offsetParent",      ns_element_get_offsetParent,      ns_element_noop_set),
-    JS_CGETSET_DEF("videoWidth",        ns_element_get_zero_int,          ns_element_noop_set),
-    JS_CGETSET_DEF("videoHeight",       ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("videoWidth",        ns_media_get_video_width,         ns_element_noop_set),
+    JS_CGETSET_DEF("videoHeight",       ns_media_get_video_height,        ns_element_noop_set),
     JS_CGETSET_DEF("srcObject",         ns_media_get_srcObject,           ns_media_set_srcObject),
     JS_CGETSET_DEF("clientInformation", ns_element_get_null,              ns_element_noop_set),
     JS_CFUNC_DEF("decode",            0, ns_returns_resolved_undefined),
@@ -44141,6 +43686,7 @@ static void
 ns_ce_disconnect_subtree(ns_js *js, ns_node *root)
 {
     ns_ce_disconnect_subtree_rec(js, root, 0);
+    ns_media_subtree_disconnected(js, root);
 }
 
 static JSValue
@@ -44222,6 +43768,7 @@ ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root)
 {
     if (!ns_ce_node_connected(js, root)) return;
     ns_ce_upgrade_subtree_all_rec(js, root, 0);
+    ns_media_subtree_connected(js, root);
 }
 
 static void
@@ -44234,6 +43781,8 @@ static void
 ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
                    const char *old_value, const char *new_value)
 {
+    if (js && node && attr && ns_node_is_media_element(node))
+        ns_media_attr_changed(js, node, attr);
     if (!js || !node || !node->js_wrapper || !attr) return;
     if (js->ce_in_attr_callback) return;
     JSContext *ctx = js->ctx;
@@ -50815,6 +50364,7 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    ns_media_teardown(js);
     ns_font_remove_idle_cb(ns_js_fonts_idle, js);
     if (js->font_ready_resolvers) {
         for (guint i = 0; i < js->font_ready_resolvers->len; i++)
@@ -54522,14 +54072,6 @@ ns_js_set_download_cb(ns_js *js, ns_js_download_cb cb, gpointer user_data)
 }
 
 void
-ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->audio_cb = cb;
-    js->audio_user_data = user_data;
-}
-
-void
 ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
                              gpointer user_data)
 {
@@ -54584,18 +54126,6 @@ ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb, gpointer user_data)
     if (!js) return;
     js->soft_nav_cb = cb;
     js->soft_nav_user_data = user_data;
-}
-
-static void
-ns_js_emit_audio(ns_js *js, const char *fmt, ...)
-{
-    if (!js || !js->audio_cb || !fmt) return;
-    va_list ap;
-    va_start(ap, fmt);
-    char *cmd = g_strdup_vprintf(fmt, ap);
-    va_end(ap);
-    js->audio_cb(cmd, js->audio_user_data);
-    g_free(cmd);
 }
 
 void
