@@ -47,6 +47,39 @@ Significant changes in each release:
   types it acts on (stylesheet, icon, preload, modulepreload, ...),
   while `<a>`, `<area>` and `<form>` report only `noopener`,
   `noreferrer` and `opener`; `<form>` now has a `relList`.
+* Absolutely positioned children of flex containers land where they
+  should. One with `margin: auto` and no `left`/`right` sat 40px in from
+  its static position instead of at it (auto margins only centre a box
+  between two insets), `align-self: baseline` and `last baseline` put it
+  at the wrong edge of a `wrap-reverse` line, and in a wrapping container
+  whose lines are stretched by `align-content`, `flex-end` and `center`
+  items stayed at the top of the taller line.
+* A float in a column too narrow for it is as wide as its longest word
+  or widest unbreakable child, like in other browsers, instead of being
+  squeezed below it so that its content spills out of its border. A
+  child with `width: 0` also counts as zero wide when its parent shrinks
+  to fit, rather than as wide as its content.
+* `min-content`, `max-content`, `fit-content` and `stretch` work in
+  `min-width`/`max-width` and `min-height`/`max-height` as well as in
+  `width`/`height`, on inline-blocks, floats, flex items and absolutely
+  positioned boxes. The width keywords measured a box that had a pixel
+  `width` of its own as that width -- so `width: 0; min-width:
+  min-content` stayed 0 and `width: 500px; max-width: max-content`
+  stayed 500px -- the height keywords were ignored, and a flex item's
+  `width: min-content` or `max-width: fit-content` was sized from its
+  max-content width. A flex item with a `min-content` or `max-content`
+  height is no longer stretched to the line.
+* A `<fieldset>`'s `<legend>` sits in the frame's top border, the way
+  every browser draws it, instead of being a full-width line of text
+  inside the frame. The legend is shrink-wrapped to its text whatever
+  its `display`, its border box is centred on the top border, the
+  border is left out behind it, and the fieldset's content starts below
+  whichever of the two reaches further down. `align="center"` /
+  `"right"` (mapped to `justify-self`), `justify-self` and auto margins
+  place it along the border, and a right-to-left fieldset starts it on
+  the right. Content written before the legend in the source now joins
+  the text after it, and a fieldset, like its rendered legend, contains
+  its floats.
 * A type selector that follows another simple selector in a compound
   (`[foo]i`, `.a*`) is a parse error instead of silently matching, and
   `selectorText` / `cssText` drop comments and write an attribute
