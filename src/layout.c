@@ -4158,7 +4158,6 @@ build_image_box(const ns_node *n)
         box->content_width <= 0 && box->content_height <= 0) {
         box->content_width = 200;
         box->content_height = 150;
-        m->placeholder_image_size = TRUE;
     }
     return box;
 }
@@ -6731,7 +6730,6 @@ layout_image(ns_box *box, double parent_content_width)
     const ns_css_value *mnh = box->style ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
 
     gboolean declared_size = box->media && box->media->declared_image_size;
-    gboolean placeholder_size = box->media && box->media->placeholder_image_size;
     const char *parent_flex_dir = box->parent
         ? keyword_or(box->parent->style, NS_CSS_FLEX_DIRECTION, "row") : "row";
     gboolean flex_row_item = box->parent &&
@@ -6803,9 +6801,6 @@ layout_image(ns_box *box, double parent_content_width)
     gboolean ratio_overrides = specified_ratio > 0 &&
         (!ratio_with_auto || intrinsic_ratio <= 0);
     if (ratio_overrides) intrinsic_ratio = specified_ratio;
-    if (box->media)
-        box->media->size_independent_of_image =
-            (w >= 0 && h >= 0) || declared_size || placeholder_size;
 
     gboolean metadata_video =
         box->kind == NS_BOX_VIDEO && node_has_media_metadata(box->dom);

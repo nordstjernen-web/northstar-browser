@@ -651,28 +651,26 @@ ns_html_assign_script_positions(ns_node *root, const char *input, size_t len)
 {
     if (!root || !input) return;
     GArray *lines = g_array_new(FALSE, FALSE, sizeof(int));
-    GArray *cols  = g_array_new(FALSE, FALSE, sizeof(int));
-    int line = 1, col = 1;
+    int line = 1;
     size_t i = 0;
     while (i < len) {
         if (input[i] == '<' && i + 7 <= len &&
             g_ascii_strncasecmp(input + i, "<script", 7) == 0 &&
             (i + 7 == len || !g_ascii_isalnum(input[i + 7]))) {
             size_t j = i;
-            int l = line, c = col;
+            int l = line;
             while (j < len && input[j] != '>') {
-                if (input[j] == '\n') { l++; c = 1; } else c++;
+                if (input[j] == '\n') l++;
                 j++;
             }
             if (j < len) {
-                c++; j++;
                 g_array_append_val(lines, l);
-                g_array_append_val(cols, c);
-                line = l; col = c; i = j;
+                line = l;
+                i = j + 1;
                 continue;
             }
         }
-        if (input[i] == '\n') { line++; col = 1; } else col++;
+        if (input[i] == '\n') line++;
         i++;
     }
     GPtrArray *elems = g_ptr_array_new();
@@ -681,11 +679,9 @@ ns_html_assign_script_positions(ns_node *root, const char *input, size_t len)
     for (guint k = 0; k < m; k++) {
         ns_node *e = g_ptr_array_index(elems, k);
         e->src_line = g_array_index(lines, int, k);
-        e->src_col  = g_array_index(cols, int, k);
     }
     g_ptr_array_free(elems, TRUE);
     g_array_free(lines, TRUE);
-    g_array_free(cols, TRUE);
 }
 
 ns_node *

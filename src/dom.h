@@ -107,7 +107,6 @@ struct ns_node {
     guint32 flags;
 
     int src_line;
-    int src_col;
 
     struct ns_node *tpl_content;
 };

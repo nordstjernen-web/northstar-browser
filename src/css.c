@@ -6647,7 +6647,6 @@ gradient_parse_prelude(ns_gradient_parse *gp, char **tok, int n)
         if (token_eq(t, "circle") || token_eq(t, "ellipse")) {
             if (seen_shape) return FALSE;
             gr->circle = token_eq(t, "circle");
-            gr->shape_explicit = TRUE;
             seen_shape = TRUE;
             i++;
             continue;
@@ -9098,12 +9097,11 @@ parse_anim_longhand(ns_css_prop prop, const char *t)
 }
 
 static void
-anim_entry_init(ns_css_anim_entry *e, gboolean is_animation)
+anim_entry_init(ns_css_anim_entry *e)
 {
     memset(e, 0, sizeof *e);
-    e->target = is_animation ? NS_CSS_ANIM_TARGET_ALL : NS_CSS_ANIM_TARGET_ALL;
+    e->target = NS_CSS_ANIM_TARGET_ALL;
     e->timing = (ns_css_timing){ .kind = NS_CSS_TIMING_EASE };
-    e->iter_count = 1;
     e->iterations = 1;
 }
 
@@ -9171,12 +9169,10 @@ anim_apply_longhand(ns_css_anim_list *out, const ns_css_value *v, ns_css_prop pr
             break;
         case NS_CSS_ANIMATION_ITERATION_COUNT:
             if (g_ascii_strcasecmp(item, "infinite") == 0) {
-                e->iter_count = -1;
                 e->iterations = INFINITY;
             } else {
                 double num = g_ascii_strtod(item, NULL);
                 e->iterations = num < 0 ? 0 : num;
-                e->iter_count = num <= 0 ? 0 : (int)num;
             }
             break;
         case NS_CSS_ANIMATION_DIRECTION:
@@ -9229,7 +9225,7 @@ anim_build_list(const ns_style *s, gboolean is_animation, int n,
 {
     memset(out, 0, sizeof *out);
     if (n > NS_CSS_ANIM_ENTRIES_MAX) n = NS_CSS_ANIM_ENTRIES_MAX;
-    for (int i = 0; i < n; i++) anim_entry_init(&out->entries[i], is_animation);
+    for (int i = 0; i < n; i++) anim_entry_init(&out->entries[i]);
     out->n = n;
     if (n == 0) return;
     const ns_css_value *names =
@@ -9948,7 +9944,6 @@ parse_anim_value(const char *text, gboolean is_animation)
         memset(e, 0, sizeof *e);
         e->target = NS_CSS_ANIM_TARGET_ALL;
         e->timing = (ns_css_timing){ .kind = NS_CSS_TIMING_EASE };
-        e->iter_count = 1;
         e->iterations = 1;
         e->duration_auto = is_animation;
         gboolean got_dur = FALSE, got_delay = FALSE, got_timing = FALSE,
@@ -9991,13 +9986,11 @@ parse_anim_value(const char *text, gboolean is_animation)
             double num = g_ascii_strtod(tok, &endp);
             if (endp != tok && *endp == '\0') {
                 if (!is_animation || got_iter || num < 0) { valid = FALSE; break; }
-                e->iter_count = num <= 0 ? 0 : (int)num;
                 e->iterations = num;
                 got_iter = TRUE;
                 continue;
             }
             if (is_animation && g_ascii_strcasecmp(tok, "infinite") == 0 && !got_iter) {
-                e->iter_count = -1;
                 e->iterations = INFINITY;
                 got_iter = TRUE;
                 continue;
@@ -19047,7 +19040,6 @@ page_apply_size(ns_css_page_rule *pr, const char *text)
     pr->width = w;
     pr->height = h;
     pr->has_size = TRUE;
-    pr->landscape = w > h;
 }
 
 static void
