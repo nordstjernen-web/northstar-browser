@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A `<summary>` draws its disclosure triangle as a list marker, the way
+  the HTML rendering rules style it, so `list-style: none`, `display:
+  block` or `::marker { content: "" }` removes it as in other browsers;
+  it was inserted into the text itself and could not be removed. The
+  summary is no longer bold, and the default stylesheet no longer pushes
+  every paragraph, list, table and heading inside a `<details>` 16px to
+  the right -- once per nesting level. Any element with `display:
+  list-item` now gets a marker, not just `<li>`.
 * More of the legacy presentational attributes work the way the HTML
   rendering rules map them. `<font size>` accepts `+n` and `-n` relative
   to size 3 and maps to the absolute font-size keywords, so `size="+1"`
