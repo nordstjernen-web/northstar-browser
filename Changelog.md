@@ -4,6 +4,21 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `color-mix()` and relative colors that use `currentcolor` paint in
+  the element's own text colour. The colour parser knew nothing of
+  `currentcolor` inside a function, so a Tailwind-style
+  `background-color: color-mix(in oklab, currentColor 10%, transparent)`
+  was thrown away and the box stayed transparent. Such a value now keeps
+  its `currentcolor` and is worked out for each element, so a child that
+  inherits it under a different `color` gets its own shade, and
+  `color: currentcolor` takes the parent's colour instead of the default.
+  Colours are also kept at full precision in the space they are written
+  in: a `none` component is filled from the other colour of a mix
+  instead of reading as zero, `color-mix()` takes a percentage before
+  the colour, any number of colours and every hue interpolation method,
+  and `getComputedStyle` reports `lab()`, `oklch()`,
+  `color(display-p3 ...)` and mixed colours in their own notation rather
+  than rounding them to `rgb()`.
 * An `<iframe>` whose source is an image shows it in an image document,
   as a top-level navigation does, instead of parsing the image bytes as
   HTML text.

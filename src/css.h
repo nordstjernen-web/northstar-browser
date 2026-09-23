@@ -615,6 +615,25 @@ typedef enum ns_css_unit {
     NS_CSS_UNIT_FR,
 } ns_css_unit;
 
+typedef enum ns_css_color_space {
+    NS_CSS_COLOR_LEGACY,
+    NS_CSS_COLOR_SRGB,
+    NS_CSS_COLOR_SRGB_LINEAR,
+    NS_CSS_COLOR_DISPLAY_P3,
+    NS_CSS_COLOR_DISPLAY_P3_LINEAR,
+    NS_CSS_COLOR_A98_RGB,
+    NS_CSS_COLOR_PROPHOTO_RGB,
+    NS_CSS_COLOR_REC2020,
+    NS_CSS_COLOR_XYZ_D50,
+    NS_CSS_COLOR_XYZ_D65,
+    NS_CSS_COLOR_LAB,
+    NS_CSS_COLOR_LCH,
+    NS_CSS_COLOR_OKLAB,
+    NS_CSS_COLOR_OKLCH,
+    NS_CSS_COLOR_HSL,
+    NS_CSS_COLOR_HWB,
+} ns_css_color_space;
+
 void     ns_css_set_viewport(double vw_px, double vh_px);
 void     ns_css_set_frame_viewport_cb(
              void (*cb)(const ns_node *frame, double *w, double *h));
@@ -682,7 +701,13 @@ typedef struct ns_css_value {
         char *keyword;
         struct { double v; ns_css_unit unit; } length;
         struct { double w, h; ns_css_unit w_unit, h_unit; gboolean w_auto, h_auto; } size;
-        struct { guint8 r, g, b, a; } color;
+        struct {
+            guint8 r, g, b, a;
+            guint8 space;
+            guint8 none;
+            guint8 current;
+            double c[4];
+        } color;
         struct {
             double pct;
             double px;
