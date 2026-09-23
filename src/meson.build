@@ -49,6 +49,7 @@ northstar_engine_sources = files(
   'datetime.c',
   'debuglog.c',
   'dom.c',
+  'encoding.c',
   'engine.c',
   'mainctx.c',
   'eventsource.c',
