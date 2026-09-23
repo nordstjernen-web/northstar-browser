@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `grid-row`, `grid-column`, `grid-area` and their `-start`/`-end`
+  longhands follow the `<grid-line>` grammar. Values such as `0`,
+  `span`, `span -2`, `1 2`, `auto 1` or a fifth `grid-area` part were
+  accepted and could override a valid earlier declaration; they are now
+  dropped. Omitted parts are filled in as the spec says (a named line
+  repeats, anything else becomes `auto`), so `grid-row: 2` also resets
+  an earlier `grid-row-end`, and `element.style` reads the values back
+  in their shortest canonical form (`2 i span` reads `span 2 i`, `1 /
+  auto` reads `1`). Line and area names keep their case, as custom
+  identifiers are case-sensitive.
 * Viewport units inside an iframe measure the iframe. `vw`, `vh`,
   `vmin` and the `sv*`/`lv*`/`dv*` variants in a frame's document
   resolved against the top-level window unless the frame's size came
