@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A comment or a `display: none` element (a `<script>`, a hidden
+  `<span>`) between pieces of inline content no longer ends the line:
+  `foo<!-- -->bar` and `a<script></script>b` lay out as one line of text
+  instead of two.
 * `display: contents` on an element that cannot be unboxed (`img`,
   `input`, `iframe`, `video`, `br`, an outermost `svg` and the other
   replaced elements and form controls CSS Display lists) computes to
