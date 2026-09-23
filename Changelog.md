@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `width`, `height`, `hspace` and `vspace` attributes are read with the
+  HTML rules for parsing dimension values. They went through `strtod`,
+  so `width="+200"` and `width=".5"` produced a width where no browser
+  gives one, and `width="20.25e2"` came out 2025px wide instead of
+  20.25px. A table's or a cell's `width="0"` is now ignored, as the
+  "ignoring zero" rule requires; `hspace`/`vspace` accept a percentage
+  and reach `<embed>`, `<object>`, `<marquee>` and `<input type=image>`,
+  not only `<img>`; and an image's `border` attribute is no longer capped
+  at 100px and applies to `<object>` and image buttons too.
 * A multi-column block splits a list, not just a run of siblings. The
   column code distributed a container's own children and gave up when
   there were fewer than two, so `column-width` on a wrapper holding a
