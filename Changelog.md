@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `align-self` and `justify-self` values `self-start` and `self-end` on
+  a grid item use the item's own writing mode. A `vertical-rl` item
+  aligned with `justify-self: self-start` sits at the right edge of its
+  area, and a vertical item with `direction: rtl` aligns to the bottom;
+  only the item's `direction` was considered before, as if every item
+  were horizontal.
 * The `grid` and `grid-template` shorthands follow their grammar and
   set every longhand they cover. Rows written in the template form
   without a size (`"a a" "b b" 1fr`) are `auto`, where the first size
