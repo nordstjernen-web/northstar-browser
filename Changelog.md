@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A `calc()` that evaluates to NaN or an infinity no longer produces
+  NaN geometry. `width: calc(NaN * 1px)` laid out and read back as
+  `nanpx` and `calc(infinity * 1px)` as an unusable infinite length;
+  computed values now clamp NaN to 0 and infinities to the largest
+  (or most negative) representable length, as CSS Values 4 specifies,
+  for lengths, percentages, numbers and the `scale` and `translate`
+  properties.
 * Grid items that span several `auto`, `min-content` or `max-content`
   columns size those columns. Only single-column items were measured,
   so a heading spanning two content-sized columns could overflow them;
