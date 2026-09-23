@@ -38137,6 +38137,39 @@ ns_js_dispatch_focus_event(ns_js *js, const ns_node *target,
     ns_js_dispatch_built_event(js, target, type, event, NULL);
 }
 
+static gboolean
+ns_node_accepts_text_entry(const ns_node *el)
+{
+    if (ns_node_is_element_named(el, "textarea")) return TRUE;
+    if (ns_node_is_element_named(el, "input")) {
+        static const char *const non_text[] = {
+            "button", "checkbox", "color", "file", "hidden", "image",
+            "radio", "range", "reset", "submit",
+        };
+        const char *t = ns_element_get_attr(el, "type");
+        for (gsize i = 0; t && i < G_N_ELEMENTS(non_text); i++)
+            if (g_ascii_strcasecmp(t, non_text[i]) == 0) return FALSE;
+        return TRUE;
+    }
+    const char *ce = el ? ns_element_get_attr(el, "contenteditable") : NULL;
+    return ce && g_ascii_strcasecmp(ce, "false") != 0;
+}
+
+static void
+ns_js_update_focus_visible(ns_js *js)
+{
+    const ns_node *el = js->focused_node;
+    gboolean visible = el && (!js->pointer_input ||
+                              ns_node_accepts_text_entry(el));
+    ns_css_set_focus_visible_node(visible ? el : NULL);
+}
+
+void
+ns_js_note_pointer_input(ns_js *js, gboolean pointer)
+{
+    if (js) js->pointer_input = pointer;
+}
+
 void
 ns_js_set_focus(ns_js *js, const ns_node *el)
 {
@@ -38147,6 +38180,7 @@ ns_js_set_focus(ns_js *js, const ns_node *el)
         ns_js_dispatch_focus_event(js, old, el, "focusout", TRUE);
     }
     js->focused_node = el;
+    ns_js_update_focus_visible(js);
     if (el) {
         ns_js_dispatch_focus_event(js, el, old, "focus", FALSE);
         ns_js_dispatch_focus_event(js, el, old, "focusin", TRUE);
@@ -38159,6 +38193,7 @@ ns_js_set_focused_node(ns_js *js, const ns_node *el)
 {
     if (!js || js->focused_node == el) return;
     js->focused_node = el;
+    ns_js_update_focus_visible(js);
     js->mutated = TRUE;
 }
 

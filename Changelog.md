@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `:focus-visible` is its own pseudo-class instead of another name for
+  `:focus`. Clicking a button or link no longer puts it in the
+  `:focus-visible` state, so pages that draw focus rings only for
+  keyboard users -- the usual `:focus:not(:focus-visible) { outline: 0 }`
+  -- stop showing a ring after every click, while Tab, access keys, focus
+  moved by script without a preceding click, and any text field still
+  match, as the Selectors spec suggests.
 * In nested CSS, declarations that follow a nested rule apply after it,
   as the CSS Nesting spec's nested-declarations rule requires. They were
   gathered into one rule at the top of the parent, so
