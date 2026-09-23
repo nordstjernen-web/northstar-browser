@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `relList.supports()` answers per element: `<link>` reports the link
+  types it acts on (stylesheet, icon, preload, modulepreload, ...),
+  while `<a>`, `<area>` and `<form>` report only `noopener`,
+  `noreferrer` and `opener`; `<form>` now has a `relList`.
 * A type selector that follows another simple selector in a compound
   (`[foo]i`, `.a*`) is a parse error instead of silently matching, and
   `selectorText` / `cssText` drop comments and write an attribute
