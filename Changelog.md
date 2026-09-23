@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Setting `document.title` on a page without a `<title>` creates one
+  that later reads (and `getElementsByTagName`) can find, reports the
+  change to mutation observers, and does nothing when there is no
+  `<head>`, as HTML says.
 * WebCrypto AES-CTR honours the `length` parameter: a length outside
   1..128 is an `OperationError`, the counter wraps within its low
   `length` bits instead of carrying into the nonce, and a message long
