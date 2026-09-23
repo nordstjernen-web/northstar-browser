@@ -27842,7 +27842,6 @@ gboolean
 ns_js_run_animation_frame(ns_js *js)
 {
     if (!js) return FALSE;
-    js->raf_host_us = g_get_monotonic_time();
     return ns_js_run_animation_frame_internal(js);
 }
 
@@ -27859,7 +27858,6 @@ ns_js_run_animation_frame_internal(ns_js *js)
     if (!js->raf_pending || js->raf_pending->len == 0)
         return js->mutated ? TRUE : FALSE;
     gint64 now_us = g_get_monotonic_time();
-    js->raf_last_us = now_us;
     GArray *fired = js->raf_pending;
     js->raf_pending = g_array_new(FALSE, FALSE, sizeof(ns_raf_entry));
     double ts_ms = ns_perf_relative_ms(now_us, js->time_origin_us);

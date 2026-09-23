@@ -116,7 +116,6 @@ struct ns_js {
     gboolean      running_due_timers;
     GArray       *raf_pending;
     int           next_raf_id;
-    gint64        raf_last_us;
     ns_node      *raf_frame_ctx;
     JSValue       pristine_promise;
     GHashTable   *style_table;
@@ -197,7 +196,6 @@ struct ns_js {
     int           iframe_load_depth;
     GArray       *pending_storage_events;
     gboolean      storage_events_draining;
-    gint64        last_pump_us;
     gint64        last_orphan_sweep_us;
     int           dispatch_depth;
     int           callback_depth;
@@ -214,7 +212,6 @@ struct ns_js {
     guint         observer_tick_source;
     gboolean      observer_ticking;
     guint         raf_tick_source;
-    gint64        raf_host_us;
     gboolean      raf_host_driven;
     JSValue       iframe_doc;
     int           iframe_doc_set;
@@ -225,7 +222,6 @@ struct ns_js {
     double        selection_x, selection_y, selection_w, selection_h;
     int           module_load_count;
     gsize         module_load_bytes;
-    gint64        module_load_deadline_us;
     gboolean      module_load_capped;
     GPtrArray    *import_map;
     gint64        time_origin_us;

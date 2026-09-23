@@ -10,8 +10,6 @@
 
 G_BEGIN_DECLS
 
-typedef void (*ns_font_loaded_cb)(const char *family, gpointer user_data);
-
 void     ns_font_init(void);
 
 gboolean ns_font_available(void);
