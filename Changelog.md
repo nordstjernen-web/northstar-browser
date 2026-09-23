@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Restyling after a script change no longer gives an element the
+  styles of a stranger's child. Elements whose parents have the same
+  computed style share one computed style, and parents were told apart
+  by a number that restarted with every style pass, so after a class,
+  id or attribute change a freshly styled parent could get the same
+  number as an untouched one elsewhere, and their children swapped
+  inherited values -- custom properties, colours, fonts -- until the
+  next full restyle. Parents that were never numbered, such as those
+  using `attr()`, all counted as the same parent even on a first load.
+  Every computed style now gets its own number that is never reused.
 * Elements whose interface is plain `HTMLElement` (`article`,
   `section`, `b`, `abbr`, `nav`, `summary`, ...) and valid custom element
   names are no longer `HTMLUnknownElement` instances; truly unknown tags
