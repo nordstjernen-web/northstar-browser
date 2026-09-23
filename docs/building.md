@@ -77,7 +77,7 @@ meson compile -C builddir
 | Dependency | Pinned to | Resolution |
 |------------|-----------|------------|
 | [lexbor](https://github.com/lexbor/lexbor) — HTML/CSS/URL parser | `v3.0.1` | A system lexbor ≥ 3.0.0 is used when `pkg-config` or CMake finds one; otherwise the wrap is cloned and its static library built through meson's CMake module. |
-| [quickjs-ng](https://github.com/quickjs-ng/quickjs) — JavaScript | `v0.16.2` | System package first, the wrap as fallback. |
+| [quickjs-ng](https://github.com/quickjs-ng/quickjs) — JavaScript | `v0.17.0` | System package first, the wrap as fallback. |
 | [ns-pango](https://github.com/nordstjernen-web/ns-pango) — text itemization, shaping, line breaking | a commit | Always the subproject. There is no system copy to find: the fork renames every symbol precisely so it can coexist with the system Pango that GTK loads. |
 
 WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree and need no network.

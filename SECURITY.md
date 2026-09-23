@@ -45,7 +45,7 @@ trusted.
 
 This minimalist edition runs **single-process**: the HTML/CSS/JS/layout
 engine parses and renders untrusted content in the GTK shell process
-itself (`ns_rproc_single_process_enable`, `src/appmain.c`). There is
+itself (`src/appmain.c`). There is
 no separate `northstar-renderer` executable and no per-tab renderer
 process — every page shares one OS process and one address space. The
 audio decoders and SDL2 mixer also run in that browser process on an

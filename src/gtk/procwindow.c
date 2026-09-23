@@ -1,4 +1,4 @@
-/* Northstar — GTK single-page browser shell over the renderer protocol.
+/* Northstar — GTK single-page browser shell around the page view.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

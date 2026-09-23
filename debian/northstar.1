@@ -9,12 +9,13 @@ northstar \- minimalist GTK 4 web browser with an original engine
 Northstar is a web browser written from scratch in C, with a GTK 4
 user interface and a libcurl network stack. Its HTML, CSS, and
 JavaScript engine is an original implementation \(em it is not based
-on Gecko, WebKit, or Blink. Pages render in a sandboxed renderer
-process; the browser supports HTML5, modern CSS, modern JavaScript,
-WebAssembly, and inline MPEG-1 video playback.
+on Gecko, WebKit, or Blink. Pages render in the browser process under
+a system-call filter and file-system sandbox; the browser supports
+HTML5, modern CSS, modern JavaScript, WebAssembly, and inline MPEG-1
+video playback.
 .PP
 When started without arguments, Northstar opens its start page.
-Passing a URL opens that page in a new tab.
+Passing a URL opens that page instead.
 .SH OPTIONS
 Northstar accepts the standard GTK 4 command-line options.
 .SH SEE ALSO

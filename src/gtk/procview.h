@@ -37,7 +37,6 @@ GtkWidget  *ns_proc_view_widget(NsProcView *view);
 void        ns_proc_view_set_notify(NsProcView *view, NsProcNotify cb,
                                     gpointer user_data);
 
-/* Mark the renderer session as private/incognito before the first load. */
 void        ns_proc_view_set_private(NsProcView *view, gboolean private_mode);
 gboolean    ns_proc_view_is_private(NsProcView *view);
 

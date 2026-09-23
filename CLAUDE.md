@@ -144,7 +144,7 @@ meson compile -C builddir
 The JavaScript engine is
 [quickjs-ng](https://github.com/quickjs-ng/quickjs), consumed as an
 **upstream meson subproject** pinned to a release
-(`subprojects/quickjs-ng.wrap`, currently v0.16.2) — no in-tree fork.
+(`subprojects/quickjs-ng.wrap`, currently v0.17.0) — no in-tree fork.
 `meson setup` fetches it and exposes it as the `libquickjs`
 dependency. The browser includes only the public `<quickjs.h>`. A
 few browser-side entry points that stock quickjs-ng does not expose —
@@ -237,12 +237,14 @@ that the HTML parser uses.
 ### Charset detection: uchardet
 
 Required dependency (Debian/Ubuntu `libuchardet-dev`,
-Fedora/RHEL `uchardet-devel`). `ns_html_decode_body` hands the
-response body to [uchardet](https://www.freedesktop.org/wiki/Software/uchardet/)
-to identify the charset, then `g_convert`s to UTF-8. No
-hand-rolled BOM / HTTP-charset / meta-charset sniffing — uchardet
-handles all of that internally. The Latin-1 fallback only fires
-if uchardet can't classify the bytes at all.
+Fedora/RHEL `uchardet-devel`). `ns_html_decode_body_full`
+(`src/html.c`) honours a byte-order mark, then a charset declared in the
+Content-Type header or a `<meta>` prescan (mapped through the WHATWG
+encoding-label table), then accepts valid UTF-8, and only then hands the
+body to [uchardet](https://www.freedesktop.org/wiki/Software/uchardet/)
+to identify the charset before `g_convert`ing to UTF-8. The
+windows-1252 fallback only fires if uchardet can't classify the bytes
+at all.
 
 ### Web Cryptography: OpenSSL libcrypto
 

@@ -71,14 +71,6 @@ test -f meson.build
 %install
 %meson_install
 
-# The GTK browser statically compiles the engine; the embedding shared
-# library and its development header are only needed by external embedders,
-# not the browser app. Drop them so the package is a clean application,
-# not a -devel library.
-rm -f %{buildroot}%{_libdir}/libnorthstar.so
-rm -f %{buildroot}%{_includedir}/northstar/libnorthstar.h
-rmdir %{buildroot}%{_includedir}/northstar 2>/dev/null || :
-
 %suse_update_desktop_file org.northstar.WebBrowser
 
 %files
