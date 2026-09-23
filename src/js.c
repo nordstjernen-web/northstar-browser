@@ -40,6 +40,7 @@
 #include "idb.h"
 #include "image.h"
 #include "media_types.h"
+#include "trace.h"
 #include "video.h"
 #include "js_date.h"
 #include "js_intl.h"
@@ -50905,6 +50906,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 trace_start = ns_trace_now();
     js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
     js->eval_depth++;
 
@@ -50938,6 +50940,9 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         ns_js_flush_document_write(js);
         ns_js_schedule_pending_script_drain(js);
     }
+    ns_trace_complete("script", cache_hit ? "evaluate script (cached bytecode)"
+                                          : "evaluate script",
+                      trace_start, origin ? origin : "inline");
     if (profile)
         g_printerr("[profile] js eval     %6.1fms  %zub  %s%s\n",
                    (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,
@@ -51376,6 +51381,7 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     char *copy = g_strndup(src ? src : "", len);
     gboolean profile = ns_js_profile_enabled();
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 trace_start = ns_trace_now();
     js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
     js->eval_depth++;
     JSValue fn = ns_js_compile_module_cached(ctx, copy, len,
@@ -51390,6 +51396,8 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
         ns_js_flush_document_write(js);
         ns_js_schedule_pending_script_drain(js);
     }
+    ns_trace_complete("script", "evaluate module", trace_start,
+                      origin ? origin : "module");
     if (profile)
         g_printerr("[profile] js module   %6.1fms  %zub  %s\n",
                    (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,

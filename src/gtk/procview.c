@@ -8,6 +8,7 @@
 #include "audio/audio.h"
 
 #include "proc_limits.h"
+#include "trace.h"
 #include "enginethread.h"
 #include "page_session.h"
 #include "net.h"
@@ -720,9 +721,12 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
         res->ph = fr.page_h;
         res->requested_scroll_y = fr.scroll_y;
         res->requested_scroll_x = fr.scroll_x;
-        if (!fr.unchanged)
+        if (!fr.unchanged) {
+            gint64 trace_start = ns_trace_now();
             res->surface = stage_fill(v, fr.pixels, fr.width, fr.height,
                                       fr.stride);
+            ns_trace_complete("frame", "copy frame", trace_start, NULL);
+        }
         res->nav = fr.nav;
         res->camera = fr.camera;
         res->download = fr.download;
@@ -1978,6 +1982,7 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
 {
     (void)area;
     NsProcView *v = data;
+    gint64 trace_start = ns_trace_now();
     gboolean covers = v->frame &&
         cairo_image_surface_get_width(v->frame) >= width &&
         cairo_image_surface_get_height(v->frame) >= height;
@@ -1990,6 +1995,7 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         cairo_set_source_surface(cr, v->frame, 0, 0);
         cairo_paint(cr);
     }
+    ns_trace_complete("frame", "present", trace_start, NULL);
 }
 
 static void

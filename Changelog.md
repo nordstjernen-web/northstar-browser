@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `--trace=FILE` writes a Chrome trace-event file of where the engine's
+  time goes -- each frame's tick, paint and copy, every cascade and
+  layout, script evaluations, fetches, image decodes and the GTK thread's
+  present -- for Perfetto or `chrome://tracing`, in the GUI as well as
+  headless. `scripts/sample-profile.sh` now samples the engine thread
+  instead of the GTK main thread, which in the GUI only ever waits.
 * The Windows process mitigations are the ones intended. The policies
   were passed as bare numbers, and two were wrong: the call meant for
   ASLR set DEP (always on for 64-bit) and the one meant for the

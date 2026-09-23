@@ -89,6 +89,7 @@ northstar_engine_sources = files(
   'selection.c',
   'spellcheck.c',
   'texture.c',
+  'trace.c',
   'wasm.c',
   'webaudio.c',
   'webcrypto.c',

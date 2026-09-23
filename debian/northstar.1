@@ -63,6 +63,12 @@ Run the browser without the watchdog process.
 .TP
 .B \-\-print\-config
 Print the effective configuration and exit.
+.TP
+.BI \-\-trace= FILE
+Write a Chrome trace-event JSON file of frame phases, relayouts, scripts,
+fetches and image decodes, which Perfetto or
+.I chrome://tracing
+can open.
 .SS Headless options
 .TP
 .B \-\-headless

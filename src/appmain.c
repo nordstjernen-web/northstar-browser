@@ -45,6 +45,7 @@
 #include "procwindow.h"
 #include "security.h"
 #include "threaddump.h"
+#include "trace.h"
 #include "version.h"
 #include "watchdog.h"
 
@@ -519,6 +520,10 @@ main(int argc, char **argv)
     }
 
     ns_security_win32_mitigations_init(proc_mode);
+    for (int i = 1; i < argc; i++)
+        if (g_str_has_prefix(argv[i], "--trace=") &&
+            !ns_trace_open(argv[i] + 8))
+            g_printerr("northstar: cannot write a trace to %s\n", argv[i] + 8);
     ns_add_screenshot_writable_dirs(argc, argv);
 
     if (proc_mode)
@@ -660,14 +665,18 @@ main(int argc, char **argv)
         }
         const char *session = ns_watchdog_child_session_arg(argc, argv);
         gboolean recover = ns_watchdog_child_is_recovery();
-        return ns_run_proc_gui(argc, argv, hopts.url, gsk_renderer_override,
-                               session, recover, private_window);
+        int gui_rc = ns_run_proc_gui(argc, argv, hopts.url,
+                                     gsk_renderer_override, session, recover,
+                                     private_window);
+        ns_trace_close();
+        return gui_rc;
     }
 
     ns_apply_gsk_renderer(gsk_renderer_override ? gsk_renderer_override
                           : (ns_config_get() ? ns_config_get()->gsk_renderer
                                              : NULL));
     int headless_rc = ns_run_headless(&hopts);
+    ns_trace_close();
     if (!ns_net_idle()) {
         fflush(NULL);
         _exit(headless_rc);

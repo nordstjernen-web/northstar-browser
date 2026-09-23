@@ -21,6 +21,7 @@
 #include "paint.h"
 #include "print.h"
 #include "render.h"
+#include "trace.h"
 
 typedef struct fetch_state {
     GMainLoop  *loop;
@@ -988,7 +989,10 @@ image_decode_in_worker(GTask *task, gpointer source, gpointer task_data,
     (void)cancellable;
     gsize len = 0;
     const guchar *data = g_bytes_get_data(task_data, &len);
-    g_task_return_pointer(task, ns_image_decode_encoded(data, len),
+    gint64 trace_start = ns_trace_now();
+    ns_image_decoding *decoding = ns_image_decode_encoded(data, len);
+    ns_trace_complete("decode", "decode image", trace_start, NULL);
+    g_task_return_pointer(task, decoding,
                           (GDestroyNotify)ns_image_decoding_free);
 }
 

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Northstar poor-man's sampling profiler.
 #
-# Attaches gdb to a running process repeatedly, grabs the top of the stack
-# each time, and aggregates where the engine spends wall-clock time. Useful
+# Attaches gdb to a running process repeatedly, grabs the top of the page
+# engine's stack each time, and aggregates where the engine spends
+# wall-clock time. The GUI runs the engine on the "ns-engine" thread and
+# headless runs on the main thread; the script samples the oldest thread
+# named "ns-engine" (threads it starts inherit the name) and thread 1 when
+# there is none (NS_PROFILE_THREAD names another). Useful
 # for attributing cost in a long-running headless run (e.g. a Speedometer
 # workload) without a perf/instrumented build — a debugoptimized build with
 # frame pointers is enough:
@@ -19,6 +23,7 @@ set -euo pipefail
 
 PID=${1:?usage: sample-profile.sh <pid> [num-samples]}
 N=${2:-120}
+THREAD=${NS_PROFILE_THREAD:-ns-engine}
 SAMPLES=$(mktemp)
 trap 'rm -f "$SAMPLES"' EXIT
 
@@ -31,12 +36,23 @@ if ! kill -0 "$PID" 2>/dev/null; then
     exit 1
 fi
 
-echo "Sampling pid $PID, $N times ..." >&2
+echo "Sampling thread \"$THREAD\" of pid $PID, $N times ..." >&2
 for _ in $(seq 1 "$N"); do
     kill -0 "$PID" 2>/dev/null || break
     gdb -p "$PID" --batch -nx \
-        -ex "set pagination off" -ex "thread 1" -ex "bt 12" 2>/dev/null \
-        | grep -E "^#" >> "$SAMPLES" || true
+        -ex "set pagination off" -ex "thread apply all bt 12" 2>/dev/null \
+        | awk -v want="\"$THREAD\"" '
+            /^Thread [0-9]+ / {
+                cur = $2; lwp = 0
+                if (match($0, /LWP [0-9]+/)) lwp = substr($0, RSTART + 4, RLENGTH - 4) + 0
+                inblock = index($0, want) > 0
+                if (inblock && (best == 0 || lwp < best)) { best = lwp; stack = "" }
+                else if (inblock) inblock = 0
+                next
+            }
+            /^#/ { if (inblock) stack = stack $0 "\n"; else if (cur == "1") first = first $0 "\n" }
+            END { printf "%s", best ? stack : first }
+          ' >> "$SAMPLES" || true
     echo "---SAMPLE---" >> "$SAMPLES"
 done
 
