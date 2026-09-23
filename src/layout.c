@@ -5443,6 +5443,8 @@ inline_box_measure_cacheable(const ns_box *box)
 
 static double measure_natural_width(ns_box *box, const ns_style *parent_style);
 static gboolean flex_box_is_border_box(const ns_box *c);
+static void legacy_align_block_child(ns_box *c, double avail_x, double avail_w,
+                                     const ns_style *inherited);
 
 static double
 inline_atomic_outer_height(const ns_box *b)
@@ -8042,6 +8044,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                     child->x = ix;
                     child->y = sub_y;
                     layout_box(child, cell_inner_w, cs);
+                    legacy_align_block_child(child, ix, cell_inner_w, cs);
                     double dh = child->content_height;
                     if (child->kind == NS_BOX_BLOCK || child->kind == NS_BOX_TABLE)
                         dh += child->margin.top + child->margin.bottom +
@@ -11640,6 +11643,33 @@ legacy_block_align(const ns_box *c, const ns_style *inherited)
     return NULL;
 }
 
+static void
+legacy_align_block_child(ns_box *c, double avail_x, double avail_w,
+                         const ns_style *inherited)
+{
+    if (c->kind != NS_BOX_BLOCK && c->kind != NS_BOX_TABLE) return;
+    if (style_is_absolute_or_fixed(c->style) || float_side_of(c->style) >= 0)
+        return;
+    const ns_css_value *ml = c->style ? c->style->values[NS_CSS_MARGIN_LEFT] : NULL;
+    const ns_css_value *mr = c->style ? c->style->values[NS_CSS_MARGIN_RIGHT] : NULL;
+    if (length_is_auto(ml) || length_is_auto(mr) ||
+        c->margin.left != 0 || c->margin.right != 0)
+        return;
+    double outer = c->content_width + c->padding.left + c->padding.right +
+                   c->border.left + c->border.right;
+    if (outer >= avail_w - 0.5) return;
+    const char *legacy = legacy_block_align(c, inherited);
+    if (!legacy) return;
+    double target_x;
+    if (strcmp(legacy, "center") == 0)
+        target_x = avail_x + (avail_w - outer) / 2.0;
+    else if (strcmp(legacy, "right") == 0)
+        target_x = avail_x + avail_w - outer;
+    else
+        return;
+    shift_box_tree(c, target_x - c->x, 0);
+}
+
 static gboolean
 block_height_is_auto(const ns_box *box, double width_basis)
 {
@@ -12066,6 +12096,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 if (fabs(outer - cw_avail) > 0.01)
                     shift_box_tree(c, cw_avail - outer, 0);
             }
+            if (c->kind == NS_BOX_BLOCK)
+                legacy_align_block_child(c, inner_x + left_off, cw_avail,
+                                         child_inherited);
             if (empty_block_collapses_through(c, clr)) {
                 cursor_y -= gap;
                 prev_margin_bottom = collapsed_margin(

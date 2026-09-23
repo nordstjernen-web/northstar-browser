@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `<center>` and `align="center"` (or `"right"`) line up the blocks
+  inside them, not just images and tables: `<center><div
+  style="width: 200px">` is centred, as is a table nested in a
+  `<td align="center">`. A block with a margin of its own or an `auto`
+  margin keeps the position those give it, and plain `text-align:
+  center` still moves only inline content.
 * A table's `width` includes its border and padding, as HTML's default
   stylesheet makes tables `box-sizing: border-box` and table layout now
   honours box-sizing. `<table style="width: 100%; border: 1px solid">`
