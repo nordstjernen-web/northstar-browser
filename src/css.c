@@ -188,6 +188,56 @@ viewport_resolve(double v, ns_css_unit unit)
     }
 }
 
+static void
+viewport_unit_coeff(ns_css_unit unit, double v, double *vw, double *vh,
+                    double *vmin, double *vmax)
+{
+    switch (unit) {
+    case NS_CSS_UNIT_VW:
+    case NS_CSS_UNIT_SVW:
+    case NS_CSS_UNIT_LVW:
+    case NS_CSS_UNIT_DVW:
+    case NS_CSS_UNIT_VI:
+    case NS_CSS_UNIT_SVI:
+    case NS_CSS_UNIT_LVI:
+    case NS_CSS_UNIT_DVI:
+        *vw += v;
+        break;
+    case NS_CSS_UNIT_VH:
+    case NS_CSS_UNIT_SVH:
+    case NS_CSS_UNIT_LVH:
+    case NS_CSS_UNIT_DVH:
+    case NS_CSS_UNIT_VB:
+    case NS_CSS_UNIT_SVB:
+    case NS_CSS_UNIT_LVB:
+    case NS_CSS_UNIT_DVB:
+        *vh += v;
+        break;
+    case NS_CSS_UNIT_VMIN:
+    case NS_CSS_UNIT_SVMIN:
+    case NS_CSS_UNIT_LVMIN:
+    case NS_CSS_UNIT_DVMIN:
+        *vmin += v;
+        break;
+    case NS_CSS_UNIT_VMAX:
+    case NS_CSS_UNIT_SVMAX:
+    case NS_CSS_UNIT_LVMAX:
+    case NS_CSS_UNIT_DVMAX:
+        *vmax += v;
+        break;
+    default:
+        break;
+    }
+}
+
+static double
+viewport_coeff_px(double vw, double vh, double vmin, double vmax,
+                  double width, double height)
+{
+    return (vw * width + vh * height + vmin * MIN(width, height) +
+            vmax * MAX(width, height)) / 100.0;
+}
+
 static char *g_target_fragment = NULL;
 
 void
@@ -1529,7 +1579,7 @@ typedef enum {
 } ns_calc_kind;
 
 typedef struct ns_calc_linear {
-    double px, pct, em, rem, lh, rlh;
+    double px, pct, em, rem, lh, rlh, vw, vh, vmin, vmax;
 } ns_calc_linear;
 
 typedef struct ns_calc_term {
@@ -1540,6 +1590,7 @@ typedef struct ns_calc_term {
     double rem;
     double lh;
     double rlh;
+    double vw, vh, vmin, vmax;
     double num;
     gboolean unresolved;
     guint8 fn;
@@ -4755,7 +4806,7 @@ static ns_css_value *parse_calc(const char *text);
 static ns_css_value *parse_calc_any(const char *text);
 static ns_css_value *parse_calc_inner(const char *text);
 
-typedef struct { double em, rem, lh, rlh; } ns_font_units;
+typedef struct { double em, rem, lh, rlh, vw, vh, vmin, vmax; } ns_font_units;
 
 static void
 font_units_set(ns_font_units *font, ns_css_unit unit, double v,
@@ -4792,6 +4843,10 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
             font->rem = v->u.calc.rem;
             font->lh = v->u.calc.lh;
             font->rlh = v->u.calc.rlh;
+            font->vw = v->u.calc.vw;
+            font->vh = v->u.calc.vh;
+            font->vmin = v->u.calc.vmin;
+            font->vmax = v->u.calc.vmax;
             *out_px = v->u.calc.px;
         } else {
             *out_px = v->u.calc.px +
@@ -4839,6 +4894,10 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
         case NS_CSS_UNIT_LVMAX:
         case NS_CSS_UNIT_DVMAX:
             *out_px = viewport_resolve(v->u.length.v, v->u.length.unit);
+            if (font)
+                viewport_unit_coeff(v->u.length.unit, v->u.length.v,
+                                    &font->vw, &font->vh, &font->vmin,
+                                    &font->vmax);
             break;
         case NS_CSS_UNIT_DEG:
         case NS_CSS_UNIT_MS:
@@ -4890,6 +4949,9 @@ resolve_to_px_pct_font(const char *text, gsize len, double *out_px,
         case NS_CSS_UNIT_LVMAX:
         case NS_CSS_UNIT_DVMAX:
             *out_px = viewport_resolve(num, u);
+            if (font)
+                viewport_unit_coeff(u, num, &font->vw, &font->vh,
+                                    &font->vmin, &font->vmax);
             break;
         case NS_CSS_UNIT_CQW:
         case NS_CSS_UNIT_CQI:
@@ -4943,6 +5005,10 @@ calc_linear_add(ns_calc_linear *l, const ns_calc_term *t, double sign)
     l->rem += sign * t->rem;
     l->lh += sign * t->lh;
     l->rlh += sign * t->rlh;
+    l->vw += sign * t->vw;
+    l->vh += sign * t->vh;
+    l->vmin += sign * t->vmin;
+    l->vmax += sign * t->vmax;
 }
 
 static void
@@ -4961,6 +5027,10 @@ calc_term_fn_scale(ns_calc_term *v, double m)
         l->rem *= m;
         l->lh *= m;
         l->rlh *= m;
+        l->vw *= m;
+        l->vh *= m;
+        l->vmin *= m;
+        l->vmax *= m;
     }
     if (m >= 0) return;
     if (v->fn == 1 || v->fn == 2) {
@@ -5010,6 +5080,10 @@ calc_term_scale(ns_calc_term *v, double m)
         v->rem *= m;
         v->lh *= m;
         v->rlh *= m;
+        v->vw *= m;
+        v->vh *= m;
+        v->vmin *= m;
+        v->vmax *= m;
     } else {
         if (v->px  != 0) v->px  *= m;
         if (v->pct != 0) v->pct *= m;
@@ -5017,6 +5091,10 @@ calc_term_scale(ns_calc_term *v, double m)
         if (v->rem != 0) v->rem *= m;
         if (v->lh  != 0) v->lh  *= m;
         if (v->rlh != 0) v->rlh *= m;
+        v->vw = 0;
+        v->vh = 0;
+        v->vmin = 0;
+        v->vmax = 0;
     }
 }
 
@@ -5115,6 +5193,7 @@ calc_unit_value(const char *unit, double num, ns_calc_term *out)
     case NS_CSS_UNIT_LVMAX:
     case NS_CSS_UNIT_DVMAX:
         out->px = viewport_resolve(v, u);
+        viewport_unit_coeff(u, v, &out->vw, &out->vh, &out->vmin, &out->vmax);
         break;
     case NS_CSS_UNIT_CQW:
     case NS_CSS_UNIT_CQI:
@@ -5204,6 +5283,10 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             out->rem = v->u.calc.rem;
             out->lh = v->u.calc.lh;
             out->rlh = v->u.calc.rlh;
+            out->vw = v->u.calc.vw;
+            out->vh = v->u.calc.vh;
+            out->vmin = v->u.calc.vmin;
+            out->vmax = v->u.calc.vmax;
             if (v->u.calc.fn >= 1 && v->u.calc.fn <= 3 &&
                 v->u.calc.n_args > 0 && v->u.calc.n_args <= 4) {
                 out->fn = v->u.calc.fn;
@@ -5216,6 +5299,10 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
                     out->args[k].rem = v->u.calc.args[k].rem;
                     out->args[k].lh = v->u.calc.args[k].lh;
                     out->args[k].rlh = v->u.calc.args[k].rlh;
+                    out->args[k].vw = v->u.calc.args[k].vw;
+                    out->args[k].vh = v->u.calc.args[k].vh;
+                    out->args[k].vmin = v->u.calc.args[k].vmin;
+                    out->args[k].vmax = v->u.calc.args[k].vmax;
                 }
             }
         } else if (v->kind == NS_CSS_V_LENGTH) {
@@ -5255,6 +5342,8 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             case NS_CSS_UNIT_LVMAX:
             case NS_CSS_UNIT_DVMAX:
                 out->px = viewport_resolve(num, v->u.length.unit);
+                viewport_unit_coeff(v->u.length.unit, num, &out->vw, &out->vh,
+                                    &out->vmin, &out->vmax);
                 break;
             case NS_CSS_UNIT_CQW:
             case NS_CSS_UNIT_CQI:
@@ -5384,6 +5473,10 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             out->rem += rhs.rem;
             out->lh += rhs.lh;
             out->rlh += rhs.rlh;
+            out->vw += rhs.vw;
+            out->vh += rhs.vh;
+            out->vmin += rhs.vmin;
+            out->vmax += rhs.vmax;
         } else {
             out->px -= rhs.px;
             out->pct -= rhs.pct;
@@ -5391,6 +5484,10 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             out->rem -= rhs.rem;
             out->lh -= rhs.lh;
             out->rlh -= rhs.rlh;
+            out->vw -= rhs.vw;
+            out->vh -= rhs.vh;
+            out->vmin -= rhs.vmin;
+            out->vmax -= rhs.vmax;
         }
         *pp = p;
     }
@@ -5546,15 +5643,28 @@ calc_num_value(double n)
     return v;
 }
 
+static gboolean
+css_less_signed(double a, double b)
+{
+    return a < b || (a == 0 && b == 0 && signbit(a) && !signbit(b));
+}
+
+static double
+css_clamp_signed(double lo, double val, double hi)
+{
+    double out = css_less_signed(hi, val) ? hi : val;
+    return css_less_signed(out, lo) ? lo : out;
+}
+
 static double
 css_round_step(int strategy, double a, double b)
 {
     if (isnan(a) || isnan(b) || b == 0) return NAN;
     if (isinf(a)) return isinf(b) ? NAN : a;
     if (isinf(b)) {
-        if (strategy == 1) return a > 0 ? INFINITY : 0.0;
-        if (strategy == 2) return a < 0 ? -INFINITY : 0.0;
-        return 0.0;
+        if (strategy == 1) return a > 0 ? INFINITY : copysign(0.0, a);
+        if (strategy == 2) return a < 0 ? -INFINITY : copysign(0.0, a);
+        return copysign(0.0, a);
     }
     double q = a / fabs(b);
     double rq = strategy == 1 ? ceil(q) :
@@ -5571,8 +5681,10 @@ css_mod_rem(gboolean is_mod, double a, double b)
         if (!is_mod) return a;
         return signbit(a) == signbit(b) ? a : NAN;
     }
-    double q = a / b;
-    return is_mod ? a - b * floor(q) : a - b * trunc(q);
+    double r = fmod(a, b);
+    if (is_mod && r != 0 && (r < 0) != (b < 0)) r += b;
+    if (r == 0) r = copysign(0.0, is_mod ? b : a);
+    return r;
 }
 
 static ns_css_value *
@@ -5669,6 +5781,7 @@ ns_css_number_str(double n)
 {
     if (isnan(n)) return g_strdup("NaN");
     if (isinf(n)) return g_strdup(n < 0 ? "-infinity" : "infinity");
+    if (n == 0) return g_strdup("0");
     return g_strdup_printf("%g", n);
 }
 
@@ -5803,13 +5916,15 @@ calc_compare_scalar(int fn, char *const *parts, int n)
         double val = terms[1].num;
         double hi = none[2] ? HUGE_VAL : terms[2].num;
         result = isnan(lo) || isnan(val) || isnan(hi) ? NAN
-               : MIN(MAX(val, lo), hi);
+               : css_clamp_signed(lo, val, hi);
     } else {
         result = terms[0].num;
         for (int i = 1; i < n; i++) {
             if (isnan(terms[i].num)) result = NAN;
-            else if (fn == 1 && terms[i].num < result) result = terms[i].num;
-            else if (fn == 2 && terms[i].num > result) result = terms[i].num;
+            else if (fn == 1 && css_less_signed(terms[i].num, result))
+                result = terms[i].num;
+            else if (fn == 2 && css_less_signed(result, terms[i].num))
+                result = terms[i].num;
         }
     }
     return calc_scalar_value(kind, result);
@@ -5849,11 +5964,12 @@ calc_compare_lengths(int fn, char *const *parts, int n)
     gboolean font_dependent = FALSE;
     for (int i = 0; i < n; i++) {
         const ns_font_units *f = &values_font[i];
-        if (f->em != 0 || f->rem != 0 || f->lh != 0 || f->rlh != 0)
+        if (f->em != 0 || f->rem != 0 || f->lh != 0 || f->rlh != 0 ||
+            f->vw != 0 || f->vh != 0 || f->vmin != 0 || f->vmax != 0)
             font_dependent = TRUE;
-        keys[i] = values_px[i] + (f->em + f->rem) * 16.0 +
-                  (f->lh + f->rlh) * 19.2 +
-                  values_pct[i] * 0.01 * g_viewport_w;
+        double relative = (f->em + f->rem) * 16.0 + (f->lh + f->rlh) * 19.2 +
+                          values_pct[i] * 0.01 * g_viewport_w;
+        keys[i] = relative != 0 ? values_px[i] + relative : values_px[i];
     }
     double out_px;
     if (fn == 3) {
@@ -5863,17 +5979,15 @@ calc_compare_lengths(int fn, char *const *parts, int n)
         if (isnan(min_v) || isnan(val_v) || isnan(max_v)) {
             out_px = NAN;
         } else {
-            out_px = val_v;
-            if (out_px > max_v) out_px = max_v;
-            if (out_px < min_v) out_px = min_v;
+            out_px = css_clamp_signed(min_v, val_v, max_v);
         }
     } else {
         out_px = keys[0];
         gboolean any_nan = isnan(keys[0]);
         for (int i = 1; i < n; i++) {
             if (isnan(keys[i])) any_nan = TRUE;
-            if (fn == 1 && keys[i] < out_px) out_px = keys[i];
-            if (fn == 2 && keys[i] > out_px) out_px = keys[i];
+            if (fn == 1 && css_less_signed(keys[i], out_px)) out_px = keys[i];
+            if (fn == 2 && css_less_signed(out_px, keys[i])) out_px = keys[i];
         }
         if (any_nan) out_px = NAN;
     }
@@ -5887,6 +6001,8 @@ calc_compare_lengths(int fn, char *const *parts, int n)
     mv->u.calc.px = out_px;
     mv->u.calc.fn = (guint8)fn;
     mv->u.calc.n_args = (guint8)n;
+    mv->u.calc.parsed_vw = g_viewport_w;
+    mv->u.calc.parsed_vh = g_viewport_h;
     for (int i = 0; i < n; i++) {
         mv->u.calc.args[i].px  = values_px[i];
         mv->u.calc.args[i].pct = values_pct[i];
@@ -5894,6 +6010,10 @@ calc_compare_lengths(int fn, char *const *parts, int n)
         mv->u.calc.args[i].rem = values_font[i].rem;
         mv->u.calc.args[i].lh  = values_font[i].lh;
         mv->u.calc.args[i].rlh = values_font[i].rlh;
+        mv->u.calc.args[i].vw  = values_font[i].vw;
+        mv->u.calc.args[i].vh  = values_font[i].vh;
+        mv->u.calc.args[i].vmin = values_font[i].vmin;
+        mv->u.calc.args[i].vmax = values_font[i].vmax;
         if (is_none[i]) mv->u.calc.arg_none |= (guint8)(1u << i);
     }
     return mv;
@@ -6068,6 +6188,8 @@ parse_calc_inner(const char *text)
     if (term.kind != CALC_LENGTH) return calc_scalar_value(term.kind, term.num);
     ns_css_value *v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_CALC;
+    v->u.calc.parsed_vw = g_viewport_w;
+    v->u.calc.parsed_vh = g_viewport_h;
     if (term.fn) {
         v->u.calc.px = calc_term_key(&term);
         v->u.calc.fn = term.fn;
@@ -6080,6 +6202,10 @@ parse_calc_inner(const char *text)
             v->u.calc.args[k].rem = term.args[k].rem;
             v->u.calc.args[k].lh = term.args[k].lh;
             v->u.calc.args[k].rlh = term.args[k].rlh;
+            v->u.calc.args[k].vw = term.args[k].vw;
+            v->u.calc.args[k].vh = term.args[k].vh;
+            v->u.calc.args[k].vmin = term.args[k].vmin;
+            v->u.calc.args[k].vmax = term.args[k].vmax;
         }
         return v;
     }
@@ -6089,6 +6215,10 @@ parse_calc_inner(const char *text)
     v->u.calc.rem = term.rem;
     v->u.calc.lh  = term.lh;
     v->u.calc.rlh = term.rlh;
+    v->u.calc.vw = term.vw;
+    v->u.calc.vh = term.vh;
+    v->u.calc.vmin = term.vmin;
+    v->u.calc.vmax = term.vmax;
     return v;
 }
 
@@ -6285,6 +6415,7 @@ parse_one_track_depth(const char *start, gsize len, ns_css_track *out, int depth
         out->min_kind = NS_CSS_TRACK_AUTO;
         out->min_v    = 0;
         out->has_min  = TRUE;
+        out->fit_content = TRUE;
         return TRUE;
     }
     if (start[len - 1] == ')' &&
@@ -6966,12 +7097,14 @@ parse_tracks(const char *text)
                 }
                 v->u.tracks.auto_repeat = ar;
                 v->u.tracks.auto_repeat_start = v->u.tracks.n;
+                v->u.tracks.auto_repeat_names_start = v->u.tracks.n_line_names;
                 int cnt = 0;
                 if (!tracks_append_repeat_body(&v->u.tracks, body, body_len,
                                                1, &cnt)) {
                     g_free(v);
                     return NULL;
                 }
+                v->u.tracks.auto_repeat_names_end = v->u.tracks.n_line_names;
                 for (int k = v->u.tracks.auto_repeat_start; k < v->u.tracks.n; k++)
                     if (!track_is_fixed_size(&v->u.tracks.tracks[k])) {
                         g_free(v);
@@ -7106,7 +7239,7 @@ parse_areas(const char *text)
             }
             if (v->u.areas.n_rects < NS_CSS_AREAS_MAX) {
                 ns_css_area_rect *rect = &v->u.areas.rects[v->u.areas.n_rects++];
-                rect->name = ascii_lower(name, strlen(name));
+                rect->name = g_strdup(name);
                 rect->r0 = r; rect->r1 = r1;
                 rect->c0 = c; rect->c1 = c1;
             }
@@ -11782,7 +11915,8 @@ ns_css_specified_canonical(const char *prop, const char *value)
         if (t) return t;
         return NULL;
     }
-    return ns_css_math_canonical(value);
+    char *math = ns_css_math_canonical(value);
+    return math ? math : ns_css_calc_canonical(value);
 }
 
 static gboolean is_font_ligatures_value(const char *s);
@@ -11991,15 +12125,773 @@ prop_is_bg_layered(ns_css_prop prop)
            prop == NS_CSS_BACKGROUND_ATTACHMENT;
 }
 
-static gboolean
-grid_line_is_custom_ident(const char *text)
+static char *
+grid_custom_ident_canonical(const char *tok)
 {
-    if (!text || !*text) return FALSE;
-    if (g_ascii_strcasecmp(text, "auto") == 0) return FALSE;
-    if (g_ascii_strncasecmp(text, "span", 4) == 0 &&
-        (text[4] == '\0' || is_ws(text[4])))
+    unsigned char c0 = (unsigned char)tok[0];
+    if (!c0 || g_ascii_isdigit(c0) || c0 == '+' || c0 == '.') return NULL;
+    if (c0 == '-' && (g_ascii_isdigit(tok[1]) || tok[1] == '.')) return NULL;
+    const char *p = tok;
+    const char *end = tok + strlen(tok);
+    char *decoded = read_css_ident(&p, end);
+    if (p != end || !decoded || !*decoded ||
+        (decoded[0] == '-' && !decoded[1] && !strchr(tok, '\\'))) {
+        g_free(decoded);
+        return NULL;
+    }
+    static const char *const reserved[] = {
+        "auto", "span", "inherit", "initial", "unset", "revert",
+        "revert-layer", "default",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(reserved); i++)
+        if (g_ascii_strcasecmp(decoded, reserved[i]) == 0) {
+            g_free(decoded);
+            return NULL;
+        }
+    if (!strchr(tok, '\\')) {
+        g_free(decoded);
+        return g_strdup(tok);
+    }
+    char *out = ns_css_ident_serialize(decoded);
+    g_free(decoded);
+    return out;
+}
+
+static char *
+grid_integer_canonical(const char *tok, gboolean *literal, long *value)
+{
+    const char *p = tok;
+    if (*p == '+' || *p == '-') p++;
+    if (*p && strspn(p, "0123456789") == strlen(p)) {
+        *literal = TRUE;
+        *value = strtol(tok, NULL, 10);
+        return g_strdup_printf("%ld", *value);
+    }
+    *literal = FALSE;
+    if (!is_math_fn_start(tok)) return NULL;
+    ns_css_value *v = parse_calc_any(tok);
+    gboolean number = v && v->kind == NS_CSS_V_LENGTH &&
+                      v->u.length.unit == NS_CSS_UNIT_NUMBER;
+    ns_css_value_free(v);
+    if (!number) return NULL;
+    char *canon = ns_css_math_canonical(tok);
+    return canon ? canon : g_strdup(tok);
+}
+
+static int
+grid_line_tokens(const char *text, char **out, int max)
+{
+    int n = 0;
+    const char *p = text, *end = text + strlen(text);
+    while (p < end) {
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end) break;
+        if (n == max) {
+            for (int i = 0; i < n; i++) g_free(out[i]);
+            return max + 1;
+        }
+        const char *start = p;
+        int depth = 0;
+        while (p < end && (depth > 0 || !is_ws(*p))) {
+            if (*p == '\\' && p + 1 < end) {
+                p++;
+                if (g_ascii_isxdigit(*p)) {
+                    for (int k = 0; k < 6 && p < end && g_ascii_isxdigit(*p); k++)
+                        p++;
+                    if (p < end && is_ws(*p)) p++;
+                } else {
+                    p++;
+                }
+                continue;
+            }
+            if (*p == '(') depth++;
+            else if (*p == ')' && depth > 0) depth--;
+            p++;
+        }
+        out[n++] = g_strndup(start, (gsize)(p - start));
+    }
+    return n;
+}
+
+static char *
+grid_line_canonical(const char *text, gboolean *ident_only)
+{
+    if (ident_only) *ident_only = FALSE;
+    char *tok[3] = {0};
+    int n = grid_line_tokens(text, tok, 3);
+    if (n > 3) return NULL;
+    char *result = NULL;
+    char *int_text = NULL, *ident = NULL;
+    int span_at = -1, int_at = -1, ident_at = -1;
+    gboolean literal = FALSE, tok_literal = FALSE, ok = n >= 1 && n <= 3;
+    long int_value = 0, tok_value = 0;
+    if (ok && n == 1 && g_ascii_strcasecmp(tok[0], "auto") == 0) {
+        result = g_strdup("auto");
+        goto done;
+    }
+    for (int i = 0; ok && i < n; i++) {
+        char *canon = NULL;
+        if (g_ascii_strcasecmp(tok[i], "span") == 0) {
+            ok = span_at < 0;
+            span_at = i;
+        } else if ((canon = grid_integer_canonical(tok[i], &tok_literal,
+                                                   &tok_value))) {
+            ok = int_at < 0;
+            int_at = i;
+            literal = tok_literal;
+            int_value = tok_value;
+            g_free(int_text);
+            int_text = canon;
+        } else if ((canon = grid_custom_ident_canonical(tok[i]))) {
+            ok = ident_at < 0;
+            ident_at = i;
+            g_free(ident);
+            ident = canon;
+        } else {
+            ok = FALSE;
+        }
+    }
+    if (!ok || (int_at < 0 && ident_at < 0)) goto done;
+    if (span_at >= 0) {
+        if (span_at != 0 && span_at != n - 1) goto done;
+        if (literal && int_value < 1) goto done;
+        GString *out = g_string_new("span");
+        if (int_text && !(literal && int_value == 1 && ident)) {
+            g_string_append_c(out, ' ');
+            g_string_append(out, int_text);
+        }
+        if (ident) {
+            g_string_append_c(out, ' ');
+            g_string_append(out, ident);
+        }
+        result = g_string_free(out, FALSE);
+        goto done;
+    }
+    if (literal && int_value == 0) goto done;
+    if (int_text && ident)
+        result = g_strdup_printf("%s %s", int_text, ident);
+    else
+        result = g_strdup(int_text ? int_text : ident);
+    if (ident_only) *ident_only = int_text == NULL;
+done:
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    g_free(int_text);
+    g_free(ident);
+    return result;
+}
+
+static int
+grid_placement_parts(const char *text, int max_parts, char *parts[4],
+                     gboolean ident_only[4])
+{
+    const char *scan = text;
+    const char *end = text + strlen(text);
+    int n = 0;
+    while (TRUE) {
+        const char *slash = css_find_top_level_char(scan, end, '/');
+        if (n >= max_parts) goto fail;
+        char *part = css_trim_dup_range(scan, slash ? slash : end);
+        parts[n] = *part ? grid_line_canonical(part, &ident_only[n]) : NULL;
+        g_free(part);
+        if (!parts[n]) goto fail;
+        n++;
+        if (!slash) break;
+        scan = slash + 1;
+    }
+    return n;
+fail:
+    for (int i = 0; i < n; i++) {
+        g_free(parts[i]);
+        parts[i] = NULL;
+    }
+    return 0;
+}
+
+static void
+grid_placement_fill(char *parts[4], gboolean ident_only[4], int n,
+                    int index, int from)
+{
+    if (index < n) return;
+    parts[index] = g_strdup(ident_only[from] ? parts[from] : "auto");
+    ident_only[index] = ident_only[from];
+}
+
+static int
+grid_placement_expand(const char *text, gboolean area, char *out[4],
+                      gboolean ident_only[4])
+{
+    int max = area ? 4 : 2;
+    int n = grid_placement_parts(text, max, out, ident_only);
+    if (n == 0) return 0;
+    grid_placement_fill(out, ident_only, n, 1, 0);
+    if (area) {
+        grid_placement_fill(out, ident_only, n, 2, 0);
+        grid_placement_fill(out, ident_only, n, 3, 1);
+    }
+    return max;
+}
+
+static gboolean
+grid_line_is_default_for(char *const full[4], const gboolean ident_only[4],
+                         int index, int from)
+{
+    const char *expected = ident_only[from] ? full[from] : "auto";
+    return strcmp(full[index], expected) == 0;
+}
+
+static char *
+grid_placement_canonical(const char *text, gboolean area)
+{
+    char *full[4] = {0};
+    gboolean ident_only[4] = {0};
+    int n = grid_placement_expand(text, area, full, ident_only);
+    if (n == 0) return NULL;
+    int keep = n;
+    if (area) {
+        if (grid_line_is_default_for(full, ident_only, 3, 1)) {
+            keep = 3;
+            if (grid_line_is_default_for(full, ident_only, 2, 0)) {
+                keep = 2;
+                if (grid_line_is_default_for(full, ident_only, 1, 0))
+                    keep = 1;
+            }
+        }
+    } else if (grid_line_is_default_for(full, ident_only, 1, 0)) {
+        keep = 1;
+    }
+    GString *out = g_string_new(NULL);
+    for (int i = 0; i < keep; i++) {
+        if (i) g_string_append(out, " / ");
+        g_string_append(out, full[i]);
+    }
+    for (int i = 0; i < n; i++) g_free(full[i]);
+    return g_string_free(out, FALSE);
+}
+
+typedef enum {
+    GRID_TOK_OTHER,
+    GRID_TOK_STRING,
+    GRID_TOK_NAMES,
+    GRID_TOK_SLASH,
+} grid_tok_kind;
+
+typedef struct {
+    grid_tok_kind kind;
+    char *text;
+} grid_tok;
+
+static void
+grid_tok_clear(gpointer data)
+{
+    g_free(((grid_tok *)data)->text);
+}
+
+static GArray *
+grid_tokens(const char *text)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(grid_tok));
+    g_array_set_clear_func(out, grid_tok_clear);
+    const char *p = text;
+    const char *end = text + strlen(text);
+    while (TRUE) {
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end) return out;
+        const char *start = p;
+        grid_tok t = { GRID_TOK_OTHER, NULL };
+        if (*p == '"' || *p == '\'') {
+            char quote = *p++;
+            while (p < end && *p != quote) {
+                if (*p == '\\' && p + 1 < end) p++;
+                p++;
+            }
+            if (p >= end) break;
+            p++;
+            t.kind = GRID_TOK_STRING;
+        } else if (*p == '[') {
+            while (p < end && *p != ']') p++;
+            if (p >= end) break;
+            p++;
+            t.kind = GRID_TOK_NAMES;
+        } else if (*p == '/') {
+            p++;
+            t.kind = GRID_TOK_SLASH;
+        } else {
+            int depth = 0;
+            while (p < end) {
+                if (*p == '(') depth++;
+                else if (*p == ')' && --depth < 0) break;
+                else if (depth == 0 && (is_ws(*p) || *p == '/' || *p == '[' ||
+                                        *p == '"' || *p == '\''))
+                    break;
+                p++;
+            }
+            if (depth != 0) break;
+        }
+        t.text = g_strndup(start, (gsize)(p - start));
+        g_array_append_val(out, t);
+    }
+    g_array_free(out, TRUE);
+    return NULL;
+}
+
+static gboolean
+grid_names_append(GString *acc, const char *tok)
+{
+    gsize len = strlen(tok);
+    const char *q = tok + 1;
+    const char *qend = tok + len - 1;
+    while (q < qend) {
+        while (q < qend && is_ws(*q)) q++;
+        const char *name = q;
+        while (q < qend && !is_ws(*q)) q++;
+        gsize nlen = (gsize)(q - name);
+        if (nlen == 0) break;
+        if (!line_name_is_custom_ident(name, nlen)) return FALSE;
+        if (acc->len) g_string_append_c(acc, ' ');
+        g_string_append_len(acc, name, (gssize)nlen);
+    }
+    return TRUE;
+}
+
+static char *
+grid_track_token_canonical(const char *tok)
+{
+    double v = 0;
+    ns_css_unit unit = NS_CSS_UNIT_PX;
+    if (parse_length(tok, &v, &unit) && unit == NS_CSS_UNIT_NUMBER && v == 0)
+        return g_strdup("0px");
+    static const char *const keywords[] = {
+        "auto", "min-content", "max-content", "none", "subgrid",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(keywords); i++)
+        if (g_ascii_strcasecmp(tok, keywords[i]) == 0)
+            return g_strdup(keywords[i]);
+    return g_strdup(tok);
+}
+
+static void
+grid_parts_append(GString *out, const char *part)
+{
+    if (out->len) g_string_append_c(out, ' ');
+    g_string_append(out, part);
+}
+
+static char *
+grid_track_tokens_canonical(const grid_tok *toks, int n)
+{
+    GString *out = g_string_new(NULL);
+    for (int i = 0; i < n; i++) {
+        if (toks[i].kind == GRID_TOK_NAMES) {
+            GString *names = g_string_new(NULL);
+            if (grid_names_append(names, toks[i].text) && names->len) {
+                if (out->len) g_string_append_c(out, ' ');
+                g_string_append_printf(out, "[%s]", names->str);
+            }
+            g_string_free(names, TRUE);
+            continue;
+        }
+        char *canon = grid_track_token_canonical(toks[i].text);
+        grid_parts_append(out, canon);
+        g_free(canon);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
+grid_name_group_append(GString *out, const char *tok)
+{
+    GString *names = g_string_new(NULL);
+    gboolean ok = grid_names_append(names, tok);
+    if (ok) g_string_append_printf(out, " [%s]", names->str);
+    g_string_free(names, TRUE);
+    return ok;
+}
+
+static gboolean
+grid_name_repeat_append(GString *out, const char *tok, gboolean *auto_fill)
+{
+    gsize len = strlen(tok);
+    if (len < 9 || g_ascii_strncasecmp(tok, "repeat(", 7) != 0 ||
+        tok[len - 1] != ')')
         return FALSE;
-    return is_ident_start(text[0]);
+    const char *body = tok + 7;
+    const char *end = tok + len - 1;
+    const char *comma = memchr(body, ',', (gsize)(end - body));
+    if (!comma) return FALSE;
+    char *count = css_trim_dup_range(body, comma);
+    char *names = g_strndup(comma + 1, (gsize)(end - comma - 1));
+    gboolean ok = TRUE;
+    GString *group = g_string_new("repeat(");
+    if (g_ascii_strcasecmp(count, "auto-fill") == 0) {
+        ok = !*auto_fill;
+        *auto_fill = TRUE;
+        g_string_append(group, "auto-fill,");
+    } else {
+        char *digits_end = NULL;
+        long n = strtol(count, &digits_end, 10);
+        ok = *count && g_ascii_isdigit(*count) && digits_end && !*digits_end &&
+             n >= 1;
+        g_string_append_printf(group, "%ld,", n);
+    }
+    GArray *toks = ok ? grid_tokens(names) : NULL;
+    ok = toks && toks->len > 0;
+    for (guint i = 0; ok && i < toks->len; i++) {
+        const grid_tok *t = &g_array_index(toks, grid_tok, i);
+        ok = t->kind == GRID_TOK_NAMES && grid_name_group_append(group, t->text);
+    }
+    if (toks) g_array_free(toks, TRUE);
+    if (ok) g_string_append_printf(out, " %s)", group->str);
+    g_string_free(group, TRUE);
+    g_free(count);
+    g_free(names);
+    return ok;
+}
+
+static char *
+grid_subgrid_canonical(const char *text)
+{
+    GArray *toks = grid_tokens(text);
+    if (!toks) return NULL;
+    const grid_tok *t = &g_array_index(toks, grid_tok, 0);
+    gboolean ok = toks->len > 0 && t[0].kind == GRID_TOK_OTHER &&
+                  g_ascii_strcasecmp(t[0].text, "subgrid") == 0;
+    gboolean auto_fill = FALSE;
+    GString *out = g_string_new("subgrid");
+    for (guint i = 1; ok && i < toks->len; i++) {
+        if (t[i].kind == GRID_TOK_NAMES)
+            ok = grid_name_group_append(out, t[i].text);
+        else
+            ok = t[i].kind == GRID_TOK_OTHER &&
+                 grid_name_repeat_append(out, t[i].text, &auto_fill);
+    }
+    g_array_free(toks, TRUE);
+    if (!ok) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static char *
+grid_track_text_canonical(const char *text)
+{
+    while (is_ws(*text)) text++;
+    if (g_ascii_strncasecmp(text, "subgrid", 7) == 0 &&
+        (!text[7] || is_ws(text[7]) || text[7] == '['))
+        return grid_subgrid_canonical(text);
+    GArray *toks = grid_tokens(text);
+    if (!toks) return NULL;
+    char *out = grid_track_tokens_canonical(&g_array_index(toks, grid_tok, 0),
+                                            (int)toks->len);
+    g_array_free(toks, TRUE);
+    return out;
+}
+
+static char *
+grid_track_list_canonical(const grid_tok *toks, int n, ns_css_prop prop,
+                          gboolean explicit_only)
+{
+    if (n <= 0) return NULL;
+    GString *raw = g_string_new(NULL);
+    for (int i = 0; i < n; i++) {
+        if (toks[i].kind == GRID_TOK_STRING || toks[i].kind == GRID_TOK_SLASH) {
+            g_string_free(raw, TRUE);
+            return NULL;
+        }
+        grid_parts_append(raw, toks[i].text);
+    }
+    ns_css_value *v = parse_value_for(prop, raw->str);
+    g_string_free(raw, TRUE);
+    gboolean none = v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+                    strcmp(v->u.keyword, "none") == 0;
+    gboolean ok = v && (v->kind == NS_CSS_V_TRACKS || none);
+    if (ok && explicit_only)
+        ok = !none && !v->u.tracks.subgrid &&
+             v->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE;
+    ns_css_value_free(v);
+    return ok ? grid_track_tokens_canonical(toks, n) : NULL;
+}
+
+static char *
+grid_area_string_canonical(const char *tok)
+{
+    const char *p = tok;
+    char *body = read_css_string(&p, tok + strlen(tok));
+    char **cells = g_strsplit_set(body, " \t\r\n\f", -1);
+    GString *out = g_string_new("\"");
+    gboolean first = TRUE;
+    for (int i = 0; cells[i]; i++) {
+        if (!*cells[i]) continue;
+        if (!first) g_string_append_c(out, ' ');
+        g_string_append(out, cells[i]);
+        first = FALSE;
+    }
+    g_string_append_c(out, '"');
+    g_strfreev(cells);
+    g_free(body);
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
+grid_track_size_valid(const char *tok)
+{
+    if (g_ascii_strncasecmp(tok, "repeat(", 7) == 0) return FALSE;
+    ns_css_track track = {0};
+    return parse_one_track(tok, strlen(tok), &track);
+}
+
+static void
+grid_flush_names(GString *names, GString *rows, GString *canon)
+{
+    if (!names->len) return;
+    char *group = g_strdup_printf("[%s]", names->str);
+    grid_parts_append(rows, group);
+    grid_parts_append(canon, group);
+    g_free(group);
+    g_string_truncate(names, 0);
+}
+
+static gboolean
+grid_template_areas_form(const grid_tok *t, int n, GString *rows,
+                         GString *canon, GString *areas)
+{
+    GString *names = g_string_new(NULL);
+    gboolean ok = TRUE;
+    int i = 0;
+    while (ok && i < n) {
+        if (t[i].kind == GRID_TOK_NAMES)
+            ok = grid_names_append(names, t[i++].text);
+        if (!ok || i >= n || t[i].kind != GRID_TOK_STRING) {
+            ok = FALSE;
+            break;
+        }
+        char *row = grid_area_string_canonical(t[i++].text);
+        char *size = NULL;
+        if (i < n && t[i].kind == GRID_TOK_OTHER) {
+            if (!grid_track_size_valid(t[i].text)) {
+                g_free(row);
+                ok = FALSE;
+                break;
+            }
+            size = grid_track_token_canonical(t[i++].text);
+        }
+        grid_flush_names(names, rows, canon);
+        grid_parts_append(canon, row);
+        grid_parts_append(areas, row);
+        grid_parts_append(rows, size ? size : "auto");
+        if (size && strcmp(size, "auto") != 0) grid_parts_append(canon, size);
+        g_free(row);
+        g_free(size);
+        if (i < n && t[i].kind == GRID_TOK_NAMES)
+            ok = grid_names_append(names, t[i++].text);
+    }
+    if (ok) grid_flush_names(names, rows, canon);
+    g_string_free(names, TRUE);
+    if (!ok) return FALSE;
+    ns_css_value *v = parse_areas(areas->str);
+    ok = v != NULL;
+    ns_css_value_free(v);
+    return ok;
+}
+
+static int
+grid_slash_index(const grid_tok *t, int n)
+{
+    int at = -1;
+    for (int i = 0; i < n; i++) {
+        if (t[i].kind != GRID_TOK_SLASH) continue;
+        if (at >= 0) return -2;
+        at = i;
+    }
+    return at;
+}
+
+static gboolean
+grid_template_tokens_parse(const grid_tok *t, int n, char *out[3],
+                           char **canon)
+{
+    if (n == 1 && t[0].kind == GRID_TOK_OTHER &&
+        g_ascii_strcasecmp(t[0].text, "none") == 0) {
+        for (int i = 0; i < 3; i++) out[i] = g_strdup("none");
+        *canon = g_strdup("none");
+        return TRUE;
+    }
+    int slash = grid_slash_index(t, n);
+    if (slash == -2) return FALSE;
+    gboolean has_string = FALSE;
+    for (int i = 0; i < n; i++)
+        if (t[i].kind == GRID_TOK_STRING) has_string = TRUE;
+    if (!has_string) {
+        if (slash < 0) return FALSE;
+        char *rows = grid_track_list_canonical(t, slash,
+                                               NS_CSS_GRID_TEMPLATE_ROWS, FALSE);
+        char *cols = rows ? grid_track_list_canonical(
+            t + slash + 1, n - slash - 1, NS_CSS_GRID_TEMPLATE_COLUMNS, FALSE)
+                          : NULL;
+        if (!cols) {
+            g_free(rows);
+            return FALSE;
+        }
+        *canon = strcmp(rows, "none") == 0 && strcmp(cols, "none") == 0
+            ? g_strdup("none") : g_strdup_printf("%s / %s", rows, cols);
+        out[0] = rows;
+        out[1] = cols;
+        out[2] = g_strdup("none");
+        return TRUE;
+    }
+    int row_end = slash >= 0 ? slash : n;
+    char *cols = NULL;
+    if (slash >= 0) {
+        cols = grid_track_list_canonical(t + slash + 1, n - slash - 1,
+                                         NS_CSS_GRID_TEMPLATE_COLUMNS, TRUE);
+        if (!cols) return FALSE;
+    }
+    GString *rows = g_string_new(NULL);
+    GString *text = g_string_new(NULL);
+    GString *areas = g_string_new(NULL);
+    if (!grid_template_areas_form(t, row_end, rows, text, areas)) {
+        g_string_free(rows, TRUE);
+        g_string_free(text, TRUE);
+        g_string_free(areas, TRUE);
+        g_free(cols);
+        return FALSE;
+    }
+    if (cols) g_string_append_printf(text, " / %s", cols);
+    out[0] = g_string_free(rows, FALSE);
+    out[1] = cols ? cols : g_strdup("none");
+    out[2] = g_string_free(areas, FALSE);
+    *canon = g_string_free(text, FALSE);
+    return TRUE;
+}
+
+static gboolean
+grid_template_parse(const char *text, char *out[3], char **canon)
+{
+    GArray *toks = grid_tokens(text);
+    if (!toks) return FALSE;
+    gboolean ok = grid_template_tokens_parse(&g_array_index(toks, grid_tok, 0),
+                                             (int)toks->len, out, canon);
+    g_array_free(toks, TRUE);
+    return ok;
+}
+
+static int
+grid_auto_flow_prefix(const grid_tok *t, int n, gboolean *dense)
+{
+    *dense = FALSE;
+    gboolean flow = FALSE;
+    int i = 0;
+    for (; i < n && i < 2 && t[i].kind == GRID_TOK_OTHER; i++) {
+        if (!flow && g_ascii_strcasecmp(t[i].text, "auto-flow") == 0)
+            flow = TRUE;
+        else if (!*dense && g_ascii_strcasecmp(t[i].text, "dense") == 0)
+            *dense = TRUE;
+        else
+            break;
+    }
+    return flow ? i : 0;
+}
+
+static char *
+grid_auto_tracks_canonical(const grid_tok *t, int n, ns_css_prop prop)
+{
+    if (n == 0) return g_strdup("auto");
+    for (int i = 0; i < n; i++)
+        if (t[i].kind != GRID_TOK_OTHER || !grid_track_size_valid(t[i].text))
+            return NULL;
+    return grid_track_list_canonical(t, n, prop, TRUE);
+}
+
+static gboolean
+grid_shorthand_parse(const char *text, char *out[6], char **canon)
+{
+    GArray *toks = grid_tokens(text);
+    if (!toks) return FALSE;
+    const grid_tok *t = &g_array_index(toks, grid_tok, 0);
+    int n = (int)toks->len;
+    int slash = grid_slash_index(t, n);
+    gboolean ok = FALSE;
+    gboolean left_dense = FALSE, right_dense = FALSE;
+    int left_flow = slash > 0 ? grid_auto_flow_prefix(t, slash, &left_dense) : 0;
+    int right_flow = slash >= 0
+        ? grid_auto_flow_prefix(t + slash + 1, n - slash - 1, &right_dense) : 0;
+    if (slash < 0 || slash == -2 || (!left_flow && !right_flow)) {
+        ok = slash != -2 && grid_template_tokens_parse(t, n, out, canon);
+        if (ok) {
+            out[3] = g_strdup("row");
+            out[4] = g_strdup("auto");
+            out[5] = g_strdup("auto");
+        }
+    } else if (left_flow && !right_flow) {
+        char *auto_rows = grid_auto_tracks_canonical(t + left_flow,
+                                                     slash - left_flow,
+                                                     NS_CSS_GRID_AUTO_ROWS);
+        char *cols = auto_rows ? grid_track_list_canonical(
+            t + slash + 1, n - slash - 1, NS_CSS_GRID_TEMPLATE_COLUMNS, FALSE)
+                               : NULL;
+        ok = cols != NULL;
+        if (ok) {
+            GString *s = g_string_new("auto-flow");
+            if (left_dense) g_string_append(s, " dense");
+            if (slash > left_flow) g_string_append_printf(s, " %s", auto_rows);
+            g_string_append_printf(s, " / %s", cols);
+            *canon = g_string_free(s, FALSE);
+            out[0] = g_strdup("none");
+            out[1] = cols;
+            out[2] = g_strdup("none");
+            out[3] = g_strdup(left_dense ? "row dense" : "row");
+            out[4] = auto_rows;
+            out[5] = g_strdup("auto");
+        } else {
+            g_free(auto_rows);
+        }
+    } else if (right_flow && !left_flow) {
+        char *rows = grid_track_list_canonical(t, slash,
+                                               NS_CSS_GRID_TEMPLATE_ROWS, FALSE);
+        int rest = n - slash - 1 - right_flow;
+        char *auto_cols = rows ? grid_auto_tracks_canonical(
+            t + slash + 1 + right_flow, rest, NS_CSS_GRID_AUTO_COLUMNS) : NULL;
+        ok = auto_cols != NULL;
+        if (ok) {
+            GString *s = g_string_new(rows);
+            g_string_append(s, " / auto-flow");
+            if (right_dense) g_string_append(s, " dense");
+            if (rest > 0) g_string_append_printf(s, " %s", auto_cols);
+            *canon = g_string_free(s, FALSE);
+            out[0] = rows;
+            out[1] = g_strdup("none");
+            out[2] = g_strdup("none");
+            out[3] = g_strdup(right_dense ? "column dense" : "column");
+            out[4] = g_strdup("auto");
+            out[5] = auto_cols;
+        } else {
+            g_free(rows);
+        }
+    }
+    g_array_free(toks, TRUE);
+    return ok;
+}
+
+static char *
+grid_auto_flow_canonical(const char *text)
+{
+    char *tok[3] = {0};
+    int n = split_ws_limit(text, tok, 3);
+    gboolean row = FALSE, column = FALSE, dense = FALSE, ok = n >= 1 && n <= 2;
+    for (int i = 0; ok && i < n; i++) {
+        if (g_ascii_strcasecmp(tok[i], "row") == 0 && !row && !column)
+            row = TRUE;
+        else if (g_ascii_strcasecmp(tok[i], "column") == 0 && !row && !column)
+            column = TRUE;
+        else if (g_ascii_strcasecmp(tok[i], "dense") == 0 && !dense)
+            dense = TRUE;
+        else
+            ok = FALSE;
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    if (!ok) return NULL;
+    if (column) return g_strdup(dense ? "column dense" : "column");
+    return g_strdup(dense ? "dense" : "row");
 }
 
 static gboolean
@@ -13013,6 +13905,18 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_GRID_AUTO_ROWS:
     case NS_CSS_GRID_AUTO_COLUMNS: {
         v = parse_tracks(t);
+        if (v && v->u.tracks.subgrid &&
+            (prop == NS_CSS_GRID_AUTO_ROWS || prop == NS_CSS_GRID_AUTO_COLUMNS)) {
+            ns_css_value_free(v);
+            v = NULL;
+        }
+        if (v) {
+            v->specified = grid_track_text_canonical(t);
+            if (v->u.tracks.subgrid && !v->specified) {
+                ns_css_value_free(v);
+                v = NULL;
+            }
+        }
         if (!v) v = parse_keyword_choice(t, "none");
         break;
     }
@@ -13618,6 +14522,31 @@ parse_value_for(ns_css_prop prop, const char *text)
     }
     case NS_CSS_FONT_FAMILY: {
         char *canon = ns_css_font_family_canonical(t);
+        if (!canon) break;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
+        break;
+    }
+    case NS_CSS_GRID_AUTO_FLOW: {
+        char *canon = grid_auto_flow_canonical(t);
+        if (!canon) break;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
+        break;
+    }
+    case NS_CSS_GRID_ROW_START:
+    case NS_CSS_GRID_ROW_END:
+    case NS_CSS_GRID_COLUMN_START:
+    case NS_CSS_GRID_COLUMN_END:
+    case NS_CSS_GRID_ROW:
+    case NS_CSS_GRID_COLUMN:
+    case NS_CSS_GRID_AREA: {
+        char *canon = prop == NS_CSS_GRID_ROW || prop == NS_CSS_GRID_COLUMN ||
+                      prop == NS_CSS_GRID_AREA
+            ? grid_placement_canonical(t, prop == NS_CSS_GRID_AREA)
+            : grid_line_canonical(t, NULL);
         if (!canon) break;
         v = g_new0(ns_css_value, 1);
         v->kind = NS_CSS_V_KEYWORD;
@@ -16689,171 +17618,33 @@ parse_declaration_block(const char **pp, const char *end,
 
         if (strcmp(pname, "grid-template") == 0 ||
             strcmp(pname, "grid") == 0) {
-            const char *slash = NULL;
-            int depth = 0;
-            for (const char *q = vtext; *q; q++) {
-                if (*q == '(') depth++;
-                else if (*q == ')') { if (depth > 0) depth--; }
-                else if (*q == '/' && depth == 0) { slash = q; break; }
-            }
-            char *rows_part = NULL, *cols_part = NULL;
-            if (slash) {
-                rows_part = g_strndup(vtext, (gsize)(slash - vtext));
-                cols_part = g_strdup(slash + 1);
+            static const ns_css_prop grid_props[6] = {
+                NS_CSS_GRID_TEMPLATE_ROWS, NS_CSS_GRID_TEMPLATE_COLUMNS,
+                NS_CSS_GRID_TEMPLATE_AREAS, NS_CSS_GRID_AUTO_FLOW,
+                NS_CSS_GRID_AUTO_ROWS, NS_CSS_GRID_AUTO_COLUMNS,
+            };
+            int n = pname[4] == '\0' ? 6 : 3;
+            char *parts[6] = {0};
+            char *canon = NULL;
+            ns_css_value *wide = parse_css_wide_keyword(vtext);
+            gboolean ok = TRUE;
+            if (wide) {
+                for (int i = 0; i < n; i++) parts[i] = g_strdup(vtext);
+                ns_css_value_free(wide);
+            } else if (n == 6) {
+                ok = grid_shorthand_parse(vtext, parts, &canon);
             } else {
-                rows_part = g_strdup(vtext);
+                ok = grid_template_parse(vtext, parts, &canon);
             }
-            char *rows_trim = rows_part ? g_strstrip(g_strdup(rows_part)) : NULL;
-            char *cols_trim = cols_part ? g_strstrip(g_strdup(cols_part)) : NULL;
-            char *areas_acc = NULL;
-            if (rows_trim) {
-                GString *areas = g_string_new(NULL);
-                GString *rows_only = g_string_new(NULL);
-                const char *q = rows_trim;
-                while (*q) {
-                    while (*q && is_ws(*q)) q++;
-                    if (*q == '"' || *q == '\'') {
-                        char qc = *q++;
-                        const char *s = q;
-                        while (*q && *q != qc) q++;
-                        gsize slen = (gsize)(q - s);
-                        if (areas->len) g_string_append_c(areas, ' ');
-                        g_string_append_c(areas, '"');
-                        g_string_append_len(areas, s, slen);
-                        g_string_append_c(areas, '"');
-                        if (*q == qc) q++;
-                        while (*q && is_ws(*q)) q++;
-                        const char *tstart = q;
-                        while (*q && *q != '"' && *q != '\'' && *q != '/') q++;
-                        gsize tlen = (gsize)(q - tstart);
-                        while (tlen > 0 && is_ws(tstart[tlen - 1])) tlen--;
-                        if (tlen > 0) {
-                            if (rows_only->len) g_string_append_c(rows_only, ' ');
-                            g_string_append_len(rows_only, tstart, tlen);
-                        }
-                    } else {
-                        const char *tstart = q;
-                        while (*q && *q != '"' && *q != '\'') q++;
-                        gsize tlen = (gsize)(q - tstart);
-                        while (tlen > 0 && is_ws(tstart[tlen - 1])) tlen--;
-                        if (tlen > 0) {
-                            if (rows_only->len) g_string_append_c(rows_only, ' ');
-                            g_string_append_len(rows_only, tstart, tlen);
-                        }
-                    }
-                }
-                if (areas->len > 0) areas_acc = g_string_free(areas, FALSE);
-                else g_string_free(areas, TRUE);
-                g_free(rows_trim);
-                rows_trim = g_string_free(rows_only, FALSE);
+            for (int i = 0; ok && i < n; i++) {
+                ns_css_value *v = parse_value_for(grid_props[i], parts[i]);
+                if (!v) continue;
+                ns_css_decl d = { .prop = grid_props[i], .value = v,
+                                  .important = important };
+                g_array_append_val(decls_out, d);
             }
-            if (areas_acc && *areas_acc) {
-                ns_css_value *v = parse_value_for(NS_CSS_GRID_TEMPLATE_AREAS, areas_acc);
-                if (v) {
-                    ns_css_decl d = { .prop = NS_CSS_GRID_TEMPLATE_AREAS,
-                                      .value = v, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            if (strcmp(pname, "grid") == 0) {
-                char *cols_flow_probe = cols_trim
-                    ? g_ascii_strdown(cols_trim, -1) : NULL;
-                if (cols_trim && cols_flow_probe &&
-                    strstr(cols_flow_probe, "auto-flow")) {
-                    char *tokens[8] = {0};
-                    int n = split_ws_limit(cols_trim, tokens, G_N_ELEMENTS(tokens));
-                    GString *flow = g_string_new("column");
-                    GString *tracks = g_string_new(NULL);
-                    for (int i = 0; i < n; i++) {
-                        if (g_ascii_strcasecmp(tokens[i], "auto-flow") == 0)
-                            continue;
-                        if (g_ascii_strcasecmp(tokens[i], "dense") == 0) {
-                            g_string_append(flow, " dense");
-                            continue;
-                        }
-                        if (tracks->len) g_string_append_c(tracks, ' ');
-                        g_string_append(tracks, tokens[i]);
-                    }
-                    ns_css_value *fv = parse_value_for(NS_CSS_GRID_AUTO_FLOW,
-                                                       flow->str);
-                    if (fv) {
-                        ns_css_decl d = { .prop = NS_CSS_GRID_AUTO_FLOW,
-                                          .value = fv, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                    ns_css_value *tv = parse_value_for(NS_CSS_GRID_AUTO_COLUMNS,
-                                                       tracks->len ? tracks->str : "auto");
-                    if (tv) {
-                        ns_css_decl d = { .prop = NS_CSS_GRID_AUTO_COLUMNS,
-                                          .value = tv, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                    for (int i = 0; i < n; i++) g_free(tokens[i]);
-                    g_string_free(flow, TRUE);
-                    g_string_free(tracks, TRUE);
-                    g_clear_pointer(&cols_trim, g_free);
-                }
-                g_free(cols_flow_probe);
-                char *rows_flow_probe = rows_trim
-                    ? g_ascii_strdown(rows_trim, -1) : NULL;
-                if (rows_trim && rows_flow_probe &&
-                    strstr(rows_flow_probe, "auto-flow")) {
-                    char *tokens[8] = {0};
-                    int n = split_ws_limit(rows_trim, tokens, G_N_ELEMENTS(tokens));
-                    GString *flow = g_string_new("row");
-                    GString *tracks = g_string_new(NULL);
-                    for (int i = 0; i < n; i++) {
-                        if (g_ascii_strcasecmp(tokens[i], "auto-flow") == 0)
-                            continue;
-                        if (g_ascii_strcasecmp(tokens[i], "dense") == 0) {
-                            g_string_append(flow, " dense");
-                            continue;
-                        }
-                        if (tracks->len) g_string_append_c(tracks, ' ');
-                        g_string_append(tracks, tokens[i]);
-                    }
-                    ns_css_value *fv = parse_value_for(NS_CSS_GRID_AUTO_FLOW,
-                                                       flow->str);
-                    if (fv) {
-                        ns_css_decl d = { .prop = NS_CSS_GRID_AUTO_FLOW,
-                                          .value = fv, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                    ns_css_value *tv = parse_value_for(NS_CSS_GRID_AUTO_ROWS,
-                                                       tracks->len ? tracks->str : "auto");
-                    if (tv) {
-                        ns_css_decl d = { .prop = NS_CSS_GRID_AUTO_ROWS,
-                                          .value = tv, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                    for (int i = 0; i < n; i++) g_free(tokens[i]);
-                    g_string_free(flow, TRUE);
-                    g_string_free(tracks, TRUE);
-                    g_clear_pointer(&rows_trim, g_free);
-                }
-                g_free(rows_flow_probe);
-            }
-            if (rows_trim && *rows_trim) {
-                ns_css_value *v = parse_value_for(NS_CSS_GRID_TEMPLATE_ROWS, rows_trim);
-                if (v) {
-                    ns_css_decl d = { .prop = NS_CSS_GRID_TEMPLATE_ROWS,
-                                      .value = v, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            if (cols_trim && *cols_trim) {
-                ns_css_value *v = parse_value_for(NS_CSS_GRID_TEMPLATE_COLUMNS, cols_trim);
-                if (v) {
-                    ns_css_decl d = { .prop = NS_CSS_GRID_TEMPLATE_COLUMNS,
-                                      .value = v, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            g_free(areas_acc);
-            g_free(rows_trim);
-            g_free(cols_trim);
-            g_free(rows_part);
-            g_free(cols_part);
+            for (int i = 0; i < n; i++) g_free(parts[i]);
+            g_free(canon);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -16886,76 +17677,48 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
-        if (strcmp(pname, "grid-area") == 0) {
+        if (strcmp(pname, "grid-area") == 0 ||
+            strcmp(pname, "grid-column") == 0 ||
+            strcmp(pname, "grid-row") == 0) {
             static const ns_css_prop area_props[4] = {
                 NS_CSS_GRID_ROW_START, NS_CSS_GRID_COLUMN_START,
                 NS_CSS_GRID_ROW_END, NS_CSS_GRID_COLUMN_END,
             };
+            static const ns_css_prop row_props[2] = {
+                NS_CSS_GRID_ROW_START, NS_CSS_GRID_ROW_END,
+            };
+            static const ns_css_prop column_props[2] = {
+                NS_CSS_GRID_COLUMN_START, NS_CSS_GRID_COLUMN_END,
+            };
+            gboolean area = pname[5] == 'a';
+            const ns_css_prop *props = area ? area_props
+                                     : pname[5] == 'c' ? column_props
+                                                       : row_props;
             char *parts[4] = {0};
+            gboolean ident_only[4] = {0};
             int n = 0;
-            gboolean overlong = FALSE;
-            const char *scan = vtext;
-            const char *gv_end = vtext + strlen(vtext);
-            while (n < 4) {
-                const char *slash = css_find_top_level_char(scan, gv_end, '/');
-                parts[n++] = css_trim_dup_range(scan, slash ? slash : gv_end);
-                if (!slash) break;
-                scan = slash + 1;
-                if (n == 4)
-                    overlong = css_find_top_level_char(scan, gv_end, '/') ||
-                               *css_skip_ws_comments(scan, gv_end);
+            ns_css_value *wide = parse_css_wide_keyword(vtext);
+            if (wide) {
+                n = area ? 4 : 2;
+                for (int i = 0; i < n; i++) parts[i] = g_strdup(vtext);
+                ns_css_value_free(wide);
+            } else {
+                n = grid_placement_expand(vtext, area, parts, ident_only);
             }
-            for (int i = 0; overlong ? FALSE : i < 4; i++) {
-                const char *text = i < n && *parts[i] ? parts[i] : NULL;
-                if (!text) {
-                    const char *from = i == 1 ? parts[0]
-                                     : i >= 2 && i - 2 < n ? parts[i - 2]
-                                     : NULL;
-                    if (from && grid_line_is_custom_ident(from)) text = from;
-                }
-                if (!text) continue;
-                ns_css_value *v = parse_value_for(area_props[i], text);
+            for (int i = 0; i < n; i++) {
+                ns_css_value *v = parse_value_for(props[i], parts[i]);
                 if (!v) continue;
-                ns_css_decl d = { .prop = area_props[i], .value = v,
+                ns_css_decl d = { .prop = props[i], .value = v,
                                   .important = important };
                 g_array_append_val(decls_out, d);
             }
             for (int i = 0; i < n; i++) g_free(parts[i]);
-        }
-
-        if (strcmp(pname, "grid-column") == 0 ||
-            strcmp(pname, "grid-row") == 0) {
-            gboolean is_col = pname[5] == 'c';
-            ns_css_prop sp_prop = is_col ? NS_CSS_GRID_COLUMN_START
-                                         : NS_CSS_GRID_ROW_START;
-            ns_css_prop ep_prop = is_col ? NS_CSS_GRID_COLUMN_END
-                                         : NS_CSS_GRID_ROW_END;
-            const char *gv_end = vtext + strlen(vtext);
-            const char *slash = css_find_top_level_char(vtext, gv_end, '/');
-            char *first = css_trim_dup_range(vtext, slash ? slash : gv_end);
-            char *second = slash ? css_trim_dup_range(slash + 1, gv_end) : NULL;
-            if (*first) {
-                ns_css_value *v = parse_value_for(sp_prop, first);
-                if (v) {
-                    ns_css_decl d = { .prop = sp_prop, .value = v,
-                                      .important = important };
-                    g_array_append_val(decls_out, d);
-                }
+            if (n == 0 || !area) {
+                g_free(pname);
+                g_free(vtext);
+                if (p < end && *p == ';') p++;
+                continue;
             }
-            if (second && *second) {
-                ns_css_value *v = parse_value_for(ep_prop, second);
-                if (v) {
-                    ns_css_decl d = { .prop = ep_prop, .value = v,
-                                      .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            g_free(first);
-            g_free(second);
-            g_free(pname);
-            g_free(vtext);
-            if (p < end && *p == ';') p++;
-            continue;
         }
 
         if (strcmp(pname, "place-items") == 0 ||
@@ -23218,17 +23981,34 @@ css_add_leading_zeros(char *v)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+is_math_fn_open(const char *text, const char *paren)
+{
+    const char *start = paren;
+    while (start > text && (is_ident(start[-1]) || start[-1] == '-')) start--;
+    return start < paren && is_math_fn_start(start);
+}
+
 static char *
-css_normalize_negative_zero(char *value)
+negative_zero_normalize(char *value, gboolean inside_math)
 {
     if (!value) return NULL;
     gboolean changed = FALSE;
     GString *out = g_string_new(NULL);
     const char *p = value;
+    int math_depth = 0, depth = 0;
     while (*p) {
+        if (*p == '(') {
+            depth++;
+            if (math_depth == 0 && !inside_math && is_math_fn_open(value, p))
+                math_depth = depth;
+        } else if (*p == ')') {
+            if (depth == math_depth) math_depth = 0;
+            if (depth > 0) depth--;
+        }
         gboolean boundary = p == value ||
             !(is_ident(p[-1]) || p[-1] == '.' || p[-1] == '\\');
-        if (*p == '-' && boundary &&
+        if (*p == '-' && boundary && math_depth == 0 &&
             (g_ascii_isdigit((guchar)p[1]) || p[1] == '.')) {
             char *number_end = NULL;
             double number = g_ascii_strtod(p, &number_end);
@@ -23247,6 +24027,18 @@ css_normalize_negative_zero(char *value)
     }
     g_free(value);
     return g_string_free(out, FALSE);
+}
+
+static char *
+css_normalize_negative_zero(char *value)
+{
+    return negative_zero_normalize(value, FALSE);
+}
+
+char *
+ns_css_negative_zero_normalize(char *value)
+{
+    return negative_zero_normalize(value, TRUE);
 }
 
 static char *
@@ -23350,6 +24142,38 @@ css_inline_value_canonical(const char *prop, char *value)
     if (strcmp(prop, "place-self") == 0 || strcmp(prop, "place-items") == 0 ||
         strcmp(prop, "place-content") == 0)
         value = place_shorthand_canonical(prop, value);
+    if (g_str_has_prefix(prop, "grid-row") ||
+        g_str_has_prefix(prop, "grid-column") ||
+        strcmp(prop, "grid-area") == 0) {
+        gboolean shorthand = strcmp(prop, "grid-row") == 0 ||
+                             strcmp(prop, "grid-column") == 0 ||
+                             strcmp(prop, "grid-area") == 0;
+        char *canon = shorthand
+            ? grid_placement_canonical(value, prop[5] == 'a')
+            : grid_line_canonical(value, NULL);
+        if (canon) {
+            g_free(value);
+            return canon;
+        }
+    }
+    if (strcmp(prop, "grid-template") == 0 || strcmp(prop, "grid") == 0) {
+        char *parts[6] = {0};
+        char *canon = NULL;
+        gboolean ok = prop[4] == '\0' ? grid_shorthand_parse(value, parts, &canon)
+                                      : grid_template_parse(value, parts, &canon);
+        for (int i = 0; i < 6; i++) g_free(parts[i]);
+        if (ok) {
+            g_free(value);
+            return canon;
+        }
+    }
+    if (strcmp(prop, "grid-auto-flow") == 0) {
+        char *canon = grid_auto_flow_canonical(value);
+        if (canon) {
+            g_free(value);
+            return canon;
+        }
+    }
     value = css_add_leading_zeros(value);
     value = css_normalize_negative_zero(value);
     value = css_serialize_urls(value);
@@ -23955,6 +24779,167 @@ inline_border_radius_value(const char *style)
     return r;
 }
 
+static char *
+inline_grid_template_compose(char *const v[3])
+{
+    const char *rows = v[0], *cols = v[1], *areas = v[2];
+    if (strcmp(areas, "none") == 0) {
+        if (strcmp(rows, "none") == 0 && strcmp(cols, "none") == 0)
+            return g_strdup("none");
+        return g_strdup_printf("%s / %s", rows, cols);
+    }
+    GArray *area_toks = grid_tokens(areas);
+    GArray *row_toks = grid_tokens(rows);
+    GArray *col_toks = grid_tokens(cols);
+    GString *out = NULL;
+    if (area_toks && row_toks && col_toks) {
+        out = g_string_new(NULL);
+        guint row = 0;
+        for (guint i = 0; out && i < row_toks->len; i++) {
+            const grid_tok *t = &g_array_index(row_toks, grid_tok, i);
+            if (t->kind == GRID_TOK_NAMES) {
+                grid_parts_append(out, t->text);
+                continue;
+            }
+            if (t->kind != GRID_TOK_OTHER || row >= area_toks->len ||
+                !grid_track_size_valid(t->text)) {
+                g_string_free(out, TRUE);
+                out = NULL;
+                break;
+            }
+            grid_parts_append(out,
+                              g_array_index(area_toks, grid_tok, row++).text);
+            if (strcmp(t->text, "auto") != 0) grid_parts_append(out, t->text);
+        }
+        if (out && row != area_toks->len) {
+            g_string_free(out, TRUE);
+            out = NULL;
+        }
+        if (out && strcmp(cols, "none") != 0) {
+            char *explicit_cols = grid_track_list_canonical(
+                &g_array_index(col_toks, grid_tok, 0), (int)col_toks->len,
+                NS_CSS_GRID_TEMPLATE_COLUMNS, TRUE);
+            if (explicit_cols) {
+                g_string_append_printf(out, " / %s", explicit_cols);
+                g_free(explicit_cols);
+            } else {
+                g_string_free(out, TRUE);
+                out = NULL;
+            }
+        }
+    }
+    if (area_toks) g_array_free(area_toks, TRUE);
+    if (row_toks) g_array_free(row_toks, TRUE);
+    if (col_toks) g_array_free(col_toks, TRUE);
+    return out ? g_string_free(out, FALSE) : g_strdup("");
+}
+
+static char *
+inline_grid_compose(char *const v[6])
+{
+    const char *rows = v[0], *cols = v[1], *areas = v[2];
+    const char *flow = v[3], *auto_rows = v[4], *auto_cols = v[5];
+    gboolean dense = strstr(flow, "dense") != NULL;
+    gboolean column = strstr(flow, "column") != NULL;
+    if (strcmp(auto_rows, "auto") == 0 && strcmp(auto_cols, "auto") == 0 &&
+        strcmp(flow, "row") == 0)
+        return inline_grid_template_compose(v);
+    if (strcmp(areas, "none") != 0) return g_strdup("");
+    if (!column && strcmp(auto_cols, "auto") == 0 &&
+        strcmp(rows, "none") == 0) {
+        GString *s = g_string_new("auto-flow");
+        if (dense) g_string_append(s, " dense");
+        if (strcmp(auto_rows, "auto") != 0)
+            g_string_append_printf(s, " %s", auto_rows);
+        g_string_append_printf(s, " / %s", cols);
+        return g_string_free(s, FALSE);
+    }
+    if (column && strcmp(auto_rows, "auto") == 0 &&
+        strcmp(cols, "none") == 0) {
+        GString *s = g_string_new(rows);
+        g_string_append(s, " / auto-flow");
+        if (dense) g_string_append(s, " dense");
+        if (strcmp(auto_cols, "auto") != 0)
+            g_string_append_printf(s, " %s", auto_cols);
+        return g_string_free(s, FALSE);
+    }
+    return g_strdup("");
+}
+
+char *
+ns_css_grid_placement_compose(char *const values[4], gboolean area)
+{
+    int n = area ? 4 : 2;
+    GString *text = g_string_new(NULL);
+    for (int i = 0; i < n; i++) {
+        if (!values[i] || !*values[i]) {
+            g_string_free(text, TRUE);
+            return g_strdup("");
+        }
+        if (i) g_string_append(text, " / ");
+        g_string_append(text, values[i]);
+    }
+    char *out = grid_placement_canonical(text->str, area);
+    g_string_free(text, TRUE);
+    return out ? out : g_strdup("");
+}
+
+char *
+ns_css_grid_shorthand_compose(char *const values[6], gboolean full)
+{
+    int n = full ? 6 : 3;
+    for (int i = 0; i < n; i++)
+        if (!values[i] || !*values[i]) return g_strdup("");
+    return full ? inline_grid_compose(values)
+                : inline_grid_template_compose(values);
+}
+
+static char *
+inline_grid_value(const char *style, gboolean full)
+{
+    static const char *const names[6] = {
+        "grid-template-rows", "grid-template-columns", "grid-template-areas",
+        "grid-auto-flow", "grid-auto-rows", "grid-auto-columns",
+    };
+    int n = full ? 6 : 3;
+    char *v[6] = {0};
+    int important = 0, present = 0;
+    for (int i = 0; i < n; i++) {
+        v[i] = ns_inline_style_get(style, names[i]);
+        if (!v[i] || !*v[i]) continue;
+        present++;
+        gboolean imp = FALSE;
+        css_strip_important(v[i], &imp);
+        g_strstrip(v[i]);
+        if (imp) important++;
+    }
+    char *r = NULL;
+    if (present == n && (important == 0 || important == n)) {
+        int wide = 0;
+        for (int i = 0; i < n; i++)
+            if (inline_css_wide_value(v[i])) wide++;
+        if (wide == n) {
+            gboolean same = TRUE;
+            for (int i = 1; i < n; i++)
+                if (strcmp(v[i], v[0]) != 0) same = FALSE;
+            r = g_strdup(same ? v[0] : "");
+        } else if (wide == 0) {
+            r = full ? inline_grid_compose(v) : inline_grid_template_compose(v);
+        } else {
+            r = g_strdup("");
+        }
+        if (important && *r) {
+            char *with = g_strconcat(r, " !important", NULL);
+            g_free(r);
+            r = with;
+        }
+    } else if (present > 0) {
+        r = g_strdup("");
+    }
+    for (int i = 0; i < n; i++) g_free(v[i]);
+    return r;
+}
+
 char *
 ns_inline_style_get(const char *style, const char *prop)
 {
@@ -24029,6 +25014,12 @@ ns_inline_style_get(const char *style, const char *prop)
         char *r = xs && ys ? bg_position_zip(xs, ys) : NULL;
         g_free(xs);
         g_free(ys);
+        if (r) return r;
+    }
+    if ((g_ascii_strcasecmp(prop, "grid") == 0 ||
+         g_ascii_strcasecmp(prop, "grid-template") == 0) &&
+        !strstr(style, "var(")) {
+        char *r = inline_grid_value(style, prop[4] == '\0');
         if (r) return r;
     }
     if (ns_css_prop_id(prop) < 0 && ns_css_named_property_supported(prop)) {
@@ -26005,9 +26996,9 @@ value_serialize_one(const ns_css_value *v)
         return g_string_free(s, FALSE);
     }
     case NS_CSS_V_TRACKS: {
-        GString *s = g_string_new(NULL);
         if (v->u.tracks.subgrid)
-            return g_strdup("subgrid");
+            return g_strdup(v->specified ? v->specified : "subgrid");
+        GString *s = g_string_new(NULL);
         for (int i = 0; i <= v->u.tracks.n; i++) {
             gboolean open = FALSE;
             for (int k = 0; k < v->u.tracks.n_line_names; k++) {
@@ -27113,6 +28104,132 @@ style_font_px(const ns_style *s)
     return 16;
 }
 
+static gboolean
+track_length_absolute(ns_css_unit unit, double v, double font_px,
+                      double root_px, double *px)
+{
+    switch (unit) {
+    case NS_CSS_UNIT_PX:  *px = v; return TRUE;
+    case NS_CSS_UNIT_EM:  *px = v * font_px; return TRUE;
+    case NS_CSS_UNIT_REM: *px = v * root_px; return TRUE;
+    default:              return FALSE;
+    }
+}
+
+static gboolean
+track_length_computed_append(GString *out, const char *tok, gsize len,
+                             double font_px, double root_px)
+{
+    char *text = g_strndup(tok, len);
+    double px = 0, pct = 0;
+    gboolean has_pct = FALSE, ok = FALSE, math = is_math_fn_start(text);
+    ns_css_value *v = math ? parse_calc(text) : NULL;
+    if (v && v->kind == NS_CSS_V_LENGTH) {
+        has_pct = v->u.length.unit == NS_CSS_UNIT_PERCENT;
+        if (has_pct) pct = v->u.length.v;
+        ok = has_pct || track_length_absolute(v->u.length.unit, v->u.length.v,
+                                              font_px, root_px, &px);
+    } else if (v && v->kind == NS_CSS_V_CALC && !v->u.calc.fn &&
+               v->u.calc.lh == 0 && v->u.calc.rlh == 0 &&
+               v->u.calc.vw == 0 && v->u.calc.vh == 0 &&
+               v->u.calc.vmin == 0 && v->u.calc.vmax == 0) {
+        px = v->u.calc.px + v->u.calc.em * font_px + v->u.calc.rem * root_px;
+        pct = v->u.calc.pct;
+        has_pct = strchr(text, '%') != NULL;
+        ok = TRUE;
+    } else if (!math) {
+        double num;
+        ns_css_unit unit;
+        if (parse_length(text, &num, &unit)) {
+            has_pct = unit == NS_CSS_UNIT_PERCENT;
+            if (has_pct) pct = num;
+            ok = has_pct || track_length_absolute(unit, num, font_px, root_px,
+                                                  &px);
+        }
+    }
+    ns_css_value_free(v);
+    g_free(text);
+    if (!ok) return FALSE;
+    char *pct_str = ns_css_number_str(pct);
+    char *px_str = ns_css_number_str(has_pct ? fabs(px) : MAX(px, 0));
+    if (!has_pct)
+        g_string_append_printf(out, "%spx", px_str);
+    else if (!math)
+        g_string_append_printf(out, "%s%%", pct_str);
+    else
+        g_string_append_printf(out, "calc(%s%% %c %spx)", pct_str,
+                               px < 0 ? '-' : '+', px_str);
+    g_free(pct_str);
+    g_free(px_str);
+    return TRUE;
+}
+
+static gboolean
+track_number_start(const char *p)
+{
+    if (*p == '+' || *p == '-') p++;
+    if (*p == '.') p++;
+    return g_ascii_isdigit(*p);
+}
+
+static char *
+tracks_computed_text(const char *text, double font_px, double root_px)
+{
+    GString *out = g_string_new(NULL);
+    const char *p = text;
+    const char *end = text + strlen(text);
+    while (p < end) {
+        gboolean boundary = p == text || !(is_ident(p[-1]) || p[-1] == '.');
+        if (*p == '[') {
+            const char *close = memchr(p, ']', (gsize)(end - p));
+            const char *stop = close ? close + 1 : end;
+            g_string_append_len(out, p, stop - p);
+            p = stop;
+            continue;
+        }
+        if (boundary && is_math_fn_start(p)) {
+            const char *close = match_close_paren(strchr(p, '(') + 1, end);
+            const char *stop = close ? close + 1 : end;
+            if (!track_length_computed_append(out, p, (gsize)(stop - p),
+                                              font_px, root_px))
+                g_string_append_len(out, p, stop - p);
+            p = stop;
+            continue;
+        }
+        if (boundary && track_number_start(p)) {
+            const char *q = p + 1;
+            while (q < end && (g_ascii_isdigit(*q) || *q == '.')) q++;
+            if (q < end && (*q == 'e' || *q == 'E') && track_number_start(q + 1)) {
+                q += 2;
+                while (q < end && g_ascii_isdigit(*q)) q++;
+            }
+            const char *unit = q;
+            while (q < end && (g_ascii_isalpha(*q) || *q == '%')) q++;
+            gboolean flex = q - unit == 2 && g_ascii_strncasecmp(unit, "fr", 2) == 0;
+            if (flex || !track_length_computed_append(out, p, (gsize)(q - p),
+                                                      font_px, root_px))
+                g_string_append_len(out, p, q - p);
+            p = q;
+            continue;
+        }
+        g_string_append_c(out, *p++);
+    }
+    return g_string_free(out, FALSE);
+}
+
+char *
+ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
+                                 int prop)
+{
+    const ns_css_value *v = s && prop >= 0 && prop < NS_CSS_PROP_COUNT
+        ? s->values[prop] : NULL;
+    if (!v || v->kind != NS_CSS_V_TRACKS || v->u.tracks.subgrid ||
+        !v->specified)
+        return NULL;
+    return tracks_computed_text(v->specified, style_font_px(s),
+                                style_font_px(root ? root : s));
+}
+
 static void
 syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s, double root_px)
 {
@@ -27886,14 +29003,17 @@ style_line_height_px(const ns_style *s, double font_px, double root_px,
 }
 
 static gboolean
-calc_has_font_units(const ns_css_value *v)
+calc_has_deferred_units(const ns_css_value *v)
 {
     if (v->u.calc.em != 0 || v->u.calc.rem != 0 || v->u.calc.lh != 0 ||
-        v->u.calc.rlh != 0)
+        v->u.calc.rlh != 0 || v->u.calc.vw != 0 || v->u.calc.vh != 0 ||
+        v->u.calc.vmin != 0 || v->u.calc.vmax != 0)
         return TRUE;
     for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
         if (v->u.calc.args[i].em != 0 || v->u.calc.args[i].rem != 0 ||
-            v->u.calc.args[i].lh != 0 || v->u.calc.args[i].rlh != 0)
+            v->u.calc.args[i].lh != 0 || v->u.calc.args[i].rlh != 0 ||
+            v->u.calc.args[i].vw != 0 || v->u.calc.args[i].vh != 0 ||
+            v->u.calc.args[i].vmin != 0 || v->u.calc.args[i].vmax != 0)
             return TRUE;
     return FALSE;
 }
@@ -27935,26 +29055,52 @@ calc_fold_percent(ns_css_value *v, double basis)
     v->u.calc.pct = 0;
 }
 
-static void
-calc_fold_font_units(ns_css_value *v, double font_px, double root_px,
-                     double lh_px, double rlh_px)
+static double
+calc_viewport_refresh_px(double vw, double vh, double vmin, double vmax,
+                         double parsed_w, double parsed_h)
 {
+    if (vw == 0 && vh == 0 && vmin == 0 && vmax == 0) return 0;
+    return viewport_coeff_px(vw, vh, vmin, vmax, g_viewport_w, g_viewport_h) -
+           viewport_coeff_px(vw, vh, vmin, vmax, parsed_w, parsed_h);
+}
+
+static void
+calc_fold_deferred_units(ns_css_value *v, double font_px, double root_px,
+                         double lh_px, double rlh_px)
+{
+    double parsed_w = v->u.calc.parsed_vw, parsed_h = v->u.calc.parsed_vh;
     v->u.calc.px += v->u.calc.em * font_px + v->u.calc.rem * root_px +
-                    v->u.calc.lh * lh_px + v->u.calc.rlh * rlh_px;
+                    v->u.calc.lh * lh_px + v->u.calc.rlh * rlh_px +
+                    calc_viewport_refresh_px(v->u.calc.vw, v->u.calc.vh,
+                                             v->u.calc.vmin, v->u.calc.vmax,
+                                             parsed_w, parsed_h);
     v->u.calc.em = 0;
     v->u.calc.rem = 0;
     v->u.calc.lh = 0;
     v->u.calc.rlh = 0;
+    v->u.calc.vw = 0;
+    v->u.calc.vh = 0;
+    v->u.calc.vmin = 0;
+    v->u.calc.vmax = 0;
     if (!v->u.calc.fn || v->u.calc.n_args == 0) return;
     gboolean pct = FALSE;
     for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
         double *px = &v->u.calc.args[i].px;
         *px += v->u.calc.args[i].em * font_px + v->u.calc.args[i].rem * root_px +
-               v->u.calc.args[i].lh * lh_px + v->u.calc.args[i].rlh * rlh_px;
+               v->u.calc.args[i].lh * lh_px + v->u.calc.args[i].rlh * rlh_px +
+               calc_viewport_refresh_px(v->u.calc.args[i].vw,
+                                        v->u.calc.args[i].vh,
+                                        v->u.calc.args[i].vmin,
+                                        v->u.calc.args[i].vmax,
+                                        parsed_w, parsed_h);
         v->u.calc.args[i].em = 0;
         v->u.calc.args[i].rem = 0;
         v->u.calc.args[i].lh = 0;
         v->u.calc.args[i].rlh = 0;
+        v->u.calc.args[i].vw = 0;
+        v->u.calc.args[i].vh = 0;
+        v->u.calc.args[i].vmin = 0;
+        v->u.calc.args[i].vmax = 0;
         if (v->u.calc.args[i].pct != 0) pct = TRUE;
     }
     v->u.calc.px = ns_css_calc_math_fn_px(v, g_viewport_w);
@@ -27969,7 +29115,7 @@ calc_font_size_px(const ns_css_value *fs, double parent_px, double root_px,
                   double lh_px, double rlh_px)
 {
     ns_css_value tmp = *fs;
-    calc_fold_font_units(&tmp, parent_px, root_px, lh_px, rlh_px);
+    calc_fold_deferred_units(&tmp, parent_px, root_px, lh_px, rlh_px);
     if (tmp.u.calc.fn && tmp.u.calc.n_args)
         return ns_css_calc_math_fn_px(&tmp, parent_px);
     return tmp.u.calc.px + tmp.u.calc.pct * parent_px / 100.0;
@@ -28083,6 +29229,71 @@ ns_css_value_cow(ns_style *out, int prop)
     return copy;
 }
 
+#define NS_CSS_CALC_LIMIT 33554400.0
+
+static double
+calc_clamp_finite(double v)
+{
+    if (isnan(v)) return 0;
+    if (isinf(v)) return v < 0 ? -NS_CSS_CALC_LIMIT : NS_CSS_CALC_LIMIT;
+    return v;
+}
+
+static gboolean
+calc_value_is_finite(const ns_css_value *v)
+{
+    if (v->kind == NS_CSS_V_LENGTH) return isfinite(v->u.length.v);
+    if (v->kind == NS_CSS_V_TRANSFORM) {
+        for (int k = 0; k < v->u.transform.n_ops; k++) {
+            const ns_css_transform_op *op = &v->u.transform.ops[k];
+            if (op->kind != NS_CSS_TFN_TRANSLATE && op->kind != NS_CSS_TFN_SCALE)
+                continue;
+            if (!isfinite(op->a) || !isfinite(op->b) || !isfinite(op->c) ||
+                !isfinite(op->a_pct) || !isfinite(op->b_pct))
+                return FALSE;
+        }
+        return TRUE;
+    }
+    if (v->kind != NS_CSS_V_CALC) return TRUE;
+    if (!isfinite(v->u.calc.px) || !isfinite(v->u.calc.pct) ||
+        !isfinite(v->u.calc.em) || !isfinite(v->u.calc.rem))
+        return FALSE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
+        if (!isfinite(v->u.calc.args[i].px) || !isfinite(v->u.calc.args[i].pct))
+            return FALSE;
+    return TRUE;
+}
+
+static void
+calc_value_clamp_finite(ns_css_value *v)
+{
+    if (v->kind == NS_CSS_V_LENGTH) {
+        v->u.length.v = calc_clamp_finite(v->u.length.v);
+        return;
+    }
+    if (v->kind == NS_CSS_V_TRANSFORM) {
+        for (int k = 0; k < v->u.transform.n_ops; k++) {
+            ns_css_transform_op *op = &v->u.transform.ops[k];
+            if (op->kind != NS_CSS_TFN_TRANSLATE && op->kind != NS_CSS_TFN_SCALE)
+                continue;
+            op->a = calc_clamp_finite(op->a);
+            op->b = calc_clamp_finite(op->b);
+            op->c = calc_clamp_finite(op->c);
+            op->a_pct = calc_clamp_finite(op->a_pct);
+            op->b_pct = calc_clamp_finite(op->b_pct);
+        }
+        return;
+    }
+    v->u.calc.px = calc_clamp_finite(v->u.calc.px);
+    v->u.calc.pct = calc_clamp_finite(v->u.calc.pct);
+    v->u.calc.em = calc_clamp_finite(v->u.calc.em);
+    v->u.calc.rem = calc_clamp_finite(v->u.calc.rem);
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
+        v->u.calc.args[i].px = calc_clamp_finite(v->u.calc.args[i].px);
+        v->u.calc.args[i].pct = calc_clamp_finite(v->u.calc.args[i].pct);
+    }
+}
+
 static void
 resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
 {
@@ -28095,7 +29306,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * font_rem_px;
     } else if (out->values[NS_CSS_FONT_SIZE] &&
                out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_CALC &&
-               calc_has_font_units(out->values[NS_CSS_FONT_SIZE])) {
+               calc_has_deferred_units(out->values[NS_CSS_FONT_SIZE])) {
         const ns_css_value *fsv = out->values[NS_CSS_FONT_SIZE];
         double parent_px = 16;
         if (parent_style && parent_style->values[NS_CSS_FONT_SIZE] &&
@@ -28149,6 +29360,10 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         if (i == NS_CSS_FONT_SIZE) continue;
         ns_css_value *v = out->values[i];
         if (!v) continue;
+        if (!calc_value_is_finite(v)) {
+            v = ns_css_value_cow(out, i);
+            calc_value_clamp_finite(v);
+        }
         if (v->kind == NS_CSS_V_SHADOW) {
             gboolean needs = FALSE;
             for (int k = 0; k < v->u.shadow.n && !needs; k++)
@@ -28206,13 +29421,13 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         }
         if (v->kind == NS_CSS_V_CALC) {
             gboolean line_pct = i == NS_CSS_LINE_HEIGHT && calc_has_percent(v);
-            if (!calc_has_font_units(v) && !line_pct) continue;
+            if (!calc_has_deferred_units(v) && !line_pct) continue;
             v = ns_css_value_cow(out, i);
             double lh_base = i == NS_CSS_LINE_HEIGHT
                 ? initial_line_px : my_line_px;
             double rlh_base = i == NS_CSS_LINE_HEIGHT && !parent_style
                 ? initial_line_px : root_line_px;
-            calc_fold_font_units(v, my_font_px, root_px, lh_base, rlh_base);
+            calc_fold_deferred_units(v, my_font_px, root_px, lh_base, rlh_base);
             if (line_pct) calc_fold_percent(v, my_font_px);
             continue;
         }
@@ -30798,6 +32013,59 @@ strip_native_widget_decorations(const ns_node *el, ns_style *s)
     }
 }
 
+static double
+frame_edge_px(const ns_style *s, ns_css_prop prop)
+{
+    const ns_css_value *v = s->values[prop];
+    if (!v || v->kind != NS_CSS_V_LENGTH || v->u.length.unit != NS_CSS_UNIT_PX)
+        return 0;
+    return v->u.length.v;
+}
+
+static double
+frame_border_px(const ns_style *s, ns_css_prop width_prop,
+                ns_css_prop style_prop)
+{
+    const ns_css_value *st = s->values[style_prop];
+    if (!st || (st->kind == NS_CSS_V_KEYWORD && st->u.keyword &&
+                (strcmp(st->u.keyword, "none") == 0 ||
+                 strcmp(st->u.keyword, "hidden") == 0)))
+        return 0;
+    return frame_edge_px(s, width_prop);
+}
+
+static gboolean
+frame_viewport_from_style(const ns_style *s, double *w, double *h)
+{
+    if (!s) return FALSE;
+    const ns_css_value *wv = s->values[NS_CSS_WIDTH];
+    const ns_css_value *hv = s->values[NS_CSS_HEIGHT];
+    if (!wv || wv->kind != NS_CSS_V_LENGTH ||
+        wv->u.length.unit != NS_CSS_UNIT_PX ||
+        !hv || hv->kind != NS_CSS_V_LENGTH ||
+        hv->u.length.unit != NS_CSS_UNIT_PX)
+        return FALSE;
+    double fw = wv->u.length.v, fh = hv->u.length.v;
+    if (ns_css_keyword_is(s->values[NS_CSS_BOX_SIZING], "border-box")) {
+        fw -= frame_edge_px(s, NS_CSS_PADDING_LEFT) +
+              frame_edge_px(s, NS_CSS_PADDING_RIGHT) +
+              frame_border_px(s, NS_CSS_BORDER_LEFT_WIDTH,
+                              NS_CSS_BORDER_LEFT_STYLE) +
+              frame_border_px(s, NS_CSS_BORDER_RIGHT_WIDTH,
+                              NS_CSS_BORDER_RIGHT_STYLE);
+        fh -= frame_edge_px(s, NS_CSS_PADDING_TOP) +
+              frame_edge_px(s, NS_CSS_PADDING_BOTTOM) +
+              frame_border_px(s, NS_CSS_BORDER_TOP_WIDTH,
+                              NS_CSS_BORDER_TOP_STYLE) +
+              frame_border_px(s, NS_CSS_BORDER_BOTTOM_WIDTH,
+                              NS_CSS_BORDER_BOTTOM_STYLE);
+    }
+    if (fw <= 0 || fh <= 0) return FALSE;
+    *w = fw;
+    *h = fh;
+    return TRUE;
+}
+
 static void
 cascade_walk(ns_node *node,
              const ns_css_stylesheet *ua,
@@ -30816,7 +32084,8 @@ cascade_walk(ns_node *node,
     gboolean frame_viewport = FALSE;
     if (node->kind == NS_NODE_DOCUMENT && node->parent && g_frame_viewport_cb) {
         double fw = 0, fh = 0;
-        g_frame_viewport_cb(node->parent, &fw, &fh);
+        if (!frame_viewport_from_style(parent_style, &fw, &fh))
+            g_frame_viewport_cb(node->parent, &fw, &fh);
         if (fw > 0 && fh > 0 &&
             (fabs(fw - g_viewport_w) > 0.01 ||
              fabs(fh - g_viewport_h) > 0.01)) {

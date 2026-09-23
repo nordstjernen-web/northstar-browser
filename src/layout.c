@@ -349,6 +349,18 @@ flex_direction_of(const ns_style *s)
     return reverse != right_to_left ? "row-reverse" : "row";
 }
 
+static gboolean
+self_start_is_far_side(const ns_style *s, gboolean horizontal_axis)
+{
+    int writing_mode = ns_css_writing_mode(s);
+    gboolean rtl = s && keyword_is(s->values[NS_CSS_DIRECTION], "rtl");
+    if (horizontal_axis)
+        return writing_mode == 1 ? TRUE : writing_mode == 2 ? FALSE : rtl;
+    if (!writing_mode) return FALSE;
+    gboolean upward = keyword_is(s->values[NS_CSS_WRITING_MODE], "sideways-lr");
+    return upward != rtl;
+}
+
 static double
 number_or(const ns_css_value *v, double fallback)
 {
@@ -10058,6 +10070,44 @@ track_is_intrinsic(ns_css_track_kind k)
            k == NS_CSS_TRACK_MAX_CONTENT;
 }
 
+static double
+grid_flex_track_sizes(const ns_css_tracks *tr, double space,
+                      double available_main, double *sizes)
+{
+    gboolean inflexible[NS_CSS_TRACKS_MAX] = {0};
+    double base[NS_CSS_TRACKS_MAX] = {0};
+    for (int i = 0; i < tr->n; i++)
+        if (tr->tracks[i].kind == NS_CSS_TRACK_FR)
+            base[i] = track_min_px(&tr->tracks[i], available_main);
+    double fr = 0;
+    for (int pass = 0; pass <= tr->n; pass++) {
+        double leftover = space, flex_sum = 0;
+        for (int i = 0; i < tr->n; i++) {
+            if (tr->tracks[i].kind != NS_CSS_TRACK_FR) continue;
+            if (inflexible[i]) leftover -= base[i];
+            else flex_sum += MAX(tr->tracks[i].v, 0);
+        }
+        fr = flex_sum > 0 ? leftover / MAX(flex_sum, 1.0) : 0;
+        gboolean changed = FALSE;
+        for (int i = 0; i < tr->n; i++) {
+            if (tr->tracks[i].kind != NS_CSS_TRACK_FR || inflexible[i]) continue;
+            if (fr * MAX(tr->tracks[i].v, 0) < base[i]) {
+                inflexible[i] = TRUE;
+                changed = TRUE;
+            }
+        }
+        if (!changed) break;
+    }
+    double used = 0;
+    for (int i = 0; i < tr->n; i++) {
+        if (tr->tracks[i].kind != NS_CSS_TRACK_FR) continue;
+        sizes[i] = inflexible[i] ? base[i]
+                                 : MAX(base[i], fr * MAX(tr->tracks[i].v, 0));
+        used += sizes[i];
+    }
+    return used;
+}
+
 static void
 resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
                          const double *content_min, const double *content_max,
@@ -10078,6 +10128,8 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
             fixed = t->kind == NS_CSS_TRACK_PX
                 ? t->v + t->pct * available_main / 100.0
                 : t->v * available_main / 100.0;
+            if (t->fit_content)
+                fixed = MIN(fixed, content_max ? content_max[i] : 0);
             if (t->has_min && track_is_intrinsic(t->min_kind) &&
                 content_min && content_min[i] > fixed)
                 fixed = content_min[i];
@@ -10161,10 +10213,12 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         }
     }
 
-    double per_fr   = total_fr > 0 ? remaining / MAX(total_fr, 1.0) : 0;
+    double fr_sizes[NS_CSS_TRACKS_MAX] = {0};
+    double fr_used = total_fr > 0
+        ? grid_flex_track_sizes(tr, remaining, available_main, fr_sizes) : 0;
     double per_auto = 0;
-    if (total_fr == 0 && n_auto > 0 && stretch_auto)
-        per_auto = remaining / n_auto;
+    if (n_auto > 0 && stretch_auto && remaining - fr_used > 0)
+        per_auto = (remaining - fr_used) / n_auto;
 
     for (int i = 0; i < tr->n; i++) {
         const ns_css_track *t = &tr->tracks[i];
@@ -10175,7 +10229,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
             if (shrink_used > 0 && shrink_px[i] > 0)
                 out_sizes[i] -= shrink_used * (shrink_px[i] / total_shrink);
             break;
-        case NS_CSS_TRACK_FR:      out_sizes[i] = per_fr * (t->v > 0 ? t->v : 0); break;
+        case NS_CSS_TRACK_FR:      out_sizes[i] = fr_sizes[i]; break;
         case NS_CSS_TRACK_AUTO:
             out_sizes[i] = auto_base[i] + auto_grow[i] + per_auto;
             break;
@@ -10192,6 +10246,48 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
     }
 }
 
+static double
+grid_track_repeat_px(const ns_css_track *t, double available_main)
+{
+    double min_px = track_min_px(t, available_main);
+    if (t->kind == NS_CSS_TRACK_PX || t->kind == NS_CSS_TRACK_PERCENT) {
+        double max_px = t->kind == NS_CSS_TRACK_PX
+            ? t->v + t->pct * available_main / 100.0
+            : t->v * available_main / 100.0;
+        return max_px > min_px ? max_px : min_px;
+    }
+    return min_px;
+}
+
+static void
+grid_line_name_copy(ns_css_tracks *out, const ns_css_line_name *ln, int line)
+{
+    if (out->n_line_names >= NS_CSS_LINE_NAMES_MAX) return;
+    ns_css_line_name *dst = &out->line_names[out->n_line_names++];
+    *dst = *ln;
+    dst->line = line;
+}
+
+static void
+grid_expand_repeat_names(const ns_css_tracks *tr, int repeats,
+                         ns_css_tracks *out)
+{
+    int first = tr->auto_repeat_names_start;
+    int last = tr->auto_repeat_names_end;
+    int shift = (repeats - 1) * tr->auto_repeat_count;
+    out->n_line_names = 0;
+    for (int i = 0; i < first; i++)
+        grid_line_name_copy(out, &tr->line_names[i], tr->line_names[i].line);
+    for (int r = 0; r < repeats; r++)
+        for (int i = first; i < last; i++)
+            grid_line_name_copy(out, &tr->line_names[i],
+                                tr->line_names[i].line +
+                                r * tr->auto_repeat_count);
+    for (int i = last; i < tr->n_line_names; i++)
+        grid_line_name_copy(out, &tr->line_names[i],
+                            tr->line_names[i].line + shift);
+}
+
 static ns_css_tracks
 expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap,
                       int *fit_start, int *fit_count)
@@ -10205,8 +10301,7 @@ expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap
     double base_min = 0;
     for (int i = 0; i < tr->auto_repeat_count; i++) {
         const ns_css_track *t = &tr->tracks[tr->auto_repeat_start + i];
-        double m = track_min_px(t, available_main);
-        if (m <= 0 && t->kind == NS_CSS_TRACK_PX) m = t->v;
+        double m = grid_track_repeat_px(t, available_main);
         if (m <= 0) {
             memset(&out, 0, sizeof(out));
             out.n = 1;
@@ -10216,10 +10311,20 @@ expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap
         base_min += m;
     }
     if (base_min <= 0) return out;
+    double others = 0;
+    int n_others = tr->n - tr->auto_repeat_count;
+    for (int i = 0; i < tr->n; i++) {
+        if (i >= tr->auto_repeat_start &&
+            i < tr->auto_repeat_start + tr->auto_repeat_count)
+            continue;
+        double m = grid_track_repeat_px(&tr->tracks[i], available_main);
+        if (m > 0) others += m;
+    }
     double pattern_with_gap = base_min + gap * tr->auto_repeat_count;
+    double room = available_main - others - (n_others - 1) * gap;
     int repeats = 1;
     if (pattern_with_gap > 0)
-        repeats = (int)((available_main + gap) / pattern_with_gap);
+        repeats = (int)(room / pattern_with_gap);
     if (repeats < 1) repeats = 1;
     if (repeats > NS_CSS_TRACKS_MAX) repeats = NS_CSS_TRACKS_MAX;
 
@@ -10242,18 +10347,13 @@ expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap
     }
     for (int i = 0; i < suffix_count && out.n < NS_CSS_TRACKS_MAX; i++)
         out.tracks[out.n++] = tr->tracks[suffix_start + i];
+    grid_expand_repeat_names(tr, repeats, &out);
     out.auto_repeat = NS_CSS_AUTO_REPEAT_NONE;
     if (tr->auto_repeat == NS_CSS_AUTO_REPEAT_FIT) {
         if (fit_start) *fit_start = prefix;
         if (fit_count) *fit_count = repeats * tr->auto_repeat_count;
     }
     return out;
-}
-
-static ns_css_tracks
-expand_auto_repeat(const ns_css_tracks *tr, double available_main, double gap)
-{
-    return expand_auto_repeat_ex(tr, available_main, gap, NULL, NULL);
 }
 
 typedef struct grid_lines {
@@ -10296,6 +10396,18 @@ grid_named_line(const char *name, gsize len, int after)
                                         : (want_end ? a->c1 + 2 : a->c0 + 1);
                 if (line > after) return line;
             }
+        }
+    }
+    if (gl->areas) {
+        for (int i = 0; i < gl->areas->n_rects; i++) {
+            const ns_css_area_rect *a = &gl->areas->rects[i];
+            if (!a->name || strlen(a->name) != len ||
+                strncmp(a->name, name, len) != 0)
+                continue;
+            int start = gl->row_axis ? a->r0 + 1 : a->c0 + 1;
+            int end = gl->row_axis ? a->r1 + 2 : a->c1 + 2;
+            if (start > after) return start;
+            if (end > after) return end;
         }
     }
     return 0;
@@ -10589,336 +10701,229 @@ grid_track_is_fixed(const ns_css_track *t, double basis)
            (t->min_kind == NS_CSS_TRACK_PERCENT && basis >= 0);
 }
 
-static const ns_css_area_rect *
-find_area_rect(const ns_css_areas *areas, const char *name)
+static void
+grid_distribute_extra(double *sizes, const double *caps,
+                      const gboolean *affected, const gboolean *beyond,
+                      int count, double extra)
 {
-    if (!areas || !name) return NULL;
-    for (int i = 0; i < areas->n_rects; i++)
-        if (strcmp(areas->rects[i].name, name) == 0)
-            return &areas->rects[i];
-    return NULL;
+    double grow[NS_CSS_TRACKS_MAX] = {0};
+    gboolean frozen[NS_CSS_TRACKS_MAX] = {0};
+    for (int i = 0; i < count; i++) frozen[i] = !affected[i];
+    while (extra > 1e-9) {
+        int open = 0;
+        for (int i = 0; i < count; i++) if (!frozen[i]) open++;
+        if (!open) break;
+        double share = extra / open;
+        gboolean capped = FALSE;
+        for (int i = 0; i < count; i++) {
+            if (frozen[i]) continue;
+            double room = caps[i] - (sizes[i] + grow[i]);
+            if (room > share + 1e-9) continue;
+            if (room < 0) room = 0;
+            grow[i] += room;
+            extra -= room;
+            frozen[i] = TRUE;
+            capped = TRUE;
+        }
+        if (capped) continue;
+        for (int i = 0; i < count; i++) if (!frozen[i]) grow[i] += share;
+        extra = 0;
+    }
+    if (extra > 1e-9) {
+        int n = 0;
+        for (int i = 0; i < count; i++) if (affected[i] && beyond[i]) n++;
+        gboolean only_beyond = n > 0;
+        if (!only_beyond)
+            for (int i = 0; i < count; i++) if (affected[i]) n++;
+        for (int i = 0; n > 0 && i < count; i++)
+            if (affected[i] && (!only_beyond || beyond[i]))
+                grow[i] += extra / n;
+    }
+    for (int i = 0; i < count; i++) sizes[i] += grow[i];
+}
+
+static gboolean
+grid_track_max_is_intrinsic(const ns_css_track *t)
+{
+    return track_is_intrinsic(t->kind);
+}
+
+static gboolean
+grid_track_min_is_intrinsic(const ns_css_track *t)
+{
+    return t->has_min ? track_is_intrinsic(t->min_kind)
+                      : track_is_intrinsic(t->kind);
+}
+
+static double
+grid_track_fixed_px(const ns_css_track *t, double avail)
+{
+    if (t->kind == NS_CSS_TRACK_PX) return t->v + t->pct * avail / 100.0;
+    if (t->kind == NS_CSS_TRACK_PERCENT) return t->v * avail / 100.0;
+    return 0;
+}
+
+static gboolean
+grid_span_accommodate(const ns_css_tracks *cols, int c0, int span,
+                      const double *gap_after, double avail,
+                      double min_contribution, double max_contribution,
+                      double *col_min, double *col_content)
+{
+    double gaps = 0;
+    for (int i = 0; i < span; i++) {
+        const ns_css_track *t = &cols->tracks[c0 + i];
+        if (t->kind == NS_CSS_TRACK_FR) return FALSE;
+        if (i + 1 < span) gaps += gap_after[c0 + i];
+    }
+    double base[NS_CSS_TRACKS_MAX], limit[NS_CSS_TRACKS_MAX];
+    double caps[NS_CSS_TRACKS_MAX];
+    gboolean affected[NS_CSS_TRACKS_MAX], beyond[NS_CSS_TRACKS_MAX];
+    gboolean any = FALSE;
+    double sum = gaps;
+    for (int i = 0; i < span; i++) {
+        const ns_css_track *t = &cols->tracks[c0 + i];
+        gboolean min_intrinsic = grid_track_min_is_intrinsic(t);
+        gboolean max_intrinsic = grid_track_max_is_intrinsic(t);
+        base[i] = min_intrinsic ? col_min[c0 + i]
+                : t->has_min ? track_min_px(t, avail)
+                             : grid_track_fixed_px(t, avail);
+        caps[i] = max_intrinsic ? INFINITY : grid_track_fixed_px(t, avail);
+        affected[i] = min_intrinsic;
+        beyond[i] = max_intrinsic;
+        any = any || min_intrinsic || max_intrinsic;
+        sum += base[i];
+    }
+    if (!any) return FALSE;
+    if (min_contribution > sum) {
+        grid_distribute_extra(base, caps, affected, beyond, span,
+                              min_contribution - sum);
+        for (int i = 0; i < span; i++)
+            if (affected[i]) col_min[c0 + i] = base[i];
+    }
+    sum = gaps;
+    gboolean any_max_min = FALSE;
+    for (int i = 0; i < span; i++) {
+        const ns_css_track *t = &cols->tracks[c0 + i];
+        ns_css_track_kind min_kind = t->has_min ? t->min_kind : t->kind;
+        affected[i] = min_kind == NS_CSS_TRACK_MAX_CONTENT;
+        beyond[i] = affected[i];
+        any_max_min = any_max_min || affected[i];
+        sum += base[i];
+    }
+    if (any_max_min && max_contribution > sum) {
+        grid_distribute_extra(base, caps, affected, beyond, span,
+                              max_contribution - sum);
+        for (int i = 0; i < span; i++)
+            if (affected[i]) col_min[c0 + i] = base[i];
+    }
+    for (int pass = 0; pass < 2; pass++) {
+        double contribution = pass == 0 ? min_contribution : max_contribution;
+        sum = gaps;
+        for (int i = 0; i < span; i++) {
+            const ns_css_track *t = &cols->tracks[c0 + i];
+            limit[i] = grid_track_max_is_intrinsic(t)
+                ? MAX(col_content[c0 + i], base[i])
+                : MAX(grid_track_fixed_px(t, avail), base[i]);
+            caps[i] = INFINITY;
+            affected[i] = pass == 0 ? grid_track_max_is_intrinsic(t)
+                                    : t->kind == NS_CSS_TRACK_AUTO ||
+                                      t->kind == NS_CSS_TRACK_MAX_CONTENT;
+            beyond[i] = affected[i];
+            sum += limit[i];
+        }
+        if (contribution <= sum) continue;
+        grid_distribute_extra(limit, caps, affected, beyond, span,
+                              contribution - sum);
+        for (int i = 0; i < span; i++)
+            if (affected[i]) col_content[c0 + i] = limit[i];
+    }
+    return TRUE;
 }
 
 static void
-layout_grid_areas(ns_box *box, double cw,
-                  double inner_x, double inner_y,
-                  const ns_css_areas *areas,
-                  const ns_style *child_inherited,
-                  double *cursor_y_out)
+grid_expand_flexible_rows(double *row_height, int n_rows,
+                          const ns_css_tracks *rows_tracks,
+                          const ns_css_tracks *auto_rows_tracks,
+                          int explicit_rows, double space)
 {
-    const ns_css_value *cols_v = box->style ? box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS] : NULL;
-    const ns_css_value *rows_v = box->style ? box->style->values[NS_CSS_GRID_TEMPLATE_ROWS]    : NULL;
-    int n_cols_from_areas = areas->n_cols;
-    ns_css_tracks default_cols = { 0 };
-    default_cols.n = n_cols_from_areas;
-    for (int i = 0; i < n_cols_from_areas; i++) {
-        default_cols.tracks[i].kind = NS_CSS_TRACK_FR;
-        default_cols.tracks[i].v = 1;
-    }
-    const ns_css_tracks *cols_src = (cols_v && cols_v->kind == NS_CSS_V_TRACKS) ?
-                                    &cols_v->u.tracks : &default_cols;
-
-    double col_gap = gap_px(box->style ? box->style->values[NS_CSS_COLUMN_GAP] : NULL,
-                            box->style ? box->style->values[NS_CSS_GAP] : NULL, cw);
-    const ns_css_value *hv_box = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
-    double row_basis = (hv_box && (hv_box->kind == NS_CSS_V_LENGTH ||
-                                   hv_box->kind == NS_CSS_V_CALC))
-        ? clamp_height_minmax_px(box->style,
-                                 resolve_used_height(box, hv_box, cw, -1))
-        : -1;
-    double row_gap = gap_px(
-        box->style ? box->style->values[NS_CSS_ROW_GAP] : NULL,
-        box->style ? box->style->values[NS_CSS_GAP] : NULL,
-        row_basis > 0 ? row_basis : 0);
-    ns_css_tracks cols_buf = expand_auto_repeat(cols_src, cw, col_gap);
-    int n_cols = cols_buf.n > 0 ? cols_buf.n : 1;
-    double avail = cw - (n_cols > 1 ? col_gap * (n_cols - 1) : 0);
-    if (avail < 0) avail = 0;
-
-    int n_rows = areas->n_rows;
-
-    GPtrArray *items   = g_ptr_array_new();
-    GArray    *r0_arr  = g_array_new(FALSE, FALSE, sizeof(int));
-    GArray    *r1_arr  = g_array_new(FALSE, FALSE, sizeof(int));
-    GArray    *c0_arr  = g_array_new(FALSE, FALSE, sizeof(int));
-    GArray    *c1_arr  = g_array_new(FALSE, FALSE, sizeof(int));
-    GArray    *h_arr   = g_array_new(FALSE, FALSE, sizeof(double));
-
-    for (ns_box *c = box->first_child; c; c = c->next_sibling) {
-        int r0 = -1, r1 = -1, c0 = -1, c1 = -1;
-        const char *name = NULL;
-        if (c->style) {
-            const ns_css_value *ga = c->style->values[NS_CSS_GRID_AREA];
-            if (ga && ga->kind == NS_CSS_V_KEYWORD) name = ga->u.keyword;
+    double *fr_factor = g_new0(double, n_rows + 1);
+    gboolean any_fr = FALSE;
+    for (int r = 0; r < n_rows; r++) {
+        const ns_css_track *tk = NULL;
+        if (rows_tracks && r < rows_tracks->n) tk = &rows_tracks->tracks[r];
+        else if (auto_rows_tracks && auto_rows_tracks->n > 0)
+            tk = &auto_rows_tracks->tracks[(r - explicit_rows) % auto_rows_tracks->n];
+        if (tk && tk->kind == NS_CSS_TRACK_FR && tk->v > 0) {
+            fr_factor[r] = tk->v;
+            any_fr = TRUE;
         }
-        const ns_css_area_rect *rect = find_area_rect(areas, name);
-        if (rect) {
-            r0 = rect->r0; r1 = rect->r1;
-            c0 = rect->c0; c1 = rect->c1;
-        } else if (c->style) {
-            int crs = -1, crsp = 1, rrs = -1, rrsp = 1;
-            grid_lines col_lines = { &cols_buf, areas, FALSE };
-            grid_lines row_lines = { rows_v && rows_v->kind == NS_CSS_V_TRACKS
-                                     ? &rows_v->u.tracks : NULL, areas, TRUE };
-            g_grid_lines = &col_lines;
-            if (!grid_resolve_pos(c->style, NS_CSS_GRID_COLUMN,
-                                  NS_CSS_GRID_COLUMN_START,
-                                  NS_CSS_GRID_COLUMN_END, n_cols,
-                                  &crs, &crsp))
-                crs = -1;
-            g_grid_lines = &row_lines;
-            if (!grid_resolve_pos(c->style, NS_CSS_GRID_ROW,
-                                  NS_CSS_GRID_ROW_START,
-                                  NS_CSS_GRID_ROW_END, n_rows,
-                                  &rrs, &rrsp))
-                rrs = -1;
-            g_grid_lines = NULL;
-            if (crs >= 0) { c0 = crs; c1 = crs + (crsp > 0 ? crsp - 1 : 0); }
-            if (rrs >= 0) { r0 = rrs; r1 = rrs + (rrsp > 0 ? rrsp - 1 : 0); }
-        }
-        if (c0 >= 0 && r0 >= 0) {
-            if (c0 >= n_cols) c0 = n_cols - 1;
-            if (c1 >= n_cols) c1 = n_cols - 1;
-            if (c1 < c0) c1 = c0;
-            if (r0 >= NS_GRID_ROWS_MAX) r0 = NS_GRID_ROWS_MAX - 1;
-            if (r1 < r0) r1 = r0;
-            if (r1 >= NS_GRID_ROWS_MAX) r1 = NS_GRID_ROWS_MAX - 1;
-            if (r1 + 1 > n_rows) n_rows = r1 + 1;
-        }
-
-        g_ptr_array_add(items, c);
-        g_array_append_val(r0_arr, r0);
-        g_array_append_val(r1_arr, r1);
-        g_array_append_val(c0_arr, c0);
-        g_array_append_val(c1_arr, c1);
-        double zero = 0;
-        g_array_append_val(h_arr, zero);
     }
-
-    GArray *occupied = grid_occupancy_new();
-    for (guint i = 0; i < items->len; i++) {
-        int r0 = g_array_index(r0_arr, int, i);
-        int c0 = g_array_index(c0_arr, int, i);
-        if (r0 < 0 || c0 < 0) continue;
-        int r1 = g_array_index(r1_arr, int, i);
-        int c1 = g_array_index(c1_arr, int, i);
-        for (int r = r0; r <= r1 && r < NS_GRID_ROWS_MAX; r++)
-            for (int cc = c0; cc <= c1 && cc < n_cols; cc++)
-                grid_occupy(occupied, r, cc);
-    }
-    int auto_r = 0, auto_c = 0;
-    for (guint i = 0; i < items->len; i++) {
-        int have_r = g_array_index(r0_arr, int, i) >= 0;
-        int have_c = g_array_index(c0_arr, int, i) >= 0;
-        if (have_r && have_c)
-            continue;
-        if (have_c) {
-            int cc0 = g_array_index(c0_arr, int, i);
-            int cc1 = g_array_index(c1_arr, int, i);
-            int r = 0;
-            while (r < NS_GRID_ROWS_MAX) {
-                gboolean free_row = TRUE;
-                for (int cc = cc0; cc <= cc1 && cc < n_cols; cc++)
-                    if (grid_occupied(occupied, r, cc)) { free_row = FALSE; break; }
-                if (free_row) break;
-                r++;
+    if (any_fr) {
+        for (int r = 0; r < n_rows; r++)
+            if (fr_factor[r] <= 0) space -= row_height[r];
+        gboolean *inflexible = g_new0(gboolean, n_rows + 1);
+        for (int pass = 0; pass <= n_rows; pass++) {
+            double sum_fr = 0, leftover = space;
+            for (int r = 0; r < n_rows; r++) {
+                if (fr_factor[r] <= 0) continue;
+                if (inflexible[r]) leftover -= row_height[r];
+                else sum_fr += fr_factor[r];
             }
-            if (r >= NS_GRID_ROWS_MAX) r = NS_GRID_ROWS_MAX - 1;
-            for (int cc = cc0; cc <= cc1 && cc < n_cols; cc++)
-                grid_occupy(occupied, r, cc);
-            g_array_index(r0_arr, int, i) = r;
-            g_array_index(r1_arr, int, i) = r;
-            if (r + 1 > n_rows) n_rows = r + 1;
-            continue;
-        }
-        if (have_r) {
-            int rr = g_array_index(r0_arr, int, i);
-            if (rr >= NS_GRID_ROWS_MAX) rr = NS_GRID_ROWS_MAX - 1;
-            int cc = 0;
-            while (cc < n_cols && grid_occupied(occupied, rr, cc)) cc++;
-            if (cc >= n_cols) cc = n_cols > 0 ? n_cols - 1 : 0;
-            grid_occupy(occupied, rr, cc);
-            g_array_index(c0_arr, int, i) = cc;
-            g_array_index(c1_arr, int, i) = cc;
-            continue;
-        }
-        while (auto_r < NS_GRID_ROWS_MAX) {
-            if (auto_c >= n_cols) { auto_c = 0; auto_r++; continue; }
-            if (!grid_occupied(occupied, auto_r, auto_c)) break;
-            auto_c++;
-        }
-        if (auto_r >= NS_GRID_ROWS_MAX) { auto_r = NS_GRID_ROWS_MAX - 1; auto_c = 0; }
-        grid_occupy(occupied, auto_r, auto_c);
-        g_array_index(r0_arr, int, i) = auto_r;
-        g_array_index(r1_arr, int, i) = auto_r;
-        g_array_index(c0_arr, int, i) = auto_c;
-        g_array_index(c1_arr, int, i) = auto_c;
-        if (auto_r + 1 > n_rows) n_rows = auto_r + 1;
-        auto_c++;
-    }
-
-    g_array_free(occupied, TRUE);
-    if (n_rows > NS_GRID_ROWS_MAX) n_rows = NS_GRID_ROWS_MAX;
-
-    double col_content[NS_CSS_TRACKS_MAX] = {0};
-    double col_min[NS_CSS_TRACKS_MAX] = {0};
-    gboolean any_auto_content = FALSE;
-    for (int t = 0; t < n_cols; t++) {
-        if (!track_is_intrinsic(cols_buf.tracks[t].kind)) continue;
-        for (guint i = 0; i < items->len; i++) {
-            int cc0 = g_array_index(c0_arr, int, i);
-            int cc1 = g_array_index(c1_arr, int, i);
-            if (cc0 != t || cc1 != t) continue;
-            ns_box *c = items->pdata[i];
-            const ns_css_value *wv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
-            gboolean fixed_w = wv && (wv->kind == NS_CSS_V_LENGTH ||
-                                      wv->kind == NS_CSS_V_CALC);
-            double nw = fixed_w
-                      ? length_resolve(wv, avail, 0)
-                      : measure_natural_width(c, child_inherited);
-            double mw = fixed_w ? nw : measure_min_width(c, child_inherited);
-            if (c->style) {
-                ns_edges m = {0}, pd = {0}, bd = {0};
-                edges_from_style(c->style, nw, &m, &pd, &bd);
-                double ex = m.left + m.right + pd.left + pd.right +
-                            bd.left + bd.right;
-                nw += ex;
-                mw += ex;
+            if (sum_fr <= 0) break;
+            double unit = leftover > 0 ? leftover / MAX(sum_fr, 1.0) : 0;
+            gboolean changed = FALSE;
+            for (int r = 0; r < n_rows; r++) {
+                if (fr_factor[r] <= 0 || inflexible[r]) continue;
+                if (row_height[r] > unit * fr_factor[r] + 0.01) {
+                    inflexible[r] = TRUE;
+                    changed = TRUE;
+                }
             }
-            if (nw > col_content[t]) col_content[t] = nw;
-            if (mw > col_min[t]) col_min[t] = mw;
-            any_auto_content = TRUE;
+            if (changed) continue;
+            for (int r = 0; r < n_rows; r++)
+                if (fr_factor[r] > 0 && !inflexible[r])
+                    row_height[r] = unit * fr_factor[r];
+            break;
         }
+        g_free(inflexible);
     }
+    g_free(fr_factor);
+}
 
-    double col_sizes[NS_CSS_TRACKS_MAX] = {0};
-    resolve_track_sizes_full(&cols_buf, avail,
-                             any_auto_content ? col_min : NULL,
-                             any_auto_content ? col_content : NULL, col_sizes,
-                             justify_kw_stretches_auto(
-                                 keyword_or(box->style, NS_CSS_JUSTIFY_CONTENT,
-                                            "normal")));
-
-    double col_x[NS_CSS_TRACKS_MAX + 1];
-    col_x[0] = inner_x;
-    for (int i = 0; i < n_cols; i++)
-        col_x[i + 1] = col_x[i] + col_sizes[i] + col_gap;
-
-    for (guint i = 0; i < items->len; i++) {
-        ns_box *c = items->pdata[i];
-        int cc0 = g_array_index(c0_arr, int, i);
-        int cc1 = g_array_index(c1_arr, int, i);
-        double w = 0;
-        for (int k = cc0; k <= cc1; k++) w += col_sizes[k];
-        w += (cc1 - cc0) * col_gap;
-        edges_from_style(c->style, w, &c->margin, &c->padding, &c->border);
-        double cw_for_item = w - c->margin.left - c->margin.right;
-        if (cw_for_item < 0) cw_for_item = 0;
-        c->x = col_x[cc0];
-        c->y = inner_y;
-        layout_box(c, cw_for_item, child_inherited);
-        double item_outer = c->content_height +
-                            c->padding.top + c->padding.bottom +
-                            c->border.top + c->border.bottom +
-                            c->margin.top + c->margin.bottom;
-        g_array_index(h_arr, double, i) = item_outer;
+static double
+grid_auto_repeat_height(const ns_box *box, double row_basis, double cw)
+{
+    if (row_basis > 0) return row_basis;
+    if (!box->style) return 0;
+    const ns_css_value *mx = box->style->values[NS_CSS_MAX_HEIGHT];
+    if (mx && (mx->kind == NS_CSS_V_LENGTH || mx->kind == NS_CSS_V_CALC)) {
+        double h = specified_height_to_content(box,
+                                               resolve_used_height(box, mx, cw, -1));
+        if (h > 0) return h;
     }
-
-    double *row_height = g_new0(double, n_rows + 1);
-    if (rows_v && rows_v->kind == NS_CSS_V_TRACKS) {
-        for (int r = 0; r < rows_v->u.tracks.n && r < n_rows; r++) {
-            const ns_css_track *t = &rows_v->u.tracks.tracks[r];
-            if (t->kind == NS_CSS_TRACK_PX) row_height[r] = t->v;
-            else if (t->kind == NS_CSS_TRACK_PERCENT)
-                row_height[r] = grid_track_px(t, row_basis);
-        }
+    const ns_css_value *mn = box->style->values[NS_CSS_MIN_HEIGHT];
+    if (mn && (mn->kind == NS_CSS_V_LENGTH || mn->kind == NS_CSS_V_CALC)) {
+        double h = specified_height_to_content(box,
+                                               resolve_used_height(box, mn, cw, -1));
+        if (h > 0) return h;
     }
-    for (guint i = 0; i < items->len; i++) {
-        int r0 = g_array_index(r0_arr, int, i);
-        int r1 = g_array_index(r1_arr, int, i);
-        int span = r1 - r0 + 1;
-        if (span < 1) span = 1;
-        double item_h = g_array_index(h_arr, double, i);
-        if (span == 1) {
-            if (r0 < n_rows && item_h > row_height[r0])
-                row_height[r0] = item_h;
-        } else {
-            double used = row_gap * (span - 1);
-            for (int r = r0; r <= r1 && r < n_rows; r++)
-                used += row_height[r];
-            if (item_h > used) {
-                int target = r1 < n_rows ? r1 : n_rows - 1;
-                if (target >= 0)
-                    row_height[target] += item_h - used;
-            }
-        }
+    return 0;
+}
+
+static void
+grid_extend_with_auto_tracks(ns_css_tracks *tracks, int from, int to,
+                             const ns_css_value *auto_v)
+{
+    const ns_css_tracks *pattern =
+        auto_v && auto_v->kind == NS_CSS_V_TRACKS && auto_v->u.tracks.n > 0 &&
+        !auto_v->u.tracks.subgrid ? &auto_v->u.tracks : NULL;
+    if (to > NS_CSS_TRACKS_MAX) to = NS_CSS_TRACKS_MAX;
+    for (int i = from; i < to; i++) {
+        ns_css_track t = { .kind = NS_CSS_TRACK_AUTO };
+        if (pattern) t = pattern->tracks[(i - from) % pattern->n];
+        tracks->tracks[i] = t;
     }
-
-    double *row_y = g_new0(double, n_rows + 1);
-    row_y[0] = inner_y;
-    for (int r = 0; r < n_rows; r++)
-        row_y[r + 1] = row_y[r] + row_height[r] + row_gap;
-
-    const char *grid_align =
-        keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
-    for (guint i = 0; i < items->len; i++) {
-        ns_box *c = items->pdata[i];
-        int r0 = g_array_index(r0_arr, int, i);
-        int r1 = g_array_index(r1_arr, int, i);
-        int cc0 = g_array_index(c0_arr, int, i);
-        int cc1 = g_array_index(c1_arr, int, i);
-        double w = 0;
-        for (int k = cc0; k <= cc1; k++) w += col_sizes[k];
-        w += (cc1 - cc0) * col_gap;
-        double cw_for_item = w - c->margin.left - c->margin.right;
-        if (cw_for_item < 0) cw_for_item = 0;
-        double row_h = 0;
-        for (int r = r0; r <= r1 && r < n_rows; r++) row_h += row_height[r];
-        if (r1 > r0) row_h += row_gap * (r1 - r0);
-        const char *aself = c->style
-            ? ns_style_keyword(c->style, NS_CSS_ALIGN_SELF) : NULL;
-        const char *a_eff = (aself && strcmp(aself, "auto") != 0)
-            ? aself : grid_align;
-        gboolean a_stretch = !a_eff || strcmp(a_eff, "stretch") == 0 ||
-                             strcmp(a_eff, "normal") == 0;
-        const ns_css_value *ihv = c->style
-            ? c->style->values[NS_CSS_HEIGHT] : NULL;
-        gboolean i_has_h = ihv && (ihv->kind == NS_CSS_V_LENGTH ||
-                                   ihv->kind == NS_CSS_V_CALC);
-        double vex = c->margin.top + c->margin.bottom +
-                     c->padding.top + c->padding.bottom +
-                     c->border.top + c->border.bottom;
-        gboolean stretch_item = a_stretch && !i_has_h && row_h - vex > 0.5 &&
-                                !style_is_absolute_or_fixed(c->style);
-        c->definite_height = stretch_item ? row_h - vex : 0;
-        c->x = col_x[cc0];
-        c->y = row_y[r0];
-        layout_box(c, cw_for_item, child_inherited);
-        if (stretch_item) {
-            if (c->content_height < row_h - vex) c->content_height = row_h - vex;
-            continue;
-        }
-        double free_h = row_h - (c->content_height + vex);
-        if (free_h <= 0.5 || !a_eff) continue;
-        double dy = 0;
-        if (strcmp(a_eff, "center") == 0) dy = free_h / 2.0;
-        else if (strcmp(a_eff, "end") == 0 || strcmp(a_eff, "flex-end") == 0)
-            dy = free_h;
-        if (dy != 0) shift_box_tree(c, 0, dy);
-    }
-
-    double cursor_y = row_y[n_rows];
-    if (n_rows > 0) cursor_y -= row_gap;
-    *cursor_y_out = cursor_y;
-
-    g_free(row_height);
-    g_free(row_y);
-    g_ptr_array_free(items, TRUE);
-    g_array_free(r0_arr, TRUE);
-    g_array_free(r1_arr, TRUE);
-    g_array_free(c0_arr, TRUE);
-    g_array_free(c1_arr, TRUE);
-    g_array_free(h_arr, TRUE);
+    if (to > from) tracks->n = to;
 }
 
 static void
@@ -10933,11 +10938,8 @@ layout_grid(ns_box *box, double cw,
     g_pending_subgrid_rows = NULL;
 
     const ns_css_value *areas_v = box->style ? box->style->values[NS_CSS_GRID_TEMPLATE_AREAS] : NULL;
-    if (areas_v && areas_v->kind == NS_CSS_V_AREAS && areas_v->u.areas.n_rects > 0) {
-        layout_grid_areas(box, cw, inner_x, inner_y,
-                          &areas_v->u.areas, child_inherited, cursor_y_out);
-        return;
-    }
+    const ns_css_areas *areas = areas_v && areas_v->kind == NS_CSS_V_AREAS
+        ? &areas_v->u.areas : NULL;
     const ns_css_value *cols_v = box->style ? box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS] : NULL;
     gboolean cols_subgrid = cols_v && cols_v->kind == NS_CSS_V_TRACKS &&
                             cols_v->u.tracks.subgrid && sg && sg->n > 0;
@@ -10966,11 +10968,29 @@ layout_grid(ns_box *box, double cw,
     int fit_start = 0, fit_count = 0;
     ns_css_tracks cols_buf = expand_auto_repeat_ex(cols_src, cw, col_gap,
                                                    &fit_start, &fit_count);
+    if (areas && !cols_subgrid) {
+        int templated = cols_src == &default_cols ? 0 : cols_buf.n;
+        if (areas->n_cols > templated)
+            grid_extend_with_auto_tracks(&cols_buf, templated, areas->n_cols,
+                box->style->values[NS_CSS_GRID_AUTO_COLUMNS]);
+    }
     const ns_css_tracks *cols = &cols_buf;
     int n_cols = cols->n > 0 ? cols->n : 1;
     int explicit_cols = n_cols;
+    ns_css_tracks rows_buf = { 0 };
+    const ns_css_tracks *rows_template = NULL;
+    int row_fit_start = 0, row_fit_count = 0;
+    if (!rows_subgrid && rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
+        !rows_v->u.tracks.subgrid) {
+        rows_buf = expand_auto_repeat_ex(&rows_v->u.tracks,
+                                         grid_auto_repeat_height(box, row_basis, cw),
+                                         row_gap, &row_fit_start, &row_fit_count);
+        rows_template = &rows_buf;
+    }
     int row_line_tracks = rows_subgrid ? sgr->n :
-        ((rows_v && rows_v->kind == NS_CSS_V_TRACKS) ? rows_v->u.tracks.n : 1);
+        (rows_template ? rows_template->n : 1);
+    if (areas && !rows_subgrid && areas->n_rows > row_line_tracks)
+        row_line_tracks = areas->n_rows;
     if (row_line_tracks < 1) row_line_tracks = 1;
 
     double col_sizes[NS_CSS_TRACKS_MAX] = {0};
@@ -10991,9 +11011,8 @@ layout_grid(ns_box *box, double cw,
         int s = -1, sp = 1;
         int rs_start = -1, rs = 1;
         if (c->style) {
-            grid_lines col_lines = { &cols_buf, NULL, FALSE };
-            grid_lines row_lines = { rows_v && rows_v->kind == NS_CSS_V_TRACKS
-                                     ? &rows_v->u.tracks : NULL, NULL, TRUE };
+            grid_lines col_lines = { &cols_buf, areas, FALSE };
+            grid_lines row_lines = { rows_template, areas, TRUE };
             g_grid_lines = &col_lines;
             int got = grid_resolve_pos(c->style, NS_CSS_GRID_COLUMN,
                                        NS_CSS_GRID_COLUMN_START,
@@ -11027,12 +11046,8 @@ layout_grid(ns_box *box, double cw,
         }
         if (max_end > NS_CSS_TRACKS_MAX) max_end = NS_CSS_TRACKS_MAX;
         if (max_end > n_cols) {
-            for (int i = n_cols; i < max_end; i++) {
-                cols_buf.tracks[i].kind = NS_CSS_TRACK_AUTO;
-                cols_buf.tracks[i].v = 0;
-                cols_buf.tracks[i].has_min = FALSE;
-            }
-            cols_buf.n = max_end;
+            grid_extend_with_auto_tracks(&cols_buf, n_cols, max_end,
+                box->style->values[NS_CSS_GRID_AUTO_COLUMNS]);
             n_cols = max_end;
             avail = cw - (n_cols > 1 ? col_gap * (n_cols - 1) : 0);
             if (avail < 0) avail = 0;
@@ -11045,9 +11060,7 @@ layout_grid(ns_box *box, double cw,
     gboolean col_flow = auto_flow && strstr(auto_flow, "column") != NULL &&
                         !cols_subgrid && !rows_subgrid;
     if (col_flow) {
-        int flow_rows = (rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
-                         !rows_v->u.tracks.subgrid)
-                        ? rows_v->u.tracks.n : 0;
+        int flow_rows = rows_template ? rows_template->n : 0;
         if (flow_rows <= 0) flow_rows = 1;
         if (flow_rows > NS_CSS_TRACKS_MAX) flow_rows = NS_CSS_TRACKS_MAX;
         int tmpl_cols = (cols_v && cols_v->kind == NS_CSS_V_TRACKS &&
@@ -11122,10 +11135,7 @@ layout_grid(ns_box *box, double cw,
 
     const ns_css_value *auto_rows_v = box->style
         ? box->style->values[NS_CSS_GRID_AUTO_ROWS] : NULL;
-    const ns_css_tracks *rows_tracks =
-        (!rows_subgrid && rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
-         !rows_v->u.tracks.subgrid)
-        ? &rows_v->u.tracks : NULL;
+    const ns_css_tracks *rows_tracks = rows_template;
     const ns_css_tracks *auto_rows_tracks =
         (!rows_subgrid && auto_rows_v && auto_rows_v->kind == NS_CSS_V_TRACKS &&
          !auto_rows_v->u.tracks.subgrid && auto_rows_v->u.tracks.n > 0)
@@ -11135,6 +11145,8 @@ layout_grid(ns_box *box, double cw,
     int auto_row = 0;
     int auto_col = 0;
     int n_rows = explicit_rows;
+    if (areas && !rows_subgrid && areas->n_rows > n_rows)
+        n_rows = MIN(areas->n_rows, NS_GRID_ROWS_MAX);
     if (col_flow) {
         for (guint i = 0; i < items->len; i++) {
             int pr = g_array_index(placed_rows, int, i);
@@ -11189,6 +11201,23 @@ layout_grid(ns_box *box, double cw,
     if (n_rows > NS_GRID_ROWS_MAX) n_rows = NS_GRID_ROWS_MAX;
     if (rows_subgrid && n_rows > sgr->n) n_rows = sgr->n;
 
+    if (row_fit_count > 0 && rows_template == &rows_buf) {
+        gboolean used[NS_CSS_TRACKS_MAX] = {0};
+        for (guint k = 0; k < placed_rows->len; k++) {
+            int r0 = g_array_index(placed_rows, int, k);
+            int rs = k < row_spans->len ? g_array_index(row_spans, int, k) : 1;
+            for (int j = 0; j < rs && r0 + j < rows_buf.n; j++)
+                if (r0 + j >= 0) used[r0 + j] = TRUE;
+        }
+        for (int t = row_fit_start;
+             t < row_fit_start + row_fit_count && t < rows_buf.n; t++) {
+            if (used[t]) continue;
+            rows_buf.tracks[t].kind = NS_CSS_TRACK_PX;
+            rows_buf.tracks[t].v = 0;
+            rows_buf.tracks[t].pct = 0;
+            rows_buf.tracks[t].has_min = FALSE;
+        }
+    }
     gboolean col_collapsed[NS_CSS_TRACKS_MAX] = {0};
     double col_gap_after[NS_CSS_TRACKS_MAX + 1] = {0};
     if (fit_count > 0 && !cols_subgrid) {
@@ -11248,6 +11277,29 @@ layout_grid(ns_box *box, double cw,
             if (nw > col_content[t]) col_content[t] = nw;
             if (mw > col_min[t]) col_min[t] = mw;
             any_auto_content = TRUE;
+        }
+    }
+    for (int span = 2; span <= n_cols; span++) {
+        for (guint k = 0; k < items->len; k++) {
+            int c0 = k < placed_cols->len ? g_array_index(placed_cols, int, k) : -1;
+            if (c0 < 0 || g_array_index(col_spans, int, k) != span ||
+                c0 + span > n_cols)
+                continue;
+            ns_box *c = items->pdata[k];
+            double nw = measure_natural_width(c, child_inherited);
+            double mw = measure_min_width(c, child_inherited);
+            if (c->style) {
+                ns_edges m = {0}, pd = {0}, bd = {0};
+                edges_from_style(c->style, mw, &m, &pd, &bd);
+                double extra = m.left + m.right + pd.left + pd.right +
+                               bd.left + bd.right;
+                mw += extra;
+                nw += extra;
+            }
+            if (nw > avail) nw = avail;
+            if (grid_span_accommodate(cols, c0, span, col_gap_after, avail,
+                                      mw, nw, col_min, col_content))
+                any_auto_content = TRUE;
         }
     }
     resolve_track_sizes_full(cols, avail,
@@ -11425,8 +11477,7 @@ layout_grid(ns_box *box, double cw,
                 jraw->u.keyword && g_str_has_prefix(jraw->u.keyword, "safe ");
             const char *j_kw = j_stretch || (j_safe && free_w < 0)
                 ? "start" : j_eff;
-            gboolean item_rtl = c->style &&
-                ns_css_keyword_is(c->style->values[NS_CSS_DIRECTION], "rtl");
+            gboolean item_far = self_start_is_far_side(c->style, TRUE);
             gboolean at_right = FALSE;
             if (strcmp(j_kw, "center") == 0) {
                 if (free_w > 0) dx = free_w / 2.0;
@@ -11435,9 +11486,9 @@ layout_grid(ns_box *box, double cw,
             } else if (strcmp(j_kw, "start") == 0 || strcmp(j_kw, "flex-start") == 0) {
                 at_right = grid_rtl;
             } else if (strcmp(j_kw, "self-end") == 0) {
-                at_right = !item_rtl;
+                at_right = !item_far;
             } else if (strcmp(j_kw, "self-start") == 0) {
-                at_right = item_rtl;
+                at_right = item_far;
             } else if (strcmp(j_kw, "right") == 0) {
                 at_right = TRUE;
             }
@@ -11451,8 +11502,10 @@ layout_grid(ns_box *box, double cw,
         g_array_append_val(item_heights, item_outer);
     }
 
+    gboolean definite_rows = !rows_subgrid && row_basis > 0;
     double *row_height = g_new0(double, n_rows + 1);
     gboolean *row_fixed = g_new0(gboolean, n_rows + 1);
+    gboolean *row_flex = g_new0(gboolean, n_rows + 1);
     for (int r = 0; r < n_rows; r++) {
         double fixed = 0;
         const ns_css_track *tk = NULL;
@@ -11466,8 +11519,14 @@ layout_grid(ns_box *box, double cw,
             tk = &auto_rows_tracks->tracks[ar];
         }
         if (tk) {
-            fixed = grid_track_px(tk, row_basis);
-            row_fixed[r] = grid_track_is_fixed(tk, row_basis);
+            gboolean flex = tk->kind == NS_CSS_TRACK_FR;
+            fixed = flex ? track_min_px(tk, row_basis > 0 ? row_basis : 0)
+                  : tk->fit_content ? 0
+                  : grid_track_px(tk, row_basis);
+            row_fixed[r] = grid_track_is_fixed(tk, row_basis) ||
+                           (definite_rows && flex && tk->has_min &&
+                            !track_is_intrinsic(tk->min_kind));
+            row_flex[r] = definite_rows && flex;
         }
         if (fixed > row_height[r]) row_height[r] = fixed;
     }
@@ -11480,10 +11539,13 @@ layout_grid(ns_box *box, double cw,
         double item_outer = g_array_index(item_heights, double, i);
         double used = row_gap * (rs - 1);
         int growable = 0;
+        gboolean crosses_flex = FALSE;
         for (int k = 0; k < rs; k++) {
             used += row_height[row + k];
             if (!row_fixed[row + k]) growable++;
+            if (row_flex[row + k]) crosses_flex = TRUE;
         }
+        if (crosses_flex && rs > 1) continue;
         if (item_outer > used && growable > 0) {
             double add = (item_outer - used) / growable;
             for (int k = 0; k < rs; k++)
@@ -11491,6 +11553,7 @@ layout_grid(ns_box *box, double cw,
         }
     }
     g_free(row_fixed);
+    g_free(row_flex);
 
     if (!rows_subgrid && row_basis > 0 && n_rows > 0) {
         double over = (n_rows > 1 ? row_gap * (n_rows - 1) : 0) - row_basis;
@@ -11518,49 +11581,24 @@ layout_grid(ns_box *box, double cw,
                     row_height[r] -= take * shrinkable[r] / shrink_total;
         }
         g_free(shrinkable);
-        double *fr_factor = g_new0(double, n_rows + 1);
-        gboolean any_fr = FALSE;
-        for (int r = 0; r < n_rows; r++) {
-            const ns_css_track *tk = NULL;
-            if (rows_tracks && r < rows_tracks->n) tk = &rows_tracks->tracks[r];
-            else if (auto_rows_tracks && auto_rows_tracks->n > 0)
-                tk = &auto_rows_tracks->tracks[(r - explicit_rows) % auto_rows_tracks->n];
-            if (tk && tk->kind == NS_CSS_TRACK_FR && tk->v > 0) {
-                fr_factor[r] = tk->v;
-                any_fr = TRUE;
-            }
-        }
-        if (any_fr) {
-            double space = row_basis - (n_rows > 1 ? row_gap * (n_rows - 1) : 0);
-            for (int r = 0; r < n_rows; r++)
-                if (fr_factor[r] <= 0) space -= row_height[r];
-            gboolean *inflexible = g_new0(gboolean, n_rows + 1);
-            for (int pass = 0; pass <= n_rows; pass++) {
-                double sum_fr = 0, leftover = space;
-                for (int r = 0; r < n_rows; r++) {
-                    if (fr_factor[r] <= 0) continue;
-                    if (inflexible[r]) leftover -= row_height[r];
-                    else sum_fr += fr_factor[r];
-                }
-                if (sum_fr <= 0) break;
-                double unit = leftover > 0 ? leftover / MAX(sum_fr, 1.0) : 0;
-                gboolean changed = FALSE;
-                for (int r = 0; r < n_rows; r++) {
-                    if (fr_factor[r] <= 0 || inflexible[r]) continue;
-                    if (row_height[r] > unit * fr_factor[r] + 0.01) {
-                        inflexible[r] = TRUE;
-                        changed = TRUE;
-                    }
-                }
-                if (changed) continue;
-                for (int r = 0; r < n_rows; r++)
-                    if (fr_factor[r] > 0 && !inflexible[r])
-                        row_height[r] = unit * fr_factor[r];
-                break;
-            }
-            g_free(inflexible);
-        }
-        g_free(fr_factor);
+        grid_expand_flexible_rows(row_height, n_rows, rows_tracks,
+                                  auto_rows_tracks, explicit_rows,
+                                  row_basis - (n_rows > 1 ? row_gap * (n_rows - 1) : 0));
+    } else if (!rows_subgrid && n_rows > 0) {
+        const ns_css_value *mnv = box->style
+            ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
+        double min_h = mnv && (mnv->kind == NS_CSS_V_LENGTH ||
+                               mnv->kind == NS_CSS_V_CALC)
+            ? specified_height_to_content(box,
+                                          resolve_used_height(box, mnv, cw, -1))
+            : -1;
+        double gaps = n_rows > 1 ? row_gap * (n_rows - 1) : 0;
+        double used = gaps;
+        for (int r = 0; r < n_rows; r++) used += row_height[r];
+        if (min_h > used)
+            grid_expand_flexible_rows(row_height, n_rows, rows_tracks,
+                                      auto_rows_tracks, explicit_rows,
+                                      min_h - gaps);
     }
 
     double cursor_y = rows_subgrid ? sgr->y[0] : inner_y;
@@ -11707,9 +11745,12 @@ layout_grid(ns_box *box, double cw,
             dy_align = free_h / 2.0;
         } else if (free_h > 0.5 && (strcmp(a_eff, "end") == 0 ||
                                     strcmp(a_eff, "flex-end") == 0 ||
-                                    strcmp(a_eff, "self-end") == 0 ||
                                     strcmp(a_eff, "last baseline") == 0)) {
             dy_align = free_h;
+        } else if (free_h > 0.5 && (strcmp(a_eff, "self-end") == 0 ||
+                                    strcmp(a_eff, "self-start") == 0)) {
+            gboolean far = self_start_is_far_side(c->style, FALSE);
+            if (far == (strcmp(a_eff, "self-start") == 0)) dy_align = free_h;
         }
         grid_row *gr = &g_array_index(grid_rows, grid_row, r);
         double row_top = gr->top + row_extra_before[r] +
@@ -13657,10 +13698,29 @@ ns_layout_grid_resolved_tracks(const ns_box *box, gboolean columns)
                                      : NS_CSS_GRID_TEMPLATE_ROWS]
         : NULL;
     const ns_css_tracks *tk = NULL;
-    if (tv && tv->kind == NS_CSS_V_TRACKS) {
-        if (tv->u.tracks.subgrid) return NULL;
-        if (tv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE)
-            tk = &tv->u.tracks;
+    if (tv && tv->kind == NS_CSS_V_TRACKS && tv->u.tracks.subgrid) {
+        const ns_box *p = box->parent;
+        while (p && !p->style) p = p->parent;
+        if (p && ns_display_is_grid_container(ns_css_display_of(p->style)))
+            return NULL;
+        tv = NULL;
+    }
+    ns_css_tracks expanded;
+    if (tv && tv->kind == NS_CSS_V_TRACKS &&
+        tv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE) {
+        tk = &tv->u.tracks;
+    } else if (tv && tv->kind == NS_CSS_V_TRACKS &&
+               tv->u.tracks.auto_repeat_count > 0) {
+        int count = tv->u.tracks.auto_repeat_count;
+        int others = tv->u.tracks.n - count;
+        int explicit_n = columns ? box->grid_explicit_cols
+                                 : box->grid_explicit_rows;
+        if (explicit_n > others && (explicit_n - others) % count == 0) {
+            expanded = tv->u.tracks;
+            grid_expand_repeat_names(&tv->u.tracks,
+                                     (explicit_n - others) / count, &expanded);
+            tk = &expanded;
+        }
     }
     if (tr->len == 0) return g_strdup("none");
     if (!tk && !(tv && tv->kind == NS_CSS_V_TRACKS)) {
