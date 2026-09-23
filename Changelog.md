@@ -7,6 +7,29 @@ Significant changes in each release:
 * Headless `--wpt`, `--inspect` and image dumps load the document's
   images before its scripts run and fire their `load` events, so tests
   and scripts that measure images at `load` see their real sizes.
+* `element.style.color` and the other colour properties read a colour
+  back in the form CSS Color 4 and 5 give it. `lab(20 0 10/50%)` came
+  back exactly as typed and `color(srgb 10% 10% 10%)` kept its
+  percentages; they now read `lab(20 0 10 / 0.5)` and
+  `color(srgb 0.1 0.1 0.1)`. A `color-mix()` lists its colours and
+  percentages in normalised form, a relative colour keeps its `from`
+  form around a normalised origin, and a `calc()` inside a colour reads
+  back as its simplified value.
+* `color-mix()` and relative colors that use `currentcolor` paint in
+  the element's own text colour. The colour parser knew nothing of
+  `currentcolor` inside a function, so a Tailwind-style
+  `background-color: color-mix(in oklab, currentColor 10%, transparent)`
+  was thrown away and the box stayed transparent. Such a value now keeps
+  its `currentcolor` and is worked out for each element, so a child that
+  inherits it under a different `color` gets its own shade, and
+  `color: currentcolor` takes the parent's colour instead of the default.
+  Colours are also kept at full precision in the space they are written
+  in: a `none` component is filled from the other colour of a mix
+  instead of reading as zero, `color-mix()` takes a percentage before
+  the colour, any number of colours and every hue interpolation method,
+  and `getComputedStyle` reports `lab()`, `oklch()`,
+  `color(display-p3 ...)` and mixed colours in their own notation rather
+  than rounding them to `rgb()`.
 * An `<iframe>` whose source is an image shows it in an image document,
   as a top-level navigation does, instead of parsing the image bytes as
   HTML text.

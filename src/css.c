@@ -762,8 +762,6 @@ static int calc_split_args(const char *args, const char *body_end,
 static const char *match_close_paren(const char *p, const char *end);
 static gboolean parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b,
                             guint8 *a);
-static gboolean parse_color_depth(const char *s, guint8 *r, guint8 *g,
-                                  guint8 *b, guint8 *a, int depth);
 static double css_angle_value_degrees(double v, char **endp);
 
 static char *
@@ -1519,1036 +1517,6 @@ named_color(const char *name, guint8 *r, guint8 *g, guint8 *b)
     return FALSE;
 }
 
-typedef struct {
-    double   v;
-    gboolean percent;
-    gboolean angle;
-    gboolean none;
-} ns_color_arg;
-
-typedef struct {
-    ns_color_arg args[4];
-    int          count;
-    gboolean     legacy;
-} ns_color_args;
-
-static const char *
-color_skip_ws(const char *p)
-{
-    while (is_ws(*p)) p++;
-    return p;
-}
-
-static gboolean
-color_read_arg(const char **pp, ns_color_arg *out)
-{
-    const char *p = *pp;
-    memset(out, 0, sizeof *out);
-    if (g_ascii_strncasecmp(p, "none", 4) == 0 && !is_ident(p[4])) {
-        out->none = TRUE;
-        *pp = p + 4;
-        return TRUE;
-    }
-    char *end = NULL;
-    double v = g_ascii_strtod(p, &end);
-    if (!end || end == p) return FALSE;
-    if (*end == '%') {
-        out->percent = TRUE;
-        end++;
-    } else if (g_ascii_isalpha(*end)) {
-        char *unit_end = end;
-        double deg = css_angle_value_degrees(v, &unit_end);
-        if (unit_end == end) return FALSE;
-        out->angle = TRUE;
-        v = deg;
-        end = unit_end;
-    }
-    if (is_ident(*end)) return FALSE;
-    out->v = v;
-    *pp = end;
-    return TRUE;
-}
-
-static gboolean
-color_args_parse(const char *args, ns_color_args *out)
-{
-    const char *p = color_skip_ws(args);
-    int slash_at = -1;
-    out->count = 0;
-    out->legacy = FALSE;
-    while (*p && *p != ')') {
-        if (out->count > 0) {
-            const char *before_ws = p;
-            p = color_skip_ws(p);
-            gboolean spaced = p != before_ws;
-            if (*p == ',') {
-                if (out->count > 1 && !out->legacy) return FALSE;
-                out->legacy = TRUE;
-                p = color_skip_ws(p + 1);
-            } else if (*p == '/') {
-                if (out->legacy || slash_at >= 0) return FALSE;
-                slash_at = out->count;
-                p = color_skip_ws(p + 1);
-            } else if (!spaced || out->legacy) {
-                return FALSE;
-            }
-        }
-        if (out->count >= (int)G_N_ELEMENTS(out->args)) return FALSE;
-        if (!*p || *p == ')') return FALSE;
-        if (!color_read_arg(&p, &out->args[out->count])) return FALSE;
-        out->count++;
-    }
-    p = color_skip_ws(p);
-    if (*p == ')') p = color_skip_ws(p + 1);
-    if (*p) return FALSE;
-    if (slash_at >= 0 && slash_at != out->count - 1) return FALSE;
-    if (out->count == 4 && !out->legacy && slash_at < 0) return FALSE;
-    return out->count >= 3;
-}
-
-static const char *
-color_func_args(const char *s, const char *name)
-{
-    gsize n = strlen(name);
-    if (g_ascii_strncasecmp(s, name, n) != 0 || s[n] != '(') return NULL;
-    return s + n + 1;
-}
-
-static double
-color_arg_scaled(const ns_color_arg *a, double percent_full)
-{
-    if (a->none) return 0.0;
-    return a->percent ? a->v * percent_full / 100.0 : a->v;
-}
-
-static guint8
-color_channel_byte(double unit_value)
-{
-    if (!isfinite(unit_value)) unit_value = unit_value > 0 ? 1.0 : 0.0;
-    return (guint8)CLAMP((int)(unit_value * 255.0 + 0.5), 0, 255);
-}
-
-static guint8
-color_args_alpha(const ns_color_args *a)
-{
-    if (a->count < 4) return 255;
-    return color_channel_byte(color_arg_scaled(&a->args[3], 1.0));
-}
-
-static gboolean
-parse_rgb_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
-{
-    const char *args = color_func_args(s, "rgba");
-    if (!args) args = color_func_args(s, "rgb");
-    if (!args) return FALSE;
-    ns_color_args parsed;
-    if (!color_args_parse(args, &parsed)) return FALSE;
-    for (int i = 0; i < 3; i++)
-        if (parsed.args[i].angle) return FALSE;
-    if (parsed.count == 4 && parsed.args[3].angle) return FALSE;
-    *r = color_channel_byte(color_arg_scaled(&parsed.args[0], 255.0) / 255.0);
-    *g = color_channel_byte(color_arg_scaled(&parsed.args[1], 255.0) / 255.0);
-    *b = color_channel_byte(color_arg_scaled(&parsed.args[2], 255.0) / 255.0);
-    *a = color_args_alpha(&parsed);
-    return TRUE;
-}
-
-static double
-hsl_hue_to_rgb(double p, double q, double t)
-{
-    if (t < 0) t += 1.0;
-    if (t > 1) t -= 1.0;
-    if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
-    if (t < 0.5)     return q;
-    if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
-    return p;
-}
-
-static double
-css_angle_value_degrees(double v, char **endp)
-{
-    char *end = *endp;
-    if (g_ascii_strncasecmp(end, "deg", 3) == 0 && !is_ident(end[3])) {
-        *endp = end + 3;
-    } else if (g_ascii_strncasecmp(end, "turn", 4) == 0 &&
-               !is_ident(end[4])) {
-        v *= 360.0;
-        *endp = end + 4;
-    } else if (g_ascii_strncasecmp(end, "grad", 4) == 0 &&
-               !is_ident(end[4])) {
-        v *= 0.9;
-        *endp = end + 4;
-    } else if (g_ascii_strncasecmp(end, "rad", 3) == 0 &&
-               !is_ident(end[3])) {
-        v = v * 180.0 / G_PI;
-        *endp = end + 3;
-    }
-    return v;
-}
-
-static gboolean
-color_hue_valid(const ns_color_arg *a)
-{
-    return !a->percent;
-}
-
-static double
-color_hue_turns(const ns_color_arg *a)
-{
-    double h = a->none ? 0.0 : a->v / 360.0;
-    return isfinite(h) ? h - floor(h) : 0.0;
-}
-
-static gboolean
-parse_hsl_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
-{
-    const char *args = color_func_args(s, "hsla");
-    if (!args) args = color_func_args(s, "hsl");
-    if (!args) return FALSE;
-    ns_color_args parsed;
-    if (!color_args_parse(args, &parsed)) return FALSE;
-    if (parsed.args[1].angle || parsed.args[2].angle) return FALSE;
-    if (!color_hue_valid(&parsed.args[0])) return FALSE;
-    if (parsed.legacy && (!parsed.args[1].percent || !parsed.args[2].percent))
-        return FALSE;
-    if (parsed.count == 4 && parsed.args[3].angle) return FALSE;
-    double h = color_hue_turns(&parsed.args[0]);
-    double sat = CLAMP(color_arg_scaled(&parsed.args[1], 100.0) / 100.0, 0.0, 1.0);
-    double lig = CLAMP(color_arg_scaled(&parsed.args[2], 100.0) / 100.0, 0.0, 1.0);
-    double rr, gg, bb;
-    if (sat == 0) {
-        rr = gg = bb = lig;
-    } else {
-        double q = lig < 0.5 ? lig * (1 + sat) : lig + sat - lig * sat;
-        double pp = 2 * lig - q;
-        rr = hsl_hue_to_rgb(pp, q, h + 1.0/3.0);
-        gg = hsl_hue_to_rgb(pp, q, h);
-        bb = hsl_hue_to_rgb(pp, q, h - 1.0/3.0);
-    }
-    *r = color_channel_byte(rr);
-    *g = color_channel_byte(gg);
-    *b = color_channel_byte(bb);
-    *a = color_args_alpha(&parsed);
-    return TRUE;
-}
-
-static gboolean
-parse_hwb_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
-{
-    const char *args = color_func_args(s, "hwb");
-    if (!args) return FALSE;
-    ns_color_args parsed;
-    if (!color_args_parse(args, &parsed) || parsed.legacy) return FALSE;
-    if (parsed.args[1].angle || parsed.args[2].angle) return FALSE;
-    if (!color_hue_valid(&parsed.args[0])) return FALSE;
-    if (parsed.count == 4 && parsed.args[3].angle) return FALSE;
-    double h = color_hue_turns(&parsed.args[0]);
-    double w = CLAMP(color_arg_scaled(&parsed.args[1], 100.0) / 100.0, 0.0, 1.0);
-    double bl = CLAMP(color_arg_scaled(&parsed.args[2], 100.0) / 100.0, 0.0, 1.0);
-    double rr = hsl_hue_to_rgb(0, 1, h + 1.0/3.0);
-    double gg = hsl_hue_to_rgb(0, 1, h);
-    double bb = hsl_hue_to_rgb(0, 1, h - 1.0/3.0);
-    double sum = w + bl;
-    if (sum >= 1.0) {
-        rr = gg = bb = sum > 0 ? w / sum : 0;
-    } else {
-        double scale = 1.0 - w - bl;
-        rr = rr * scale + w;
-        gg = gg * scale + w;
-        bb = bb * scale + w;
-    }
-    *r = color_channel_byte(rr);
-    *g = color_channel_byte(gg);
-    *b = color_channel_byte(bb);
-    *a = color_args_alpha(&parsed);
-    return TRUE;
-}
-
-static double
-srgb_encode_linear(double c)
-{
-    if (c <= 0.0031308) return 12.92 * c;
-    return 1.055 * pow(c, 1.0 / 2.4) - 0.055;
-}
-
-static void
-oklab_to_srgb(double l, double a, double b, guint8 *r, guint8 *g,
-              guint8 *bl)
-{
-    double lp = l + 0.3963377774 * a + 0.2158037573 * b;
-    double mp = l - 0.1055613458 * a - 0.0638541728 * b;
-    double sp = l - 0.0894841775 * a - 1.2914855480 * b;
-    double ll = lp * lp * lp;
-    double mm = mp * mp * mp;
-    double ss = sp * sp * sp;
-    double rr =  4.0767416621 * ll - 3.3077115913 * mm + 0.2309699292 * ss;
-    double gg = -1.2684380046 * ll + 2.6097574011 * mm - 0.3413193965 * ss;
-    double bb = -0.0041960863 * ll - 0.7034186147 * mm + 1.7076147010 * ss;
-    rr = srgb_encode_linear(rr);
-    gg = srgb_encode_linear(gg);
-    bb = srgb_encode_linear(bb);
-    *r = (guint8)CLAMP((int)(rr * 255 + 0.5), 0, 255);
-    *g = (guint8)CLAMP((int)(gg * 255 + 0.5), 0, 255);
-    *bl = (guint8)CLAMP((int)(bb * 255 + 0.5), 0, 255);
-}
-
-static double
-srgb_decode_gamma(double c)
-{
-    if (c <= 0.04045) return c / 12.92;
-    return pow((c + 0.055) / 1.055, 2.4);
-}
-
-static void
-srgb_to_oklab(guint8 r, guint8 g, guint8 b, double *ol, double *oa, double *ob)
-{
-    double rl = srgb_decode_gamma(r / 255.0);
-    double gl = srgb_decode_gamma(g / 255.0);
-    double bl = srgb_decode_gamma(b / 255.0);
-    double l = 0.4122214708 * rl + 0.5363325363 * gl + 0.0514459929 * bl;
-    double m = 0.2119034982 * rl + 0.6806995451 * gl + 0.1073969566 * bl;
-    double s = 0.0883024619 * rl + 0.2817188376 * gl + 0.6299787005 * bl;
-    double lp = cbrt(l), mp = cbrt(m), sp = cbrt(s);
-    *ol = 0.2104542553 * lp + 0.7936177850 * mp - 0.0040720468 * sp;
-    *oa = 1.9779984951 * lp - 2.4285922050 * mp + 0.4505937099 * sp;
-    *ob = 0.0259040371 * lp + 0.7827717662 * mp - 0.8086757660 * sp;
-}
-
-static double
-lab_inv_f(double t)
-{
-    double t3 = t * t * t;
-    if (t3 > 0.008856451679) return t3;
-    return (116.0 * t - 16.0) / 903.2962963;
-}
-
-static void
-lab_to_srgb(double l, double a, double b, guint8 *r, guint8 *g, guint8 *bl)
-{
-    double fy = (l + 16.0) / 116.0;
-    double fx = fy + a / 500.0;
-    double fz = fy - b / 200.0;
-    double x50 = 0.96422 * lab_inv_f(fx);
-    double y50 = lab_inv_f(fy);
-    double z50 = 0.82521 * lab_inv_f(fz);
-    double x =  0.9555766 * x50 - 0.0230393 * y50 + 0.0631636 * z50;
-    double y = -0.0282895 * x50 + 1.0099416 * y50 + 0.0210077 * z50;
-    double z =  0.0122982 * x50 - 0.0204830 * y50 + 1.3299098 * z50;
-    double rr =  3.2404542 * x - 1.5371385 * y - 0.4985314 * z;
-    double gg = -0.9692660 * x + 1.8760108 * y + 0.0415560 * z;
-    double bb =  0.0556434 * x - 0.2040259 * y + 1.0572252 * z;
-    rr = srgb_encode_linear(rr);
-    gg = srgb_encode_linear(gg);
-    bb = srgb_encode_linear(bb);
-    *r = (guint8)CLAMP((int)(rr * 255 + 0.5), 0, 255);
-    *g = (guint8)CLAMP((int)(gg * 255 + 0.5), 0, 255);
-    *bl = (guint8)CLAMP((int)(bb * 255 + 0.5), 0, 255);
-}
-
-static gboolean
-parse_polar_lab_args(const ns_color_args *parsed, gboolean is_polar,
-                     double lightness_full, double axis_full,
-                     double chroma_full, double *l, double *aa, double *bb)
-{
-    if (parsed->legacy) return FALSE;
-    if (parsed->args[0].angle || parsed->args[1].angle) return FALSE;
-    if (parsed->count == 4 && parsed->args[3].angle) return FALSE;
-    if (!is_polar && parsed->args[2].angle) return FALSE;
-    *l = CLAMP(color_arg_scaled(&parsed->args[0], lightness_full),
-               0.0, lightness_full);
-    if (is_polar) {
-        if (!color_hue_valid(&parsed->args[2])) return FALSE;
-        double chroma = color_arg_scaled(&parsed->args[1], chroma_full);
-        if (chroma < 0) chroma = 0;
-        double rad = color_hue_turns(&parsed->args[2]) * 2.0 * G_PI;
-        *aa = chroma * cos(rad);
-        *bb = chroma * sin(rad);
-    } else {
-        *aa = color_arg_scaled(&parsed->args[1], axis_full);
-        *bb = color_arg_scaled(&parsed->args[2], axis_full);
-    }
-    return TRUE;
-}
-
-static gboolean
-parse_lab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
-{
-    const char *args = color_func_args(s, "lch");
-    gboolean is_lch = args != NULL;
-    if (!args) args = color_func_args(s, "lab");
-    if (!args) return FALSE;
-    ns_color_args parsed;
-    if (!color_args_parse(args, &parsed)) return FALSE;
-    double l, aa, bb;
-    if (!parse_polar_lab_args(&parsed, is_lch, 100.0, 125.0, 150.0,
-                              &l, &aa, &bb))
-        return FALSE;
-    lab_to_srgb(l, aa, bb, r, g, b);
-    *alpha = color_args_alpha(&parsed);
-    return TRUE;
-}
-
-static gboolean
-parse_oklab_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *alpha)
-{
-    const char *args = color_func_args(s, "oklch");
-    gboolean is_lch = args != NULL;
-    if (!args) args = color_func_args(s, "oklab");
-    if (!args) return FALSE;
-    ns_color_args parsed;
-    if (!color_args_parse(args, &parsed)) return FALSE;
-    double l, aa, bb;
-    if (!parse_polar_lab_args(&parsed, is_lch, 1.0, 0.4, 0.4, &l, &aa, &bb))
-        return FALSE;
-    oklab_to_srgb(l, aa, bb, r, g, b);
-    *alpha = color_args_alpha(&parsed);
-    return TRUE;
-}
-
-typedef enum {
-    NS_PREDEF_SRGB,
-    NS_PREDEF_SRGB_LINEAR,
-    NS_PREDEF_DISPLAY_P3,
-    NS_PREDEF_A98_RGB,
-    NS_PREDEF_PROPHOTO_RGB,
-    NS_PREDEF_REC2020,
-    NS_PREDEF_XYZ_D65,
-    NS_PREDEF_XYZ_D50,
-} ns_predefined_space;
-
-static gboolean
-predefined_space_by_name(const char *name, gsize len, ns_predefined_space *out)
-{
-    static const struct { const char *name; ns_predefined_space space; } spaces[] = {
-        { "srgb",          NS_PREDEF_SRGB },
-        { "srgb-linear",   NS_PREDEF_SRGB_LINEAR },
-        { "display-p3",    NS_PREDEF_DISPLAY_P3 },
-        { "a98-rgb",       NS_PREDEF_A98_RGB },
-        { "prophoto-rgb",  NS_PREDEF_PROPHOTO_RGB },
-        { "rec2020",       NS_PREDEF_REC2020 },
-        { "xyz",           NS_PREDEF_XYZ_D65 },
-        { "xyz-d65",       NS_PREDEF_XYZ_D65 },
-        { "xyz-d50",       NS_PREDEF_XYZ_D50 },
-    };
-    for (gsize i = 0; i < G_N_ELEMENTS(spaces); i++) {
-        if (strlen(spaces[i].name) == len &&
-            g_ascii_strncasecmp(name, spaces[i].name, len) == 0) {
-            *out = spaces[i].space;
-            return TRUE;
-        }
-    }
-    return FALSE;
-}
-
-static void
-mat3_apply(const double m[9], const double v[3], double out[3])
-{
-    for (int i = 0; i < 3; i++)
-        out[i] = m[i * 3] * v[0] + m[i * 3 + 1] * v[1] + m[i * 3 + 2] * v[2];
-}
-
-static void
-mat3_invert(const double m[9], double out[9])
-{
-    double det = m[0] * (m[4] * m[8] - m[5] * m[7])
-               - m[1] * (m[3] * m[8] - m[5] * m[6])
-               + m[2] * (m[3] * m[7] - m[4] * m[6]);
-    if (det == 0.0) det = 1.0;
-    out[0] = (m[4] * m[8] - m[5] * m[7]) / det;
-    out[1] = (m[2] * m[7] - m[1] * m[8]) / det;
-    out[2] = (m[1] * m[5] - m[2] * m[4]) / det;
-    out[3] = (m[5] * m[6] - m[3] * m[8]) / det;
-    out[4] = (m[0] * m[8] - m[2] * m[6]) / det;
-    out[5] = (m[2] * m[3] - m[0] * m[5]) / det;
-    out[6] = (m[3] * m[7] - m[4] * m[6]) / det;
-    out[7] = (m[1] * m[6] - m[0] * m[7]) / det;
-    out[8] = (m[0] * m[4] - m[1] * m[3]) / det;
-}
-
-static void
-mat3_apply_inverse(const double m[9], const double v[3], double out[3])
-{
-    double inv[9];
-    mat3_invert(m, inv);
-    mat3_apply(inv, v, out);
-}
-
-static const double ns_xyz_to_srgb[9] = {
-     3.2404542, -1.5371385, -0.4985314,
-    -0.9692660,  1.8760108,  0.0415560,
-     0.0556434, -0.2040259,  1.0572252,
-};
-static const double ns_p3_to_xyz[9] = {
-    0.4865709486, 0.2656676932, 0.1982172852,
-    0.2289745641, 0.6917385218, 0.0792869141,
-    0.0000000000, 0.0451133819, 1.0439443689,
-};
-static const double ns_a98_to_xyz[9] = {
-    0.5766690429, 0.1855582379, 0.1882286462,
-    0.2973449753, 0.6273635663, 0.0752914585,
-    0.0270313614, 0.0706888525, 0.9913375368,
-};
-static const double ns_prophoto_to_xyz_d50[9] = {
-    0.7977604896, 0.1351757162, 0.0313534242,
-    0.2880711198, 0.7118432022, 0.0000856779,
-    0.0000000000, 0.0000000000, 0.8251046025,
-};
-static const double ns_rec2020_to_xyz[9] = {
-    0.6369580483, 0.1446169036, 0.1688809752,
-    0.2627002120, 0.6779980715, 0.0593017165,
-    0.0000000000, 0.0280726930, 1.0609850577,
-};
-static const double ns_d50_to_d65[9] = {
-     0.9555766, -0.0230393, 0.0631636,
-    -0.0282895,  1.0099416, 0.0210077,
-     0.0122982, -0.0204830, 1.3299098,
-};
-
-static void
-xyz_d65_to_linear_srgb(const double xyz[3], double out[3])
-{
-    mat3_apply(ns_xyz_to_srgb, xyz, out);
-}
-
-static double
-a98_decode(double c)
-{
-    double v = pow(fabs(c), 563.0 / 256.0);
-    return c < 0 ? -v : v;
-}
-
-static double
-prophoto_decode(double c)
-{
-    double a = fabs(c);
-    double v = a < 16.0 / 512.0 ? a / 16.0 : pow(a, 1.8);
-    return c < 0 ? -v : v;
-}
-
-static double
-rec2020_decode(double c)
-{
-    static const double alpha = 1.09929682680944;
-    static const double beta  = 0.018053968510807;
-    double a = fabs(c);
-    double v = a < beta * 4.5 ? a / 4.5
-                              : pow((a + alpha - 1.0) / alpha, 1.0 / 0.45);
-    return c < 0 ? -v : v;
-}
-
-static void
-predefined_to_linear_srgb(ns_predefined_space space, const double in[3],
-                          double out[3])
-{
-    double linear[3], xyz[3], adapted[3];
-    switch (space) {
-    case NS_PREDEF_SRGB:
-        for (int i = 0; i < 3; i++) out[i] = srgb_decode_gamma(in[i]);
-        return;
-    case NS_PREDEF_SRGB_LINEAR:
-        for (int i = 0; i < 3; i++) out[i] = in[i];
-        return;
-    case NS_PREDEF_DISPLAY_P3:
-        for (int i = 0; i < 3; i++) linear[i] = srgb_decode_gamma(in[i]);
-        mat3_apply(ns_p3_to_xyz, linear, xyz);
-        break;
-    case NS_PREDEF_A98_RGB:
-        for (int i = 0; i < 3; i++) linear[i] = a98_decode(in[i]);
-        mat3_apply(ns_a98_to_xyz, linear, xyz);
-        break;
-    case NS_PREDEF_PROPHOTO_RGB:
-        for (int i = 0; i < 3; i++) linear[i] = prophoto_decode(in[i]);
-        mat3_apply(ns_prophoto_to_xyz_d50, linear, adapted);
-        mat3_apply(ns_d50_to_d65, adapted, xyz);
-        break;
-    case NS_PREDEF_REC2020:
-        for (int i = 0; i < 3; i++) linear[i] = rec2020_decode(in[i]);
-        mat3_apply(ns_rec2020_to_xyz, linear, xyz);
-        break;
-    case NS_PREDEF_XYZ_D65:
-        for (int i = 0; i < 3; i++) xyz[i] = in[i];
-        break;
-    case NS_PREDEF_XYZ_D50:
-        for (int i = 0; i < 3; i++) adapted[i] = in[i];
-        mat3_apply(ns_d50_to_d65, adapted, xyz);
-        break;
-    default:
-        return;
-    }
-    xyz_d65_to_linear_srgb(xyz, out);
-}
-
-static void
-xyz_linear_srgb_to_d65(const double lin[3], double out[3])
-{
-    mat3_apply_inverse(ns_xyz_to_srgb, lin, out);
-}
-
-static double
-a98_encode(double c)
-{
-    double v = pow(fabs(c), 256.0 / 563.0);
-    return c < 0 ? -v : v;
-}
-
-static double
-prophoto_encode(double c)
-{
-    double a = fabs(c);
-    double v = a < 1.0 / 512.0 ? a * 16.0 : pow(a, 1.0 / 1.8);
-    return c < 0 ? -v : v;
-}
-
-static double
-rec2020_encode(double c)
-{
-    static const double alpha = 1.09929682680944;
-    static const double beta  = 0.018053968510807;
-    double a = fabs(c);
-    double v = a < beta ? a * 4.5 : alpha * pow(a, 0.45) - (alpha - 1.0);
-    return c < 0 ? -v : v;
-}
-
-static void
-linear_srgb_to_predefined(ns_predefined_space space, const double lin[3],
-                          double out[3])
-{
-    double xyz[3], rgb[3];
-    xyz_linear_srgb_to_d65(lin, xyz);
-    switch (space) {
-    case NS_PREDEF_SRGB:
-        for (int i = 0; i < 3; i++) out[i] = srgb_encode_linear(lin[i]);
-        return;
-    case NS_PREDEF_SRGB_LINEAR:
-        for (int i = 0; i < 3; i++) out[i] = lin[i];
-        return;
-    case NS_PREDEF_DISPLAY_P3:
-        mat3_apply_inverse(ns_p3_to_xyz, xyz, rgb);
-        for (int i = 0; i < 3; i++) out[i] = srgb_encode_linear(rgb[i]);
-        return;
-    case NS_PREDEF_A98_RGB:
-        mat3_apply_inverse(ns_a98_to_xyz, xyz, rgb);
-        for (int i = 0; i < 3; i++) out[i] = a98_encode(rgb[i]);
-        return;
-    case NS_PREDEF_PROPHOTO_RGB: {
-        double d50[3];
-        mat3_apply_inverse(ns_d50_to_d65, xyz, d50);
-        mat3_apply_inverse(ns_prophoto_to_xyz_d50, d50, rgb);
-        for (int i = 0; i < 3; i++) out[i] = prophoto_encode(rgb[i]);
-        return;
-    }
-    case NS_PREDEF_REC2020:
-        mat3_apply_inverse(ns_rec2020_to_xyz, xyz, rgb);
-        for (int i = 0; i < 3; i++) out[i] = rec2020_encode(rgb[i]);
-        return;
-    case NS_PREDEF_XYZ_D65:
-        for (int i = 0; i < 3; i++) out[i] = xyz[i];
-        return;
-    case NS_PREDEF_XYZ_D50:
-        mat3_apply_inverse(ns_d50_to_d65, xyz, out);
-        return;
-    }
-}
-
-static double
-lab_f(double t)
-{
-    if (t > 0.008856451679) return cbrt(t);
-    return (903.2962963 * t + 16.0) / 116.0;
-}
-
-static void
-srgb_to_lab(guint8 r, guint8 g, guint8 b, double *ol, double *oa, double *ob)
-{
-    double lin[3] = { srgb_decode_gamma(r / 255.0),
-                      srgb_decode_gamma(g / 255.0),
-                      srgb_decode_gamma(b / 255.0) };
-    double xyz[3], d50[3];
-    xyz_linear_srgb_to_d65(lin, xyz);
-    mat3_apply_inverse(ns_d50_to_d65, xyz, d50);
-    double fx = lab_f(d50[0] / 0.96422);
-    double fy = lab_f(d50[1]);
-    double fz = lab_f(d50[2] / 0.82521);
-    *ol = 116.0 * fy - 16.0;
-    *oa = 500.0 * (fx - fy);
-    *ob = 200.0 * (fy - fz);
-}
-
-static void
-srgb_to_hsl(guint8 r, guint8 g, guint8 b, double *oh, double *os, double *ol)
-{
-    double rr = r / 255.0, gg = g / 255.0, bb = b / 255.0;
-    double max = MAX(rr, MAX(gg, bb)), min = MIN(rr, MIN(gg, bb));
-    double d = max - min;
-    double h = 0.0;
-    if (d > 0) {
-        if (max == rr)      h = fmod((gg - bb) / d, 6.0);
-        else if (max == gg) h = (bb - rr) / d + 2.0;
-        else                h = (rr - gg) / d + 4.0;
-        h *= 60.0;
-        if (h < 0) h += 360.0;
-    }
-    double l = (max + min) / 2.0;
-    double s = (l <= 0.0 || l >= 1.0) ? 0.0 : d / (1.0 - fabs(2.0 * l - 1.0));
-    *oh = h;
-    *os = s * 100.0;
-    *ol = l * 100.0;
-}
-
-static void
-srgb_to_hwb(guint8 r, guint8 g, guint8 b, double *oh, double *ow, double *obl)
-{
-    double s, l;
-    srgb_to_hsl(r, g, b, oh, &s, &l);
-    double rr = r / 255.0, gg = g / 255.0, bb = b / 255.0;
-    *ow = MIN(rr, MIN(gg, bb)) * 100.0;
-    *obl = (1.0 - MAX(rr, MAX(gg, bb))) * 100.0;
-}
-
-static void
-lab_to_polar(double a, double b, double *chroma, double *hue)
-{
-    *chroma = hypot(a, b);
-    double h = atan2(b, a) * 180.0 / G_PI;
-    *hue = h < 0 ? h + 360.0 : h;
-}
-
-static gboolean
-relative_channel_values(const char *fn, gsize fn_len,
-                        ns_predefined_space space, const guint8 rgba[4],
-                        const char *names[4], double ch[4])
-{
-    static const char *const rgb_names[]   = { "r", "g", "b", "alpha" };
-    static const char *const hsl_names[]   = { "h", "s", "l", "alpha" };
-    static const char *const hwb_names[]   = { "h", "w", "b", "alpha" };
-    static const char *const lab_names[]   = { "l", "a", "b", "alpha" };
-    static const char *const lch_names[]   = { "l", "c", "h", "alpha" };
-    static const char *const xyz_names[]   = { "x", "y", "z", "alpha" };
-    const char *const *pick = NULL;
-    ch[3] = rgba[3] / 255.0;
-
-    if (fn_len == 3 && g_ascii_strncasecmp(fn, "rgb", 3) == 0) {
-        pick = rgb_names;
-        for (int i = 0; i < 3; i++) ch[i] = rgba[i];
-    } else if (fn_len == 4 && g_ascii_strncasecmp(fn, "rgba", 4) == 0) {
-        pick = rgb_names;
-        for (int i = 0; i < 3; i++) ch[i] = rgba[i];
-    } else if ((fn_len == 3 && g_ascii_strncasecmp(fn, "hsl", 3) == 0) ||
-               (fn_len == 4 && g_ascii_strncasecmp(fn, "hsla", 4) == 0)) {
-        pick = hsl_names;
-        srgb_to_hsl(rgba[0], rgba[1], rgba[2], &ch[0], &ch[1], &ch[2]);
-    } else if (fn_len == 3 && g_ascii_strncasecmp(fn, "hwb", 3) == 0) {
-        pick = hwb_names;
-        srgb_to_hwb(rgba[0], rgba[1], rgba[2], &ch[0], &ch[1], &ch[2]);
-    } else if (fn_len == 3 && g_ascii_strncasecmp(fn, "lab", 3) == 0) {
-        pick = lab_names;
-        srgb_to_lab(rgba[0], rgba[1], rgba[2], &ch[0], &ch[1], &ch[2]);
-    } else if (fn_len == 3 && g_ascii_strncasecmp(fn, "lch", 3) == 0) {
-        pick = lch_names;
-        double a, b;
-        srgb_to_lab(rgba[0], rgba[1], rgba[2], &ch[0], &a, &b);
-        lab_to_polar(a, b, &ch[1], &ch[2]);
-    } else if (fn_len == 5 && g_ascii_strncasecmp(fn, "oklab", 5) == 0) {
-        pick = lab_names;
-        srgb_to_oklab(rgba[0], rgba[1], rgba[2], &ch[0], &ch[1], &ch[2]);
-    } else if (fn_len == 5 && g_ascii_strncasecmp(fn, "oklch", 5) == 0) {
-        pick = lch_names;
-        double a, b;
-        srgb_to_oklab(rgba[0], rgba[1], rgba[2], &ch[0], &a, &b);
-        lab_to_polar(a, b, &ch[1], &ch[2]);
-    } else if (fn_len == 5 && g_ascii_strncasecmp(fn, "color", 5) == 0) {
-        pick = space == NS_PREDEF_XYZ_D65 || space == NS_PREDEF_XYZ_D50
-               ? xyz_names : rgb_names;
-        double lin[3] = { srgb_decode_gamma(rgba[0] / 255.0),
-                          srgb_decode_gamma(rgba[1] / 255.0),
-                          srgb_decode_gamma(rgba[2] / 255.0) };
-        linear_srgb_to_predefined(space, lin, ch);
-    }
-    if (!pick) return FALSE;
-    for (int i = 0; i < 4; i++) names[i] = pick[i];
-    return TRUE;
-}
-
-static const char *
-color_relative_origin_end(const char *p, const char *s_end)
-{
-    while (p < s_end && !is_ws(*p) && *p != ')' && *p != '(') p++;
-    if (p < s_end && *p == '(') {
-        const char *close = match_close_paren(p + 1, s_end);
-        return close ? close + 1 : NULL;
-    }
-    return p;
-}
-
-static char *
-color_relative_expand(const char *s, int depth)
-{
-    const char *open = strchr(s, '(');
-    if (!open || open == s) return NULL;
-    const char *fn = s;
-    gsize fn_len = (gsize)(open - s);
-    const char *s_end = s + strlen(s);
-    const char *p = open + 1;
-    ns_predefined_space space = NS_PREDEF_SRGB;
-    const char *space_text = NULL;
-    gsize space_len = 0;
-    if (fn_len == 5 && g_ascii_strncasecmp(fn, "color", 5) == 0) {
-        p = color_skip_ws(p);
-        space_text = p;
-        while (*p && (g_ascii_isalnum(*p) || *p == '-')) p++;
-        space_len = (gsize)(p - space_text);
-        if (!predefined_space_by_name(space_text, space_len, &space))
-            return NULL;
-    }
-    p = color_skip_ws(p);
-    if (g_ascii_strncasecmp(p, "from", 4) != 0 || !is_ws(p[4])) return NULL;
-    p = color_skip_ws(p + 4);
-
-    const char *origin_end = color_relative_origin_end(p, s_end);
-    if (!origin_end || origin_end == p) return NULL;
-    char *origin = g_strndup(p, (gsize)(origin_end - p));
-    guint8 rgba[4] = { 0, 0, 0, 255 };
-    gboolean parsed = parse_color_depth(origin, &rgba[0], &rgba[1], &rgba[2],
-                                        &rgba[3], depth + 1);
-    g_free(origin);
-    if (!parsed) return NULL;
-
-    const char *names[4] = { NULL, NULL, NULL, NULL };
-    double ch[4];
-    if (!relative_channel_values(fn, fn_len, space, rgba, names, ch))
-        return NULL;
-
-    const char *args_end = match_close_paren(open + 1, s_end);
-    if (!args_end) args_end = s_end;
-    GString *out = g_string_new_len(fn, fn_len);
-    g_string_append_c(out, '(');
-    if (space_text) {
-        g_string_append_len(out, space_text, space_len);
-        g_string_append_c(out, ' ');
-    }
-    const char *q = origin_end;
-    while (q < args_end) {
-        if (g_ascii_isalpha(*q) || *q == '_' || (unsigned char)*q >= 128) {
-            const char *id = q;
-            while (q < args_end && is_ident(*q)) q++;
-            gsize n = (gsize)(q - id);
-            int idx = -1;
-            for (int i = 0; i < 4; i++)
-                if (strlen(names[i]) == n &&
-                    g_ascii_strncasecmp(id, names[i], n) == 0)
-                    idx = i;
-            if (idx < 0) {
-                g_string_append_len(out, id, n);
-            } else {
-                char buf[G_ASCII_DTOSTR_BUF_SIZE];
-                g_ascii_formatd(buf, sizeof buf, "%.6f", ch[idx]);
-                g_string_append(out, buf);
-            }
-        } else {
-            g_string_append_c(out, *q++);
-        }
-    }
-    g_string_append_c(out, ')');
-    return g_string_free(out, FALSE);
-}
-
-static gboolean
-parse_color_function(const char *s, guint8 *r, guint8 *g, guint8 *b,
-                     guint8 *alpha)
-{
-    const char *p = color_func_args(s, "color");
-    if (!p) return FALSE;
-    p = color_skip_ws(p);
-    const char *name = p;
-    while (*p && (g_ascii_isalnum(*p) || *p == '-')) p++;
-    ns_predefined_space space;
-    if (!predefined_space_by_name(name, (gsize)(p - name), &space)) return FALSE;
-    if (!is_ws(*p)) return FALSE;
-
-    ns_color_args parsed;
-    if (!color_args_parse(p, &parsed) || parsed.legacy) return FALSE;
-    double values[4] = { 0, 0, 0, 1 };
-    for (int i = 0; i < parsed.count; i++) {
-        if (parsed.args[i].angle) return FALSE;
-        values[i] = color_arg_scaled(&parsed.args[i], 1.0);
-    }
-
-    double linear[3];
-    predefined_to_linear_srgb(space, values, linear);
-    for (int i = 0; i < 3; i++)
-        linear[i] = srgb_encode_linear(linear[i]);
-    *r  = (guint8)CLAMP((int)(linear[0] * 255 + 0.5), 0, 255);
-    *g  = (guint8)CLAMP((int)(linear[1] * 255 + 0.5), 0, 255);
-    *b  = (guint8)CLAMP((int)(linear[2] * 255 + 0.5), 0, 255);
-    *alpha = (guint8)CLAMP((int)(CLAMP(values[3], 0.0, 1.0) * 255 + 0.5), 0, 255);
-    return TRUE;
-}
-
-static gboolean
-color_mix_percent(const char *s, double *out)
-{
-    char *end = NULL;
-    double v = g_ascii_strtod(s, &end);
-    if (!end || end == s) return FALSE;
-    while (*end && is_ws(*end)) end++;
-    if (*end != '%') return FALSE;
-    end++;
-    while (*end && is_ws(*end)) end++;
-    if (*end) return FALSE;
-    *out = CLAMP(v, 0.0, 100.0);
-    return TRUE;
-}
-
-static gboolean
-parse_color_mix_stop(const char *text, guint8 rgba[4], double *pct,
-                     gboolean *has_pct, int depth)
-{
-    *has_pct = FALSE;
-    char *tokens[3] = {0};
-    int n = split_ws_limit(text, tokens, G_N_ELEMENTS(tokens));
-    gboolean ok = FALSE;
-    if (n == 1 || n == 2) {
-        if (n == 2) {
-            if (!color_mix_percent(tokens[1], pct)) goto done;
-            *has_pct = TRUE;
-        }
-        ok = parse_color_depth(tokens[0], &rgba[0], &rgba[1], &rgba[2],
-                               &rgba[3], depth + 1);
-    }
-done:
-    for (int i = 0; i < n; i++) g_free(tokens[i]);
-    return ok;
-}
-
-static gboolean
-parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
-                     guint8 *a, int depth)
-{
-    if (g_ascii_strncasecmp(s, "color-mix(", 10) != 0) return FALSE;
-    const char *p = strchr(s, '(');
-    if (!p) return FALSE;
-    p++;
-    const char *end = s + strlen(s);
-    const char *body_end = match_close_paren(p, end);
-    if (!body_end) return FALSE;
-    char *parts[3] = {0};
-    int n = calc_split_args(p, body_end, parts, G_N_ELEMENTS(parts));
-    if (n != 3) {
-        for (int i = 0; i < n; i++) g_free(parts[i]);
-        return FALSE;
-    }
-    char *space = parts[0];
-    while (*space && is_ws(*space)) space++;
-    gboolean ok = g_ascii_strncasecmp(space, "in", 2) == 0 &&
-                  is_ws(space[2]);
-    gboolean in_oklab = FALSE, in_oklch = FALSE;
-    if (ok) {
-        space += 2;
-        while (*space && is_ws(*space)) space++;
-        gsize sl = 0;
-        while (space[sl] && !is_ws(space[sl])) sl++;
-        in_oklab = sl == 5 && g_ascii_strncasecmp(space, "oklab", 5) == 0;
-        in_oklch = sl == 5 && g_ascii_strncasecmp(space, "oklch", 5) == 0;
-        ok = in_oklab || in_oklch ||
-             (sl == 4 && g_ascii_strncasecmp(space, "srgb", 4) == 0) ||
-             (sl == 11 && g_ascii_strncasecmp(space, "srgb-linear", 11) == 0) ||
-             (sl == 3 && (g_ascii_strncasecmp(space, "hsl", 3) == 0 ||
-                          g_ascii_strncasecmp(space, "hwb", 3) == 0 ||
-                          g_ascii_strncasecmp(space, "lab", 3) == 0 ||
-                          g_ascii_strncasecmp(space, "lch", 3) == 0 ||
-                          g_ascii_strncasecmp(space, "xyz", 3) == 0));
-    }
-    guint8 c1[4] = {0}, c2[4] = {0};
-    double p1 = 50, p2 = 50;
-    gboolean h1 = FALSE, h2 = FALSE;
-    if (ok)
-        ok = parse_color_mix_stop(parts[1], c1, &p1, &h1, depth) &&
-             parse_color_mix_stop(parts[2], c2, &p2, &h2, depth);
-    if (ok) {
-        if (h1 && !h2) p2 = 100.0 - p1;
-        else if (!h1 && h2) p1 = 100.0 - p2;
-        else if (!h1 && !h2) { p1 = 50.0; p2 = 50.0; }
-        double sum = p1 + p2;
-        if (sum <= 0) ok = FALSE;
-        else {
-            double w1 = p1 / sum;
-            double w2 = p2 / sum;
-            double a1 = c1[3] / 255.0;
-            double a2 = c2[3] / 255.0;
-            double ao = a1 * w1 + a2 * w2;
-            if (in_oklch) {
-                double l1, aa1, bb1, l2, aa2, bb2;
-                srgb_to_oklab(c1[0], c1[1], c1[2], &l1, &aa1, &bb1);
-                srgb_to_oklab(c2[0], c2[1], c2[2], &l2, &aa2, &bb2);
-                double ch1 = hypot(aa1, bb1), ch2 = hypot(aa2, bb2);
-                double hh1 = atan2(bb1, aa1) * 180.0 / G_PI;
-                double hh2 = atan2(bb2, aa2) * 180.0 / G_PI;
-                if (ch1 < 1e-4) hh1 = hh2;
-                else if (ch2 < 1e-4) hh2 = hh1;
-                if (hh2 - hh1 > 180) hh1 += 360;
-                else if (hh1 - hh2 > 180) hh2 += 360;
-                double lo = 0, co = 0;
-                if (ao > 0) {
-                    lo = (l1 * a1 * w1 + l2 * a2 * w2) / ao;
-                    co = (ch1 * a1 * w1 + ch2 * a2 * w2) / ao;
-                }
-                double ho = (hh1 * w1 + hh2 * w2) * G_PI / 180.0;
-                oklab_to_srgb(lo, co * cos(ho), co * sin(ho), r, g, b);
-            } else if (in_oklab) {
-                double l1, aa1, bb1, l2, aa2, bb2;
-                srgb_to_oklab(c1[0], c1[1], c1[2], &l1, &aa1, &bb1);
-                srgb_to_oklab(c2[0], c2[1], c2[2], &l2, &aa2, &bb2);
-                double lo = 0, ao2 = 0, bo = 0;
-                if (ao > 0) {
-                    lo  = (l1 * a1 * w1 + l2 * a2 * w2) / ao;
-                    ao2 = (aa1 * a1 * w1 + aa2 * a2 * w2) / ao;
-                    bo  = (bb1 * a1 * w1 + bb2 * a2 * w2) / ao;
-                }
-                oklab_to_srgb(lo, ao2, bo, r, g, b);
-            } else {
-                double rr = 0, gg = 0, bb = 0;
-                if (ao > 0) {
-                    rr = (c1[0] * a1 * w1 + c2[0] * a2 * w2) / ao;
-                    gg = (c1[1] * a1 * w1 + c2[1] * a2 * w2) / ao;
-                    bb = (c1[2] * a1 * w1 + c2[2] * a2 * w2) / ao;
-                }
-                *r = (guint8)CLAMP((int)(rr + 0.5), 0, 255);
-                *g = (guint8)CLAMP((int)(gg + 0.5), 0, 255);
-                *b = (guint8)CLAMP((int)(bb + 0.5), 0, 255);
-            }
-            if (h1 && h2 && sum < 100) ao *= sum / 100.0;
-            *a = (guint8)CLAMP((int)(ao * 255 + 0.5), 0, 255);
-        }
-    }
-    for (int i = 0; i < n; i++) g_free(parts[i]);
-    return ok;
-}
-
-static gboolean
-parse_light_dark_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
-                      int depth)
-{
-    if (g_ascii_strncasecmp(s, "light-dark(", 11) != 0) return FALSE;
-    const char *p = strchr(s, '(');
-    if (!p) return FALSE;
-    p++;
-    const char *end = s + strlen(s);
-    const char *body_end = match_close_paren(p, end);
-    if (!body_end) return FALSE;
-    char *parts[2] = {0};
-    int n = calc_split_args(p, body_end, parts, G_N_ELEMENTS(parts));
-    if (n != 2) {
-        for (int i = 0; i < n; i++) g_free(parts[i]);
-        return FALSE;
-    }
-    const char *choice = (ns_css_get_color_scheme() == NS_CSS_COLOR_SCHEME_DARK)
-        ? parts[1] : parts[0];
-    gboolean ok = parse_color_depth(choice, r, g, b, a, depth + 1);
-    g_free(parts[0]);
-    g_free(parts[1]);
-    return ok;
-}
-
 #define NS_CALC_MAX_DEPTH 64
 
 typedef enum {
@@ -2586,117 +1554,2110 @@ static gboolean calc_expr_parse(const char **pp, const char *end,
                                 ns_calc_term *out, int depth);
 static void calc_skip_ws(const char **pp, const char *end);
 
-static char *
-color_resolve_calcs(const char *s)
+#define NS_COLOR_NONE_ALPHA 8
+#define NS_COLOR_MAX_DEPTH 32
+#define NS_COLOR_MIX_MAX 32
+
+typedef struct {
+    double   v;
+    gboolean percent;
+    gboolean angle;
+    gboolean none;
+    gboolean math;
+} ns_color_arg;
+
+typedef struct {
+    ns_color_arg args[4];
+    int          count;
+    gboolean     legacy;
+    gboolean     has_alpha;
+} ns_color_args;
+
+typedef struct {
+    ns_css_color_space space;
+    double   c[3];
+    double   alpha;
+    guint8   none;
+    gboolean legacy;
+    gboolean current;
+} ns_color;
+
+typedef enum {
+    NS_HUE_SHORTER,
+    NS_HUE_LONGER,
+    NS_HUE_INCREASING,
+    NS_HUE_DECREASING,
+} ns_hue_method;
+
+typedef enum {
+    NS_COLOR_FN_RGB,
+    NS_COLOR_FN_HSL,
+    NS_COLOR_FN_HWB,
+    NS_COLOR_FN_LAB,
+    NS_COLOR_FN_LCH,
+    NS_COLOR_FN_OKLAB,
+    NS_COLOR_FN_OKLCH,
+    NS_COLOR_FN_COLOR,
+    NS_COLOR_FN_MIX,
+    NS_COLOR_FN_LIGHT_DARK,
+    NS_COLOR_FN_UNKNOWN,
+} ns_color_fn;
+
+static __thread const ns_color *color_current_ctx;
+
+static const struct {
+    const char *name;
+    ns_css_color_space space;
+} ns_color_space_names[] = {
+    { "srgb",              NS_CSS_COLOR_SRGB },
+    { "srgb-linear",       NS_CSS_COLOR_SRGB_LINEAR },
+    { "display-p3",        NS_CSS_COLOR_DISPLAY_P3 },
+    { "display-p3-linear", NS_CSS_COLOR_DISPLAY_P3_LINEAR },
+    { "a98-rgb",           NS_CSS_COLOR_A98_RGB },
+    { "prophoto-rgb",      NS_CSS_COLOR_PROPHOTO_RGB },
+    { "rec2020",           NS_CSS_COLOR_REC2020 },
+    { "xyz",               NS_CSS_COLOR_XYZ_D65 },
+    { "xyz-d50",           NS_CSS_COLOR_XYZ_D50 },
+    { "xyz-d65",           NS_CSS_COLOR_XYZ_D65 },
+    { "lab",               NS_CSS_COLOR_LAB },
+    { "lch",               NS_CSS_COLOR_LCH },
+    { "oklab",             NS_CSS_COLOR_OKLAB },
+    { "oklch",             NS_CSS_COLOR_OKLCH },
+    { "hsl",               NS_CSS_COLOR_HSL },
+    { "hwb",               NS_CSS_COLOR_HWB },
+};
+
+static gboolean
+color_space_by_name(const char *name, gsize len, gboolean predefined_only,
+                    ns_css_color_space *out)
 {
-    const char *s_end = s + strlen(s);
-    GString *out = g_string_new(NULL);
-    const char *p = s;
-    while (*p) {
-        if (g_ascii_strncasecmp(p, "calc(", 5) == 0) {
-            const char *body = p + 5;
-            const char *close = match_close_paren(body, s_end);
-            if (!close) { g_string_free(out, TRUE); return NULL; }
-            const char *q = body;
-            ns_calc_term t;
-            gboolean ok = calc_expr_parse(&q, close, &t, 0);
-            if (ok) {
-                calc_skip_ws(&q, close);
-                ok = q == close;
-            }
-            gboolean percent_only = ok && t.kind == CALC_LENGTH &&
-                                    t.px == 0 && t.em == 0 && t.rem == 0 &&
-                                    t.lh == 0 && t.rlh == 0;
-            if (ok && t.kind == CALC_NUMBER)
-                g_string_append_printf(out, "%.6g", t.num);
-            else if (ok && t.kind == CALC_ANGLE)
-                g_string_append_printf(out, "%.6gdeg", t.num);
-            else if (percent_only)
-                g_string_append_printf(out, "%.6g%%", t.pct);
-            else {
-                g_string_free(out, TRUE);
-                return NULL;
-            }
-            p = close + 1;
-        } else {
-            g_string_append_c(out, *p++);
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_color_space_names); i++) {
+        ns_css_color_space s = ns_color_space_names[i].space;
+        if (predefined_only && s > NS_CSS_COLOR_XYZ_D65) continue;
+        if (strlen(ns_color_space_names[i].name) == len &&
+            g_ascii_strncasecmp(name, ns_color_space_names[i].name, len) == 0) {
+            *out = s;
+            return TRUE;
         }
+    }
+    return FALSE;
+}
+
+static const char *
+color_space_name(ns_css_color_space space)
+{
+    if (space == NS_CSS_COLOR_XYZ_D65) return "xyz-d65";
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_color_space_names); i++)
+        if (ns_color_space_names[i].space == space)
+            return ns_color_space_names[i].name;
+    return "srgb";
+}
+
+static int
+color_space_hue_index(ns_css_color_space space)
+{
+    switch (space) {
+    case NS_CSS_COLOR_HSL:
+    case NS_CSS_COLOR_HWB:
+        return 0;
+    case NS_CSS_COLOR_LCH:
+    case NS_CSS_COLOR_OKLCH:
+        return 2;
+    default:
+        return -1;
+    }
+}
+
+typedef enum {
+    NS_COLOR_CAT_NONE,
+    NS_COLOR_CAT_RED,
+    NS_COLOR_CAT_GREEN,
+    NS_COLOR_CAT_BLUE,
+    NS_COLOR_CAT_LIGHTNESS,
+    NS_COLOR_CAT_COLORFULNESS,
+    NS_COLOR_CAT_HUE,
+    NS_COLOR_CAT_OPPONENT_A,
+    NS_COLOR_CAT_OPPONENT_B,
+} ns_color_category;
+
+static void
+color_space_categories(ns_css_color_space space, ns_color_category cat[3])
+{
+    switch (space) {
+    case NS_CSS_COLOR_LAB:
+    case NS_CSS_COLOR_OKLAB:
+        cat[0] = NS_COLOR_CAT_LIGHTNESS;
+        cat[1] = NS_COLOR_CAT_OPPONENT_A;
+        cat[2] = NS_COLOR_CAT_OPPONENT_B;
+        return;
+    case NS_CSS_COLOR_LCH:
+    case NS_CSS_COLOR_OKLCH:
+        cat[0] = NS_COLOR_CAT_LIGHTNESS;
+        cat[1] = NS_COLOR_CAT_COLORFULNESS;
+        cat[2] = NS_COLOR_CAT_HUE;
+        return;
+    case NS_CSS_COLOR_HSL:
+        cat[0] = NS_COLOR_CAT_HUE;
+        cat[1] = NS_COLOR_CAT_COLORFULNESS;
+        cat[2] = NS_COLOR_CAT_LIGHTNESS;
+        return;
+    case NS_CSS_COLOR_HWB:
+        cat[0] = NS_COLOR_CAT_HUE;
+        cat[1] = NS_COLOR_CAT_NONE;
+        cat[2] = NS_COLOR_CAT_NONE;
+        return;
+    default:
+        cat[0] = NS_COLOR_CAT_RED;
+        cat[1] = NS_COLOR_CAT_GREEN;
+        cat[2] = NS_COLOR_CAT_BLUE;
+        return;
+    }
+}
+
+static gboolean
+color_space_is_srgb_family(ns_css_color_space space)
+{
+    return space == NS_CSS_COLOR_LEGACY || space == NS_CSS_COLOR_SRGB ||
+           space == NS_CSS_COLOR_HSL || space == NS_CSS_COLOR_HWB;
+}
+
+static double
+color_hue_normalize(double h)
+{
+    if (!isfinite(h)) return 0.0;
+    h = fmod(h, 360.0);
+    if (h < 0) h += 360.0;
+    if (h >= 360.0) h -= 360.0;
+    return h;
+}
+
+static void
+mat3_apply(const double m[9], const double v[3], double out[3])
+{
+    double r[3];
+    for (int i = 0; i < 3; i++)
+        r[i] = m[i * 3] * v[0] + m[i * 3 + 1] * v[1] + m[i * 3 + 2] * v[2];
+    for (int i = 0; i < 3; i++) out[i] = r[i];
+}
+
+static void
+mat3_apply_inverse(const double m[9], const double v[3], double out[3])
+{
+    double det = m[0] * (m[4] * m[8] - m[5] * m[7])
+               - m[1] * (m[3] * m[8] - m[5] * m[6])
+               + m[2] * (m[3] * m[7] - m[4] * m[6]);
+    if (det == 0.0) det = 1.0;
+    double inv[9] = {
+        (m[4] * m[8] - m[5] * m[7]) / det,
+        (m[2] * m[7] - m[1] * m[8]) / det,
+        (m[1] * m[5] - m[2] * m[4]) / det,
+        (m[5] * m[6] - m[3] * m[8]) / det,
+        (m[0] * m[8] - m[2] * m[6]) / det,
+        (m[2] * m[3] - m[0] * m[5]) / det,
+        (m[3] * m[7] - m[4] * m[6]) / det,
+        (m[1] * m[6] - m[0] * m[7]) / det,
+        (m[0] * m[4] - m[1] * m[3]) / det,
+    };
+    mat3_apply(inv, v, out);
+}
+
+static const double ns_srgb_to_xyz[9] = {
+    506752.0 / 1228815.0,  87881.0 / 245763.0,   12673.0 / 70218.0,
+     87098.0 / 409605.0,  175762.0 / 245763.0,   12673.0 / 175545.0,
+      7918.0 / 409605.0,   87881.0 / 737289.0, 1001167.0 / 1053270.0,
+};
+static const double ns_xyz_to_srgb[9] = {
+     12831.0 / 3959.0,     -329.0 / 214.0,     -1974.0 / 3959.0,
+   -851781.0 / 878810.0, 1648619.0 / 878810.0, 36519.0 / 878810.0,
+       705.0 / 12673.0,   -2585.0 / 12673.0,     705.0 / 667.0,
+};
+static const double ns_p3_to_xyz[9] = {
+    608311.0 / 1250200.0, 189793.0 / 714400.0,  198249.0 / 1000160.0,
+     35783.0 / 156275.0,  247089.0 / 357200.0,  198249.0 / 2500400.0,
+         0.0,              32229.0 / 714400.0, 5220557.0 / 5000800.0,
+};
+static const double ns_a98_to_xyz[9] = {
+    573536.0 / 994567.0,   263643.0 / 1420810.0,  187206.0 / 994567.0,
+    591459.0 / 1989134.0, 6239551.0 / 9945670.0,  374412.0 / 4972835.0,
+     53769.0 / 1989134.0,  351524.0 / 4972835.0, 4929758.0 / 4972835.0,
+};
+static const double ns_prophoto_to_xyz_d50[9] = {
+    0.7977666449006423, 0.1351812974005331, 0.0313477341283922,
+    0.2880748288194013, 0.7118352342418731, 0.0000899369387256,
+    0.0,                0.0,                0.8251046025104602,
+};
+static const double ns_rec2020_to_xyz[9] = {
+    63426534.0 / 99577255.0,  20160776.0 / 139408157.0,  47086771.0 / 278816314.0,
+    26158966.0 / 99577255.0, 472592308.0 / 697040785.0,   8267143.0 / 139408157.0,
+           0.0,               19567812.0 / 697040785.0, 295819943.0 / 278816314.0,
+};
+static const double ns_d50_to_d65[9] = {
+     0.955473421488075,    -0.02309845494876471,  0.06325924320057072,
+    -0.0283697093338637,    1.0099953980813041,   0.021041441191917323,
+     0.012314014864481998, -0.020507649298898964, 1.330365926242124,
+};
+static const double ns_d65_to_d50[9] = {
+     1.0479297925449969,    0.022946870601609652, -0.05019226628920524,
+     0.02962780877005599,   0.9904344267538799,   -0.017073799063418826,
+    -0.009243040646204504,  0.015055191490298152,  0.7518742814281371,
+};
+static const double ns_xyz_to_lms[9] = {
+    0.8190224379967030, 0.3619062600528904, -0.1288737815209879,
+    0.0329836539323885, 0.9292868615863434,  0.0361446663506424,
+    0.0481771893596242, 0.2642395317527308,  0.6335478284694309,
+};
+static const double ns_lms_to_xyz[9] = {
+     1.2268798758459243, -0.5578149944602171,  0.2813910456659647,
+    -0.0405757452148008,  1.1122868032803170, -0.0717110580655164,
+    -0.0763729366746601, -0.4214933324022432,  1.5869240198367816,
+};
+static const double ns_lms_to_oklab[9] = {
+    0.2104542683093140,  0.7936177747023054, -0.0040720430116193,
+    1.9779985324311684, -2.4285922420485799,  0.4505937096174110,
+    0.0259040424655478,  0.7827717124575296, -0.8086757549230774,
+};
+static const double ns_oklab_to_lms[9] = {
+    1.0,  0.3963377773761749,  0.2158037573099136,
+    1.0, -0.1055613458156586, -0.0638541728258133,
+    1.0, -0.0894841775298119, -1.2914855480194092,
+};
+
+static double
+srgb_to_linear(double c)
+{
+    double a = fabs(c);
+    double v = a <= 0.04045 ? a / 12.92 : pow((a + 0.055) / 1.055, 2.4);
+    return c < 0 ? -v : v;
+}
+
+static double
+srgb_from_linear(double c)
+{
+    double a = fabs(c);
+    double v = a > 0.0031308 ? 1.055 * pow(a, 1.0 / 2.4) - 0.055 : 12.92 * a;
+    return c < 0 ? -v : v;
+}
+
+static double
+a98_to_linear(double c)
+{
+    double v = pow(fabs(c), 563.0 / 256.0);
+    return c < 0 ? -v : v;
+}
+
+static double
+a98_from_linear(double c)
+{
+    double v = pow(fabs(c), 256.0 / 563.0);
+    return c < 0 ? -v : v;
+}
+
+static double
+prophoto_to_linear(double c)
+{
+    double a = fabs(c);
+    double v = a <= 16.0 / 512.0 ? a / 16.0 : pow(a, 1.8);
+    return c < 0 ? -v : v;
+}
+
+static double
+prophoto_from_linear(double c)
+{
+    double a = fabs(c);
+    double v = a >= 1.0 / 512.0 ? pow(a, 1.0 / 1.8) : 16.0 * a;
+    return c < 0 ? -v : v;
+}
+
+static double
+rec2020_to_linear(double c)
+{
+    double v = pow(fabs(c), 2.4);
+    return c < 0 ? -v : v;
+}
+
+static double
+rec2020_from_linear(double c)
+{
+    double v = pow(fabs(c), 1.0 / 2.4);
+    return c < 0 ? -v : v;
+}
+
+static void
+hsl_to_srgb(const double hsl[3], double rgb[3])
+{
+    static const double n[3] = { 0.0, 8.0, 4.0 };
+    double h = color_hue_normalize(hsl[0]);
+    double s = hsl[1] / 100.0, l = hsl[2] / 100.0;
+    double a = s * MIN(l, 1.0 - l);
+    for (int i = 0; i < 3; i++) {
+        double k = fmod(n[i] + h / 30.0, 12.0);
+        rgb[i] = l - a * MAX(-1.0, MIN(MIN(k - 3.0, 9.0 - k), 1.0));
+    }
+}
+
+static double
+srgb_hue(const double rgb[3])
+{
+    double r = rgb[0], g = rgb[1], b = rgb[2];
+    double max = MAX(r, MAX(g, b)), min = MIN(r, MIN(g, b));
+    double d = max - min;
+    if (d == 0) return NAN;
+    double h;
+    if (max == r)      h = (g - b) / d + (g < b ? 6.0 : 0.0);
+    else if (max == g) h = (b - r) / d + 2.0;
+    else               h = (r - g) / d + 4.0;
+    h *= 60.0;
+    return h >= 360.0 ? h - 360.0 : h;
+}
+
+static void
+srgb_to_hsl(const double rgb[3], double hsl[3])
+{
+    double max = MAX(rgb[0], MAX(rgb[1], rgb[2]));
+    double min = MIN(rgb[0], MIN(rgb[1], rgb[2]));
+    double l = (min + max) / 2.0;
+    double h = srgb_hue(rgb), s = 0.0;
+    if (max != min)
+        s = (l == 0 || l == 1) ? 0.0 : (max - l) / MIN(l, 1.0 - l);
+    if (s < 0) {
+        h += 180.0;
+        s = fabs(s);
+    }
+    if (h >= 360.0) h -= 360.0;
+    hsl[0] = h;
+    hsl[1] = s * 100.0;
+    hsl[2] = l * 100.0;
+}
+
+static void
+hwb_to_srgb(const double hwb[3], double rgb[3])
+{
+    double w = hwb[1] / 100.0, b = hwb[2] / 100.0;
+    if (w + b >= 1.0) {
+        double gray = w / (w + b);
+        rgb[0] = rgb[1] = rgb[2] = gray;
+        return;
+    }
+    double hsl[3] = { hwb[0], 100.0, 50.0 };
+    hsl_to_srgb(hsl, rgb);
+    for (int i = 0; i < 3; i++) rgb[i] = rgb[i] * (1.0 - w - b) + w;
+}
+
+static void
+srgb_to_hwb(const double rgb[3], double hwb[3])
+{
+    hwb[0] = srgb_hue(rgb);
+    hwb[1] = MIN(rgb[0], MIN(rgb[1], rgb[2])) * 100.0;
+    hwb[2] = (1.0 - MAX(rgb[0], MAX(rgb[1], rgb[2]))) * 100.0;
+}
+
+static const double ns_d50_white[3] = {
+    0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585,
+};
+
+static void
+lab_to_xyz_d50(const double lab[3], double xyz[3])
+{
+    static const double kappa = 24389.0 / 27.0;
+    static const double epsilon = 216.0 / 24389.0;
+    double f1 = (lab[0] + 16.0) / 116.0;
+    double f0 = lab[1] / 500.0 + f1;
+    double f2 = f1 - lab[2] / 200.0;
+    double x = f0 * f0 * f0 > epsilon ? f0 * f0 * f0 : (116.0 * f0 - 16.0) / kappa;
+    double y = lab[0] > kappa * epsilon ? f1 * f1 * f1 : lab[0] / kappa;
+    double z = f2 * f2 * f2 > epsilon ? f2 * f2 * f2 : (116.0 * f2 - 16.0) / kappa;
+    xyz[0] = x * ns_d50_white[0];
+    xyz[1] = y * ns_d50_white[1];
+    xyz[2] = z * ns_d50_white[2];
+}
+
+static void
+xyz_d50_to_lab(const double xyz[3], double lab[3])
+{
+    static const double kappa = 24389.0 / 27.0;
+    static const double epsilon = 216.0 / 24389.0;
+    double f[3];
+    for (int i = 0; i < 3; i++) {
+        double v = xyz[i] / ns_d50_white[i];
+        f[i] = v > epsilon ? cbrt(v) : (kappa * v + 16.0) / 116.0;
+    }
+    lab[0] = 116.0 * f[1] - 16.0;
+    lab[1] = 500.0 * (f[0] - f[1]);
+    lab[2] = 200.0 * (f[1] - f[2]);
+}
+
+static void
+polar_to_rect(const double lch[3], double lab[3])
+{
+    double c = isfinite(lch[1]) ? lch[1] : 0.0;
+    double rad = color_hue_normalize(lch[2]) * G_PI / 180.0;
+    lab[0] = lch[0];
+    lab[1] = c * cos(rad);
+    lab[2] = c * sin(rad);
+}
+
+static void
+rect_to_polar(const double lab[3], double lch[3])
+{
+    lch[0] = lab[0];
+    lch[1] = hypot(lab[1], lab[2]);
+    lch[2] = color_hue_normalize(atan2(lab[2], lab[1]) * 180.0 / G_PI);
+}
+
+static void
+oklab_to_xyz(const double oklab[3], double xyz[3])
+{
+    double lms[3];
+    mat3_apply(ns_oklab_to_lms, oklab, lms);
+    for (int i = 0; i < 3; i++) lms[i] = lms[i] * lms[i] * lms[i];
+    mat3_apply(ns_lms_to_xyz, lms, xyz);
+}
+
+static void
+xyz_to_oklab(const double xyz[3], double oklab[3])
+{
+    double lms[3];
+    mat3_apply(ns_xyz_to_lms, xyz, lms);
+    for (int i = 0; i < 3; i++) lms[i] = cbrt(lms[i]);
+    mat3_apply(ns_lms_to_oklab, lms, oklab);
+}
+
+static void
+color_space_to_srgb(ns_css_color_space space, const double c[3], double rgb[3]);
+
+static void
+color_space_to_xyz(ns_css_color_space space, const double c[3], double xyz[3])
+{
+    double lin[3], tmp[3];
+    switch (space) {
+    case NS_CSS_COLOR_LEGACY:
+    case NS_CSS_COLOR_SRGB:
+        for (int i = 0; i < 3; i++) lin[i] = srgb_to_linear(c[i]);
+        mat3_apply(ns_srgb_to_xyz, lin, xyz);
+        return;
+    case NS_CSS_COLOR_HSL:
+    case NS_CSS_COLOR_HWB:
+        color_space_to_srgb(space, c, tmp);
+        color_space_to_xyz(NS_CSS_COLOR_SRGB, tmp, xyz);
+        return;
+    case NS_CSS_COLOR_SRGB_LINEAR:
+        mat3_apply(ns_srgb_to_xyz, c, xyz);
+        return;
+    case NS_CSS_COLOR_DISPLAY_P3:
+        for (int i = 0; i < 3; i++) lin[i] = srgb_to_linear(c[i]);
+        mat3_apply(ns_p3_to_xyz, lin, xyz);
+        return;
+    case NS_CSS_COLOR_DISPLAY_P3_LINEAR:
+        mat3_apply(ns_p3_to_xyz, c, xyz);
+        return;
+    case NS_CSS_COLOR_A98_RGB:
+        for (int i = 0; i < 3; i++) lin[i] = a98_to_linear(c[i]);
+        mat3_apply(ns_a98_to_xyz, lin, xyz);
+        return;
+    case NS_CSS_COLOR_PROPHOTO_RGB:
+        for (int i = 0; i < 3; i++) lin[i] = prophoto_to_linear(c[i]);
+        mat3_apply(ns_prophoto_to_xyz_d50, lin, tmp);
+        mat3_apply(ns_d50_to_d65, tmp, xyz);
+        return;
+    case NS_CSS_COLOR_REC2020:
+        for (int i = 0; i < 3; i++) lin[i] = rec2020_to_linear(c[i]);
+        mat3_apply(ns_rec2020_to_xyz, lin, xyz);
+        return;
+    case NS_CSS_COLOR_XYZ_D65:
+        for (int i = 0; i < 3; i++) xyz[i] = c[i];
+        return;
+    case NS_CSS_COLOR_XYZ_D50:
+        mat3_apply(ns_d50_to_d65, c, xyz);
+        return;
+    case NS_CSS_COLOR_LAB:
+        lab_to_xyz_d50(c, tmp);
+        mat3_apply(ns_d50_to_d65, tmp, xyz);
+        return;
+    case NS_CSS_COLOR_LCH:
+        polar_to_rect(c, lin);
+        lab_to_xyz_d50(lin, tmp);
+        mat3_apply(ns_d50_to_d65, tmp, xyz);
+        return;
+    case NS_CSS_COLOR_OKLAB:
+        oklab_to_xyz(c, xyz);
+        return;
+    case NS_CSS_COLOR_OKLCH:
+        polar_to_rect(c, lin);
+        oklab_to_xyz(lin, xyz);
+        return;
+    }
+}
+
+static void
+color_space_from_xyz(ns_css_color_space space, const double xyz[3], double c[3])
+{
+    double lin[3], tmp[3];
+    switch (space) {
+    case NS_CSS_COLOR_LEGACY:
+    case NS_CSS_COLOR_SRGB:
+        mat3_apply(ns_xyz_to_srgb, xyz, lin);
+        for (int i = 0; i < 3; i++) c[i] = srgb_from_linear(lin[i]);
+        return;
+    case NS_CSS_COLOR_HSL:
+        color_space_from_xyz(NS_CSS_COLOR_SRGB, xyz, tmp);
+        srgb_to_hsl(tmp, c);
+        return;
+    case NS_CSS_COLOR_HWB:
+        color_space_from_xyz(NS_CSS_COLOR_SRGB, xyz, tmp);
+        srgb_to_hwb(tmp, c);
+        return;
+    case NS_CSS_COLOR_SRGB_LINEAR:
+        mat3_apply(ns_xyz_to_srgb, xyz, c);
+        return;
+    case NS_CSS_COLOR_DISPLAY_P3:
+        mat3_apply_inverse(ns_p3_to_xyz, xyz, lin);
+        for (int i = 0; i < 3; i++) c[i] = srgb_from_linear(lin[i]);
+        return;
+    case NS_CSS_COLOR_DISPLAY_P3_LINEAR:
+        mat3_apply_inverse(ns_p3_to_xyz, xyz, c);
+        return;
+    case NS_CSS_COLOR_A98_RGB:
+        mat3_apply_inverse(ns_a98_to_xyz, xyz, lin);
+        for (int i = 0; i < 3; i++) c[i] = a98_from_linear(lin[i]);
+        return;
+    case NS_CSS_COLOR_PROPHOTO_RGB:
+        mat3_apply(ns_d65_to_d50, xyz, tmp);
+        mat3_apply_inverse(ns_prophoto_to_xyz_d50, tmp, lin);
+        for (int i = 0; i < 3; i++) c[i] = prophoto_from_linear(lin[i]);
+        return;
+    case NS_CSS_COLOR_REC2020:
+        mat3_apply_inverse(ns_rec2020_to_xyz, xyz, lin);
+        for (int i = 0; i < 3; i++) c[i] = rec2020_from_linear(lin[i]);
+        return;
+    case NS_CSS_COLOR_XYZ_D65:
+        for (int i = 0; i < 3; i++) c[i] = xyz[i];
+        return;
+    case NS_CSS_COLOR_XYZ_D50:
+        mat3_apply(ns_d65_to_d50, xyz, c);
+        return;
+    case NS_CSS_COLOR_LAB:
+        mat3_apply(ns_d65_to_d50, xyz, tmp);
+        xyz_d50_to_lab(tmp, c);
+        return;
+    case NS_CSS_COLOR_LCH:
+        mat3_apply(ns_d65_to_d50, xyz, tmp);
+        xyz_d50_to_lab(tmp, lin);
+        rect_to_polar(lin, c);
+        return;
+    case NS_CSS_COLOR_OKLAB:
+        xyz_to_oklab(xyz, c);
+        return;
+    case NS_CSS_COLOR_OKLCH:
+        xyz_to_oklab(xyz, lin);
+        rect_to_polar(lin, c);
+        return;
+    }
+}
+
+static void
+color_space_to_srgb(ns_css_color_space space, const double c[3], double rgb[3])
+{
+    double xyz[3];
+    switch (space) {
+    case NS_CSS_COLOR_LEGACY:
+    case NS_CSS_COLOR_SRGB:
+        for (int i = 0; i < 3; i++) rgb[i] = c[i];
+        return;
+    case NS_CSS_COLOR_HSL:
+        hsl_to_srgb(c, rgb);
+        return;
+    case NS_CSS_COLOR_HWB:
+        hwb_to_srgb(c, rgb);
+        return;
+    default:
+        color_space_to_xyz(space, c, xyz);
+        color_space_from_xyz(NS_CSS_COLOR_SRGB, xyz, rgb);
+        return;
+    }
+}
+
+static void
+color_space_from_srgb(ns_css_color_space space, const double rgb[3], double c[3])
+{
+    double xyz[3];
+    switch (space) {
+    case NS_CSS_COLOR_LEGACY:
+    case NS_CSS_COLOR_SRGB:
+        for (int i = 0; i < 3; i++) c[i] = rgb[i];
+        return;
+    case NS_CSS_COLOR_HSL:
+        srgb_to_hsl(rgb, c);
+        return;
+    case NS_CSS_COLOR_HWB:
+        srgb_to_hwb(rgb, c);
+        return;
+    default:
+        color_space_to_xyz(NS_CSS_COLOR_SRGB, rgb, xyz);
+        color_space_from_xyz(space, xyz, c);
+        return;
+    }
+}
+
+static void
+color_make_achromatic(ns_css_color_space space, double c[3])
+{
+    switch (space) {
+    case NS_CSS_COLOR_HSL:
+        if (fabs(c[1]) <= 0.001) c[1] = 0.0;
+        return;
+    case NS_CSS_COLOR_HWB: {
+        double sum = c[1] + c[2];
+        if (sum >= 99.999 - 1e-9 && sum > 0) {
+            c[1] = c[1] * 100.0 / sum;
+            c[2] = c[2] * 100.0 / sum;
+        }
+        return;
+    }
+    case NS_CSS_COLOR_LCH:
+        if (c[1] <= 0.0015) c[1] = 0.0;
+        return;
+    case NS_CSS_COLOR_OKLCH:
+        if (c[1] <= 0.000004) c[1] = 0.0;
+        return;
+    default:
+        return;
+    }
+}
+
+static gboolean
+color_hue_powerless(ns_css_color_space space, double c[3])
+{
+    switch (space) {
+    case NS_CSS_COLOR_HSL:
+        if (!isnan(c[0]) && fabs(c[1]) > 0.001) return FALSE;
+        c[1] = 0.0;
+        return TRUE;
+    case NS_CSS_COLOR_HWB:
+        return isnan(c[0]) || c[1] + c[2] >= 99.999 - 1e-9;
+    case NS_CSS_COLOR_LCH:
+        if (c[1] > 0.0015) return FALSE;
+        c[1] = 0.0;
+        return TRUE;
+    case NS_CSS_COLOR_OKLCH:
+        if (c[1] > 0.000004) return FALSE;
+        c[1] = 0.0;
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static guint8
+color_missing_sets(ns_css_color_space from, guint8 none,
+                   ns_css_color_space to)
+{
+    gboolean from_lab = from == NS_CSS_COLOR_LAB || from == NS_CSS_COLOR_OKLAB;
+    gboolean to_lab = to == NS_CSS_COLOR_LAB || to == NS_CSS_COLOR_OKLAB;
+    gboolean from_lch = from == NS_CSS_COLOR_LCH || from == NS_CSS_COLOR_OKLCH;
+    if ((none & 7) == 7) return 7;
+    if (from_lab && (none & 6) == 6) {
+        switch (to) {
+        case NS_CSS_COLOR_LCH:
+        case NS_CSS_COLOR_OKLCH: return 6;
+        case NS_CSS_COLOR_HSL:   return 3;
+        case NS_CSS_COLOR_HWB:   return 1;
+        default:                 return 0;
+        }
+    }
+    if (to_lab && ((from_lch && (none & 6) == 6) ||
+                   (from == NS_CSS_COLOR_HSL && (none & 3) == 3)))
+        return 6;
+    if ((none & 6) == 6 &&
+        ((from == NS_CSS_COLOR_HWB && to == NS_CSS_COLOR_HSL) ||
+         (from == NS_CSS_COLOR_HSL && to == NS_CSS_COLOR_HWB)))
+        return 6;
+    return 0;
+}
+
+static void
+color_convert(const ns_color *in, ns_css_color_space target, ns_color *out)
+{
+    *out = *in;
+    out->legacy = FALSE;
+    if (target == NS_CSS_COLOR_LEGACY) target = NS_CSS_COLOR_SRGB;
+    ns_css_color_space from = in->space == NS_CSS_COLOR_LEGACY
+        ? NS_CSS_COLOR_SRGB : in->space;
+    if (from == target) {
+        out->space = target;
+        return;
+    }
+    double src[3] = { in->c[0], in->c[1], in->c[2] };
+    for (int i = 0; i < 3; i++)
+        if (in->none & (1 << i)) src[i] = 0.0;
+    color_make_achromatic(from, src);
+    if (color_space_is_srgb_family(from) && color_space_is_srgb_family(target)) {
+        double rgb[3];
+        color_space_to_srgb(from, src, rgb);
+        color_space_from_srgb(target, rgb, out->c);
+    } else {
+        double xyz[3];
+        color_space_to_xyz(from, src, xyz);
+        color_space_from_xyz(target, xyz, out->c);
+    }
+    out->space = target;
+    out->none = in->none & NS_COLOR_NONE_ALPHA;
+    int hue = color_space_hue_index(target);
+    if (hue >= 0 && color_hue_powerless(target, out->c)) {
+        out->none |= (guint8)(1 << hue);
+        out->c[hue] = 0.0;
+    }
+    ns_color_category src_cat[3], dst_cat[3];
+    color_space_categories(from, src_cat);
+    color_space_categories(target, dst_cat);
+    for (int i = 0; i < 3; i++) {
+        if (!(in->none & (1 << i)) || src_cat[i] == NS_COLOR_CAT_NONE) continue;
+        for (int j = 0; j < 3; j++) {
+            if (dst_cat[j] != src_cat[i]) continue;
+            out->none |= (guint8)(1 << j);
+            out->c[j] = 0.0;
+        }
+    }
+    out->none |= color_missing_sets(from, in->none & 7, target);
+    for (int i = 0; i < 3; i++)
+        if (!isfinite(out->c[i]) || (out->none & (1 << i))) out->c[i] = 0.0;
+}
+
+static guint8
+color_unit_byte(double v)
+{
+    if (isnan(v)) return 0;
+    if (!isfinite(v)) return v > 0 ? 255 : 0;
+    double scaled = floor(v * 255.0 + 0.5 + 1e-7);
+    return (guint8)CLAMP(scaled, 0.0, 255.0);
+}
+
+static void
+color_to_bytes(const ns_color *col, guint8 rgba[4])
+{
+    double c[3], rgb[3];
+    for (int i = 0; i < 3; i++)
+        c[i] = (col->none & (1 << i)) ? 0.0 : col->c[i];
+    color_space_to_srgb(col->space, c, rgb);
+    for (int i = 0; i < 3; i++) rgba[i] = color_unit_byte(rgb[i]);
+    rgba[3] = (col->none & NS_COLOR_NONE_ALPHA)
+        ? 0 : color_unit_byte(col->alpha);
+}
+
+static double
+css_angle_value_degrees(double v, char **endp)
+{
+    char *end = *endp;
+    if (g_ascii_strncasecmp(end, "deg", 3) == 0 && !is_ident(end[3])) {
+        *endp = end + 3;
+    } else if (g_ascii_strncasecmp(end, "turn", 4) == 0 &&
+               !is_ident(end[4])) {
+        v *= 360.0;
+        *endp = end + 4;
+    } else if (g_ascii_strncasecmp(end, "grad", 4) == 0 &&
+               !is_ident(end[4])) {
+        v *= 0.9;
+        *endp = end + 4;
+    } else if (g_ascii_strncasecmp(end, "rad", 3) == 0 &&
+               !is_ident(end[3])) {
+        v = v * 180.0 / G_PI;
+        *endp = end + 3;
+    }
+    return v;
+}
+
+static const char *
+color_skip_ws(const char *p, const char *end)
+{
+    while (p < end && is_ws(*p)) p++;
+    return p;
+}
+
+static const char *
+color_number_end(const char *p, const char *end)
+{
+    const char *q = p;
+    if (q < end && (*q == '+' || *q == '-')) q++;
+    const char *digits = q;
+    while (q < end && g_ascii_isdigit(*q)) q++;
+    gboolean whole = q > digits;
+    gboolean frac = FALSE;
+    if (q + 1 < end && *q == '.' && g_ascii_isdigit(q[1])) {
+        q++;
+        while (q < end && g_ascii_isdigit(*q)) q++;
+        frac = TRUE;
+    }
+    if (!whole && !frac) return p;
+    if (q < end && (*q == 'e' || *q == 'E')) {
+        const char *e = q + 1;
+        if (e < end && (*e == '+' || *e == '-')) e++;
+        if (e < end && g_ascii_isdigit(*e)) {
+            while (e < end && g_ascii_isdigit(*e)) e++;
+            q = e;
+        }
+    }
+    return q;
+}
+
+static gboolean
+color_math_arg(const char *start, const char *end, ns_color_arg *out)
+{
+    const char *p = start;
+    ns_calc_term t;
+    gboolean outer_unresolved = calc_unresolved;
+    calc_unresolved = FALSE;
+    gboolean ok = calc_expr_parse(&p, end, &t, 0);
+    gboolean unresolved = calc_unresolved;
+    calc_unresolved = outer_unresolved;
+    if (!ok) return FALSE;
+    calc_skip_ws(&p, end);
+    if (p != end || (unresolved && !t.unresolved)) return FALSE;
+    if (t.kind == CALC_NUMBER) {
+        out->v = t.num;
+        return TRUE;
+    }
+    if (t.kind == CALC_ANGLE) {
+        out->v = t.num;
+        out->angle = TRUE;
+        return TRUE;
+    }
+    if (t.kind == CALC_LENGTH && t.px == 0 && t.em == 0 && t.rem == 0 &&
+        t.lh == 0 && t.rlh == 0) {
+        out->v = t.pct;
+        out->percent = TRUE;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+color_read_arg(const char **pp, const char *end, ns_color_arg *out)
+{
+    const char *p = *pp;
+    memset(out, 0, sizeof *out);
+    const char *num_end = color_number_end(p, end);
+    if (num_end != p) {
+        char *text = g_strndup(p, (gsize)(num_end - p));
+        double v = g_ascii_strtod(text, NULL);
+        g_free(text);
+        const char *q = num_end;
+        if (q < end && *q == '%') {
+            out->percent = TRUE;
+            q++;
+        } else if (q < end && is_ident_start(*q)) {
+            const char *u = q;
+            while (q < end && is_ident(*q)) q++;
+            char *unit = g_strndup(u, (gsize)(q - u));
+            char *unit_end = unit;
+            double deg = css_angle_value_degrees(v, &unit_end);
+            gboolean ok = unit_end != unit && *unit_end == '\0';
+            g_free(unit);
+            if (!ok) return FALSE;
+            out->angle = TRUE;
+            v = deg;
+        }
+        if (q < end && (is_ident(*q) || *q == '.' || *q == '%')) return FALSE;
+        out->v = v;
+        *pp = q;
+        return TRUE;
+    }
+    if (p >= end || !is_ident_start(*p)) return FALSE;
+    const char *id = p;
+    while (p < end && is_ident(*p)) p++;
+    gsize n = (gsize)(p - id);
+    if (p < end && *p == '(') {
+        const char *close = match_close_paren(p + 1, end);
+        if (!close) return FALSE;
+        gboolean ok = n == 4 && g_ascii_strncasecmp(id, "calc", 4) == 0
+            ? color_math_arg(p + 1, close, out)
+            : color_math_arg(id, close + 1, out);
+        if (!ok) return FALSE;
+        out->math = TRUE;
+        *pp = close + 1;
+        return TRUE;
+    }
+    if (n == 4 && g_ascii_strncasecmp(id, "none", 4) == 0) {
+        out->none = TRUE;
+        *pp = p;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+color_args_parse(const char *p, const char *end, ns_color_args *out)
+{
+    memset(out, 0, sizeof *out);
+    int slash_at = -1;
+    const char *prev_end = p;
+    while (1) {
+        p = color_skip_ws(p, end);
+        if (p >= end) break;
+        if (out->count > 0) {
+            gboolean spaced = p != prev_end;
+            if (*p == ',') {
+                if (out->count == 1) out->legacy = TRUE;
+                else if (!out->legacy) return FALSE;
+                p = color_skip_ws(p + 1, end);
+            } else if (out->legacy) {
+                return FALSE;
+            } else if (*p == '/') {
+                if (slash_at >= 0 || out->count != 3) return FALSE;
+                slash_at = out->count;
+                p = color_skip_ws(p + 1, end);
+            } else if (!spaced) {
+                return FALSE;
+            }
+        }
+        if (out->count >= 4 || p >= end) return FALSE;
+        if (!color_read_arg(&p, end, &out->args[out->count])) return FALSE;
+        prev_end = p;
+        out->count++;
+    }
+    if (out->count < 3) return FALSE;
+    if (!out->legacy && out->count == 4 && slash_at != 3) return FALSE;
+    out->has_alpha = out->count == 4;
+    if (out->legacy)
+        for (int i = 0; i < out->count; i++)
+            if (out->args[i].none) return FALSE;
+    return TRUE;
+}
+
+static double
+color_arg_value(const ns_color_arg *a, double percent_full)
+{
+    if (a->none) return 0.0;
+    double v = a->percent ? a->v * percent_full / 100.0 : a->v;
+    return isnan(v) ? 0.0 : v;
+}
+
+static gboolean
+color_alpha_from_args(const ns_color_args *args, ns_color *out)
+{
+    out->alpha = 1.0;
+    if (!args->has_alpha) return TRUE;
+    const ns_color_arg *a = &args->args[3];
+    if (a->angle) return FALSE;
+    if (a->none) {
+        out->none |= NS_COLOR_NONE_ALPHA;
+        out->alpha = 0.0;
+        return TRUE;
+    }
+    out->alpha = CLAMP(color_arg_value(a, 1.0), 0.0, 1.0);
+    return TRUE;
+}
+
+static gboolean
+color_build_rgb(const ns_color_args *args, gboolean relative, ns_color *out)
+{
+    if (args->legacy) {
+        if (relative) return FALSE;
+        for (int i = 1; i < 3; i++)
+            if (args->args[i].percent != args->args[0].percent) return FALSE;
+    }
+    out->space = NS_CSS_COLOR_SRGB;
+    out->legacy = !relative;
+    for (int i = 0; i < 3; i++) {
+        const ns_color_arg *a = &args->args[i];
+        if (a->angle) return FALSE;
+        if (a->none) {
+            out->none |= (guint8)(1 << i);
+            out->c[i] = 0.0;
+            continue;
+        }
+        double v = a->percent ? color_arg_value(a, 1.0)
+                              : color_arg_value(a, 1.0) / 255.0;
+        if (!relative || !isfinite(v)) v = CLAMP(v, 0.0, 1.0);
+        out->c[i] = v;
+    }
+    return color_alpha_from_args(args, out);
+}
+
+static gboolean
+color_build_hsl(const ns_color_args *args, gboolean hwb, gboolean relative,
+                ns_color *out)
+{
+    if (args->legacy && (hwb || relative)) return FALSE;
+    if (args->legacy && (!args->args[1].percent || !args->args[2].percent))
+        return FALSE;
+    const ns_color_arg *h = &args->args[0];
+    if (h->percent) return FALSE;
+    if (args->args[1].angle || args->args[2].angle) return FALSE;
+    out->space = hwb ? NS_CSS_COLOR_HWB : NS_CSS_COLOR_HSL;
+    out->legacy = !relative;
+    if (h->none) {
+        out->none |= 1;
+        out->c[0] = 0.0;
+    } else {
+        out->c[0] = color_hue_normalize(color_arg_value(h, 1.0));
+    }
+    for (int i = 1; i < 3; i++) {
+        const ns_color_arg *a = &args->args[i];
+        if (a->none) {
+            out->none |= (guint8)(1 << i);
+            out->c[i] = 0.0;
+            continue;
+        }
+        double v = color_arg_value(a, 100.0);
+        if (!hwb && !relative) v = CLAMP(v, 0.0, 100.0);
+        if (!isfinite(v)) v = v > 0 ? 100.0 : 0.0;
+        out->c[i] = v;
+    }
+    return color_alpha_from_args(args, out);
+}
+
+static gboolean
+color_build_lab(const ns_color_args *args, ns_css_color_space space,
+                ns_color *out)
+{
+    if (args->legacy) return FALSE;
+    gboolean ok_space = space == NS_CSS_COLOR_OKLAB || space == NS_CSS_COLOR_OKLCH;
+    gboolean polar = space == NS_CSS_COLOR_LCH || space == NS_CSS_COLOR_OKLCH;
+    double l_full = ok_space ? 1.0 : 100.0;
+    double ab_full = ok_space ? 0.4 : 125.0;
+    double c_full = ok_space ? 0.4 : 150.0;
+    out->space = space;
+    out->legacy = FALSE;
+    for (int i = 0; i < 3; i++) {
+        const ns_color_arg *a = &args->args[i];
+        gboolean hue = polar && i == 2;
+        if (hue ? a->percent : a->angle) return FALSE;
+        if (a->none) {
+            out->none |= (guint8)(1 << i);
+            out->c[i] = 0.0;
+            continue;
+        }
+        if (i == 0) {
+            out->c[0] = CLAMP(color_arg_value(a, l_full), 0.0, l_full);
+        } else if (hue) {
+            out->c[2] = color_hue_normalize(color_arg_value(a, 1.0));
+        } else if (polar) {
+            out->c[1] = MAX(color_arg_value(a, c_full), 0.0);
+        } else {
+            out->c[i] = color_arg_value(a, ab_full);
+        }
+    }
+    return color_alpha_from_args(args, out);
+}
+
+static gboolean
+color_build_predefined(const ns_color_args *args, ns_css_color_space space,
+                       ns_color *out)
+{
+    if (args->legacy) return FALSE;
+    out->space = space;
+    out->legacy = FALSE;
+    for (int i = 0; i < 3; i++) {
+        const ns_color_arg *a = &args->args[i];
+        if (a->angle) return FALSE;
+        if (a->none) {
+            out->none |= (guint8)(1 << i);
+            out->c[i] = 0.0;
+            continue;
+        }
+        out->c[i] = color_arg_value(a, 1.0);
+    }
+    return color_alpha_from_args(args, out);
+}
+
+static gboolean color_parse_range(const char *s, const char *end,
+                                  ns_color *out, int depth);
+
+static ns_color_fn
+color_fn_by_name(const char *name, gsize len)
+{
+    static const struct { const char *name; ns_color_fn fn; } fns[] = {
+        { "rgb", NS_COLOR_FN_RGB },     { "rgba", NS_COLOR_FN_RGB },
+        { "hsl", NS_COLOR_FN_HSL },     { "hsla", NS_COLOR_FN_HSL },
+        { "hwb", NS_COLOR_FN_HWB },     { "lab", NS_COLOR_FN_LAB },
+        { "lch", NS_COLOR_FN_LCH },     { "oklab", NS_COLOR_FN_OKLAB },
+        { "oklch", NS_COLOR_FN_OKLCH }, { "color", NS_COLOR_FN_COLOR },
+        { "color-mix", NS_COLOR_FN_MIX },
+        { "light-dark", NS_COLOR_FN_LIGHT_DARK },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(fns); i++)
+        if (strlen(fns[i].name) == len &&
+            g_ascii_strncasecmp(name, fns[i].name, len) == 0)
+            return fns[i].fn;
+    return NS_COLOR_FN_UNKNOWN;
+}
+
+static ns_css_color_space
+color_fn_space(ns_color_fn fn)
+{
+    switch (fn) {
+    case NS_COLOR_FN_HSL:   return NS_CSS_COLOR_HSL;
+    case NS_COLOR_FN_HWB:   return NS_CSS_COLOR_HWB;
+    case NS_COLOR_FN_LAB:   return NS_CSS_COLOR_LAB;
+    case NS_COLOR_FN_LCH:   return NS_CSS_COLOR_LCH;
+    case NS_COLOR_FN_OKLAB: return NS_CSS_COLOR_OKLAB;
+    case NS_COLOR_FN_OKLCH: return NS_CSS_COLOR_OKLCH;
+    default:                return NS_CSS_COLOR_SRGB;
+    }
+}
+
+static gboolean
+color_build(ns_color_fn fn, ns_css_color_space space,
+            const ns_color_args *args, gboolean relative, ns_color *out)
+{
+    switch (fn) {
+    case NS_COLOR_FN_RGB:
+        return color_build_rgb(args, relative, out);
+    case NS_COLOR_FN_HSL:
+        return color_build_hsl(args, FALSE, relative, out);
+    case NS_COLOR_FN_HWB:
+        return color_build_hsl(args, TRUE, relative, out);
+    case NS_COLOR_FN_LAB:
+    case NS_COLOR_FN_LCH:
+    case NS_COLOR_FN_OKLAB:
+    case NS_COLOR_FN_OKLCH:
+        return color_build_lab(args, color_fn_space(fn), out);
+    case NS_COLOR_FN_COLOR:
+        return color_build_predefined(args, space, out);
+    default:
+        return FALSE;
+    }
+}
+
+static const char *
+color_component_end(const char *p, const char *end)
+{
+    int depth = 0;
+    while (p < end) {
+        if (*p == '(') depth++;
+        else if (*p == ')') depth--;
+        else if (depth == 0 && is_ws(*p)) break;
+        p++;
+    }
+    return p;
+}
+
+static const char *
+color_space_ident_end(const char *p, const char *end)
+{
+    while (p < end && (g_ascii_isalnum(*p) || *p == '-')) p++;
+    return p;
+}
+
+static void
+color_channel_names(ns_color_fn fn, ns_css_color_space space,
+                    const char *names[4])
+{
+    static const char *const rgb[] = { "r", "g", "b" };
+    static const char *const hsl[] = { "h", "s", "l" };
+    static const char *const hwb[] = { "h", "w", "b" };
+    static const char *const lab[] = { "l", "a", "b" };
+    static const char *const lch[] = { "l", "c", "h" };
+    static const char *const xyz[] = { "x", "y", "z" };
+    const char *const *pick = rgb;
+    switch (fn) {
+    case NS_COLOR_FN_HSL: pick = hsl; break;
+    case NS_COLOR_FN_HWB: pick = hwb; break;
+    case NS_COLOR_FN_LAB:
+    case NS_COLOR_FN_OKLAB: pick = lab; break;
+    case NS_COLOR_FN_LCH:
+    case NS_COLOR_FN_OKLCH: pick = lch; break;
+    case NS_COLOR_FN_COLOR:
+        if (space == NS_CSS_COLOR_XYZ_D50 || space == NS_CSS_COLOR_XYZ_D65)
+            pick = xyz;
+        break;
+    default:
+        break;
+    }
+    for (int i = 0; i < 3; i++) names[i] = pick[i];
+    names[3] = "alpha";
+}
+
+static char *
+color_relative_substitute(const char *p, const char *end,
+                          const char *const names[4], const double vals[4],
+                          guint8 none)
+{
+    GString *out = g_string_new(NULL);
+    int depth = 0;
+    const char *start = p;
+    while (p < end) {
+        char c = *p;
+        if (c == '(' || c == ')') {
+            depth += c == '(' ? 1 : -1;
+            g_string_append_c(out, c);
+            p++;
+            continue;
+        }
+        const char *num_end = (p == start || !is_ident(p[-1]))
+            ? color_number_end(p, end) : p;
+        if (num_end != p) {
+            const char *q = num_end;
+            while (q < end && (is_ident(*q) || *q == '%')) q++;
+            g_string_append_len(out, p, q - p);
+            p = q;
+            continue;
+        }
+        if (is_ident_start(c)) {
+            const char *id = p;
+            while (p < end && is_ident(*p)) p++;
+            gsize n = (gsize)(p - id);
+            int idx = -1;
+            if (p >= end || *p != '(')
+                for (int i = 0; i < 4; i++)
+                    if (strlen(names[i]) == n &&
+                        g_ascii_strncasecmp(id, names[i], n) == 0)
+                        idx = i;
+            if (idx < 0) {
+                g_string_append_len(out, id, n);
+            } else if (none & (1 << idx)) {
+                g_string_append(out, depth == 0 ? "none" : "0");
+            } else {
+                char buf[G_ASCII_DTOSTR_BUF_SIZE];
+                double v = isfinite(vals[idx]) ? vals[idx] : 0.0;
+                g_ascii_formatd(buf, sizeof buf, "%.17g", v);
+                g_string_append(out, buf);
+            }
+            continue;
+        }
+        g_string_append_c(out, c);
+        p++;
     }
     return g_string_free(out, FALSE);
 }
 
 static gboolean
-parse_color_depth(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
-                  int depth)
+color_parse_relative(ns_color_fn fn, const char *p, const char *end,
+                     ns_color *out, int depth)
 {
-    *a = 255;
-    if (!s || !*s) return FALSE;
-    if (depth > 32) return FALSE;
-    if (strchr(s, '(')) {
-        char *plain = color_relative_expand(s, depth);
-        if (plain) {
-            gboolean ok = parse_color_depth(plain, r, g, b, a, depth + 1);
-            g_free(plain);
-            return ok;
-        }
+    p = color_skip_ws(p, end);
+    const char *origin_end = color_component_end(p, end);
+    if (origin_end == p) return FALSE;
+    ns_color origin;
+    if (!color_parse_range(p, origin_end, &origin, depth + 1)) return FALSE;
+    p = color_skip_ws(origin_end, end);
+    ns_css_color_space space = color_fn_space(fn);
+    if (fn == NS_COLOR_FN_COLOR) {
+        const char *name_end = color_space_ident_end(p, end);
+        if (!color_space_by_name(p, (gsize)(name_end - p), TRUE, &space))
+            return FALSE;
+        p = name_end;
     }
-    if (strstr(s, "calc(")) {
-        char *flat = color_resolve_calcs(s);
-        if (flat) {
-            gboolean ok = parse_color_depth(flat, r, g, b, a, depth + 1);
-            g_free(flat);
-            return ok;
-        }
-        return FALSE;
+    ns_color converted;
+    color_convert(&origin, space, &converted);
+    double vals[4] = { converted.c[0], converted.c[1], converted.c[2],
+                       converted.alpha };
+    if (fn == NS_COLOR_FN_RGB)
+        for (int i = 0; i < 3; i++) vals[i] *= 255.0;
+    const char *names[4];
+    color_channel_names(fn, space, names);
+    char *text = color_relative_substitute(p, end, names, vals, converted.none);
+    ns_color_args args;
+    gboolean ok = color_args_parse(text, text + strlen(text), &args) &&
+                  !args.legacy;
+    g_free(text);
+    if (!ok) return FALSE;
+    memset(out, 0, sizeof *out);
+    if (!color_build(fn, space, &args, TRUE, out)) return FALSE;
+    if (!args.has_alpha) {
+        out->alpha = converted.alpha;
+        out->none = (guint8)((out->none & 7) |
+                             (converted.none & NS_COLOR_NONE_ALPHA));
     }
-    if (g_ascii_strcasecmp(s, "transparent") == 0) {
-        *r = 0; *g = 0; *b = 0; *a = 0;
+    out->current = origin.current;
+    return TRUE;
+}
+
+static gboolean
+color_parse_function(ns_color_fn fn, const char *p, const char *end,
+                     ns_color *out, int depth)
+{
+    p = color_skip_ws(p, end);
+    if (end - p > 4 && g_ascii_strncasecmp(p, "from", 4) == 0 && is_ws(p[4]))
+        return color_parse_relative(fn, p + 4, end, out, depth);
+    ns_css_color_space space = NS_CSS_COLOR_SRGB;
+    if (fn == NS_COLOR_FN_COLOR) {
+        const char *name_end = color_space_ident_end(p, end);
+        if (!color_space_by_name(p, (gsize)(name_end - p), TRUE, &space))
+            return FALSE;
+        if (name_end >= end || !is_ws(*name_end)) return FALSE;
+        p = name_end;
+    }
+    ns_color_args args;
+    if (!color_args_parse(p, end, &args)) return FALSE;
+    return color_build(fn, space, &args, FALSE, out);
+}
+
+static gboolean
+color_parse_method(const char *text, ns_css_color_space *space,
+                   ns_hue_method *hue)
+{
+    char *tok[5] = {0};
+    int n = split_ws_limit(text, tok, G_N_ELEMENTS(tok));
+    gboolean ok = n >= 2 && g_ascii_strcasecmp(tok[0], "in") == 0 &&
+                  color_space_by_name(tok[1], strlen(tok[1]), FALSE, space);
+    *hue = NS_HUE_SHORTER;
+    if (ok && n == 4) {
+        static const char *const methods[] = {
+            "shorter", "longer", "increasing", "decreasing",
+        };
+        ok = color_space_hue_index(*space) >= 0 &&
+             g_ascii_strcasecmp(tok[3], "hue") == 0;
+        gboolean found = FALSE;
+        for (int i = 0; ok && i < 4; i++)
+            if (g_ascii_strcasecmp(tok[2], methods[i]) == 0) {
+                *hue = (ns_hue_method)i;
+                found = TRUE;
+            }
+        ok = ok && found;
+    } else if (n != 2) {
+        ok = FALSE;
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    return ok;
+}
+
+static gboolean
+color_mix_item_split(const char *s, const char **color_start,
+                     const char **color_end, const char **pct_start,
+                     const char **pct_end, double *pct)
+{
+    const char *s_end = s + strlen(s);
+    const char *a = color_skip_ws(s, s_end);
+    const char *a_end = color_component_end(a, s_end);
+    const char *b = color_skip_ws(a_end, s_end);
+    const char *b_end = color_component_end(b, s_end);
+    ns_color_arg arg;
+    const char *q = a;
+    *color_start = a;
+    *color_end = a_end;
+    *pct_start = *pct_end = a_end;
+    if (b < s_end && color_read_arg(&q, a_end, &arg) && q == a_end &&
+        arg.percent) {
+        *color_start = b;
+        *color_end = b_end;
+        *pct_start = a;
+        *pct_end = a_end;
+        *pct = isnan(arg.v) ? 0.0 : arg.v;
         return TRUE;
     }
-    if (parse_rgb_func(s, r, g, b, a)) return TRUE;
-    if (parse_hsl_func(s, r, g, b, a)) return TRUE;
-    if (parse_hwb_func(s, r, g, b, a)) return TRUE;
-    if (parse_lab_func(s, r, g, b, a)) return TRUE;
-    if (parse_oklab_func(s, r, g, b, a)) return TRUE;
-    if (parse_color_function(s, r, g, b, a)) return TRUE;
-    if (parse_color_mix_func(s, r, g, b, a, depth)) return TRUE;
-    if (parse_light_dark_func(s, r, g, b, a, depth)) return TRUE;
-    if (s[0] == '#') {
-        gsize n = strlen(s + 1);
-        if (n == 3 || n == 4) {
-            int rr = g_ascii_xdigit_value(s[1]);
-            int gg = g_ascii_xdigit_value(s[2]);
-            int bb = g_ascii_xdigit_value(s[3]);
-            if (rr < 0 || gg < 0 || bb < 0) return FALSE;
-            *r = (guint8)(rr * 17); *g = (guint8)(gg * 17); *b = (guint8)(bb * 17);
-            if (n == 4) {
-                int aa = g_ascii_xdigit_value(s[4]);
-                if (aa < 0) return FALSE;
-                *a = (guint8)(aa * 17);
-            }
-            return TRUE;
-        }
-        if (n == 6 || n == 8) {
-            int v[8];
-            for (gsize i = 0; i < n; i++) {
-                v[i] = g_ascii_xdigit_value(s[1 + i]);
-                if (v[i] < 0) return FALSE;
-            }
-            *r = (guint8)(v[0] * 16 + v[1]);
-            *g = (guint8)(v[2] * 16 + v[3]);
-            *b = (guint8)(v[4] * 16 + v[5]);
-            if (n == 8) *a = (guint8)(v[6] * 16 + v[7]);
-            return TRUE;
-        }
-        return FALSE;
+    q = b;
+    if (b < s_end && color_read_arg(&q, b_end, &arg) && q == b_end &&
+        arg.percent) {
+        *pct_start = b;
+        *pct_end = b_end;
+        *pct = isnan(arg.v) ? 0.0 : arg.v;
+        return TRUE;
     }
-    return named_color(s, r, g, b);
+    return FALSE;
+}
+
+static gboolean
+color_mix_item_parse(const char *text, ns_color *col, double *pct,
+                     gboolean *has_pct, int depth)
+{
+    const char *end = text + strlen(text);
+    const char *cs, *ce, *ps, *pe;
+    *has_pct = color_mix_item_split(text, &cs, &ce, &ps, &pe, pct);
+    const char *last = *has_pct && pe > ce ? pe : ce;
+    if (color_skip_ws(last, end) != end) return FALSE;
+    if (*has_pct && (*pct < 0.0 || *pct > 100.0)) return FALSE;
+    return color_parse_range(cs, ce, col, depth + 1);
+}
+
+static void
+color_mix_pair(ns_color *acc, const ns_color *b, double t, ns_hue_method method)
+{
+    ns_color a = *acc;
+    ns_color r = a;
+    r.none = 0;
+    int hue = color_space_hue_index(a.space);
+    double aa = a.alpha, ab = b->alpha;
+    gboolean alpha_none_a = a.none & NS_COLOR_NONE_ALPHA;
+    gboolean alpha_none_b = b->none & NS_COLOR_NONE_ALPHA;
+    if (alpha_none_a && alpha_none_b) {
+        aa = ab = 1.0;
+        r.none |= NS_COLOR_NONE_ALPHA;
+    } else if (alpha_none_a) {
+        aa = ab;
+    } else if (alpha_none_b) {
+        ab = aa;
+    }
+    double ca[3], cb[3];
+    for (int i = 0; i < 3; i++) {
+        gboolean na = a.none & (1 << i), nb = b->none & (1 << i);
+        ca[i] = a.c[i];
+        cb[i] = b->c[i];
+        if (na && nb) r.none |= (guint8)(1 << i);
+        else if (na) ca[i] = cb[i];
+        else if (nb) cb[i] = ca[i];
+    }
+    if (hue >= 0 && !(r.none & (1 << hue))) {
+        double h1 = color_hue_normalize(ca[hue]);
+        double h2 = color_hue_normalize(cb[hue]);
+        double d = h2 - h1;
+        switch (method) {
+        case NS_HUE_SHORTER:
+            if (d > 180.0) h1 += 360.0;
+            else if (d < -180.0) h2 += 360.0;
+            break;
+        case NS_HUE_LONGER:
+            if (d > 0.0 && d < 180.0) h1 += 360.0;
+            else if (d > -180.0 && d <= 0.0) h2 += 360.0;
+            break;
+        case NS_HUE_INCREASING:
+            if (h2 < h1) h2 += 360.0;
+            break;
+        case NS_HUE_DECREASING:
+            if (h1 < h2) h1 += 360.0;
+            break;
+        }
+        ca[hue] = h1;
+        cb[hue] = h2;
+    }
+    double alpha = aa * (1.0 - t) + ab * t;
+    for (int i = 0; i < 3; i++) {
+        if (r.none & (1 << i)) {
+            r.c[i] = 0.0;
+            continue;
+        }
+        if (i == hue) {
+            r.c[i] = color_hue_normalize(ca[i] * (1.0 - t) + cb[i] * t);
+            continue;
+        }
+        double v = ca[i] * aa * (1.0 - t) + cb[i] * ab * t;
+        r.c[i] = alpha != 0.0 ? v / alpha : v;
+    }
+    r.alpha = (r.none & NS_COLOR_NONE_ALPHA) ? 0.0 : alpha;
+    r.current = a.current || b->current;
+    r.legacy = FALSE;
+    *acc = r;
+}
+
+static gboolean
+color_parse_mix(const char *p, const char *end, ns_color *out, int depth)
+{
+    char *parts[NS_COLOR_MIX_MAX + 1] = {0};
+    int n = calc_split_args(p, end, parts, G_N_ELEMENTS(parts));
+    gboolean ok = n >= 1 && n <= NS_COLOR_MIX_MAX;
+    ns_css_color_space space = NS_CSS_COLOR_OKLAB;
+    ns_hue_method method = NS_HUE_SHORTER;
+    int first = 0;
+    if (ok && g_ascii_strncasecmp(parts[0], "in", 2) == 0 &&
+        is_ws(parts[0][2])) {
+        ok = color_parse_method(parts[0], &space, &method);
+        first = 1;
+    }
+    int count = n - first;
+    if (count < 1) ok = FALSE;
+    ns_color cols[NS_COLOR_MIX_MAX];
+    double pcts[NS_COLOR_MIX_MAX];
+    gboolean given[NS_COLOR_MIX_MAX];
+    double given_sum = 0.0;
+    int omitted = 0;
+    for (int i = 0; ok && i < count; i++) {
+        ok = color_mix_item_parse(parts[first + i], &cols[i], &pcts[i],
+                                  &given[i], depth);
+        if (!ok) break;
+        if (given[i]) given_sum += pcts[i];
+        else omitted++;
+    }
+    for (int i = 0; i < n; i++) g_free(parts[i]);
+    if (!ok) return FALSE;
+    for (int i = 0; i < count; i++) {
+        if (given[i]) continue;
+        pcts[i] = omitted == count ? 100.0 / count
+                                   : MAX(0.0, (100.0 - given_sum) / omitted);
+    }
+    double total = 0.0;
+    for (int i = 0; i < count; i++) total += pcts[i];
+    double alpha_mult = 1.0;
+    if (total > 100.0) {
+        for (int i = 0; i < count; i++) pcts[i] *= 100.0 / total;
+    } else if (total < 100.0) {
+        alpha_mult = total / 100.0;
+    }
+    ns_color acc;
+    color_convert(&cols[0], space, &acc);
+    double acc_pct = pcts[0];
+    for (int i = 1; i < count; i++) {
+        ns_color next;
+        color_convert(&cols[i], space, &next);
+        double sum = acc_pct + pcts[i];
+        double t = sum > 0.0 ? pcts[i] / sum : 0.5;
+        color_mix_pair(&acc, &next, t, method);
+        acc_pct = sum;
+    }
+    if (!(acc.none & NS_COLOR_NONE_ALPHA)) acc.alpha *= alpha_mult;
+    acc.legacy = FALSE;
+    for (int i = 0; i < count; i++)
+        if (cols[i].current) acc.current = TRUE;
+    *out = acc;
+    return TRUE;
+}
+
+static gboolean
+color_parse_light_dark(const char *p, const char *end, ns_color *out,
+                       int depth)
+{
+    char *parts[3] = {0};
+    int n = calc_split_args(p, end, parts, G_N_ELEMENTS(parts));
+    gboolean ok = n == 2;
+    if (ok) {
+        const char *choice =
+            ns_css_get_color_scheme() == NS_CSS_COLOR_SCHEME_DARK
+            ? parts[1] : parts[0];
+        const char *other = choice == parts[0] ? parts[1] : parts[0];
+        ns_color unused;
+        ok = color_parse_range(other, other + strlen(other), &unused,
+                               depth + 1) &&
+             color_parse_range(choice, choice + strlen(choice), out,
+                               depth + 1);
+    }
+    for (int i = 0; i < n; i++) g_free(parts[i]);
+    return ok;
+}
+
+static gboolean
+color_parse_hex(const char *s, const char *end, ns_color *out)
+{
+    gsize n = (gsize)(end - s);
+    int v[8];
+    if (n != 3 && n != 4 && n != 6 && n != 8) return FALSE;
+    for (gsize i = 0; i < n; i++) {
+        v[i] = g_ascii_xdigit_value(s[i]);
+        if (v[i] < 0) return FALSE;
+    }
+    int ch[4] = { 0, 0, 0, 255 };
+    if (n <= 4) {
+        for (gsize i = 0; i < n; i++) ch[i] = v[i] * 17;
+    } else {
+        for (gsize i = 0; i < n / 2; i++) ch[i] = v[i * 2] * 16 + v[i * 2 + 1];
+    }
+    out->space = NS_CSS_COLOR_SRGB;
+    out->legacy = TRUE;
+    for (int i = 0; i < 3; i++) out->c[i] = ch[i] / 255.0;
+    out->alpha = ch[3] / 255.0;
+    return TRUE;
+}
+
+static gboolean
+color_parse_range(const char *s, const char *end, ns_color *out, int depth)
+{
+    memset(out, 0, sizeof *out);
+    out->alpha = 1.0;
+    if (depth > NS_COLOR_MAX_DEPTH) return FALSE;
+    s = color_skip_ws(s, end);
+    while (end > s && is_ws(end[-1])) end--;
+    if (s >= end) return FALSE;
+    if (*s == '#') return color_parse_hex(s + 1, end, out);
+    const char *p = s;
+    while (p < end && is_ident(*p)) p++;
+    if (p == s) return FALSE;
+    if (p < end && *p == '(') {
+        const char *close = match_close_paren(p + 1, end);
+        if (!close || close + 1 != end) return FALSE;
+        ns_color_fn fn = color_fn_by_name(s, (gsize)(p - s));
+        switch (fn) {
+        case NS_COLOR_FN_UNKNOWN:
+            return FALSE;
+        case NS_COLOR_FN_MIX:
+            return color_parse_mix(p + 1, close, out, depth);
+        case NS_COLOR_FN_LIGHT_DARK:
+            return color_parse_light_dark(p + 1, close, out, depth);
+        default:
+            return color_parse_function(fn, p + 1, close, out, depth);
+        }
+    }
+    if (p != end) return FALSE;
+    gsize n = (gsize)(end - s);
+    if (n == 12 && g_ascii_strncasecmp(s, "currentcolor", 12) == 0) {
+        if (color_current_ctx) {
+            *out = *color_current_ctx;
+        } else {
+            out->space = NS_CSS_COLOR_SRGB;
+            out->legacy = TRUE;
+        }
+        out->current = TRUE;
+        return TRUE;
+    }
+    if (n == 11 && g_ascii_strncasecmp(s, "transparent", 11) == 0) {
+        out->space = NS_CSS_COLOR_SRGB;
+        out->legacy = TRUE;
+        out->alpha = 0.0;
+        return TRUE;
+    }
+    char *name = g_strndup(s, n);
+    guint8 r, g, b;
+    gboolean ok = named_color(name, &r, &g, &b);
+    g_free(name);
+    if (!ok) return FALSE;
+    out->space = NS_CSS_COLOR_SRGB;
+    out->legacy = TRUE;
+    out->c[0] = r / 255.0;
+    out->c[1] = g / 255.0;
+    out->c[2] = b / 255.0;
+    return TRUE;
+}
+
+static char *
+color_strip_comments(const char *s)
+{
+    GString *out = g_string_new(NULL);
+    while (*s) {
+        if (s[0] == '/' && s[1] == '*') {
+            const char *close = strstr(s + 2, "*/");
+            s = close ? close + 2 : s + strlen(s);
+            continue;
+        }
+        g_string_append_c(out, *s++);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
+color_parse_text(const char *s, ns_color *out)
+{
+    if (!s) return FALSE;
+    if (strstr(s, "/*")) {
+        char *plain = color_strip_comments(s);
+        gboolean ok = color_parse_range(plain, plain + strlen(plain), out, 0);
+        g_free(plain);
+        return ok;
+    }
+    return color_parse_range(s, s + strlen(s), out, 0);
+}
+
+static void
+color_from_value(const ns_css_value *v, ns_color *out)
+{
+    memset(out, 0, sizeof *out);
+    out->space = NS_CSS_COLOR_SRGB;
+    out->alpha = 1.0;
+    out->legacy = TRUE;
+    if (!v || v->kind != NS_CSS_V_COLOR) return;
+    if (v->u.color.space == NS_CSS_COLOR_LEGACY) {
+        out->c[0] = v->u.color.r / 255.0;
+        out->c[1] = v->u.color.g / 255.0;
+        out->c[2] = v->u.color.b / 255.0;
+        out->alpha = v->u.color.a / 255.0;
+        return;
+    }
+    out->legacy = FALSE;
+    out->space = (ns_css_color_space)v->u.color.space;
+    out->none = v->u.color.none;
+    for (int i = 0; i < 3; i++) out->c[i] = v->u.color.c[i];
+    out->alpha = v->u.color.c[3];
+}
+
+static void
+color_value_store(ns_css_value *v, const ns_color *col)
+{
+    guint8 rgba[4];
+    color_to_bytes(col, rgba);
+    v->kind = NS_CSS_V_COLOR;
+    v->u.color.r = rgba[0];
+    v->u.color.g = rgba[1];
+    v->u.color.b = rgba[2];
+    v->u.color.a = rgba[3];
+    v->u.color.current = col->current;
+    v->u.color.none = 0;
+    for (int i = 0; i < 4; i++) v->u.color.c[i] = 0.0;
+    if (col->legacy && !col->none) {
+        v->u.color.space = NS_CSS_COLOR_LEGACY;
+        return;
+    }
+    ns_color norm = *col;
+    if ((norm.space == NS_CSS_COLOR_HSL || norm.space == NS_CSS_COLOR_HWB) &&
+        !norm.none) {
+        double rgb[3];
+        color_space_to_srgb(norm.space, norm.c, rgb);
+        for (int i = 0; i < 3; i++) norm.c[i] = rgb[i];
+        norm.space = NS_CSS_COLOR_SRGB;
+    }
+    v->u.color.space = (guint8)norm.space;
+    v->u.color.none = norm.none;
+    for (int i = 0; i < 3; i++) v->u.color.c[i] = norm.c[i];
+    v->u.color.c[3] = norm.alpha;
+}
+
+static ns_css_value *
+color_value_parse(const char *text)
+{
+    ns_color col;
+    if (!color_parse_text(text, &col)) return NULL;
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    color_value_store(v, &col);
+    if (col.current) v->specified = g_strdup(text);
+    return v;
+}
+
+static gboolean
+color_value_resolve_current(ns_css_value *v, const ns_css_value *current)
+{
+    if (!v || v->kind != NS_CSS_V_COLOR || !v->u.color.current ||
+        !v->specified)
+        return FALSE;
+    ns_color ctx, col;
+    color_from_value(current, &ctx);
+    color_current_ctx = &ctx;
+    gboolean ok = color_parse_text(v->specified, &col);
+    color_current_ctx = NULL;
+    if (ok) color_value_store(v, &col);
+    return ok;
+}
+
+static void
+color_append_number(GString *s, double v)
+{
+    if (isnan(v)) v = 0.0;
+    if (isinf(v)) {
+        g_string_append(s, v > 0 ? "calc(infinity)" : "calc(-infinity)");
+        return;
+    }
+    char buf[G_ASCII_DTOSTR_BUF_SIZE];
+    if (fabs(v) < 1.0) {
+        g_ascii_formatd(buf, sizeof buf, "%.8f", v);
+    } else {
+        g_ascii_formatd(buf, sizeof buf, "%.6g", v);
+        if (strchr(buf, 'e')) g_ascii_formatd(buf, sizeof buf, "%.0f", v);
+    }
+    char *dot = strchr(buf, '.');
+    if (dot) {
+        char *last = buf + strlen(buf) - 1;
+        while (last > dot && *last == '0') *last-- = '\0';
+        if (last == dot) *last = '\0';
+    }
+    g_string_append(s, strcmp(buf, "-0") == 0 ? "0" : buf);
+}
+
+static void ns_css_append_color(GString *s, guint8 r, guint8 g, guint8 b,
+                                guint8 a);
+
+static void
+color_append_value(GString *s, const ns_css_value *v)
+{
+    ns_css_color_space space = (ns_css_color_space)v->u.color.space;
+    if (space == NS_CSS_COLOR_LEGACY) {
+        ns_css_append_color(s, v->u.color.r, v->u.color.g, v->u.color.b,
+                            v->u.color.a);
+        return;
+    }
+    gboolean percent_units = FALSE;
+    switch (space) {
+    case NS_CSS_COLOR_LAB:
+    case NS_CSS_COLOR_LCH:
+    case NS_CSS_COLOR_OKLAB:
+    case NS_CSS_COLOR_OKLCH:
+        g_string_append_printf(s, "%s(", color_space_name(space));
+        break;
+    case NS_CSS_COLOR_HSL:
+    case NS_CSS_COLOR_HWB:
+        g_string_append_printf(s, "%s(", color_space_name(space));
+        percent_units = TRUE;
+        break;
+    default:
+        g_string_append_printf(s, "color(%s ", color_space_name(space));
+        break;
+    }
+    for (int i = 0; i < 3; i++) {
+        if (i) g_string_append_c(s, ' ');
+        if (v->u.color.none & (1 << i)) {
+            g_string_append(s, "none");
+            continue;
+        }
+        color_append_number(s, v->u.color.c[i]);
+        if (percent_units && i > 0) g_string_append_c(s, '%');
+    }
+    if (v->u.color.none & NS_COLOR_NONE_ALPHA) {
+        g_string_append(s, " / none");
+    } else if (v->u.color.c[3] < 1.0 - 1e-9) {
+        g_string_append(s, " / ");
+        color_append_number(s, v->u.color.c[3]);
+    }
+    g_string_append_c(s, ')');
+}
+
+static gboolean color_specified_append(GString *out, const char *s,
+                                       const char *end, int depth);
+
+static void
+color_append_lower(GString *out, const char *p, const char *end)
+{
+    for (; p < end; p++) g_string_append_c(out, g_ascii_tolower(*p));
+}
+
+static const char *
+color_fn_name(ns_color_fn fn)
+{
+    switch (fn) {
+    case NS_COLOR_FN_RGB:   return "rgb";
+    case NS_COLOR_FN_HSL:   return "hsl";
+    case NS_COLOR_FN_HWB:   return "hwb";
+    case NS_COLOR_FN_LAB:   return "lab";
+    case NS_COLOR_FN_LCH:   return "lch";
+    case NS_COLOR_FN_OKLAB: return "oklab";
+    case NS_COLOR_FN_OKLCH: return "oklch";
+    default:                return "color";
+    }
+}
+
+static void
+color_append_token(GString *out, const char *p, const char *end)
+{
+    const char *num_end = color_number_end(p, end);
+    if (num_end != p) {
+        char *text = g_strndup(p, (gsize)(num_end - p));
+        color_append_number(out, g_ascii_strtod(text, NULL));
+        g_free(text);
+        color_append_lower(out, num_end, end);
+        return;
+    }
+    const char *q = p;
+    while (q < end && is_ident(*q)) q++;
+    if (q < end && *q == '(') {
+        g_string_append_len(out, p, end - p);
+        return;
+    }
+    color_append_lower(out, p, end);
+}
+
+static gboolean
+color_relative_specified_append(GString *out, ns_color_fn fn, const char *p,
+                                const char *end, int depth)
+{
+    p = color_skip_ws(p, end);
+    const char *origin_end = color_component_end(p, end);
+    g_string_append_printf(out, "%s(from ", color_fn_name(fn));
+    if (!color_specified_append(out, p, origin_end, depth + 1)) return FALSE;
+    p = origin_end;
+    while (1) {
+        p = color_skip_ws(p, end);
+        if (p >= end) break;
+        if (*p == '/') {
+            g_string_append(out, " /");
+            p++;
+            continue;
+        }
+        const char *e = p;
+        int nest = 0;
+        while (e < end) {
+            if (*e == '(') nest++;
+            else if (*e == ')') nest--;
+            else if (nest == 0 && (is_ws(*e) || *e == '/')) break;
+            e++;
+        }
+        g_string_append_c(out, ' ');
+        color_append_token(out, p, e);
+        p = e;
+    }
+    g_string_append_c(out, ')');
+    return TRUE;
+}
+
+static void
+color_append_math_arg(GString *out, const ns_color_arg *a)
+{
+    g_string_append(out, "calc(");
+    if (isnan(a->v)) g_string_append(out, "NaN");
+    else if (isinf(a->v)) g_string_append(out, a->v > 0 ? "infinity" : "-infinity");
+    else color_append_number(out, a->v);
+    if (a->percent) g_string_append_c(out, '%');
+    else if (a->angle) g_string_append(out, "deg");
+    g_string_append_c(out, ')');
+}
+
+static gboolean
+color_absolute_specified_append(GString *out, ns_color_fn fn, const char *p,
+                                const char *end, const ns_color *col)
+{
+    if (fn == NS_COLOR_FN_COLOR) {
+        p = color_space_ident_end(color_skip_ws(p, end), end);
+        g_string_append_printf(out, "color(%s ", color_space_name(col->space));
+    } else {
+        g_string_append_printf(out, "%s(", color_fn_name(fn));
+    }
+    ns_color_args args;
+    if (!color_args_parse(p, end, &args)) return FALSE;
+    for (int i = 0; i < 3; i++) {
+        if (i) g_string_append_c(out, ' ');
+        if (args.args[i].math) color_append_math_arg(out, &args.args[i]);
+        else if (col->none & (1 << i)) g_string_append(out, "none");
+        else color_append_number(out, col->c[i]);
+    }
+    if (args.has_alpha && args.args[3].math) {
+        g_string_append(out, " / ");
+        color_append_math_arg(out, &args.args[3]);
+    } else if (col->none & NS_COLOR_NONE_ALPHA) {
+        g_string_append(out, " / none");
+    } else if (col->alpha < 1.0) {
+        g_string_append(out, " / ");
+        color_append_number(out, col->alpha);
+    }
+    g_string_append_c(out, ')');
+    return TRUE;
+}
+
+static gboolean
+color_mix_specified_append(GString *out, const char *p, const char *end,
+                           int depth)
+{
+    char *parts[NS_COLOR_MIX_MAX + 1] = {0};
+    int n = calc_split_args(p, end, parts, G_N_ELEMENTS(parts));
+    gboolean ok = n >= 1 && n <= NS_COLOR_MIX_MAX;
+    int first = 0;
+    g_string_append(out, "color-mix(");
+    if (ok && g_ascii_strncasecmp(parts[0], "in", 2) == 0 &&
+        is_ws(parts[0][2])) {
+        static const char *const methods[] = {
+            "shorter", "longer", "increasing", "decreasing",
+        };
+        ns_css_color_space space;
+        ns_hue_method hue;
+        ok = color_parse_method(parts[0], &space, &hue);
+        if (ok && (space != NS_CSS_COLOR_OKLAB || hue != NS_HUE_SHORTER)) {
+            g_string_append_printf(out, "in %s", color_space_name(space));
+            if (hue != NS_HUE_SHORTER)
+                g_string_append_printf(out, " %s hue", methods[hue]);
+            g_string_append(out, ", ");
+        }
+        first = 1;
+    }
+    int count = ok ? n - first : 0;
+    const char *color_start[NS_COLOR_MIX_MAX], *color_end[NS_COLOR_MIX_MAX];
+    const char *pct_start[NS_COLOR_MIX_MAX], *pct_end[NS_COLOR_MIX_MAX];
+    double pcts[NS_COLOR_MIX_MAX];
+    gboolean given[NS_COLOR_MIX_MAX], math = FALSE;
+    double given_sum = 0.0;
+    int omitted = 0;
+    for (int i = 0; i < count; i++) {
+        given[i] = color_mix_item_split(parts[first + i], &color_start[i],
+                                        &color_end[i], &pct_start[i],
+                                        &pct_end[i], &pcts[i]);
+        if (!given[i]) {
+            omitted++;
+            continue;
+        }
+        given_sum += pcts[i];
+        for (const char *c = pct_start[i]; c < pct_end[i]; c++)
+            if (*c == '(') math = TRUE;
+    }
+    gboolean print_pcts = FALSE;
+    if (!math && omitted < count) {
+        for (int i = 0; i < count; i++)
+            if (!given[i])
+                pcts[i] = MAX(0.0, (100.0 - given_sum) / omitted);
+        for (int i = 0; i < count; i++)
+            if (fabs(pcts[i] - 100.0 / count) > 1e-9) print_pcts = TRUE;
+    }
+    for (int i = 0; ok && i < count; i++) {
+        if (i) g_string_append(out, ", ");
+        ok = color_specified_append(out, color_start[i], color_end[i],
+                                    depth + 1);
+        if (!ok) break;
+        if (math && given[i]) {
+            g_string_append_c(out, ' ');
+            g_string_append_len(out, pct_start[i], pct_end[i] - pct_start[i]);
+        } else if (print_pcts) {
+            g_string_append_c(out, ' ');
+            color_append_number(out, pcts[i]);
+            g_string_append_c(out, '%');
+        }
+    }
+    g_string_append_c(out, ')');
+    for (int i = 0; i < n; i++) g_free(parts[i]);
+    return ok;
+}
+
+static gboolean
+color_light_dark_specified_append(GString *out, const char *p,
+                                  const char *end, int depth)
+{
+    char *parts[2] = {0};
+    int n = calc_split_args(p, end, parts, 2);
+    gboolean ok = n == 2;
+    g_string_append(out, "light-dark(");
+    for (int i = 0; ok && i < 2; i++) {
+        if (i) g_string_append(out, ", ");
+        ok = color_specified_append(out, parts[i], parts[i] + strlen(parts[i]),
+                                    depth + 1);
+    }
+    g_string_append_c(out, ')');
+    for (int i = 0; i < n; i++) g_free(parts[i]);
+    return ok;
+}
+
+static gboolean
+color_specified_append(GString *out, const char *s, const char *end, int depth)
+{
+    if (depth > NS_COLOR_MAX_DEPTH) return FALSE;
+    s = color_skip_ws(s, end);
+    while (end > s && is_ws(end[-1])) end--;
+    ns_color col;
+    if (!color_parse_range(s, end, &col, depth)) return FALSE;
+    const char *p = s;
+    while (p < end && is_ident(*p)) p++;
+    if (*s != '#' && p == end) {
+        color_append_lower(out, s, end);
+        return TRUE;
+    }
+    ns_color_fn fn = *s == '#' ? NS_COLOR_FN_RGB
+                               : color_fn_by_name(s, (gsize)(p - s));
+    if (*s != '#') {
+        const char *body = p + 1, *close = end - 1;
+        if (fn == NS_COLOR_FN_MIX)
+            return color_mix_specified_append(out, body, close, depth);
+        if (fn == NS_COLOR_FN_LIGHT_DARK)
+            return color_light_dark_specified_append(out, body, close, depth);
+        const char *q = color_skip_ws(body, close);
+        if (close - q > 4 && g_ascii_strncasecmp(q, "from", 4) == 0 &&
+            is_ws(q[4]))
+            return color_relative_specified_append(out, fn, q + 4, close,
+                                                   depth);
+        gboolean legacy_fn = fn == NS_COLOR_FN_RGB || fn == NS_COLOR_FN_HSL ||
+                             fn == NS_COLOR_FN_HWB;
+        if (!legacy_fn ||
+            (fn != NS_COLOR_FN_RGB && col.none && depth == 0))
+            return color_absolute_specified_append(out, fn, body, close,
+                                                   &col);
+    }
+    if (col.legacy) col.none = 0;
+    ns_css_value tmp;
+    memset(&tmp, 0, sizeof tmp);
+    color_value_store(&tmp, &col);
+    color_append_value(out, &tmp);
+    return TRUE;
+}
+
+static char *
+color_specified_serialize(const char *text)
+{
+    if (!text || strstr(text, "var(") || strstr(text, "attr(") ||
+        strstr(text, "sibling-") || strstr(text, "/*"))
+        return NULL;
+    GString *out = g_string_new(NULL);
+    if (!color_specified_append(out, text, text + strlen(text), 0)) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
+color_text_valid(const char *s)
+{
+    ns_color col;
+    return color_parse_text(s, &col);
 }
 
 static gboolean
 parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
 {
-    return parse_color_depth(s, r, g, b, a, 0);
+    *a = 255;
+    ns_color col;
+    if (!color_parse_text(s, &col)) return FALSE;
+    if (col.current && !color_current_ctx) return FALSE;
+    guint8 rgba[4];
+    color_to_bytes(&col, rgba);
+    *r = rgba[0];
+    *g = rgba[1];
+    *b = rgba[2];
+    *a = rgba[3];
+    return TRUE;
 }
 
 gboolean
@@ -6176,7 +7137,6 @@ static gboolean inline_css_wide_value(const char *value);
 static char *bg_clip_canonical(const char *text);
 static char *css_add_leading_zeros(char *v);
 static char *css_normalize_negative_zero(char *value);
-static void ns_css_append_color(GString *s, guint8 r, guint8 g, guint8 b, guint8 a);
 
 static gboolean
 shadow_length_token(const char *tok, gboolean allow_negative, GString *out)
@@ -6228,7 +7188,7 @@ shadow_specified_one(const char *text, gboolean is_text, GString *out)
     gboolean inset = FALSE, ok = n > 0;
     for (int i = 0; ok && i < n; i++) {
         const char *tok = tokens[i];
-        guint8 r, g, b, a;
+        guint8 r = 0, g = 0, b = 0, a = 255;
         if (g_ascii_strcasecmp(tok, "inset") == 0) {
             if (is_text || inset) ok = FALSE;
             inset = TRUE;
@@ -10667,6 +11627,48 @@ prop_name_is_color(const char *prop)
     return FALSE;
 }
 
+static char *
+color_computed_text(const char *text)
+{
+    ns_color col;
+    if (!color_parse_text(text, &col)) return NULL;
+    ns_css_value tmp;
+    memset(&tmp, 0, sizeof tmp);
+    color_value_store(&tmp, &col);
+    GString *s = g_string_new(NULL);
+    color_append_value(s, &tmp);
+    return g_string_free(s, FALSE);
+}
+
+static gboolean
+color_text_has_math(const char *p)
+{
+    while (*p) {
+        if (!is_ident_start(*p)) {
+            p++;
+            continue;
+        }
+        const char *id = p;
+        while (*p && is_ident(*p)) p++;
+        if (*p == '(' &&
+            color_fn_by_name(id, (gsize)(p - id)) == NS_COLOR_FN_UNKNOWN)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+color_canonical_keeps_value(const char *raw, const char *canonical)
+{
+    if (color_text_has_math(raw)) return FALSE;
+    char *a = color_computed_text(raw);
+    char *b = color_computed_text(canonical);
+    gboolean same = a && b && strcmp(a, b) == 0;
+    g_free(a);
+    g_free(b);
+    return same;
+}
+
 char *
 ns_css_specified_canonical(const char *prop, const char *value)
 {
@@ -10718,22 +11720,8 @@ ns_css_specified_canonical(const char *prop, const char *value)
         ns_css_value_free(v);
     }
     if (prop && value && prop_name_is_color(prop)) {
-        guint8 r, g, b, a;
-        if (text_is_ident(value)) {
-            if (parse_color(value, &r, &g, &b, &a) ||
-                g_ascii_strcasecmp(value, "currentcolor") == 0)
-                return g_ascii_strdown(value, -1);
-        } else if ((value[0] == '#' ||
-                    g_ascii_strncasecmp(value, "rgb", 3) == 0 ||
-                    g_ascii_strncasecmp(value, "hsl", 3) == 0 ||
-                    g_ascii_strncasecmp(value, "hwb(", 4) == 0) &&
-                   !strstr(value, "var(") && !strstr(value, "calc(") &&
-                   !strstr(value, "none") &&
-                   parse_color(value, &r, &g, &b, &a)) {
-            GString *out = g_string_new(NULL);
-            ns_css_append_color(out, r, g, b, a);
-            return g_string_free(out, FALSE);
-        }
+        char *canon = color_specified_serialize(value);
+        if (canon) return canon;
     }
     if (prop && (strcmp(prop, "border-radius") == 0 ||
                  strcmp(prop, "-webkit-border-radius") == 0)) {
@@ -11723,12 +12711,9 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_CARET_COLOR:
     case NS_CSS_STOP_COLOR:
     case NS_CSS_ACCENT_COLOR: {
-        guint8 r, g, b, a;
-        if (parse_color(t, &r, &g, &b, &a)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_COLOR;
-            v->u.color.r = r; v->u.color.g = g; v->u.color.b = b; v->u.color.a = a;
-        } else {
+        if (g_ascii_strcasecmp(t, "currentcolor") != 0)
+            v = color_value_parse(t);
+        if (!v) {
             char *kw = ascii_lower(t, strlen(t));
             if (kw && (strcmp(kw, "currentcolor") == 0 ||
                        strcmp(kw, "inherit") == 0 ||
@@ -11746,13 +12731,9 @@ parse_value_for(ns_css_prop prop, const char *text)
     }
     case NS_CSS_FILL:
     case NS_CSS_STROKE: {
-        guint8 r, g, b, a;
-        if (parse_color(t, &r, &g, &b, &a)) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_COLOR;
-            v->u.color.r = r; v->u.color.g = g; v->u.color.b = b; v->u.color.a = a;
-            break;
-        }
+        if (g_ascii_strcasecmp(t, "currentcolor") != 0)
+            v = color_value_parse(t);
+        if (v) break;
         char *kw = ascii_lower(t, strlen(t));
         if (kw && (strcmp(kw, "none") == 0 ||
                    strcmp(kw, "currentcolor") == 0 ||
@@ -14106,7 +15087,6 @@ bg_layer_parse(const char *text, gboolean final_layer, bg_layer_text *out,
     char *clip_only = NULL;
     for (guint i = 0; ok && i < toks->len; i++) {
         const char *tok = g_ptr_array_index(toks, i);
-        guint8 r, g, b, a;
         if (strcmp(tok, "/") == 0) {
             if (!pos || pos_closed || size) { ok = FALSE; break; }
             pos_closed = TRUE;
@@ -14188,8 +15168,7 @@ bg_layer_parse(const char *text, gboolean final_layer, bg_layer_text *out,
             g_free(joined);
             g_free(lower);
             if (!clip_only) { ok = FALSE; break; }
-        } else if (parse_color(tok, &r, &g, &b, &a) ||
-                   g_ascii_strcasecmp(tok, "currentcolor") == 0) {
+        } else if (color_text_valid(tok)) {
             if (!final_layer || *color_out) { ok = FALSE; break; }
             *color_out = g_strdup(tok);
         } else {
@@ -14462,10 +15441,9 @@ border_shorthand_tokens_valid(char *const tokens[], int n)
     int colors = 0, widths = 0, styles = 0;
     for (int i = 0; i < n; i++) {
         const char *tok = tokens[i];
-        guint8 r, g, b, a;
         double num;
         ns_css_unit unit;
-        if (parse_color(tok, &r, &g, &b, &a) || is_color_keyword(tok)) {
+        if (color_text_valid(tok) || is_color_keyword(tok)) {
             colors++;
         } else if (parse_length(tok, &num, &unit)) {
             if (num < 0 || unit == NS_CSS_UNIT_PERCENT ||
@@ -14521,10 +15499,9 @@ border_shorthand_split(char *const tokens[], int n, const char **width,
 {
     for (int i = 0; i < n; i++) {
         const char *tok = tokens[i];
-        guint8 r, g, b, a;
         double num;
         ns_css_unit unit;
-        if (parse_color(tok, &r, &g, &b, &a) || is_color_keyword(tok))
+        if (color_text_valid(tok) || is_color_keyword(tok))
             *color = tok;
         else if (parse_length(tok, &num, &unit) ||
                  g_ascii_strncasecmp(tok, "calc(", 5) == 0 ||
@@ -16065,9 +17042,8 @@ parse_declaration_block(const char **pp, const char *end,
             gboolean valid = n >= 1 && n <= 3;
             for (int i = 0; valid && i < n; i++) {
                 const char *tok = tokens[i];
-                guint8 r, g, b, a;
                 double num; ns_css_unit u;
-                if (parse_color(tok, &r, &g, &b, &a) || is_color_keyword(tok) ||
+                if (color_text_valid(tok) || is_color_keyword(tok) ||
                     (is_outline && g_ascii_strcasecmp(tok, "invert") == 0)) {
                     color = tok;
                     colors++;
@@ -16109,7 +17085,6 @@ parse_declaration_block(const char **pp, const char *end,
             gboolean valid = n >= 1;
             for (int i = 0; valid && i < n; i++) {
                 const char *tk = tokens[i];
-                guint8 cr, cg, cb, ca;
                 if (word_is_one_of(tk, "underline overline line-through none")) {
                     if (lines->len > 0) g_string_append_c(lines, ' ');
                     char *low = g_ascii_strdown(tk, -1);
@@ -16121,7 +17096,7 @@ parse_declaration_block(const char **pp, const char *end,
                            word_is_one_of(tk, "solid double dotted dashed wavy")) {
                     style = tk;
                 } else if (!color &&
-                           (parse_color(tk, &cr, &cg, &cb, &ca) ||
+                           (color_text_valid(tk) ||
                             is_color_keyword(tk))) {
                     color = tk;
                 } else {
@@ -23293,6 +24268,11 @@ inline_decl_list_parse(const char *style)
         value = css_inline_value_canonical(name, value);
         char *canonical = custom ? NULL
             : ns_css_specified_canonical(name, value);
+        if (canonical && prop_name_is_color(name) &&
+            !color_canonical_keeps_value(value, canonical)) {
+            g_free(canonical);
+            canonical = NULL;
+        }
         if (canonical) {
             g_free(value);
             value = canonical;
@@ -24895,16 +25875,11 @@ value_serialize_one(const ns_css_value *v)
     switch (v->kind) {
     case NS_CSS_V_KEYWORD:
         return g_strdup(v->u.keyword ? v->u.keyword : "");
-    case NS_CSS_V_COLOR:
-        if (v->u.color.a == 255)
-            return g_strdup_printf("rgb(%u, %u, %u)",
-                v->u.color.r, v->u.color.g, v->u.color.b);
-        {
-            char ab[16];
-            ns_css_alpha_serialize(v->u.color.a, ab, sizeof ab);
-            return g_strdup_printf("rgba(%u, %u, %u, %s)",
-                v->u.color.r, v->u.color.g, v->u.color.b, ab);
-        }
+    case NS_CSS_V_COLOR: {
+        GString *s = g_string_new(NULL);
+        color_append_value(s, v);
+        return g_string_free(s, FALSE);
+    }
     case NS_CSS_V_LENGTH: {
         const char *unit = ns_css_unit_suffix(v->u.length.unit);
         double n = v->u.length.v;
@@ -27528,6 +28503,22 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
         out->values[NS_CSS_FONT_WEIGHT] = keyword_value(weight);
     }
     {
+        const ns_css_value *parent_color =
+            parent_style ? parent_style->values[NS_CSS_COLOR] : NULL;
+        if (ns_css_keyword_is(out->values[NS_CSS_COLOR], "currentcolor")) {
+            ns_css_value_free(out->values[NS_CSS_COLOR]);
+            out->values[NS_CSS_COLOR] = ns_css_value_dup(parent_color);
+        }
+        ns_css_value *cv = out->values[NS_CSS_COLOR];
+        if (cv && cv->kind == NS_CSS_V_COLOR && cv->u.color.current) {
+            cv = ns_css_value_cow(out, NS_CSS_COLOR);
+            color_value_resolve_current(cv, parent_color);
+            cv->u.color.current = FALSE;
+            g_free(cv->specified);
+            cv->specified = NULL;
+        }
+    }
+    {
         const ns_css_prop color_props[] = {
             NS_CSS_BACKGROUND_COLOR,
             NS_CSS_BORDER_TOP_COLOR, NS_CSS_BORDER_RIGHT_COLOR,
@@ -27543,6 +28534,11 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
         };
         for (gsize i = 0; i < G_N_ELEMENTS(color_props); i++) {
             ns_css_value *v = out->values[color_props[i]];
+            if (v && v->kind == NS_CSS_V_COLOR && v->u.color.current) {
+                v = ns_css_value_cow(out, color_props[i]);
+                color_value_resolve_current(v, out->values[NS_CSS_COLOR]);
+                continue;
+            }
             if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) continue;
             if (strcmp(v->u.keyword, "currentcolor") == 0) {
                 ns_css_value_free(out->values[color_props[i]]);
