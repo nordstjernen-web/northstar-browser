@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* A `fit-content(<length>)` grid track sizes to its content up to the
+  limit. It behaved like `minmax(auto, <length>)` and always grew to
+  the limit, so `fit-content(70px)` holding 30px of text was 70px wide
+  and an empty one kept its full size instead of collapsing.
 * Rows repeated by `grid-template-rows: repeat(auto-fit, ...)` that no
   item occupies collapse to zero height, as auto-fit columns already
   did, instead of keeping their size like `auto-fill`.
