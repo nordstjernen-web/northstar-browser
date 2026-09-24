@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Deeply nested tables no longer stall the browser. Measuring a table
+  measured each nested table twice over and counted its columns in a
+  4096-entry scratch array every time, so 100 nested tables took 0.9 s
+  to lay out, 200 took 6 s and a script writing
+  `'<table><td>'.repeat(3000)` hung the page for 90 s. The same pages
+  now lay out in under 0.1 s.
 * Extreme numbers in a page's CSS no longer overflow the browser's
   integer arithmetic. `counter-increment: c 2147483647` applied twice
   wrapped the counter round to a negative number; counters now stop at

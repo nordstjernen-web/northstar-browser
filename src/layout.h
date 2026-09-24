@@ -194,6 +194,8 @@ typedef struct ns_box {
 
     int colspan;
     int rowspan;
+    guint table_cols;
+    gboolean table_cols_valid;
     ns_fragment_context *fragment_context;
 
     struct ns_box *parent;

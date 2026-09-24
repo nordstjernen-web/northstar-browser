@@ -7445,8 +7445,9 @@ table_row_done(int *rs_remain, guint max_cols)
 }
 
 static guint
-table_column_count(const ns_box *box)
+table_column_count(ns_box *box)
 {
+    if (box->table_cols_valid) return box->table_cols;
     guint max_cols = 0;
     int rs_remain[NS_TABLE_MAX_COLS] = {0};
     for (ns_box *row = box->first_child; row; row = row->next_sibling) {
@@ -7462,6 +7463,8 @@ table_column_count(const ns_box *box)
         if (c > max_cols) max_cols = c;
         table_row_done(rs_remain, NS_TABLE_MAX_COLS);
     }
+    box->table_cols = max_cols;
+    box->table_cols_valid = TRUE;
     return max_cols;
 }
 
@@ -7553,15 +7556,18 @@ table_intrinsic_width(ns_box *box, const ns_style *inherited, gboolean min)
                 edges_from_style(cell->style, 0, &m, &pd, &bd);
                 double extra = m.left + m.right + pd.left + pd.right +
                                bd.left + bd.right;
-                double content_min = measure_min_content_width(cell, cs);
-                double w = min ? content_min
+                double w = min ? measure_min_content_width(cell, cs)
                                : measure_natural_width(cell, cs);
                 const ns_css_value *wv = cell->style
                     ? cell->style->values[NS_CSS_WIDTH] : NULL;
                 if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC) &&
                     !value_is_percent(wv)) {
                     double e = length_resolve(wv, 0, -1);
-                    if (e >= 0) w = e > content_min ? e : content_min;
+                    if (e >= 0) {
+                        double content_min = min ? w
+                            : measure_min_content_width(cell, cs);
+                        w = e > content_min ? e : content_min;
+                    }
                 }
                 table_widen_columns(cols, max_cols, col, span,
                                     table_cell_clamp(cell, extra, w + extra)
