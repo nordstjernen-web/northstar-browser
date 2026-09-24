@@ -128,15 +128,24 @@ unconfined.
     `../lib64` beside it.
   - *Read-only:* `/etc`, the CA-certificate and fontconfig caches,
     `/proc`, `/sys`, `/run`, `/dev/dri`, `/dev/urandom`, the X11 and ICE
-    socket directories, the user's font and theme directories
-    (`~/.fonts`, `~/.fontconfig`, `~/.icons`, `~/.themes`), the whole
-    XDG config, data and cache directories (`~/.config`,
-    `~/.local/share`, `~/.cache`), the directory that holds
-    `$XAUTHORITY`, and the data directories found near the executable
-    (`../share/northstar`, or `data/` in a build tree — where the source
-    tree itself, the nearest directory holding a `meson.build` up to
-    three levels above the executable, is readable too). `/dev/shm` is
-    read-only in headless mode.
+    socket directories, the X authority file (`$XAUTHORITY`, or
+    `~/.Xauthority` when that is unset) and nothing else in its
+    directory, and the per-user configuration the libraries the browser
+    loads look for: in the XDG config directory `dconf`, `enchant`,
+    `fontconfig`, `glib-2.0`, `gtk-3.0`, `gtk-4.0`, `ibus`, `pipewire`,
+    `pulse`, `vulkan`, `mimeapps.list` and `user-dirs.dirs`; in the XDG
+    data directory `applications`, `enchant`, `fonts`, `glib-2.0`,
+    `icons`, `mime`, `themes` and `vulkan`; in the
+    XDG cache directory `fontconfig`, `gtk-4.0`, `mesa_shader_cache`,
+    `mesa_shader_cache_db` and `nvidia`; and in the home directory
+    `.XCompose`, `.asoundrc`, `.drirc`, `.fontconfig`, `.fonts`,
+    `.fonts.conf`, `.fonts.conf.d`, `.icons`, `.nv` and `.themes`. Each
+    is granted only if it exists when the browser starts. So are the
+    data directories found near the executable (`../share/northstar`, or
+    `data/` in a build tree — where the source tree itself, the nearest
+    directory holding a `meson.build` up to three levels above the
+    executable, is readable too). `/dev/shm` is read-only in headless
+    mode.
   - *Read + write:* the per-user runtime directory (which holds the
     Wayland socket), the browser's own state under
     `~/.config/northstar`, `~/.local/share/northstar` and
@@ -145,18 +154,21 @@ unconfined.
     `/dev/video0`–`/dev/video63` node that exists, and the output
     directory of a `--dump=png:`, `pdf:` or `print:` run.
 
-  The rest of `$HOME` — `~/.ssh`, `~/.aws`, `~/.netrc`, shell history —
-  is **not** reachable. Two things widen that: other applications' state
-  kept under `~/.config`, `~/.local/share` or `~/.cache` (other browsers'
-  profiles among it) is readable, and when `$XAUTHORITY` is
-  `~/.Xauthority` its directory is `$HOME` itself, which makes the whole
-  home directory readable. No writable directory is granted Landlock's
-  execute right, and `execve` is not in the seccomp allow-list, so a
-  dropped file cannot be run as a program. Symbolic-link creation
-  (`LANDLOCK_ACCESS_FS_MAKE_SYM`) is handled by the ruleset and granted
-  nowhere, and on Landlock ABI 3+ `truncate(2)` is handled and allowed
-  only where file writes are; the ABI is probed at startup so the
-  ruleset requests only rights the running kernel knows.
+  The rest of `$HOME` — `~/.ssh`, `~/.aws`, `~/.netrc`, shell history,
+  documents, and other applications' state under `~/.config`,
+  `~/.local/share` and `~/.cache` such as other browsers' profiles,
+  keyrings and command-line tokens — is **not** reachable, and a save
+  dialog GTK draws itself, when no desktop portal is running, can browse
+  only the directories above. One thing widens that: without
+  `$XDG_RUNTIME_DIR`, GLib uses `~/.cache` as the runtime directory,
+  which is then readable and writable. No writable directory is granted
+  Landlock's execute right, and `execve` is not in the seccomp
+  allow-list, so a dropped file cannot be run as a program.
+  Symbolic-link creation (`LANDLOCK_ACCESS_FS_MAKE_SYM`) is handled by
+  the ruleset and granted nowhere, and on Landlock ABI 3+ `truncate(2)`
+  is handled and allowed only where file writes are; the ABI is probed
+  at startup so the ruleset requests only rights the running kernel
+  knows.
 - **seccomp-bpf (syscalls) — applied in every browser mode.**
   Default-deny allow-list: the filter is built with
   `SCMP_ACT_ERRNO(EPERM)` as the default action and then permits only the
@@ -567,10 +579,10 @@ The `document.cookie` setter:
   built) and WebAssembly are ordinary C parsing attacker-controlled bytes
   in the browser process (see *Media*). They are bounded, but nothing
   stands between them and the rest of the process.
-- **Linux read access is wider than the browser needs.** The whole XDG
-  config, data and cache directories are readable, and so is the
-  directory holding `$XAUTHORITY` — `$HOME` itself on systems that keep
-  `~/.Xauthority`.
+- **Linux: without `$XDG_RUNTIME_DIR` the cache directory is writable.**
+  GLib then falls back to `~/.cache` as the runtime directory, which the
+  browser needs to write, so other applications' caches are readable and
+  writable in that case.
 - **Windows: no per-path filesystem sandbox, and no dynamic-code ban in
   the GUI.** The mitigation suite restricts the *process* (no remote DLL
   loads, no child processes, etc.) but does not allow-list the files the

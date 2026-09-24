@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* On Linux the sandbox no longer lets the browser read other programs'
+  files in your home directory. It granted read access to all of
+  `~/.config`, `~/.local/share` and `~/.cache` -- other browsers'
+  profiles, keyrings and command-line tokens included -- and to the
+  whole directory holding the X authority file, which is the home
+  directory itself where that file is `~/.Xauthority`. It now reads
+  only the settings, fonts, themes, dictionaries and caches of the
+  libraries it uses, and the authority file alone. With `XAUTHORITY`
+  unset the browser now also finds `~/.Xauthority`, where before it
+  could not connect to an X server that requires it.
 * Deeply nested tables no longer stall the browser. Measuring a table
   measured each nested table twice over and counted its columns in a
   4096-entry scratch array every time, so 100 nested tables took 0.9 s

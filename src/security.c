@@ -350,6 +350,55 @@ add_path_rw(int rfd, guint64 allowed, const char *path)
     close(pfd);
 }
 
+static void
+add_path_read(int rfd, const char *path)
+{
+    if (!path) return;
+    int pfd = open(path, O_PATH | O_CLOEXEC);
+    if (pfd < 0) return;
+    struct stat st;
+    guint64 allowed = LANDLOCK_ACCESS_FS_READ_FILE;
+    if (fstat(pfd, &st) == 0 && S_ISDIR(st.st_mode))
+        allowed |= LANDLOCK_ACCESS_FS_READ_DIR;
+    struct landlock_path_beneath_attr pb = {
+        .allowed_access = allowed,
+        .parent_fd      = pfd,
+    };
+    (void)landlock_add_rule_(rfd, LANDLOCK_RULE_PATH_BENEATH, &pb, 0);
+    close(pfd);
+}
+
+static void
+add_paths_read_under(int rfd, const char *base, const char *const *names)
+{
+    if (!base) return;
+    for (gsize i = 0; names[i]; i++) {
+        g_autofree char *p = g_build_filename(base, names[i], NULL);
+        add_path_read(rfd, p);
+    }
+}
+
+static const char *const ns_config_read_names[] = {
+    "dconf", "enchant", "fontconfig", "glib-2.0", "gtk-3.0", "gtk-4.0",
+    "ibus", "mimeapps.list", "pipewire", "pulse", "user-dirs.dirs",
+    "vulkan", NULL,
+};
+
+static const char *const ns_data_read_names[] = {
+    "applications", "enchant", "fonts", "glib-2.0", "icons", "mime",
+    "themes", "vulkan", NULL,
+};
+
+static const char *const ns_cache_read_names[] = {
+    "fontconfig", "gtk-4.0", "mesa_shader_cache", "mesa_shader_cache_db",
+    "nvidia", NULL,
+};
+
+static const char *const ns_home_read_names[] = {
+    ".XCompose", ".asoundrc", ".drirc", ".fontconfig", ".fonts",
+    ".fonts.conf", ".fonts.conf.d", ".icons", ".nv", ".themes", NULL,
+};
+
 void
 ns_security_sandbox_init(const char *self_exe)
 {
@@ -414,18 +463,18 @@ ns_security_sandbox_init(const char *self_exe)
     if (g_file_test("/dev/snd", G_FILE_TEST_IS_DIR))
         add_path_rw(rfd, fs_read | fs_write_file, "/dev/snd");
 
-    const char *xauth = g_getenv("XAUTHORITY");
-    if (xauth && *xauth) {
-        char *xauth_dir = g_path_get_dirname(xauth);
-        add_path_rw(rfd, fs_read, xauth_dir);
-        g_free(xauth_dir);
-    }
-
     const char *home = g_get_home_dir();
 
-    add_path_rw(rfd, fs_read, g_get_user_config_dir());
-    add_path_rw(rfd, fs_read, g_get_user_data_dir());
-    add_path_rw(rfd, fs_read, g_get_user_cache_dir());
+    const char *xauth = g_getenv("XAUTHORITY");
+    g_autofree char *xauth_default = NULL;
+    if (!xauth || !*xauth)
+        xauth = xauth_default = g_build_filename(home, ".Xauthority", NULL);
+    add_path_read(rfd, xauth);
+
+    add_paths_read_under(rfd, g_get_user_config_dir(), ns_config_read_names);
+    add_paths_read_under(rfd, g_get_user_data_dir(), ns_data_read_names);
+    add_paths_read_under(rfd, g_get_user_cache_dir(), ns_cache_read_names);
+    add_paths_read_under(rfd, home, ns_home_read_names);
     add_path_rw(rfd, fs_rw,   g_get_user_runtime_dir());
 
     char *ns_cfg_root =
@@ -465,14 +514,6 @@ ns_security_sandbox_init(const char *self_exe)
                 add_path_rw(rfd, fs_rw, dl_dir);
         }
         g_free(dl_dir);
-    }
-
-    static const char *const home_ro_subdirs[] = {
-        ".fonts", ".fontconfig", ".icons", ".themes", NULL,
-    };
-    for (gsize i = 0; home_ro_subdirs[i]; i++) {
-        g_autofree char *p = g_build_filename(home, home_ro_subdirs[i], NULL);
-        add_path_rw(rfd, fs_read, p);
     }
 
     if (self_exe) {
