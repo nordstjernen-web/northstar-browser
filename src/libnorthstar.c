@@ -169,13 +169,20 @@ browser_prune_cached_nodes(ns_browser *browser)
         browser->open_select = NULL;
 }
 
+static gint32
+px_to_int(double v)
+{
+    if (isnan(v)) return 0;
+    return (gint32)CLAMP(v, (double)G_MININT32, (double)G_MAXINT32);
+}
+
 static guint64
 layout_signature_walk(const ns_box *b, guint64 h)
 {
     if (!b) return h;
     gint32 q[4] = {
-        (gint32)(b->x * 4), (gint32)(b->y * 4),
-        (gint32)(b->content_width * 4), (gint32)(b->content_height * 4),
+        px_to_int(b->x * 4), px_to_int(b->y * 4),
+        px_to_int(b->content_width * 4), px_to_int(b->content_height * 4),
     };
     const guchar *bytes = (const guchar *)q;
     h ^= (guint64)b->kind;
@@ -1761,9 +1768,9 @@ ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height)
     if (!hide_y)
         bottom = ns_box_max_bottom(browser->layout, bottom);
     if (!(bottom > 0)) bottom = 0;
-    if (out_width)  *out_width  = (int)w;
+    if (out_width)  *out_width  = px_to_int(w);
     int ypad = (!hide_y && bottom > browser->vh + 0.5) ? 32 : 0;
-    if (out_height) *out_height = (int)bottom + ypad;
+    if (out_height) *out_height = px_to_int(bottom + ypad);
     return 0;
 }
 

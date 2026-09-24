@@ -12079,9 +12079,10 @@ parse_integer_property(ns_css_prop prop, const char *t)
         return v;
     }
     if (css_is_integer_token(t)) {
+        gint64 n = g_ascii_strtoll(t, NULL, 10);
         ns_css_value *v = g_new0(ns_css_value, 1);
         v->kind = NS_CSS_V_LENGTH;
-        v->u.length.v = (double)g_ascii_strtoll(t, NULL, 10);
+        v->u.length.v = (double)CLAMP(n, G_MININT32, G_MAXINT32);
         v->u.length.unit = NS_CSS_UNIT_NUMBER;
         return v;
     }

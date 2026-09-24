@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Extreme numbers in a page's CSS no longer overflow the browser's
+  integer arithmetic. `counter-increment: c 2147483647` applied twice
+  wrapped the counter round to a negative number; counters now stop at
+  the 32-bit limits, and integer properties such as `z-index` and
+  `-webkit-line-clamp` are clamped to them when parsed. Lengths handed
+  to the text shaper -- `letter-spacing`, `word-spacing`, `text-indent`,
+  `tab-size`, `line-height`, `vertical-align`, inline-block sizes and
+  line widths -- were converted to its integer units unchecked, so
+  `letter-spacing: -1e20px` overflowed inside it; they are now clamped
+  first, and so is the page size reported to the window.
 * A change to a page no longer breaks every paragraph into lines again.
   The layout tree is rebuilt on each change, and with it every text
   run's measurement, so a counter updating on a page of 400 cards spent

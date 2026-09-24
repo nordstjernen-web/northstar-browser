@@ -82,12 +82,55 @@ ns_paint_pango_weight(int weight)
     return (NsPangoWeight)weight;
 }
 
+#define NS_PAINT_PANGO_MAX_PX 1048576.0
+#define NS_PAINT_PANGO_MAX_STEP_PX 65535.0
+
 int
 ns_paint_pango_font_size(double size_px)
 {
     if (!(size_px > 0)) return 0;
-    if (size_px > 65535) size_px = 65535;
+    size_px = MIN(size_px, NS_PAINT_PANGO_MAX_STEP_PX);
     return (int)(size_px * NS_PANGO_SCALE);
+}
+
+int
+ns_paint_pango_units(double px)
+{
+    if (isnan(px)) return 0;
+    px = CLAMP(px, -NS_PAINT_PANGO_MAX_PX, NS_PAINT_PANGO_MAX_PX);
+    return (int)(px * NS_PANGO_SCALE);
+}
+
+double
+ns_paint_text_spacing_px(const ns_css_value *v)
+{
+    if (!v || v->kind != NS_CSS_V_LENGTH || v->u.length.unit != NS_CSS_UNIT_PX ||
+        isnan(v->u.length.v))
+        return 0;
+    return CLAMP(v->u.length.v, -NS_PAINT_PANGO_MAX_STEP_PX,
+                 NS_PAINT_PANGO_MAX_STEP_PX);
+}
+
+void
+ns_paint_apply_text_spacing(NsPangoAttrList *attrs, const ns_style *s)
+{
+    if (!attrs || !s) return;
+    double ls_px = ns_paint_text_spacing_px(s->values[NS_CSS_LETTER_SPACING]);
+    double ws_px = ns_paint_text_spacing_px(s->values[NS_CSS_WORD_SPACING]);
+    if (ls_px != 0) {
+        NsPangoAttribute *ls = ns_pango_attr_letter_spacing_new(
+            ns_paint_pango_units(ls_px));
+        ls->start_index = 0;
+        ls->end_index = G_MAXUINT;
+        ns_pango_attr_list_insert(attrs, ls);
+    }
+    if (ws_px != 0) {
+        NsPangoAttribute *ws = ns_pango_attr_word_spacing_new(
+            ns_paint_pango_units(ws_px));
+        ws->start_index = 0;
+        ws->end_index = G_MAXUINT;
+        ns_pango_attr_list_insert(attrs, ws);
+    }
 }
 
 NsPangoStretch
@@ -1705,7 +1748,8 @@ void
 ns_paint_apply_css_line_spacing(NsPangoLayout *layout, const ns_style *s)
 {
     double lh_px = ns_paint_css_line_height_px(s);
-    if (!layout || lh_px <= 0) return;
+    if (!layout || !(lh_px > 0)) return;
+    lh_px = MIN(lh_px, NS_PAINT_PANGO_MAX_STEP_PX);
     NsPangoContext *ctx = ns_pango_layout_get_context(layout);
     const NsPangoFontDescription *fd = ns_pango_layout_get_font_description(layout);
     NsPangoFontMetrics *fm = ns_pango_context_get_metrics(ctx, fd, NULL);
@@ -2220,6 +2264,7 @@ ns_paint_apply_inline_font(NsPangoLayout *layout, const ns_style *s)
         }
         if (tab_w > 0) {
             int n = 32;
+            tab_w = MIN(tab_w, NS_PAINT_PANGO_MAX_PX / n);
             NsPangoTabArray *tabs = ns_pango_tab_array_new(n, TRUE);
             for (int i = 0; i < n; i++)
                 ns_pango_tab_array_set_tab(tabs, i, NS_PANGO_TAB_LEFT,
@@ -2258,7 +2303,7 @@ apply_nowrap_align_width(NsPangoLayout *layout, const ns_box *b)
     int pw, ph;
     ns_pango_layout_get_pixel_size(layout, &pw, &ph);
     if (pw <= b->content_width)
-        ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_pango_units(b->content_width));
 }
 
 static void paint_walk(cairo_t *cr, const ns_box *b, const char *highlight);
@@ -2663,14 +2708,14 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
         !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         ns_pango_layout_set_width(layout, -1);
     else
-        ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_pango_units(b->content_width));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
     if (!(b->inline_atomics && b->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, s);
     {
         double ti = ns_text_indent_px(s, b->content_width);
         if (ti > 0)
-            ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
+            ns_pango_layout_set_indent(layout, ns_paint_pango_units(ti));
     }
     if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
@@ -2687,29 +2732,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     ns_paint_apply_i18n(layout, attrs, b);
     ns_paint_apply_font_features(attrs, s, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(attrs, b);
-    double ls_px = 0, ws_px = 0;
-    if (s && s->values[NS_CSS_LETTER_SPACING] &&
-        s->values[NS_CSS_LETTER_SPACING]->kind == NS_CSS_V_LENGTH &&
-        s->values[NS_CSS_LETTER_SPACING]->u.length.unit == NS_CSS_UNIT_PX)
-        ls_px = s->values[NS_CSS_LETTER_SPACING]->u.length.v;
-    if (s && s->values[NS_CSS_WORD_SPACING] &&
-        s->values[NS_CSS_WORD_SPACING]->kind == NS_CSS_V_LENGTH &&
-        s->values[NS_CSS_WORD_SPACING]->u.length.unit == NS_CSS_UNIT_PX)
-        ws_px = s->values[NS_CSS_WORD_SPACING]->u.length.v;
-    if (ls_px != 0) {
-        NsPangoAttribute *ls = ns_pango_attr_letter_spacing_new(
-            (int)(ls_px * NS_PANGO_SCALE));
-        ls->start_index = 0;
-        ls->end_index = G_MAXUINT;
-        ns_pango_attr_list_insert(attrs, ls);
-    }
-    if (ws_px != 0) {
-        NsPangoAttribute *ws = ns_pango_attr_word_spacing_new(
-            (int)(ws_px * NS_PANGO_SCALE));
-        ws->start_index = 0;
-        ws->end_index = G_MAXUINT;
-        ns_pango_attr_list_insert(attrs, ws);
-    }
+    ns_paint_apply_text_spacing(attrs, s);
     if (b->attrs) {
         for (gint ii = (gint)b->attrs->len - 1; ii >= 0; ii--) {
             const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, (guint)ii);
@@ -2843,7 +2866,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                 }
                 break;
             case NS_INLINE_RISE:
-                a = ns_pango_attr_rise_new((int)(r->rise_px * NS_PANGO_SCALE));
+                a = ns_pango_attr_rise_new(ns_paint_pango_units(r->rise_px));
                 break;
             case NS_INLINE_UPRIGHT:
                 a = ns_pango_attr_style_new(NS_PANGO_STYLE_NORMAL);
@@ -3489,13 +3512,13 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
         !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         ns_pango_layout_set_width(layout, -1);
     else
-        ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_pango_units(b->content_width));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
     if (!(b->inline_atomics && b->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, s);
     {
         double ti = ns_text_indent_px(s, b->content_width);
-        if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
+        if (ti > 0) ns_pango_layout_set_indent(layout, ns_paint_pango_units(ti));
     }
     if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
@@ -3544,7 +3567,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
                 }
                 break;
             case NS_INLINE_RISE:
-                a = ns_pango_attr_rise_new((int)(r->rise_px * NS_PANGO_SCALE));
+                a = ns_pango_attr_rise_new(ns_paint_pango_units(r->rise_px));
                 break;
             case NS_INLINE_UPRIGHT:
                 a = ns_pango_attr_style_new(NS_PANGO_STYLE_NORMAL); break;
@@ -3610,8 +3633,8 @@ ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
     double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
     double layout_y = rel_y - y_offset;
     if (layout_y < 0) layout_y = 0;
-    ns_pango_layout_xy_to_index(layout, (int)(rel_x * NS_PANGO_SCALE),
-                             (int)(layout_y * NS_PANGO_SCALE),
+    ns_pango_layout_xy_to_index(layout, ns_paint_pango_units(rel_x),
+                             ns_paint_pango_units(layout_y),
                              &index, &trailing);
     if (out_byte) {
         gsize tlen = strlen(b->text);
@@ -4537,7 +4560,7 @@ paint_image(cairo_t *cr, const ns_box *b)
             NsPangoLayout *layout = paint_create_layout();
             ns_pango_layout_set_text(layout, alt, -1);
             ns_pango_layout_set_width(layout,
-                (int)((b->content_width - 8) * NS_PANGO_SCALE));
+                ns_paint_pango_units(b->content_width - 8));
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
             int pw, ph;
             ns_pango_layout_get_pixel_size(layout, &pw, &ph);
@@ -5288,7 +5311,7 @@ box_z_index(const ns_box *b)
 
 typedef struct paint_entry {
     const ns_box *box;
-    int key;
+    gint64 key;
     guint order;
 } paint_entry;
 
@@ -5334,10 +5357,10 @@ box_is_float(const ns_box *b)
             strcmp(v->u.keyword, "right") == 0);
 }
 
-static int
+static gint64
 box_paint_key(const ns_box *b)
 {
-    if (box_is_z_ordered(b)) return box_z_index(b) * 2;
+    if (box_is_z_ordered(b)) return (gint64)box_z_index(b) * 2;
     return box_is_float(b) ? 1 : 0;
 }
 
