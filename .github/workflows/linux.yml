@@ -124,3 +124,85 @@ jobs:
           path: builddir/src/gtk/northstar
           if-no-files-found: error
           retention-days: 14
+
+  sanitize:
+    name: ASan+UBSan on ubuntu-24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ccache gcc g++ make cmake pkg-config meson ninja-build \
+            libgtk-4-dev libcurl4-openssl-dev libssl-dev \
+            libharfbuzz-dev libfribidi-dev libcairo2-dev \
+            libfontconfig-dev libfreetype-dev \
+            libuchardet-dev libpsl-dev libsqlite3-dev \
+            libavif-dev libsdl2-dev libseccomp-dev libenchant-2-dev \
+            libopusfile-dev libvorbis-dev ca-certificates
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-24.04-sanitize-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-24.04-sanitize-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=300M
+          ccache --zero-stats
+
+      - name: Build with AddressSanitizer and UndefinedBehaviorSanitizer
+        env:
+          CC: ccache gcc
+          CXX: ccache g++
+        run: |
+          meson setup builddir -Dbuildtype=debugoptimized -Db_lto=false \
+            -Db_sanitize=address,undefined -Db_lundef=false \
+            -Dc_args=-fsanitize=float-cast-overflow
+          meson compile -C builddir
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Headless baseline smoke (./scripts/dev.sh smoke)
+        env:
+          NS_NO_SANDBOX: '1'
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ./scripts/dev.sh smoke
+
+      - name: Render tests (./scripts/render-tests.sh)
+        env:
+          NS_NO_SANDBOX: '1'
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -o pipefail
+          ./scripts/render-tests.sh render-tests-out 2>&1 | tee render-tests.log
+          ! grep -q FAILED render-tests.log
+
+      - name: Sanitizer reports
+        if: failure()
+        env:
+          NS_NO_SANDBOX: '1'
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          for f in data/fixtures/*.html data/render-tests/*.html; do
+            ./builddir/src/gtk/northstar --headless --dump=text "$f" \
+              2>&1 >/dev/null |
+              grep -A40 -E 'runtime error|ERROR: AddressSanitizer' |
+              sed "s|^|$f: |" || true
+          done
