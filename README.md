@@ -61,8 +61,12 @@ libavif when available, and SVG in the engine).
 - **Storage** — IndexedDB over SQLite, `localStorage`/`sessionStorage`
   and the Cache API (`caches`, request/response pairs per the Service
   Workers specification), each partitioned by site.
-- **Live connections** — WebSockets (with libcurl 8.11 or newer, or one
-  built with WebSocket support) and server-sent events.
+- **Live connections** — WebSockets and server-sent events. WebSockets
+  go through libcurl and need one built with its `ws`/`wss` protocols,
+  which libcurl enables by default from 8.11. Ubuntu 24.04 LTS ships
+  libcurl 8.5 without them, so there `new WebSocket()` throws; `meson
+  setup` reports whether the libcurl it found has them, and
+  `curl --version` lists `ws wss` under Protocols when it does.
 - **Navigation API** — `window.navigation` for single-page routing.
 - **Service workers** — origin-scoped registration, persistence,
   controlled-page fetch interception and offline pages served from the

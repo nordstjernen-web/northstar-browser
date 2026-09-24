@@ -148,8 +148,27 @@ else
 endif
 gmodule = dependency('gmodule-2.0')
 libcurl = dependency('libcurl', version: '>=8.5')
-if libcurl.version().version_compare('<8.11')
-  warning('libcurl @0@ predates stable WebSocket support (curl 8.11): WebSocket will be unavailable at runtime unless this libcurl was built with the ws/wss protocols.'.format(libcurl.version()))
+libcurl_ws_known = false
+libcurl_ws = false
+if meson.can_run_host_binaries()
+  libcurl_ws_probe = cc.run('''#include <curl/curl.h>
+#include <string.h>
+int main(void) {
+  const curl_version_info_data *v = curl_version_info(CURLVERSION_NOW);
+  for (const char *const *p = v->protocols; p && *p; p++)
+    if (strcmp(*p, "ws") == 0) return 0;
+  return 1;
+}
+''', dependencies: libcurl, name: 'libcurl WebSocket (ws/wss) support')
+  if libcurl_ws_probe.compiled() and libcurl_ws_probe.returncode() in [0, 1]
+    libcurl_ws_known = true
+    libcurl_ws = libcurl_ws_probe.returncode() == 0
+  endif
+endif
+if libcurl_ws_known and not libcurl_ws
+  warning('libcurl @0@ was built without the ws/wss protocols: new WebSocket() will throw at runtime. libcurl 8.11 and newer include them by default; older releases only when built with --enable-websockets.'.format(libcurl.version()))
+elif not libcurl_ws_known and libcurl.version().version_compare('<8.11')
+  warning('libcurl @0@ predates default WebSocket support (curl 8.11): WebSocket will be unavailable at runtime unless this libcurl was built with the ws/wss protocols.'.format(libcurl.version()))
 endif
 libcrypto = dependency('libcrypto')
 libm = cc.find_library('m', required: false)
@@ -369,5 +388,7 @@ install_data(
 
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
+summary({'WebSocket (libcurl ws/wss)': libcurl_ws_known ? libcurl_ws : 'unknown'},
+        section: 'Features')
 
 subdir('src')

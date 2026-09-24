@@ -42,9 +42,16 @@ The text stack has version floors set by ns-pango: GLib ≥ 2.80,
 HarfBuzz ≥ 8.3, fontconfig ≥ 2.15, Cairo ≥ 1.18 and FriBidi ≥ 1.0.6.
 They are what Ubuntu 24.04 ships, the oldest system CI builds on; older
 distributions (Debian 12, for one) need newer copies of those libraries.
-GTK must be ≥ 4.14 and libcurl ≥ 8.5. With a libcurl older than 8.11 the
-build warns that WebSocket is unavailable unless that libcurl was built
-with WebSocket support.
+GTK must be ≥ 4.14 and libcurl ≥ 8.5. WebSocket needs a libcurl built
+with the `ws`/`wss` protocols, which libcurl includes by default from
+8.11 and only with `--enable-websockets` before that. Ubuntu 24.04's
+libcurl 8.5 lacks them, so a build there runs everything but WebSocket:
+`new WebSocket()` throws a `TypeError`. `meson setup` runs a small probe
+against the libcurl it found, prints `WebSocket (libcurl ws/wss)` under
+Features in its summary, and warns when it is missing; `curl --version`
+shows the same thing as `ws wss` in its Protocols line. To get WebSocket
+on such a system, build against a newer libcurl (for example one
+installed under a prefix listed in `PKG_CONFIG_PATH`).
 
 **Optional, auto-detected:** `libavif-dev` (AVIF images — it pulls in a
 full AV1 decoder for a format that is rare on the web, so

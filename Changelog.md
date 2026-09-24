@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* `meson setup` now says whether the libcurl it builds against can open
+  WebSockets, under Features in its summary, and warns when it cannot.
+  WebSocket needs libcurl's `ws`/`wss` protocols, built in by default
+  only from curl 8.11; Ubuntu 24.04's libcurl 8.5 lacks them, so a
+  browser built there throws on `new WebSocket()`. README and the build
+  guide now say so plainly.
 * On Linux the sandbox no longer lets the browser read other programs'
   files in your home directory. It granted read access to all of
   `~/.config`, `~/.local/share` and `~/.cache` -- other browsers'
