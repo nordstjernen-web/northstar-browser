@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.10:
 =======
+* Northstar builds again against a shared lexbor library, as MSYS2
+  ships it. The character-encoding tables were placed in static
+  initializers, which a DLL-imported symbol cannot be, so the build
+  stopped; they are now looked up when first needed.
 * A change to a page no longer breaks every paragraph into lines again.
   The layout tree is rebuilt on each change, and with it every text
   run's measurement, so a counter updating on a page of 400 cards spent

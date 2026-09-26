@@ -30,51 +30,86 @@ typedef enum {
 struct ns_encoding {
     lxb_encoding_t id;
     ns_encoding_kind kind;
-    const lxb_encoding_single_index_t *single;
 };
 
 static const ns_encoding ns_encodings[] = {
-    { LXB_ENCODING_UTF_8, NS_KIND_UTF8, NULL },
-    { LXB_ENCODING_IBM866, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_ibm866 },
-    { LXB_ENCODING_ISO_8859_2, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_2 },
-    { LXB_ENCODING_ISO_8859_3, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_3 },
-    { LXB_ENCODING_ISO_8859_4, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_4 },
-    { LXB_ENCODING_ISO_8859_5, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_5 },
-    { LXB_ENCODING_ISO_8859_6, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_6 },
-    { LXB_ENCODING_ISO_8859_7, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_7 },
-    { LXB_ENCODING_ISO_8859_8, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_8 },
-    { LXB_ENCODING_ISO_8859_8_I, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_8 },
-    { LXB_ENCODING_ISO_8859_10, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_10 },
-    { LXB_ENCODING_ISO_8859_13, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_13 },
-    { LXB_ENCODING_ISO_8859_14, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_14 },
-    { LXB_ENCODING_ISO_8859_15, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_15 },
-    { LXB_ENCODING_ISO_8859_16, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_iso_8859_16 },
-    { LXB_ENCODING_KOI8_R, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_koi8_r },
-    { LXB_ENCODING_KOI8_U, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_koi8_u },
-    { LXB_ENCODING_MACINTOSH, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_macintosh },
-    { LXB_ENCODING_WINDOWS_874, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_874 },
-    { LXB_ENCODING_WINDOWS_1250, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1250 },
-    { LXB_ENCODING_WINDOWS_1251, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1251 },
-    { LXB_ENCODING_WINDOWS_1252, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1252 },
-    { LXB_ENCODING_WINDOWS_1253, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1253 },
-    { LXB_ENCODING_WINDOWS_1254, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1254 },
-    { LXB_ENCODING_WINDOWS_1255, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1255 },
-    { LXB_ENCODING_WINDOWS_1256, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1256 },
-    { LXB_ENCODING_WINDOWS_1257, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1257 },
-    { LXB_ENCODING_WINDOWS_1258, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_windows_1258 },
-    { LXB_ENCODING_X_MAC_CYRILLIC, NS_KIND_SINGLE_BYTE, lxb_encoding_single_index_x_mac_cyrillic },
-    { LXB_ENCODING_GBK, NS_KIND_GB18030, NULL },
-    { LXB_ENCODING_GB18030, NS_KIND_GB18030, NULL },
-    { LXB_ENCODING_BIG5, NS_KIND_BIG5, NULL },
-    { LXB_ENCODING_EUC_JP, NS_KIND_EUC_JP, NULL },
-    { LXB_ENCODING_ISO_2022_JP, NS_KIND_ISO_2022_JP, NULL },
-    { LXB_ENCODING_SHIFT_JIS, NS_KIND_SHIFT_JIS, NULL },
-    { LXB_ENCODING_EUC_KR, NS_KIND_EUC_KR, NULL },
-    { LXB_ENCODING_REPLACEMENT, NS_KIND_REPLACEMENT, NULL },
-    { LXB_ENCODING_UTF_16BE, NS_KIND_UTF16BE, NULL },
-    { LXB_ENCODING_UTF_16LE, NS_KIND_UTF16LE, NULL },
-    { LXB_ENCODING_X_USER_DEFINED, NS_KIND_X_USER_DEFINED, NULL },
+    { LXB_ENCODING_UTF_8, NS_KIND_UTF8 },
+    { LXB_ENCODING_IBM866, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_2, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_3, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_4, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_5, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_6, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_7, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_8, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_8_I, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_10, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_13, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_14, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_15, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_ISO_8859_16, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_KOI8_R, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_KOI8_U, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_MACINTOSH, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_874, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1250, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1251, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1252, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1253, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1254, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1255, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1256, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1257, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_WINDOWS_1258, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_X_MAC_CYRILLIC, NS_KIND_SINGLE_BYTE },
+    { LXB_ENCODING_GBK, NS_KIND_GB18030 },
+    { LXB_ENCODING_GB18030, NS_KIND_GB18030 },
+    { LXB_ENCODING_BIG5, NS_KIND_BIG5 },
+    { LXB_ENCODING_EUC_JP, NS_KIND_EUC_JP },
+    { LXB_ENCODING_ISO_2022_JP, NS_KIND_ISO_2022_JP },
+    { LXB_ENCODING_SHIFT_JIS, NS_KIND_SHIFT_JIS },
+    { LXB_ENCODING_EUC_KR, NS_KIND_EUC_KR },
+    { LXB_ENCODING_REPLACEMENT, NS_KIND_REPLACEMENT },
+    { LXB_ENCODING_UTF_16BE, NS_KIND_UTF16BE },
+    { LXB_ENCODING_UTF_16LE, NS_KIND_UTF16LE },
+    { LXB_ENCODING_X_USER_DEFINED, NS_KIND_X_USER_DEFINED },
 };
+
+static const lxb_encoding_single_index_t *
+single_byte_index(lxb_encoding_t id)
+{
+    switch (id) {
+    case LXB_ENCODING_IBM866: return lxb_encoding_single_index_ibm866;
+    case LXB_ENCODING_ISO_8859_2: return lxb_encoding_single_index_iso_8859_2;
+    case LXB_ENCODING_ISO_8859_3: return lxb_encoding_single_index_iso_8859_3;
+    case LXB_ENCODING_ISO_8859_4: return lxb_encoding_single_index_iso_8859_4;
+    case LXB_ENCODING_ISO_8859_5: return lxb_encoding_single_index_iso_8859_5;
+    case LXB_ENCODING_ISO_8859_6: return lxb_encoding_single_index_iso_8859_6;
+    case LXB_ENCODING_ISO_8859_7: return lxb_encoding_single_index_iso_8859_7;
+    case LXB_ENCODING_ISO_8859_8: return lxb_encoding_single_index_iso_8859_8;
+    case LXB_ENCODING_ISO_8859_8_I: return lxb_encoding_single_index_iso_8859_8;
+    case LXB_ENCODING_ISO_8859_10: return lxb_encoding_single_index_iso_8859_10;
+    case LXB_ENCODING_ISO_8859_13: return lxb_encoding_single_index_iso_8859_13;
+    case LXB_ENCODING_ISO_8859_14: return lxb_encoding_single_index_iso_8859_14;
+    case LXB_ENCODING_ISO_8859_15: return lxb_encoding_single_index_iso_8859_15;
+    case LXB_ENCODING_ISO_8859_16: return lxb_encoding_single_index_iso_8859_16;
+    case LXB_ENCODING_KOI8_R: return lxb_encoding_single_index_koi8_r;
+    case LXB_ENCODING_KOI8_U: return lxb_encoding_single_index_koi8_u;
+    case LXB_ENCODING_MACINTOSH: return lxb_encoding_single_index_macintosh;
+    case LXB_ENCODING_WINDOWS_874: return lxb_encoding_single_index_windows_874;
+    case LXB_ENCODING_WINDOWS_1250: return lxb_encoding_single_index_windows_1250;
+    case LXB_ENCODING_WINDOWS_1251: return lxb_encoding_single_index_windows_1251;
+    case LXB_ENCODING_WINDOWS_1252: return lxb_encoding_single_index_windows_1252;
+    case LXB_ENCODING_WINDOWS_1253: return lxb_encoding_single_index_windows_1253;
+    case LXB_ENCODING_WINDOWS_1254: return lxb_encoding_single_index_windows_1254;
+    case LXB_ENCODING_WINDOWS_1255: return lxb_encoding_single_index_windows_1255;
+    case LXB_ENCODING_WINDOWS_1256: return lxb_encoding_single_index_windows_1256;
+    case LXB_ENCODING_WINDOWS_1257: return lxb_encoding_single_index_windows_1257;
+    case LXB_ENCODING_WINDOWS_1258: return lxb_encoding_single_index_windows_1258;
+    case LXB_ENCODING_X_MAC_CYRILLIC: return lxb_encoding_single_index_x_mac_cyrillic;
+    default: return lxb_encoding_single_index_windows_1252;
+    }
+}
 
 static const struct {
     const char *label;
@@ -318,21 +353,26 @@ typedef enum {
     NS_INDEX_BIG5,
 } ns_index_id;
 
-static const struct {
-    const lxb_codepoint_t *map;
-    gsize size;
-} ns_indexes[] = {
-    [NS_INDEX_JIS0208] = { lxb_encoding_multi_jis0208_map,
-                           G_N_ELEMENTS(lxb_encoding_multi_jis0208_map) },
-    [NS_INDEX_JIS0212] = { lxb_encoding_multi_jis0212_map,
-                           G_N_ELEMENTS(lxb_encoding_multi_jis0212_map) },
-    [NS_INDEX_EUC_KR]  = { lxb_encoding_multi_euc_kr_map,
-                           G_N_ELEMENTS(lxb_encoding_multi_euc_kr_map) },
-    [NS_INDEX_GB18030] = { lxb_encoding_multi_gb18030_map,
-                           G_N_ELEMENTS(lxb_encoding_multi_gb18030_map) },
-    [NS_INDEX_BIG5]    = { lxb_encoding_multi_big5_map,
-                           G_N_ELEMENTS(lxb_encoding_multi_big5_map) },
+static const gsize ns_index_sizes[] = {
+    [NS_INDEX_JIS0208] = G_N_ELEMENTS(lxb_encoding_multi_jis0208_map),
+    [NS_INDEX_JIS0212] = G_N_ELEMENTS(lxb_encoding_multi_jis0212_map),
+    [NS_INDEX_EUC_KR] = G_N_ELEMENTS(lxb_encoding_multi_euc_kr_map),
+    [NS_INDEX_GB18030] = G_N_ELEMENTS(lxb_encoding_multi_gb18030_map),
+    [NS_INDEX_BIG5] = G_N_ELEMENTS(lxb_encoding_multi_big5_map),
 };
+
+static const lxb_codepoint_t *
+index_map(ns_index_id id)
+{
+    switch (id) {
+    case NS_INDEX_JIS0208: return lxb_encoding_multi_jis0208_map;
+    case NS_INDEX_JIS0212: return lxb_encoding_multi_jis0212_map;
+    case NS_INDEX_EUC_KR: return lxb_encoding_multi_euc_kr_map;
+    case NS_INDEX_GB18030: return lxb_encoding_multi_gb18030_map;
+    case NS_INDEX_BIG5: return lxb_encoding_multi_big5_map;
+    }
+    return lxb_encoding_multi_jis0208_map;
+}
 
 #define NS_EOS (-1)
 
@@ -377,8 +417,8 @@ struct ns_decoder {
 static guint32
 index_code_point(ns_index_id id, guint pointer)
 {
-    if (pointer >= ns_indexes[id].size) return 0;
-    lxb_codepoint_t cp = ns_indexes[id].map[pointer];
+    if (pointer >= ns_index_sizes[id]) return 0;
+    lxb_codepoint_t cp = index_map(id)[pointer];
     return cp == LXB_ENCODING_ERROR_CODEPOINT ? 0 : cp;
 }
 
@@ -577,7 +617,7 @@ single_byte_step(ns_decoder *d, int byte, guint32 *out)
         out[0] = (guint32)byte;
         return 1;
     }
-    lxb_codepoint_t cp = d->enc->single[byte - 0x80].codepoint;
+    lxb_codepoint_t cp = single_byte_index(d->enc->id)[byte - 0x80].codepoint;
     if (cp == LXB_ENCODING_ERROR_CODEPOINT) return NS_STEP_ERROR;
     out[0] = cp;
     return 1;
@@ -1128,7 +1168,7 @@ rev_map_build(ns_rev_id id, ns_rev_map *map)
         [NS_REV_BIG5] = NS_INDEX_BIG5,
     };
     ns_index_id src = sources[id];
-    gsize size = ns_indexes[src].size;
+    gsize size = ns_index_sizes[src];
     ns_rev_entry *all = g_new(ns_rev_entry, size);
     gsize n = 0;
     for (guint32 p = 0; p < size; p++) {
@@ -1198,8 +1238,9 @@ encode_two(guint32 lead, guint32 trail, guint8 *out)
 static int
 encode_single_byte(const ns_encoder *e, guint32 cp, guint8 *out)
 {
+    const lxb_encoding_single_index_t *index = single_byte_index(e->enc->id);
     for (guint b = 0; b < 128; b++)
-        if (e->enc->single[b].codepoint == cp) return encode_byte(b + 0x80, out);
+        if (index[b].codepoint == cp) return encode_byte(b + 0x80, out);
     return NS_ENCODE_ERROR;
 }
 
