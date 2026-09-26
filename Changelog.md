@@ -2,6 +2,9 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.11:
+=======
+
 1.0.10:
 =======
 * `align-content` works on block containers, as CSS Box Alignment
