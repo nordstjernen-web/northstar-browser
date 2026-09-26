@@ -59,6 +59,20 @@
   </branding>
 
   <releases>
+    <release version="1.0.10" date="2026-09-26">
+      <description>
+        <p>Media, performance and standards release.</p>
+        <ul>
+          <li>audio and video are real HTMLMediaElements driven by the in-process mixer and the MPEG-1 frame timeline.</li>
+          <li>Only changed regions are repainted, scrolling shifts the previous frame, and text measurements and blurred box shadows are cached across relayouts.</li>
+          <li>Every WHATWG Encoding Standard encoding is decoded and encoded in-tree, for pages, TextDecoder, XMLHttpRequest, links and form submissions.</li>
+          <li>WebCrypto gains Ed448 and X448 and follows the specification's algorithm normalization; structuredClone and Blob follow their specifications.</li>
+          <li>Cross-origin frames and images are isolated more strictly, and every subresource request passes a single policy check.</li>
+          <li>dialog, popover, invoker commands, autofocus, image maps and srcset follow the HTML standard.</li>
+          <li>Grid, table, flexbox, float, cascade and align-content layout fixes, and textareas sized by CSS height.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.9" date="2026-09-20">
       <description>
         <p>Security, chrome and layout release.</p>

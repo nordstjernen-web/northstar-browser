@@ -1,3 +1,13 @@
+northstar (1.0.10-1) unstable; urgency=medium
+
+  * New upstream release: real audio and video media elements, incremental
+    repainting and cached text measurement, Encoding Standard decoders and
+    encoders, Ed448/X448 in WebCrypto, stricter cross-origin frame and
+    image isolation, dialog and popover per the HTML standard, and grid,
+    table, flexbox and cascade fixes.
+
+ -- Andreas Røsdal <andreas.rosdal@gmail.com>  Sat, 26 Sep 2026 12:00:00 +0200
+
 northstar (1.0.9-1) unstable; urgency=medium
 
   * New upstream release: a full-screen notice, address bar suggestions,
