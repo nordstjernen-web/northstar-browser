@@ -2,6 +2,9 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.12:
+=======
+
 1.0.11:
 =======
 * The Microsoft Store package is built under the Northstar Browser
