@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.12:
 =======
+* The Windows build compiles against newer GLib, whose `g_renew` declares
+  a local that shadowed one in the CSS candidate collector under
+  `-Werror=shadow`.
 
 1.0.11:
 =======
