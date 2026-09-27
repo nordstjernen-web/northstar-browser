@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.11:
 =======
+* The Microsoft Store package is built under the Northstar Browser
+  product identity (`29567TheFreecivProject.NorthstarBrowser`, published
+  by Nordstjernen), without the phone identity of the old reservation.
 
 1.0.10:
 =======
