@@ -12,6 +12,9 @@ This repository is the open-source GPL edition of the
 Northstar is licensed under the GNU General Public License, version 3 or
 later.
 
+**Download for Windows:** Northstar Browser is available from the
+[Microsoft Store](https://apps.microsoft.com/detail/9P39ZB79JV0T).
+
 ![Best viewed in Northstar](docs/best-viewed-in-northstar.gif)
 
 **Web standards:** Behaviour is measured against the specification text,
