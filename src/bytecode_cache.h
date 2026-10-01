@@ -10,12 +10,6 @@
 
 G_BEGIN_DECLS
 
-#ifdef NS_QUICKJS_ORIGINAL
-#define NS_BYTECODE_CACHE_DIR_NAME "jsbc-quickjs"
-#else
-#define NS_BYTECODE_CACHE_DIR_NAME "jsbc"
-#endif
-
 void          ns_bytecode_cache_init(void);
 void          ns_bytecode_cache_shutdown(void);
 

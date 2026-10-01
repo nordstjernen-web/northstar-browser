@@ -47,6 +47,19 @@ JSValue ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
 bool ns_quickjs_is_array(JSValueConst val);
 bool ns_quickjs_is_error(JSValueConst val);
 
+static inline bool
+ns_quickjs_is_big_int(JSValueConst val)
+{
+    int tag = JS_VALUE_GET_TAG(val);
+    return tag == JS_TAG_BIG_INT || tag == JS_TAG_SHORT_BIG_INT;
+}
+
+static inline bool
+JS_IsStrictEqual(JSContext *ctx, JSValueConst op1, JSValueConst op2)
+{
+    return JS_StrictEq(ctx, op1, op2);
+}
+
 #define JS_NewContext(rt) ns_quickjs_new_context(rt)
 #define JS_NewArrayBuffer(ctx, buf, len, max_len, realloc_func, opaque, is_shared) \
     ns_quickjs_new_array_buffer((ctx), (buf), (len), (max_len), (realloc_func), \
@@ -55,8 +68,7 @@ bool ns_quickjs_is_error(JSValueConst val);
     ns_quickjs_new_typed_array((ctx), (argc), (argv), (type))
 #define JS_IsArray(val) ns_quickjs_is_array(val)
 #define JS_IsError(val) ns_quickjs_is_error(val)
-#define JS_IsBigInt(val) (JS_IsBigInt)(NULL, (val))
-#define JS_IsStrictEqual(ctx, op1, op2) JS_StrictEq((ctx), (op1), (op2))
+#define JS_IsBigInt(val) ns_quickjs_is_big_int(val)
 
 const char *JS_GetVersion(void);
 bool JS_IsArrayBuffer(JSValueConst obj);

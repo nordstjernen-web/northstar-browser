@@ -47,50 +47,86 @@ int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
 #include <stdarg.h>
 #include <string.h>
 
-static JSClassID ns_quickjs_array_class;
-static JSClassID ns_quickjs_error_class;
-static JSClassID ns_quickjs_array_buffer_class;
-static JSClassID ns_quickjs_typed_array_first_class;
-static JSClassID ns_quickjs_typed_array_last_class;
+typedef struct ns_quickjs_class_ids {
+    JSClassID array;
+    JSClassID error;
+    JSClassID array_buffer;
+    JSClassID typed_array[JS_TYPED_ARRAY_FLOAT64 + 1];
+} ns_quickjs_class_ids;
+
+typedef struct ns_quickjs_array_buffer_owner {
+    JSReallocArrayBufferDataFunc *realloc_func;
+    void *opaque;
+} ns_quickjs_array_buffer_owner;
+
+static ns_quickjs_class_ids ns_quickjs_classes;
 
 static JSClassID ns_quickjs_class_of(JSContext *ctx, JSValue val)
 {
     JSClassID id = JS_GetClassID(val);
+    if (JS_IsException(val))
+        JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, val);
     return id;
 }
 
-static JSClassID ns_quickjs_typed_array_class(JSContext *ctx, JSValueConst buffer,
-                                              JSTypedArrayEnum type)
+static void ns_quickjs_learn_class_ids(JSContext *ctx)
 {
-    return ns_quickjs_class_of(ctx, JS_NewTypedArray(ctx, 1, &buffer, type));
-}
-
-static void ns_quickjs_probe_classes(JSContext *ctx)
-{
-    static const uint8_t bytes[8];
-    ns_quickjs_array_class = ns_quickjs_class_of(ctx, JS_NewArray(ctx));
-    ns_quickjs_error_class = ns_quickjs_class_of(ctx, JS_NewError(ctx));
-    JSValue buffer = JS_NewArrayBufferCopy(ctx, bytes, sizeof(bytes));
-    ns_quickjs_array_buffer_class = JS_GetClassID(buffer);
-    ns_quickjs_typed_array_first_class =
-        ns_quickjs_typed_array_class(ctx, buffer, JS_TYPED_ARRAY_UINT8C);
-    ns_quickjs_typed_array_last_class =
-        ns_quickjs_typed_array_class(ctx, buffer, JS_TYPED_ARRAY_FLOAT64);
-    JS_FreeValue(ctx, buffer);
-    g_assert(ns_quickjs_typed_array_last_class - ns_quickjs_typed_array_first_class ==
-             JS_TYPED_ARRAY_FLOAT64 - JS_TYPED_ARRAY_UINT8C);
+    static const uint8_t one_byte;
+    ns_quickjs_class_ids *ids = &ns_quickjs_classes;
+    ids->array = ns_quickjs_class_of(ctx, JS_NewArray(ctx));
+    ids->error = ns_quickjs_class_of(ctx, JS_NewError(ctx));
+    ids->array_buffer = ns_quickjs_class_of(ctx, JS_NewArrayBufferCopy(ctx, &one_byte, 1));
+    JSValue zero = JS_NewInt32(ctx, 0);
+    for (int type = JS_TYPED_ARRAY_UINT8C; type <= JS_TYPED_ARRAY_FLOAT64; type++)
+        ids->typed_array[type] = ns_quickjs_class_of(ctx,
+            JS_NewTypedArray(ctx, 1, &zero, (JSTypedArrayEnum)type));
 }
 
 JSContext *ns_quickjs_new_context(JSRuntime *rt)
 {
-    static gsize probed;
+    static gsize learned;
     JSContext *ctx = (JS_NewContext)(rt);
-    if (ctx && g_once_init_enter(&probed)) {
-        ns_quickjs_probe_classes(ctx);
-        g_once_init_leave(&probed, 1);
+    if (ctx && g_once_init_enter(&learned)) {
+        ns_quickjs_learn_class_ids(ctx);
+        g_once_init_leave(&learned, 1);
     }
     return ctx;
+}
+
+static bool ns_quickjs_has_class(JSValueConst val, JSClassID class_id)
+{
+    return class_id != JS_INVALID_CLASS_ID && JS_GetClassID(val) == class_id;
+}
+
+bool ns_quickjs_is_array(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.array);
+}
+
+bool ns_quickjs_is_error(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.error);
+}
+
+bool JS_IsArrayBuffer(JSValueConst obj)
+{
+    return ns_quickjs_has_class(obj, ns_quickjs_classes.array_buffer);
+}
+
+int JS_GetTypedArrayType(JSValueConst obj)
+{
+    for (int type = JS_TYPED_ARRAY_UINT8C; type <= JS_TYPED_ARRAY_FLOAT64; type++)
+        if (ns_quickjs_has_class(obj, ns_quickjs_classes.typed_array[type]))
+            return type;
+    return -1;
+}
+
+static void ns_quickjs_array_buffer_free(JSRuntime *rt, void *opaque, void *ptr)
+{
+    ns_quickjs_array_buffer_owner *owner = opaque;
+    owner->realloc_func(rt, owner->opaque, ptr, 0);
+    g_free(owner);
 }
 
 JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
@@ -98,48 +134,34 @@ JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
                                     JSReallocArrayBufferDataFunc *realloc_func,
                                     void *opaque, bool is_shared)
 {
-    if (max_len != 0 || realloc_func)
-        return JS_ThrowInternalError(ctx, "resizable external ArrayBuffer is not supported");
-    return (JS_NewArrayBuffer)(ctx, buf, len, NULL, opaque, is_shared);
+    if (max_len != 0)
+        return JS_ThrowRangeError(ctx, "resizable external ArrayBuffer is not supported");
+    if (!realloc_func)
+        return (JS_NewArrayBuffer)(ctx, buf, len, NULL, opaque, is_shared);
+    ns_quickjs_array_buffer_owner *owner = g_new(ns_quickjs_array_buffer_owner, 1);
+    owner->realloc_func = realloc_func;
+    owner->opaque = opaque;
+    JSValue buffer = (JS_NewArrayBuffer)(ctx, buf, len, ns_quickjs_array_buffer_free,
+                                         owner, is_shared);
+    if (JS_IsException(buffer))
+        g_free(owner);
+    return buffer;
 }
 
 JSValue ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
                                    JSTypedArrayEnum type)
 {
     JSValueConst padded[3] = { JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED };
-    for (int i = 0; i < argc && i < 3; i++)
+    if (argc >= 3)
+        return (JS_NewTypedArray)(ctx, argc, argv, type);
+    for (int i = 0; i < argc; i++)
         padded[i] = argv[i];
-    return (JS_NewTypedArray)(ctx, argc < 3 ? 3 : argc, argc < 3 ? padded : argv,
-                              type);
-}
-
-bool ns_quickjs_is_array(JSValueConst val)
-{
-    return JS_GetClassID(val) == ns_quickjs_array_class;
-}
-
-bool ns_quickjs_is_error(JSValueConst val)
-{
-    return JS_GetClassID(val) == ns_quickjs_error_class;
+    return (JS_NewTypedArray)(ctx, 3, padded, type);
 }
 
 const char *JS_GetVersion(void)
 {
     return NS_QUICKJS_VERSION;
-}
-
-bool JS_IsArrayBuffer(JSValueConst obj)
-{
-    return JS_GetClassID(obj) == ns_quickjs_array_buffer_class;
-}
-
-int JS_GetTypedArrayType(JSValueConst obj)
-{
-    JSClassID id = JS_GetClassID(obj);
-    if (id == JS_INVALID_CLASS_ID || id < ns_quickjs_typed_array_first_class ||
-        id > ns_quickjs_typed_array_last_class)
-        return -1;
-    return (int)(id - ns_quickjs_typed_array_first_class) + JS_TYPED_ARRAY_UINT8C;
 }
 
 JSValue JS_NewUint8ArrayCopy(JSContext *ctx, const uint8_t *buf, size_t len)
@@ -207,31 +229,36 @@ JSValue JS_ThrowDOMException(JSContext *ctx, const char *name, const char *fmt, 
         JS_FreeValue(ctx, args[1]);
     } else {
         error = JS_NewError(ctx);
-        JS_DefinePropertyValueStr(ctx, error, "name", JS_NewString(ctx, name),
-                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-        JS_DefinePropertyValueStr(ctx, error, "message", JS_NewString(ctx, message),
-                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        if (!JS_IsException(error)) {
+            JS_DefinePropertyValueStr(ctx, error, "name", JS_NewString(ctx, name),
+                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+            JS_DefinePropertyValueStr(ctx, error, "message", JS_NewString(ctx, message),
+                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        }
     }
     JS_FreeValue(ctx, ctor);
     g_free(message);
     if (JS_IsException(error))
-        return error;
+        return JS_EXCEPTION;
     return JS_Throw(ctx, error);
 }
 
 JSValue JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
                      size_t input_len, JSEvalOptions *options)
 {
-    const char *filename = options->filename ? options->filename : "<input>";
-    size_t lead = options->line_num > 1 ? (size_t)options->line_num - 1 : 0;
-    if (lead == 0)
+    const char *filename = options->filename ? options->filename : "<unnamed>";
+    size_t lines = options->line_num > 1 ? (size_t)options->line_num - 1 : 0;
+    gboolean hashbang = input_len >= 2 && input[0] == '#' && input[1] == '!';
+    if (lines == 0 || hashbang || input_len > G_MAXSIZE - lines - 1)
         return JS_EvalThis(ctx, this_obj, input, input_len, filename,
                            options->eval_flags);
-    char *shifted = g_malloc(lead + input_len + 1);
-    memset(shifted, '\n', lead);
-    memcpy(shifted + lead, input, input_len);
-    shifted[lead + input_len] = '\0';
-    JSValue result = JS_EvalThis(ctx, this_obj, shifted, lead + input_len, filename,
+    char *shifted = g_try_malloc(lines + input_len + 1);
+    if (!shifted)
+        return JS_ThrowOutOfMemory(ctx);
+    memset(shifted, '\n', lines);
+    memcpy(shifted + lines, input, input_len);
+    shifted[lines + input_len] = '\0';
+    JSValue result = JS_EvalThis(ctx, this_obj, shifted, lines + input_len, filename,
                                  options->eval_flags);
     g_free(shifted);
     return result;

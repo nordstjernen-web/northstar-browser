@@ -18,6 +18,9 @@ libcurl, carrying no upstream browser engine.
 - **[compliance.md](compliance.md)** — where the engine stands against the
   HTML and CSS specifications, how to reproduce the web-platform-tests
   scores, and the known structural gaps.
+- **[quickjs.md](quickjs.md)** — the choice between quickjs-ng (the
+  default) and Fabrice Bellard's original QuickJS (`-Djs_engine=quickjs`):
+  how the original is built and patched, the API adapter, and what differs.
 - **[cve-2026-85046.md](cve-2026-85046.md)** — why the actively exploited
   V8 JIT type confusion CVE-2026-85046 does not apply to Northstar: no V8,
   no JIT, no elements-kind maps, no write barriers.

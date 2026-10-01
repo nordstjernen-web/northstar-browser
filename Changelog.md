@@ -8,9 +8,16 @@ Significant changes in each release:
   quickjs-ng: `meson setup builddir -Djs_engine=quickjs`. quickjs-ng stays
   the default. The original is fetched from its 2026-06-04 release and
   built from a meson file Northstar supplies; the quickjs-ng API calls it
-  lacks are provided in `src/quickjs_compat.c` over its public API, so
-  neither engine is patched. Each engine keeps its compiled-script cache
-  in its own directory, and `about:northstar` names the engine in use.
+  lacks are provided in `src/quickjs_compat.c` over its public API. Each
+  engine keeps its compiled-script cache apart, and `about:northstar`
+  names the engine in use. `docs/quickjs.md` lists what differs.
+* On the original QuickJS, `Array.prototype.sort` calls the comparator for
+  identical values, as every other engine does. Without that, jQuery 4's
+  `uniqueSort` kept duplicates, so `$(a).add(a)` and `.closest()` returned
+  the same element twice. The adapter also pads short argument lists to
+  `JS_NewTypedArray`, whose constructor reads three arguments regardless,
+  and learns each typed-array class on its own instead of assuming they
+  are consecutive.
 * The Windows build compiles against newer GLib, whose `g_renew` declares
   a local that shadowed one in the CSS candidate collector under
   `-Werror=shadow`.

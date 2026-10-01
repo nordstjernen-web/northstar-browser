@@ -354,11 +354,14 @@ and separable:
   on Windows, drops the threads dependency and builds the `qjs` and
   `qjsc` tools without PIE.
 
+- `subprojects/packagefiles/quickjs-sort-calls-comparator.patch` — for the
+  optional original QuickJS: `Array.prototype.sort` calls the comparator
+  for identical values too, as other engines do.
+
 Meson applies them to the fetched sources at `meson setup`; the wrap
 files name them under `diff_files`. The original QuickJS ships no meson
-build, so `subprojects/packagefiles/quickjs/meson.build` is laid over its
-checkout (`patch_directory` in `subprojects/quickjs.wrap`); it adds a
-build file and changes no QuickJS source. A system lexbor or quickjs-ng, which
+build, so `subprojects/packagefiles/quickjs/meson.build` is also laid over
+its checkout (`patch_directory` in `subprojects/quickjs.wrap`). A system lexbor or quickjs-ng, which
 the build prefers when it finds one, does not carry them. pl_mpeg carries its local change in
 the vendored copy directly. ns-pango is a public fork whose full history
 is at the URL in its section above. Northstar's own source is
