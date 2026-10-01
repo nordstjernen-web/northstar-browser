@@ -32,6 +32,33 @@ Significant changes in each release:
 * The Windows build compiles against newer GLib, whose `g_renew` declares
   a local that shadowed one in the CSS candidate collector under
   `-Werror=shadow`.
+* `window[name]` returns the WindowProxy of the child frame whose `name`
+  attribute matches, before falling back to an element id, as the HTML
+  named-access rules specify. From inside a frame, `parent.frames.length`
+  counted the calling frame's own children and `parent[i]`,
+  `parent.frames[name]` and `parent.foo` looked in the frame's document,
+  so sibling frames could not reach each other to `postMessage`. Named
+  and indexed access now resolves in the document of the window being
+  read: `frames[0].foo` finds the frame's element, and a frame's
+  `window.foo` never finds one in its parent. A cross-origin parent
+  exposes its child frames by index and name, each behind the same
+  cross-origin WindowProxy, while every other property still throws
+  `SecurityError`.
+* Inline event-handler content attributes inside a frame, such as
+  `<body onload="...">`, are compiled and run in that frame's realm. They
+  ran in the top-level page's realm, so they could not see functions
+  declared by the frame's own scripts and failed with `ReferenceError`.
+  A frame whose markup carries such handlers gets its own realm even
+  without a `<script>`, and an `<iframe onload="...">` attribute runs in
+  the page that holds the iframe.
+* A frame's `window.name` starts as its `<iframe name>`, and a same-origin
+  frame's `window.frameElement` is its `<iframe>`. Both were empty, so a
+  frame could not find itself in `parent.frames`.
+* `postMessage` into a same-origin frame reports the caller as
+  `event.source`. It reported the receiving frame itself, so replying to
+  `event.source` sent the answer back into the frame instead of to its
+  parent. A message from another origin hands the frame a cross-origin
+  WindowProxy as `event.source` rather than the sender's own window.
 
 1.0.11:
 =======
