@@ -99,6 +99,18 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+### QuickJS — MIT License (optional, `-Djs_engine=quickjs`)
+
+> The original JavaScript engine, linked instead of quickjs-ng when the
+> build selects it.
+> <https://github.com/bellard/quickjs>
+>
+> Copyright (c) 2017-2021 Fabrice Bellard
+> Copyright (c) 2017-2021 Charlie Gordon
+
+Licensed under the MIT License. See the quickjs-ng section above for the
+license text (same license).
+
 ### WebAssembly Micro Runtime (WAMR) — Apache License 2.0 with LLVM exceptions
 
 > WebAssembly runtime. Vendored in `src/wamr/`.
@@ -343,7 +355,10 @@ and separable:
   `qjsc` tools without PIE.
 
 Meson applies them to the fetched sources at `meson setup`; the wrap
-files name them under `diff_files`. A system lexbor or quickjs-ng, which
+files name them under `diff_files`. The original QuickJS ships no meson
+build, so `subprojects/packagefiles/quickjs/meson.build` is laid over its
+checkout (`patch_directory` in `subprojects/quickjs.wrap`); it adds a
+build file and changes no QuickJS source. A system lexbor or quickjs-ng, which
 the build prefers when it finds one, does not carry them. pl_mpeg carries its local change in
 the vendored copy directly. ns-pango is a public fork whose full history
 is at the URL in its section above. Northstar's own source is

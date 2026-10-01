@@ -91,7 +91,30 @@ meson compile -C builddir
 |------------|-----------|------------|
 | [lexbor](https://github.com/lexbor/lexbor) — HTML parser and WHATWG URL module | `v3.0.1` | A system lexbor ≥ 3.0.0 is used when `pkg-config` or CMake finds one; otherwise the wrap is cloned and its static library built through meson's CMake module. |
 | [quickjs-ng](https://github.com/quickjs-ng/quickjs) — JavaScript | `v0.17.0` | A system quickjs-ng first, of any version; the wrap as fallback. |
+| [QuickJS](https://github.com/bellard/quickjs) — JavaScript, with `-Djs_engine=quickjs` | the `2026-06-04` release commit | Always the subproject, built by the meson file in `subprojects/packagefiles/quickjs/`; upstream ships none. |
 | [ns-pango](https://github.com/nordstjernen-web/ns-pango) — text itemization, shaping, line breaking | a commit | Always the subproject. There is no system copy to find: the fork renames every symbol precisely so it can coexist with the system Pango that GTK loads. |
+
+## Choosing the JavaScript engine
+
+`-Djs_engine` picks the interpreter: `quickjs-ng` (the default) or
+`quickjs`, Fabrice Bellard's original QuickJS. Only the selected one is
+fetched and built.
+
+```sh
+meson setup builddir -Djs_engine=quickjs
+meson compile -C builddir
+```
+
+The engine is written against the quickjs-ng API. With the original
+QuickJS, `src/quickjs_compat.c` supplies the quickjs-ng calls it lacks
+over its public API, so no engine source is patched. Script error line
+numbers, `structuredClone`, `TextEncoder` and the rest behave alike; what
+differs is each engine's own JavaScript built-ins (quickjs-ng adds, for
+example, `Error.captureStackTrace`, `Array.fromAsync` and explicit
+resource management). The two engines serialize values differently, so
+an IndexedDB written by one build reads back as empty values in the
+other, and each keeps its compiled-script cache in its own directory
+(`jsbc` or `jsbc-quickjs`). `about:northstar` names the engine in use.
 
 WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree and need no network.
 No in-tree fork of any browser engine is carried.

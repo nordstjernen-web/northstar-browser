@@ -45,7 +45,7 @@ ns_bytecode_cache_init(void)
         const ns_config *c = ns_config_get();
         if (!c || c->cache_enabled) {
             const char *base = g_get_user_cache_dir();
-            g_dir = g_build_filename(base, NS_APP_DIR_NAME, "jsbc", NULL);
+            g_dir = g_build_filename(base, NS_APP_DIR_NAME, NS_BYTECODE_CACHE_DIR_NAME, NULL);
             g_mkdir_with_parents(g_dir, 0700);
         }
     }

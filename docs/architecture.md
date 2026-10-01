@@ -169,7 +169,7 @@ run of table-internal siblings.
 | Area | File(s) |
 |------|---------|
 | QuickJS binding, DOM/JS bridge, events, CSSOM, fetch/XHR, storage, most Web APIs | `js.c`, `js_internal.h` |
-| Compatibility shims over the public QuickJS API | `quickjs_compat.c` |
+| Compatibility shims over the public QuickJS API, which also map the quickjs-ng API onto the original QuickJS | `quickjs_compat.c` |
 | Canvas 2D, `Path2D`, `ImageBitmap`, `DOMMatrix` | `js_canvas.c` |
 | `Temporal` | `js_date.c`, `datetime.c` |
 | `Intl` (ECMA-402, without ICU) | `js_intl.c` |
@@ -329,7 +329,8 @@ the page as one long unpaginated sheet.
 ## Third-party components
 
 Fetched by `meson setup` as pinned subprojects: **lexbor** (HTML parsing
-and the WHATWG URL parser — CSS is the engine's own), **quickjs-ng** (JS)
+and the WHATWG URL parser — CSS is the engine's own), **quickjs-ng** (JS;
+`-Djs_engine=quickjs` takes the original **QuickJS** instead)
 and **ns-pango** (text itemization, shaping and line breaking). Vendored
 in-tree: **Wuffs** (images), **pl_mpeg** (MPEG-1 video and MP2 audio),
 **WAMR** (WebAssembly, `src/wamr/`) and **minimp3** (MP3,

@@ -7,7 +7,7 @@
 #define NS_EXT_H
 
 #include <glib.h>
-#include <quickjs.h>
+#include "quickjs_compat.h"
 
 G_BEGIN_DECLS
 

@@ -9,6 +9,7 @@
 #include "procview.h"
 #include "i18n.h"
 #include "bookmarks.h"
+#include "bytecode_cache.h"
 #include "cache.h"
 #include "config.h"
 #include "css.h"
@@ -2447,7 +2448,7 @@ static void
 procapp_clear_http_caches(gboolean at_exit)
 {
     static const char *const object_dirs[] = {
-        "cache", "jsbc", "webfonts", "frames",
+        "cache", NS_BYTECODE_CACHE_DIR_NAME, "webfonts", "frames",
     };
     static const char *const stream_dirs[] = { "msaudio" };
     for (gsize i = 0; i < G_N_ELEMENTS(object_dirs); i++)

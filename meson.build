@@ -261,7 +261,15 @@ if not liblexbor.found()
   liblexbor = lexbor_subproject.dependency('lexbor_static').as_system('system')
 endif
 
-libquickjs = dependency('quickjs-ng', fallback: ['quickjs-ng', 'qjs_dep'])
+js_engine = get_option('js_engine')
+if js_engine == 'quickjs'
+  libquickjs = subproject('quickjs').get_variable('quickjs_dep')
+  add_project_arguments('-DNS_QUICKJS_ORIGINAL=1',
+                        '-DNS_QUICKJS_VERSION="' + libquickjs.version() + '"',
+                        language: 'c')
+else
+  libquickjs = dependency('quickjs-ng', fallback: ['quickjs-ng', 'qjs_dep'])
+endif
 
 wasm_unsupported_cpu = host_machine.cpu_family() == 'x86'
 if get_option('wasm').enabled() and wasm_unsupported_cpu
@@ -369,5 +377,6 @@ install_data(
 
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
+summary({'JavaScript engine': js_engine + ' ' + libquickjs.version()}, section: 'Features')
 
 subdir('src')

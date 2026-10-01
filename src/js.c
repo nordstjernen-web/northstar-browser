@@ -17,7 +17,6 @@
 #include <gio/gio.h>
 #include <glib/gstdio.h>
 #include <ns-pango/pangocairo.h>
-#include <quickjs.h>
 
 #include "quickjs_compat.h"
 
@@ -21199,7 +21198,7 @@ ns_worker_console_assert(JSContext *ctx, JSValueConst this_val,
 
 static void
 ns_worker_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
-                                    JSValueConst reason, bool is_handled,
+                                    JSValueConst reason, ns_js_bool is_handled,
                                     void *opaque)
 {
     (void)promise; (void)opaque;
@@ -45330,7 +45329,7 @@ ns_pending_rejection_free(gpointer data)
 
 static void
 ns_js_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
-                                JSValueConst reason, bool is_handled,
+                                JSValueConst reason, ns_js_bool is_handled,
                                 void *opaque)
 {
     (void)opaque;

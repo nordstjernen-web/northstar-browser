@@ -10,7 +10,7 @@
 #include <glib.h>
 #include <cairo.h>
 #include <ns-pango/pango.h>
-#include <quickjs.h>
+#include "quickjs_compat.h"
 
 #include "js.h"
 #include "audio/audio.h"

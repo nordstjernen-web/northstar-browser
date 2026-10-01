@@ -2834,7 +2834,7 @@ about_diagnostics_html(void)
                                                        : NULL);
         diag_kv(s, "User agent", ua);
     }
-    diag_kv(s, "JavaScript (QuickJS)", JS_GetVersion());
+    diag_kv(s, "JavaScript (" NS_QUICKJS_ENGINE_NAME ")", JS_GetVersion());
 #ifdef NS_LEXBOR_VERSION
     diag_kv(s, "HTML / CSS (lexbor)", NS_LEXBOR_VERSION);
 #endif

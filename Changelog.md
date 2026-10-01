@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.12:
 =======
+* Northstar can be built on Fabrice Bellard's original QuickJS instead of
+  quickjs-ng: `meson setup builddir -Djs_engine=quickjs`. quickjs-ng stays
+  the default. The original is fetched from its 2026-06-04 release and
+  built from a meson file Northstar supplies; the quickjs-ng API calls it
+  lacks are provided in `src/quickjs_compat.c` over its public API, so
+  neither engine is patched. Each engine keeps its compiled-script cache
+  in its own directory, and `about:northstar` names the engine in use.
 * The Windows build compiles against newer GLib, whose `g_renew` declares
   a local that shadowed one in the CSS candidate collector under
   `-Werror=shadow`.

@@ -162,6 +162,22 @@ the tree carries no patched engine. The shims degrade gracefully
 (e.g. realm lookups resolve to the current realm), which suits this
 single-realm, no-JIT edition.
 
+`-Djs_engine=quickjs` builds on Fabrice Bellard's **original QuickJS**
+instead (`subprojects/quickjs.wrap`, pinned to the 2026-06-04 release
+commit, built by the meson file in `subprojects/packagefiles/quickjs/`,
+since upstream ships none). The meson option defines
+`NS_QUICKJS_ORIGINAL`, and `src/quickjs_compat.h` then maps the
+quickjs-ng API the engine uses onto the original's public API — the
+one-argument `JS_IsArray`/`JS_IsError`/`JS_IsBigInt`, `JS_IsStrictEqual`,
+the typed-array and `Uint8Array` helpers, `JS_ToObject`,
+`JS_ThrowDOMException`, `JS_EvalThis2` (which pads the source with
+newlines to keep the starting line) and the seven-argument
+`JS_NewArrayBuffer`. Keep writing against the quickjs-ng API; when a new
+quickjs-ng-only call is used, add its shim there and build both engines.
+Callbacks whose quickjs-ng signature takes `bool` use `ns_js_bool`, which
+is `JS_BOOL` (`int`) on the original. The Linux CI builds and smoke-tests
+the original QuickJS on Ubuntu 24.04.
+
 ### Text layout: ns-pango
 
 Text is itemized, shaped and broken into lines by

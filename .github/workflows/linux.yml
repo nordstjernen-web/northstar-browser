@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   build:
-    name: gcc on ubuntu-${{ matrix.ubuntu }}
+    name: gcc on ubuntu-${{ matrix.ubuntu }} (${{ matrix.js_engine }})
     runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 30
 
@@ -32,6 +32,12 @@ jobs:
       fail-fast: false
       matrix:
         ubuntu: ['24.04', '26.04']
+        js_engine: ['quickjs-ng']
+        artifact_suffix: ['']
+        include:
+          - ubuntu: '24.04'
+            js_engine: 'quickjs'
+            artifact_suffix: '-quickjs'
 
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -56,9 +62,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
-          key: ccache-linux-${{ matrix.ubuntu }}-gcc-${{ github.sha }}
+          key: ccache-linux-${{ matrix.ubuntu }}-gcc${{ matrix.artifact_suffix }}-${{ github.sha }}
           restore-keys: |
-            ccache-linux-${{ matrix.ubuntu }}-gcc-
+            ccache-linux-${{ matrix.ubuntu }}-gcc${{ matrix.artifact_suffix }}-
 
       - name: Configure ccache
         run: |
@@ -84,7 +90,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          meson setup builddir --werror
+          meson setup builddir --werror -Djs_engine=${{ matrix.js_engine }}
           meson compile -C builddir 2>&1 | tee build.log
 
       - name: ccache stats
@@ -112,7 +118,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: build-log-${{ matrix.ubuntu }}-gcc
+          name: build-log-${{ matrix.ubuntu }}-gcc${{ matrix.artifact_suffix }}
           path: build.log
           if-no-files-found: ignore
           retention-days: 14
@@ -120,7 +126,7 @@ jobs:
       - name: Upload northstar binary
         uses: actions/upload-artifact@v7
         with:
-          name: northstar-linux-${{ matrix.ubuntu }}-gcc
+          name: northstar-linux-${{ matrix.ubuntu }}-gcc${{ matrix.artifact_suffix }}
           path: builddir/src/gtk/northstar
           if-no-files-found: error
           retention-days: 14

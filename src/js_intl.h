@@ -5,7 +5,7 @@
 #ifndef NS_JS_INTL_H
 #define NS_JS_INTL_H
 
-#include <quickjs.h>
+#include "quickjs_compat.h"
 
 void ns_js_intl_install(JSContext *ctx, JSValueConst global);
 
