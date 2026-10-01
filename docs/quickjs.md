@@ -52,8 +52,16 @@ if it no longer applies, and rerun the checks below.
 
 Engine code includes `"quickjs_compat.h"`, never `<quickjs.h>`. With
 quickjs-ng it only adds the few shims upstream lacks: realm lookup,
-ArrayBuffer repointing and class-ID allocation. With the original engine (`NS_QUICKJS_ORIGINAL`, set by
-`meson.build`) it also supplies the quickjs-ng API the engine uses:
+ArrayBuffer repointing, class-ID allocation, `JS_GetBoxedPrimitiveKind`
+(answered from the class IDs of boxed primitives that the wrapped
+`JS_NewContext` learns in the first context) and
+`JS_EvalHidingSource`/`JS_CompileHidingSource`, which compile the engine's
+own scripts without source text so their functions print as native code.
+On quickjs-ng the compiled script is written with
+`JS_WRITE_OBJ_STRIP_SOURCE` and read back; on the original engine it is
+compiled under `JS_SetStripInfo(rt, JS_STRIP_SOURCE)`. With the original
+engine (`NS_QUICKJS_ORIGINAL`, set by `meson.build`) it also supplies the
+quickjs-ng API the engine uses:
 
 - **Different signatures.** `JS_IsArray`, `JS_IsError` and `JS_IsBigInt`
   take no context in quickjs-ng; `JS_NewArrayBuffer` takes a realloc-style
@@ -65,8 +73,9 @@ ArrayBuffer repointing and class-ID allocation. With the original engine (`NS_QU
 - **Argument padding.** The original typed-array constructor reads three
   arguments whatever `argc` says, so `JS_NewTypedArray` is wrapped to pad
   short argument lists with `undefined`.
-- **quickjs-ng additions.** `JS_IsArrayBuffer` and `JS_GetTypedArrayType`
-  compare the learned class IDs. `JS_NewUint8ArrayCopy`, `JS_GetUint8Array`,
+- **quickjs-ng additions.** `JS_IsArrayBuffer`, `JS_GetTypedArrayType`,
+  `JS_IsDate`, `JS_IsRegExp`, `JS_IsMap`, `JS_IsSet`, `JS_IsDataView` and
+  `JS_IsProxy` compare the learned class IDs. `JS_NewUint8ArrayCopy`, `JS_GetUint8Array`,
   `JS_ToObject`, `JS_ThrowDOMException`, `JS_IsStrictEqual` and
   `JS_GetVersion` are rebuilt from public calls. `JS_EvalThis2` pads the
   source with newlines, because the original `JS_EvalThis` takes no starting

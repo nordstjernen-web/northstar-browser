@@ -155,7 +155,8 @@ dependency. The browser includes only the public `<quickjs.h>`. A
 few browser-side entry points that stock quickjs-ng does not expose —
 caller/function realm lookup, module private values, an
 import-attributes module loader, in-place ArrayBuffer repointing,
-UTF-16 string creation, native-function marking, and
+UTF-16 string creation, native-function marking, compiling engine
+scripts without source text, boxed-primitive kinds, and
 `JS_ThrowDOMException` — are provided as thin compatibility shims over
 the public API in `src/quickjs_compat.c` (`src/quickjs_compat.h`), so
 the tree carries no patched engine. The shims degrade gracefully

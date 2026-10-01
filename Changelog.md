@@ -4,6 +4,85 @@ Significant changes in each release:
 
 1.0.12:
 =======
+* `postMessage` and `MessagePort` messages are delivered as tasks after
+  the sender's microtasks, as in other browsers. They ran as microtasks,
+  so a message arrived before promise callbacks queued ahead of it, and a
+  handler that posted back to itself kept `setTimeout` callbacks from
+  ever running.
+* A frame's `WindowProxy` stays the same object across its first
+  navigation. A `contentWindow` read while an iframe still showed its
+  initial `about:blank` now reaches the document that loads into it:
+  same-origin frames reuse the initial window, as the HTML spec
+  requires, and messages posted through the early reference to a
+  cross-origin frame are delivered. The link between a frame's outer
+  window and its realm global moved out of JavaScript-visible
+  properties, which had let a cross-origin frame reach its embedder's
+  window.
+* Structured data sent between windows, frames and `MessageChannel`
+  ports arrives as objects of the receiving realm: `e.data instanceof
+  Array`, `Map`, `Date` and `Uint8Array` hold in the receiver. Messages
+  crossing a frame boundary carried the sender's objects, and `Map`,
+  `Set`, `Date`, `RegExp`, `DataView` and boxed primitives from another
+  realm degraded to plain objects. The original QuickJS gains
+  `JS_IsDate`, `JS_IsRegExp`, `JS_IsMap`, `JS_IsSet`, `JS_IsDataView` and
+  `JS_IsProxy` in `src/quickjs_compat.c`, and both engines
+  `JS_GetBoxedPrimitiveKind`, all from class ids learned on the first
+  context.
+* Frames have their own document lifecycle and geometry. Each frame's
+  `document.readyState` runs `loading` -> `interactive` -> `complete`
+  with `readystatechange` at each step instead of reporting the top
+  page's state. `innerWidth`/`innerHeight` in a laid-out frame are the
+  frame's size rather than the top window's, element rects and
+  `elementFromPoint` inside a frame are measured from the iframe's
+  content box rather than its border box.
+* A message from a cross-origin frame to its parent has the frame's
+  WindowProxy as `event.source`, the same object as
+  `iframe.contentWindow`, so pages can tell which frame spoke.
+* Rounded solid borders whose sides differ in color, or have some sides
+  transparent, follow the corner radius instead of being stroked as
+  straight lines with square corners.
+* Events carry the interface their type implies: window, port and
+  worker messages are `MessageEvent`s, and `error`, `hashchange`,
+  `popstate`, `storage`, `pageshow`/`pagehide` and promise rejection
+  events get their own interfaces. Port messages were plain objects.
+  `isTrusted` lives on each event, not on `Event.prototype`, so objects
+  deriving from `Event.prototype` can define their own.
+* Objects the engine hands to pages inherit from their WebIDL interface
+  and report its name: `new FileReader() instanceof FileReader`,
+  `new AbortController()`, `FormData` and `AudioContext` instances, and
+  `Object.prototype.toString.call(localStorage)` is `[object Storage]`.
+  Canvas contexts, `TextMetrics`, `ImageData`, `MediaQueryList`,
+  `FontFaceSet`, `location`, `screen` and the `navigator` sub-objects
+  follow suit, and `Location`, `Screen`, `BarProp`,
+  `CustomElementRegistry` and the other interfaces they belong to exist
+  as globals. Constructors made by `ns_make_ctor` give a plain object
+  they return `new.target.prototype`, through a trampoline instead of an
+  engine change.
+* Functions the engine implements in JavaScript print as native code,
+  `function animate() { [native code] }`, like every other built-in, and
+  carry their member name instead of an internal one (`elementAnimate`).
+  About a thousand engine functions printed their source. Engine
+  scripts are compiled without source text through
+  `JS_EvalHidingSource`/`JS_CompileHidingSource` in
+  `src/quickjs_compat.c`: quickjs-ng round-trips the compiled script
+  through `JS_WriteObject` with `JS_WRITE_OBJ_STRIP_SOURCE`, the original
+  QuickJS compiles it under `JS_STRIP_SOURCE`. Page scripts, inline
+  handlers, string timers and `new Function` keep their source. The
+  compiled-script cache format version is bumped.
+* Inside a frame, `window`, `location` and `history` report themselves
+  as `[object Window]`, `[object Location]` and `[object History]`, as on
+  the top-level page.
+* `performance.getEntries`, `getEntriesByType` and `getEntriesByName`
+  return empty lists in workers instead of throwing, and `clearMarks` and
+  `clearMeasures` exist. A frame's document has `domain`, `timeline`,
+  `pictureInPictureEnabled`, `adoptedStyleSheets`, `xmlEncoding` and
+  `xmlStandalone` like the top-level document.
+* Dedicated workers have `Intl` and `crossOriginIsolated`. A worker that
+  read its time zone or formatted a number threw `ReferenceError`.
+* Numbers the engine formats keep a `.` decimal point under locales that
+  use a comma, such as Turkish or Norwegian. The engine runs inside the
+  GTK shell, whose startup applies the OS locale, so `Accept-Language`
+  went out as `tr-TR,tr;q=0,9`, an invalid header.
 * Northstar can be built on Fabrice Bellard's original QuickJS instead of
   quickjs-ng: `meson setup builddir -Djs_engine=quickjs`. quickjs-ng stays
   the default. The original is fetched from its 2026-06-04 release and
