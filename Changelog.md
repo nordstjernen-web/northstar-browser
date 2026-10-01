@@ -4,6 +4,18 @@ Significant changes in each release:
 
 1.0.12:
 =======
+* A frame's origin comes from the URL the engine loaded it from, not from
+  its `location.origin`, which the frame could redefine to send messages
+  under another origin and receive messages posted to that origin.
+* A frame's document no longer shows through its iframe element:
+  `textContent`, `innerHTML`, `outerHTML`, `getHTML()`, `XMLSerializer`,
+  `TreeWalker`, `hasChildNodes()` and `cloneNode(true)` treat the iframe as
+  having only its fallback content, as `childNodes` already did. They used
+  to include the frame's text and markup, even for a cross-origin frame.
+* Deep recursion in a worker throws a stack overflow error (`RangeError`
+  on quickjs-ng, `InternalError` on the original QuickJS) instead of
+  crashing the browser: the worker's JavaScript stack limit now fits its
+  thread's stack, which on macOS is 512 KiB.
 * Message ports work across frames: a frame that receives a transferred
   `MessagePort` gets its message events and `ports` in its own realm,
   `addEventListener` on a port accepts `{handleEvent}` objects, and the

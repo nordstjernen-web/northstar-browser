@@ -1498,6 +1498,7 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
                                          NS_NODE_PI);
     if (deep && out) {
         for (const ns_node *c = src->first_child; c; c = c->next_sibling) {
+            if (ns_node_is_embedded_doc(c)) continue;
             ns_node *cc = ns_node_clone_depth(c, TRUE, depth + 1);
             if (cc) ns_node_append_child(out, cc);
         }
@@ -1632,8 +1633,8 @@ ns_input_is_one_line_text(const ns_node *n)
     return TRUE;
 }
 
-static gboolean
-ns_node_is_embedded_document(const ns_node *n)
+gboolean
+ns_node_is_embedded_doc(const ns_node *n)
 {
     return n && n->kind == NS_NODE_DOCUMENT && n->parent != NULL;
 }
@@ -1654,7 +1655,7 @@ ns_node_find_first_element_depth(const ns_node *root, const char *tag, int depth
     if (ns_node_is_element_named(root, tag))
         return (ns_node *)root;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_embedded_document(c)) continue;
+        if (ns_node_is_embedded_doc(c)) continue;
         ns_node *m = ns_node_find_first_element_depth(c, tag, depth + 1);
         if (m) return m;
     }
@@ -1692,7 +1693,7 @@ ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
     }
     if (ns_node_is_element_named(root, "template")) return NULL;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_embedded_document(c)) continue;
+        if (ns_node_is_embedded_doc(c)) continue;
         ns_node *m = ns_node_find_by_id_depth(c, id, depth + 1);
         if (m) return m;
     }
@@ -1757,7 +1758,7 @@ static void
 ns_doc_id_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_node_is_embedded_document(n)) return;
+    if (n != doc && ns_node_is_embedded_doc(n)) return;
     if (n != doc && ns_node_is_shadow_root_marked(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(n, "id");
@@ -1786,7 +1787,7 @@ static void
 ns_doc_id_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_node_is_embedded_document(n)) return;
+    if (n != doc && ns_node_is_embedded_doc(n)) return;
     if (n != doc && ns_node_is_shadow_root_marked(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *eid = ns_element_get_attr(n, "id");
@@ -2106,7 +2107,7 @@ static void
 ns_doc_class_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_node_is_embedded_document(n)) return;
+    if (n != doc && ns_node_is_embedded_doc(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *cls = ns_element_get_attr(n, "class");
         if (cls && *cls) ns_doc_class_index_register(doc, cls, n);
@@ -2120,7 +2121,7 @@ static void
 ns_doc_class_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_node_is_embedded_document(n)) return;
+    if (n != doc && ns_node_is_embedded_doc(n)) return;
     if (n->kind == NS_NODE_ELEMENT) {
         const char *cls = ns_element_get_attr(n, "class");
         if (cls && *cls) ns_doc_class_index_unregister(doc, cls, n);
@@ -2209,7 +2210,7 @@ static void
 ns_doc_tag_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_node_is_embedded_document(n)) return;
+    if (n != doc && ns_node_is_embedded_doc(n)) return;
     if (n->kind == NS_NODE_ELEMENT && n->name)
         ns_doc_tag_index_add_single(doc->tag_index, n->name, n);
     if (ns_node_is_element_named(n, "template")) return;
@@ -2221,7 +2222,7 @@ static void
 ns_doc_tag_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
     if (!n || depth >= NS_DOM_MAX_DEPTH) return;
-    if (n != doc && ns_node_is_embedded_document(n)) return;
+    if (n != doc && ns_node_is_embedded_doc(n)) return;
     if (n->kind == NS_NODE_ELEMENT && n->name)
         ns_doc_tag_index_remove_single(doc->tag_index, n->name, n);
     if (ns_node_is_element_named(n, "template")) return;
@@ -2760,7 +2761,7 @@ collect_all_text(const ns_node *n, GString *out, int depth)
         return;
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        if (!ns_node_is_shadow_root_marked(c))
+        if (!ns_node_is_shadow_root_marked(c) && !ns_node_is_embedded_doc(c))
             collect_all_text(c, out, depth + 1);
 }
 
@@ -2913,7 +2914,7 @@ serialize_node_opts(const ns_node *n, GString *out, gboolean include_self,
     if (shadow && ns_shadow_root_included(shadow, opts))
         serialize_shadow_template(shadow, out, depth, opts);
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c == shadow)
+        if (c == shadow || ns_node_is_embedded_doc(c))
             continue;
         if (raw_text && c->kind == NS_NODE_TEXT)
             g_string_append(out, c->text ? c->text : "");
@@ -2945,7 +2946,7 @@ ns_node_inner_html(const ns_node *root)
     const ns_node *shadow = ns_serialize_shadow_child(root);
     if (root)
         for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
-            if (c == shadow) continue;
+            if (c == shadow || ns_node_is_embedded_doc(c)) continue;
             if (raw_text && c->kind == NS_NODE_TEXT)
                 g_string_append(out, c->text ? c->text : "");
             else
@@ -2968,7 +2969,7 @@ ns_node_get_html(const ns_node *root, const ns_html_ser_opts *opts)
         serialize_shadow_template(shadow, out, 0, opts);
     if (root)
         for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
-            if (c == shadow) continue;
+            if (c == shadow || ns_node_is_embedded_doc(c)) continue;
             if (raw_text && c->kind == NS_NODE_TEXT)
                 g_string_append(out, c->text ? c->text : "");
             else
@@ -3311,7 +3312,8 @@ xml_serialize_node(const ns_node *n, GString *out, const char *parent_ns,
     }
     g_string_append_c(out, '>');
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        xml_serialize_node(c, out, child_default, prefix_index, depth + 1);
+        if (!ns_node_is_embedded_doc(c))
+            xml_serialize_node(c, out, child_default, prefix_index, depth + 1);
     g_string_append(out, "</");
     if (prefix) {
         g_string_append(out, prefix);
