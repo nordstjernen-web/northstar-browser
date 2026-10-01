@@ -24,20 +24,14 @@ permissions:
 
 jobs:
   build:
-    name: gcc on ubuntu-${{ matrix.ubuntu }} (${{ matrix.js_engine }})
+    name: gcc on ubuntu-${{ matrix.ubuntu }}
     runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 30
 
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: ['24.04', '26.04']
-        js_engine: ['quickjs-ng']
-        artifact_suffix: ['']
-        include:
-          - ubuntu: '24.04'
-            js_engine: 'quickjs'
-            artifact_suffix: '-quickjs'
+        ubuntu: ['26.04']
 
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -62,9 +56,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
-          key: ccache-linux-${{ matrix.ubuntu }}-gcc${{ matrix.artifact_suffix }}-${{ github.sha }}
+          key: ccache-linux-${{ matrix.ubuntu }}-gcc-${{ github.sha }}
           restore-keys: |
-            ccache-linux-${{ matrix.ubuntu }}-gcc${{ matrix.artifact_suffix }}-
+            ccache-linux-${{ matrix.ubuntu }}-gcc-
 
       - name: Configure ccache
         run: |
@@ -90,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          meson setup builddir --werror -Djs_engine=${{ matrix.js_engine }}
+          meson setup builddir --werror
           meson compile -C builddir 2>&1 | tee build.log
 
       - name: ccache stats
@@ -115,11 +109,7 @@ jobs:
         run: |
           set -o pipefail
           ./builddir/src/gtk/northstar --headless --dump=text about:northstar > about-js.txt
-          if [ "${{ matrix.js_engine }}" = quickjs ]; then
-            grep -A1 -xF 'JavaScript (QuickJS)' about-js.txt | grep -qxF "$(cat subprojects/quickjs/VERSION)"
-          else
-            grep -qxF 'JavaScript (quickjs-ng)' about-js.txt
-          fi
+          grep -qxF 'JavaScript (quickjs-ng)' about-js.txt
           ./builddir/src/gtk/northstar --headless --dump=text --settle-ms=300 \
             'data:text/html,<p id="a">before</p><script>var a=document.getElementById("a");var n=0;[1,1].sort(function(){n++;return 0});a.textContent="js-dom-ok "+(6*7)+" "+(2n**65n)+" "+structuredClone([1,[2]])[1][0]+" enc="+new TextEncoder().encode("h\u00e9").length+" sortcmp="+n;Promise.resolve().then(function(){a.textContent+=" js-microtask-ok"});setTimeout(function(){a.textContent+=" js-timer-ok"},50);</script>' \
             > js-page.txt
@@ -136,7 +126,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: build-log-${{ matrix.ubuntu }}-gcc${{ matrix.artifact_suffix }}
+          name: build-log-${{ matrix.ubuntu }}-gcc
           path: build.log
           if-no-files-found: ignore
           retention-days: 14
@@ -144,7 +134,7 @@ jobs:
       - name: Upload northstar binary
         uses: actions/upload-artifact@v7
         with:
-          name: northstar-linux-${{ matrix.ubuntu }}-gcc${{ matrix.artifact_suffix }}
+          name: northstar-linux-${{ matrix.ubuntu }}-gcc
           path: builddir/src/gtk/northstar
           if-no-files-found: error
           retention-days: 14

@@ -20,7 +20,7 @@ is fetched and built.
 | Version | v0.17.0 | release 2026-06-04, pinned by commit |
 | Local patches | Windows link fix | `Array.prototype.sort` always calls the comparator |
 | `about:northstar` | `JavaScript (quickjs-ng) 0.17.0` | `JavaScript (QuickJS) 2026-06-04` |
-| CI | every workflow | the `quickjs` job of `linux.yml` (Ubuntu 24.04) |
+| CI | every workflow | none; build it locally (see below) |
 
 Both builds carry the same Web API surface. The engine — `src/js.c` and its
 satellites — is written against the quickjs-ng API; the original engine gets

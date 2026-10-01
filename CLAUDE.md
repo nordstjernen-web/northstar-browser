@@ -171,9 +171,9 @@ calls its comparator). The meson option defines `NS_QUICKJS_ORIGINAL`, and
 the original's public API. Keep writing against the quickjs-ng API; when a
 new quickjs-ng-only call is used, add its shim to `src/quickjs_compat.c`
 and build both engines. Callbacks whose quickjs-ng signature takes `bool`
-use `ns_js_bool`, which is `JS_BOOL` (`int`) on the original. The Linux CI
-builds and smoke-tests the original QuickJS on Ubuntu 24.04.
-`docs/quickjs.md` describes the adapter and the known differences.
+use `ns_js_bool`, which is `JS_BOOL` (`int`) on the original. CI does not
+build the original QuickJS, so build both engines locally when touching the
+adapter. `docs/quickjs.md` describes the adapter and the known differences.
 
 ### Text layout: ns-pango
 

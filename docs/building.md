@@ -40,8 +40,8 @@ macOS and Windows it is unused and the syscall filter is a no-op.
 
 The text stack has version floors set by ns-pango: GLib ≥ 2.80,
 HarfBuzz ≥ 8.3, fontconfig ≥ 2.15, Cairo ≥ 1.18 and FriBidi ≥ 1.0.6.
-They are what Ubuntu 24.04 ships, the oldest system CI builds on; older
-distributions (Debian 12, for one) need newer copies of those libraries.
+They are what Ubuntu 24.04 ships; older distributions (Debian 12, for
+one) need newer copies of those libraries.
 GTK must be ≥ 4.14 and libcurl ≥ 8.5. With a libcurl older than 8.11 the
 build warns that WebSocket is unavailable unless that libcurl was built
 with WebSocket support.
