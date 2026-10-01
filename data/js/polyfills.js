@@ -607,6 +607,15 @@
             !!global.__ndMediaSourceTypeSupported(String(type || ''));
     }
 
+    function ndBufferSourceBytes(data) {
+        if (ArrayBuffer.isView(data))
+            return blobBufferBytes(data.buffer, data.byteOffset, data.byteLength);
+        if (data instanceof ArrayBuffer)
+            return blobBufferBytes(data, 0, data.byteLength);
+        throw new TypeError("Failed to execute 'appendBuffer' on 'SourceBuffer': " +
+                            "parameter 1 is not of type '(ArrayBuffer or ArrayBufferView)'");
+    }
+
 
     function MediaSource() {
         if (!(this instanceof MediaSource)) return new MediaSource();
@@ -748,6 +757,7 @@
         get: function () { return this._buffered; }
     });
     SourceBuffer.prototype.appendBuffer = function (data) {
+        var copy = ndBufferSourceBytes(data);
         if (this._removed || !this._mediaSource ||
             this._mediaSource.readyState === 'closed' || this.updating)
             throw ndMseError('InvalidStateError');
@@ -755,9 +765,6 @@
             this._mediaSource.readyState = 'open';
             ndFireEvent(this._mediaSource, 'sourceopen');
         }
-        var bytes = blobPartBytes(data);
-        var copy = new Uint8Array(bytes.length);
-        copy.set(bytes);
         if (this._bytes + copy.length > 64 * 1024 * 1024)
             throw ndMseError('QuotaExceededError');
         this.updating = true;

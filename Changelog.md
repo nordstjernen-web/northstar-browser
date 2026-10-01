@@ -59,6 +59,11 @@ Significant changes in each release:
   `event.source` sent the answer back into the frame instead of to its
   parent. A message from another origin hands the frame a cross-origin
   WindowProxy as `event.source` rather than the sender's own window.
+* `SourceBuffer.appendBuffer()` accepts data again. It still called a
+  helper that the Blob rewrite removed, so every append threw
+  `ReferenceError` and no byte reached the native stream. It now copies
+  the `ArrayBuffer` or view it is given and throws `TypeError` for
+  anything else, before the state checks, as WebIDL requires.
 
 1.0.11:
 =======
