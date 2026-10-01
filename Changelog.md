@@ -64,6 +64,11 @@ Significant changes in each release:
   `ReferenceError` and no byte reached the native stream. It now copies
   the `ArrayBuffer` or view it is given and throws `TypeError` for
   anything else, before the state checks, as WebIDL requires.
+* `animation` and `transition` set to a CSS-wide keyword (`inherit`,
+  `initial`, `unset`, `revert`, `revert-layer`) give that keyword to
+  every longhand. The shorthand expansion read the keyword as an
+  animation list, which crashed the renderer on pages such as YouTube
+  and made `animation: inherit` compute to `none`.
 
 1.0.11:
 =======
