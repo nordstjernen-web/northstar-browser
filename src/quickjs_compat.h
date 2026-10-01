@@ -28,6 +28,8 @@ JSContext *ns_quickjs_new_context(JSRuntime *rt);
 #define JS_NewContext(rt) ns_quickjs_new_context(rt)
 
 int JS_GetBoxedPrimitiveKind(JSValueConst val);
+bool JS_IsRunningScript(JSContext *ctx);
+JSContext *JS_GetPendingJobRealm(JSRuntime *rt);
 
 #ifdef NS_QUICKJS_ORIGINAL
 
@@ -86,6 +88,7 @@ bool JS_IsMap(JSValueConst val);
 bool JS_IsSet(JSValueConst val);
 bool JS_IsDataView(JSValueConst val);
 bool JS_IsProxy(JSValueConst val);
+int JS_FreezeObject(JSContext *ctx, JSValueConst obj);
 int JS_GetTypedArrayType(JSValueConst obj);
 JSValue JS_NewUint8ArrayCopy(JSContext *ctx, const uint8_t *buf, size_t len);
 uint8_t *JS_GetUint8Array(JSContext *ctx, size_t *psize, JSValueConst obj);

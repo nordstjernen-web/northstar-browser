@@ -115,6 +115,7 @@ struct ns_js {
     char         *doc_charset;
     ns_node       *current_doc;
     const ns_node *main_document;
+    gpointer       realm_scope_base;
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;

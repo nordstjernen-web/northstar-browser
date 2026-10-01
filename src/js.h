@@ -167,6 +167,7 @@ ns_fetch_policy *ns_js_fetch_policy(ns_js *js, const ns_node *node);
 void     ns_media_scan(ns_js *js, ns_node *doc, const char *base_url);
 void     ns_js_suspend_media(ns_js *js);
 void     ns_js_set_frame_time(ns_js *js, gint64 frame_time_us);
+gboolean ns_js_needs_tick(const ns_js *js);
 
 void ns_js_dump_stats(ns_js *js, GString *out);
 

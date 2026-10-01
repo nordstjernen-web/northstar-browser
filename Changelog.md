@@ -4,6 +4,50 @@ Significant changes in each release:
 
 1.0.12:
 =======
+* Message ports work across frames: a frame that receives a transferred
+  `MessagePort` gets its message events and `ports` in its own realm,
+  `addEventListener` on a port accepts `{handleEvent}` objects, and the
+  handlers run against the frame's document. Exceptions thrown by port
+  handlers and by window `on<event>` handlers now reach `onerror` and
+  `error` listeners instead of being dropped.
+* `XMLHttpRequest`, `FileReader`, `Worker`, `WebSocket` and `EventSource`
+  events, observer callbacks and the load events of images created from
+  script run against the document of the frame whose handler they call,
+  so a frame's relative URLs no longer resolve against the parent page.
+  Promise reactions keep running against the document that is current
+  when the microtask queue drains: neither stock quickjs-ng nor the
+  original QuickJS tells which realm a pending job belongs to.
+* Events inside a frame reach that frame's window: window listeners and
+  `window.onclick`-style handlers see clicks, pointer and key events,
+  `DOMContentLoaded` and bubbling custom events, and a frame's `load`
+  event fires once with the document as its target. A frame's events
+  no longer run the parent window's `on<event>` handlers.
+* When the browser dispatches an event, such as a user click or a port
+  message, microtasks queued by one listener run before the next
+  listener, as in other browsers.
+* Trusted mouse and pointer events are `MouseEvent`/`PointerEvent`s of the
+  target's realm, with frame-relative `clientX`/`clientY`, `pageX`/`pageY`,
+  `offsetX`/`offsetY`, `view` and `timeStamp`.
+* The window keeps being ticked while a `requestIdleCallback`, a posted
+  message or a script-started image load is waiting.
+* `window.postMessage` throws `SyntaxError` for an unparseable target
+  origin and defaults to `"/"` when none is given; messages to and from a
+  frame sandboxed without `allow-same-origin` use the opaque origin
+  `"null"`; message events target the receiving window and carry a
+  frozen `ports` array from the receiving realm.
+* `window.postMessage(message, [port])` with an array as the second
+  argument follows the `(message, options)` overload, as WebIDL overload
+  resolution requires: the array is read as an options dictionary, so
+  nothing is transferred. It was taken as a transfer list, so a library
+  that posts `postMessage(token, [channel.port2])` from code shared with
+  workers handed its own port to every `message` listener on the page.
+  Any second argument that is neither an object nor `undefined`/`null`
+  is the target origin, and `postMessage()` with no arguments throws
+  `TypeError`.
+* Aliased built-ins keep their spec names (`String.prototype.trimLeft`
+  is the function named `trimStart`, `URL` stays `URL` beside
+  `webkitURL`), and `Function.prototype.name` is empty again. The `URL`
+  interface is installed after `URLSearchParams`, which it needs.
 * `postMessage` and `MessagePort` messages are delivered as tasks after
   the sender's microtasks, as in other browsers. They ran as microtasks,
   so a message arrived before promise callbacks queued ahead of it, and a
