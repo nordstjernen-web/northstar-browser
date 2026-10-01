@@ -11,6 +11,17 @@ Significant changes in each release:
   lacks are provided in `src/quickjs_compat.c` over its public API. Each
   engine keeps its compiled-script cache apart, and `about:northstar`
   names the engine in use. `docs/quickjs.md` lists what differs.
+* A module script that imports other modules runs again after the page
+  has created an event, posted a message, opened IndexedDB or fetched
+  something. Native code that built those objects assigned `isTrusted`
+  over the read-only accessor on `Event.prototype`, and a fetched
+  response's `body` over the read-only `Response.prototype.body`, ignoring
+  the failure; quickjs-ng kept the error pending and reported it from the
+  next module evaluation as `TypeError: no setter for property`, so the
+  whole module was lost. Each page load also left two such errors behind
+  from start-up: `Event.prototype` was being made its own prototype, and
+  `new URL()` built its `searchParams` before `URLSearchParams` existed.
+  Trusted events keep `isTrusted` true through the accessor.
 * On the original QuickJS, `Array.prototype.sort` calls the comparator for
   identical values, as every other engine does. Without that, jQuery 4's
   `uniqueSort` kept duplicates, so `$(a).add(a)` and `.closest()` returned
