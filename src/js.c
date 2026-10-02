@@ -4273,6 +4273,10 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
             return JS_NewBool(ctx, ns_value_is_attr_node(ctx, argv[0]));
         return JS_FALSE;
     }
+    if (ns_node_is_shadow_root(n))
+        return JS_NewBool(ctx, d->special == NS_INSTOF_NODE ||
+                               d->special == NS_INSTOF_FRAGMENT ||
+                               d->special == NS_INSTOF_SHADOW);
     switch (d->special) {
     case NS_INSTOF_NODE:
         return JS_NewBool(ctx, TRUE);
@@ -24114,6 +24118,24 @@ ns_qcache_clear(ns_js *js)
     js->qcache_next = 0;
 }
 
+static const ns_node *
+ns_dom_tree_parent(const ns_node *n)
+{
+    if (!n || ns_node_is_shadow_root(n) || ns_node_is_embedded_doc(n))
+        return NULL;
+    return n->parent;
+}
+
+static gboolean
+ns_node_in_shadow_tree(const ns_node *n)
+{
+    for (const ns_node *p = n; p; p = p->parent) {
+        if (ns_node_is_shadow_root(p)) return TRUE;
+        if (p->kind == NS_NODE_DOCUMENT) return FALSE;
+    }
+    return FALSE;
+}
+
 static void
 ns_js_index_child_change(ns_js *js, ns_node *parent,
                          ns_node *added, ns_node *removed)
@@ -24210,17 +24232,20 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
         }
     }
     if (doc) {
+        gboolean shadow_scope = ns_node_in_shadow_tree(parent);
         if (removed)
             for (guint i = 0; i < removed->len; i++) {
                 ns_node *n = g_ptr_array_index(removed, i);
-                ns_doc_id_index_subtree_removed   (doc, n);
+                if (!shadow_scope)
+                    ns_doc_id_index_subtree_removed(doc, n);
                 ns_doc_class_index_subtree_removed(doc, n);
                 ns_doc_tag_index_subtree_removed  (doc, n);
             }
         if (added)
             for (guint i = 0; i < added->len; i++) {
                 ns_node *n = g_ptr_array_index(added, i);
-                ns_doc_id_index_subtree_added   (doc, n);
+                if (!shadow_scope)
+                    ns_doc_id_index_subtree_added(doc, n);
                 ns_doc_class_index_subtree_added(doc, n);
                 ns_doc_tag_index_subtree_added  (doc, n);
                 const ns_node *form = ns_form_owner(n, NULL);
@@ -27321,16 +27346,6 @@ ns_current_event_pop(ns_js *js, ns_current_event_guard *g)
     JS_SetPropertyStr(js->ctx, g->global, "event", g->prev);
     JS_FreeValue(js->ctx, g->global);
     g->set = FALSE;
-}
-
-static gboolean
-ns_node_in_shadow_tree(const ns_node *n)
-{
-    for (const ns_node *p = n; p; p = p->parent)
-        if (p->kind == NS_NODE_ELEMENT &&
-            ns_element_get_attr(p, NS_SHADOW_ATTR) != NULL)
-            return TRUE;
-    return FALSE;
 }
 
 static const ns_node *
@@ -31325,8 +31340,11 @@ static JSValue
 ns_element_get_parentElement(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || n->kind == NS_NODE_DOCUMENT) return JS_NULL;
-    if (!n->parent || n->parent->kind != NS_NODE_ELEMENT) return JS_NULL;
+    if (!n || n->kind == NS_NODE_DOCUMENT || ns_node_is_shadow_root(n))
+        return JS_NULL;
+    if (!n->parent || n->parent->kind != NS_NODE_ELEMENT ||
+        ns_node_is_shadow_root(n->parent))
+        return JS_NULL;
     return ns_make_element(ctx, n->parent);
 }
 
@@ -31334,7 +31352,9 @@ static JSValue
 ns_element_get_parentNode(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || n->kind == NS_NODE_DOCUMENT || !n->parent) return JS_NULL;
+    if (!n || n->kind == NS_NODE_DOCUMENT || !n->parent ||
+        ns_node_is_shadow_root(n))
+        return JS_NULL;
     return ns_make_element(ctx, n->parent);
 }
 
@@ -31568,7 +31588,13 @@ ns_collect_by_class(const ns_node *n, const char *cls, gboolean ci,
 static gboolean
 ns_root_uses_doc_index(const ns_node *root, const ns_node *doc)
 {
-    return doc && root && ns_node_ancestor_or_self(root, doc) != NULL;
+    if (!doc || !root) return FALSE;
+    for (const ns_node *p = root; p; p = p->parent) {
+        if (p == doc) return TRUE;
+        if (ns_node_is_embedded_doc(p) || ns_node_is_shadow_root(p))
+            return FALSE;
+    }
+    return FALSE;
 }
 
 static JSValue
@@ -32419,7 +32445,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     if (ns_is_simple_class_selector(sel)) {
         const char *cls = sel + 1;
         int depth = 0;
-        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
+        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT &&
+             !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
             if (ns_element_has_class(cur, cls)) {
                 g_free(sel);
                 return ns_make_element(ctx, cur);
@@ -32430,7 +32457,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     }
     if (ns_is_simple_tag_selector(sel)) {
         int depth = 0;
-        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
+        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT &&
+             !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
             if (cur->name && g_ascii_strcasecmp(cur->name, sel) == 0) {
                 g_free(sel);
                 return ns_make_element(ctx, cur);
@@ -32442,7 +32470,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     if (ns_is_simple_id_selector(sel)) {
         const char *target_id = sel + 1;
         int depth = 0;
-        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
+        for (const ns_node *cur = el; cur && cur->kind == NS_NODE_ELEMENT &&
+             !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH; cur = cur->parent) {
             const char *id = ns_element_get_attr(cur, "id");
             if (id && strcmp(id, target_id) == 0) {
                 g_free(sel);
@@ -32468,7 +32497,8 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
     const ns_node *prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
     const ns_node *cur = el;
     int depth = 0;
-    while (cur && cur->kind == NS_NODE_ELEMENT && depth++ < NS_DOM_MAX_DEPTH) {
+    while (cur && cur->kind == NS_NODE_ELEMENT &&
+             !ns_node_is_shadow_root(cur) && depth++ < NS_DOM_MAX_DEPTH) {
         if (ns_matches_any_selector(sels, cur)) {
             ns_css_set_focus_node(prev_focus);
             ns_css_set_match_scope(prev_scope);
@@ -32496,7 +32526,7 @@ ns_element_contains(JSContext *ctx, JSValueConst this_val,
     if (!el || argc < 1) return JS_FALSE;
     const ns_node *other = ns_unwrap_element(argv[0]);
     if (!other) return JS_FALSE;
-    for (const ns_node *cur = other; cur; cur = cur->parent)
+    for (const ns_node *cur = other; cur; cur = ns_dom_tree_parent(cur))
         if (cur == el) return JS_TRUE;
     return JS_FALSE;
 }
@@ -32667,15 +32697,17 @@ ns_element_compareDocumentPosition(JSContext *ctx, JSValueConst this_val,
     const ns_node *b = ns_unwrap_element(argv[0]);
     if (!b) return JS_NewInt32(ctx, 1);
     if (a == b) return JS_NewInt32(ctx, 0);
-    for (const ns_node *p = a->parent; p; p = p->parent)
+    for (const ns_node *p = ns_dom_tree_parent(a); p; p = ns_dom_tree_parent(p))
         if (p == b) return JS_NewInt32(ctx, 0x02 | 0x08);
-    for (const ns_node *p = b->parent; p; p = p->parent)
+    for (const ns_node *p = ns_dom_tree_parent(b); p; p = ns_dom_tree_parent(p))
         if (p == a) return JS_NewInt32(ctx, 0x04 | 0x10);
     const ns_node *anc_a = a, *anc_b = b;
     GPtrArray *pa = g_ptr_array_new();
     GPtrArray *pb = g_ptr_array_new();
-    for (; anc_a; anc_a = anc_a->parent) g_ptr_array_add(pa, (gpointer)anc_a);
-    for (; anc_b; anc_b = anc_b->parent) g_ptr_array_add(pb, (gpointer)anc_b);
+    for (; anc_a; anc_a = ns_dom_tree_parent(anc_a))
+        g_ptr_array_add(pa, (gpointer)anc_a);
+    for (; anc_b; anc_b = ns_dom_tree_parent(anc_b))
+        g_ptr_array_add(pb, (gpointer)anc_b);
     const ns_node *common = NULL;
     guint ia = pa->len, ib = pb->len;
     while (ia > 0 && ib > 0 && pa->pdata[ia - 1] == pb->pdata[ib - 1]) {
@@ -32701,7 +32733,8 @@ ns_element_get_nodeType(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_NewInt32(ctx, 0);
-    if (el->flags & NS_NODE_FRAGMENT) return JS_NewInt32(ctx, 11);
+    if ((el->flags & NS_NODE_FRAGMENT) || ns_node_is_shadow_root(el))
+        return JS_NewInt32(ctx, 11);
     switch (el->kind) {
         case NS_NODE_ELEMENT: return JS_NewInt32(ctx, 1);
         case NS_NODE_TEXT:
@@ -32719,7 +32752,7 @@ ns_element_get_nodeName(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_NewString(ctx, "#text");
-    if (el->flags & NS_NODE_FRAGMENT)
+    if ((el->flags & NS_NODE_FRAGMENT) || ns_node_is_shadow_root(el))
         return JS_NewString(ctx, "#document-fragment");
     switch (el->kind) {
         case NS_NODE_TEXT:

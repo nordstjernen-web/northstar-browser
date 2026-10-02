@@ -2318,9 +2318,10 @@ ns_node_find_by_id(const ns_node *root, const char *id)
         return found;
     }
     const ns_node *doc = root;
-    while (doc && doc->parent && doc->kind != NS_NODE_DOCUMENT)
+    while (doc && doc->parent && doc->kind != NS_NODE_DOCUMENT &&
+           !ns_node_is_shadow_root_marked(doc))
         doc = doc->parent;
-    if (doc && doc != root && doc->id_index) {
+    if (doc && doc != root && doc->kind == NS_NODE_DOCUMENT && doc->id_index) {
         ns_node *hit = g_hash_table_lookup(doc->id_index, id);
         if (ns_node_id_hit_usable(root, doc, hit, id))
             return hit;
