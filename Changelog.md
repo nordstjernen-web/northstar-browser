@@ -2,6 +2,9 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.13:
+=======
+
 1.0.12:
 =======
 * A page with a few hundred nested elements, or a script that recurses
