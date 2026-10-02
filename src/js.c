@@ -3571,6 +3571,8 @@ ns_invalidate_wrapper(ns_node *n)
         g_hash_table_remove(js->orphan_nodes, n);
     if (js && js->js_image_loads)
         g_hash_table_remove(js->js_image_loads, n);
+    if (js && js->focused_node == n) js->focused_node = NULL;
+    if (js && js->focused_doc == n) js->focused_doc = NULL;
     ns_popover_forget_node(js, n);
     if (js && js->media_players)
         ns_media_node_released(js, n);
@@ -38597,21 +38599,6 @@ ns_node_is_focusable(const ns_node *el)
     return FALSE;
 }
 
-static void
-ns_js_dispatch_focus_event(ns_js *js, const ns_node *target,
-                           const ns_node *related, const char *type,
-                           gboolean bubbles)
-{
-    JSValue event = ns_make_event(js->ctx, type, target);
-    JS_SetPropertyStr(js->ctx, event, "bubbles",
-                      bubbles ? JS_TRUE : JS_FALSE);
-    JS_SetPropertyStr(js->ctx, event, "cancelable", JS_FALSE);
-    JS_SetPropertyStr(js->ctx, event, "composed", JS_TRUE);
-    JS_SetPropertyStr(js->ctx, event, "relatedTarget",
-                      related ? ns_make_element(js->ctx, related) : JS_NULL);
-    ns_js_dispatch_built_event(js, target, type, event, NULL);
-}
-
 static gboolean
 ns_node_accepts_text_entry(const ns_node *el)
 {
@@ -38645,23 +38632,97 @@ ns_js_note_pointer_input(ns_js *js, gboolean pointer)
     if (js) js->pointer_input = pointer;
 }
 
+static ns_node *
+ns_node_owner_doc(const ns_node *n)
+{
+    for (const ns_node *p = n; p; p = p->parent)
+        if (p->kind == NS_NODE_DOCUMENT) return (ns_node *)p;
+    return NULL;
+}
+
+static ns_node *
+ns_js_focused_document(ns_js *js)
+{
+    if (js->focused_doc) return (ns_node *)js->focused_doc;
+    return ns_js_top_document(js->current_doc);
+}
+
+static void
+ns_js_dispatch_focus_event(ns_js *js, const ns_node *target, const char *type,
+                           const ns_node *related)
+{
+    if (js->halted || js->in_pump) return;
+    JSContext *ctx = js->ctx;
+    JSValue event = ns_make_event(ctx, type, target);
+    gboolean bubbles = FALSE, cancelable = FALSE;
+    ns_event_type_init_flags(type, FALSE, &bubbles, &cancelable);
+    JS_SetPropertyStr(ctx, event, "bubbles", JS_NewBool(ctx, bubbles));
+    JS_SetPropertyStr(ctx, event, "cancelable", JS_NewBool(ctx, cancelable));
+    JS_SetPropertyStr(ctx, event, "composed", JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "relatedTarget",
+                      related ? ns_make_element(ctx, related) : JS_NULL);
+    ns_js_dispatch_built_event(js, target, type, event, NULL);
+}
+
+static void
+ns_js_fire_window_focus_event(ns_js *js, ns_node *doc, const char *type)
+{
+    if (!doc || js->halted || js->in_pump) return;
+    JSContext *realm = doc->parent ? ns_js_node_realm_context(js, doc)
+                     : js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    if (!realm) return;
+    ns_realm_scope scope;
+    scope.active = FALSE;
+    if (doc->parent) {
+        if (realm != js->ctx)
+            ns_js_frame_scope_enter(js, realm, doc->parent, &scope);
+    } else {
+        ns_js_realm_scope_enter(js, realm, &scope);
+    }
+    JSValue ev = ns_make_window_event(js->ctx, type);
+    JS_SetPropertyStr(js->ctx, ev, "target",
+                      ns_event_window_for_document(js, doc));
+    JS_SetPropertyStr(js->ctx, ev, "relatedTarget", JS_NULL);
+    ns_js_dispatch_window_only_event(js, doc, type, ev, NULL);
+    ns_js_realm_scope_leave(js, &scope);
+}
+
+static void
+ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
+{
+    if (!js) return;
+    ns_node *old_doc = ns_js_focused_document(js);
+    ns_node *new_doc = el ? ns_node_owner_doc(el) : doc ? doc : old_doc;
+    if (js->focused_node == el && new_doc == old_doc) return;
+    const ns_node *old = js->focused_node;
+    gboolean same_doc = new_doc == old_doc;
+    js->focused_node = NULL;
+    ns_js_update_focus_visible(js);
+    js->mutated = TRUE;
+    if (old) {
+        ns_js_dispatch_focus_event(js, old, "blur", same_doc ? el : NULL);
+        ns_js_dispatch_focus_event(js, old, "focusout", same_doc ? el : NULL);
+        if (js->focused_node) return;
+    }
+    if (!same_doc) {
+        js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
+        ns_js_fire_window_focus_event(js, old_doc, "blur");
+        ns_js_fire_window_focus_event(js, new_doc, "focus");
+        if (js->focused_node) return;
+    }
+    if (!el) return;
+    js->focused_node = el;
+    js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
+    ns_js_update_focus_visible(js);
+    js->focus_nav_start = NULL;
+    ns_js_dispatch_focus_event(js, el, "focus", same_doc ? old : NULL);
+    ns_js_dispatch_focus_event(js, el, "focusin", same_doc ? old : NULL);
+}
+
 void
 ns_js_set_focus(ns_js *js, const ns_node *el)
 {
-    if (!js || js->focused_node == el) return;
-    const ns_node *old = js->focused_node;
-    if (old) {
-        ns_js_dispatch_focus_event(js, old, el, "blur", FALSE);
-        ns_js_dispatch_focus_event(js, old, el, "focusout", TRUE);
-    }
-    js->focused_node = el;
-    if (el) js->focus_nav_start = NULL;
-    ns_js_update_focus_visible(js);
-    js->mutated = TRUE;
-    if (el) {
-        ns_js_dispatch_focus_event(js, el, old, "focus", FALSE);
-        ns_js_dispatch_focus_event(js, el, old, "focusin", TRUE);
-    }
+    ns_js_set_focus_in(js, el, NULL);
 }
 
 void
@@ -38680,7 +38741,7 @@ ns_js_focus_from_pointer(ns_js *js, const ns_node *target)
     const ns_node *focus = NULL;
     for (const ns_node *a = target; a && !focus; a = a->parent)
         if (ns_node_is_focusable(a)) focus = a;
-    ns_js_set_focus(js, focus);
+    ns_js_set_focus_in(js, focus, ns_node_owner_doc(target));
     if (focus || !target) return;
     js->focus_nav_start = target;
     ns_node_arm_js_invalidate((ns_node *)target);
@@ -38819,6 +38880,8 @@ ns_element_focus(JSContext *ctx, JSValueConst this_val,
     if (!el || !js) return JS_UNDEFINED;
     if (ns_element_effectively_inert(el)) return JS_UNDEFINED;
     if (ns_element_effectively_disabled(el)) return JS_UNDEFINED;
+    if (!ns_node_ancestor_or_self(el, ns_js_top_document(js->current_doc)))
+        return JS_UNDEFINED;
     if (ns_node_is_element_named(el, "body")) {
         ns_js_set_focus(js, NULL);
         return JS_UNDEFINED;
@@ -45002,17 +45065,39 @@ ns_document_get_head(JSContext *ctx, JSValueConst this_val)
     return ns_make_element(ctx, head);
 }
 
+static const ns_node *
+ns_js_active_element_in(ns_js *js, const ns_node *doc)
+{
+    const ns_node *n = js->focused_node;
+    if (!n) {
+        const ns_node *fdoc = js->focused_doc;
+        n = fdoc && fdoc != doc ? fdoc->parent : NULL;
+    }
+    while (n) {
+        const ns_node *found = n;
+        const ns_node *p = n->parent;
+        for (; p && p->kind != NS_NODE_DOCUMENT; p = p->parent)
+            if (ns_node_is_shadow_root(p) && p->parent) found = p->parent;
+        if (!p) return NULL;
+        if (p == doc) return found;
+        n = p->parent;
+    }
+    return NULL;
+}
+
 static JSValue
 ns_document_get_activeElement(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
+    ns_node *doc = ns_document_context_node(ctx, this_val);
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->current_doc) return JS_NULL;
+    if (!js || !doc) return JS_NULL;
     if (js->focused_node &&
-        ns_js_node_contains(js->current_doc, js->focused_node))
-        return ns_make_element(ctx, js->focused_node);
-    js->focused_node = NULL;
-    ns_node *body = ns_node_find_first_element(js->current_doc, "body");
+        !ns_node_ancestor_or_self(js->focused_node,
+                                  ns_js_top_document(js->current_doc)))
+        js->focused_node = NULL;
+    const ns_node *active = ns_js_active_element_in(js, doc);
+    if (active) return ns_make_element(ctx, active);
+    ns_node *body = ns_node_find_first_element(doc, "body");
     return ns_make_element(ctx, body);
 }
 
@@ -45235,8 +45320,12 @@ static JSValue
 ns_document_has_focus(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
-    return JS_TRUE;
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *doc = ns_document_context_node(ctx, this_val);
+    if (!js || !doc) return JS_FALSE;
+    return JS_NewBool(ctx, ns_node_ancestor_or_self(ns_js_focused_document(js),
+                                                    doc) != NULL);
 }
 
 static gboolean
@@ -53350,6 +53439,7 @@ ns_js_reset_runtime_state(ns_js *js)
     if (!js) return;
     ns_popover_state_clear(js);
     js->focused_node = NULL;
+    js->focused_doc = NULL;
     ns_storage_free_deferred_events(js);
 
     if (js->slot_assignments)
@@ -53629,6 +53719,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
     js->current_doc = doc;
     js->main_document = doc;
     js->focused_node = NULL;
+    js->focused_doc = NULL;
     js->autofocus_processed = FALSE;
     js->active_modal = NULL;
     ns_dom_set_active_modal(NULL);

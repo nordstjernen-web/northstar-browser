@@ -140,6 +140,7 @@ struct ns_js {
     const void   *box_lookup_pending_root;
     int           box_lookup_pending_count;
     const ns_node *focused_node;
+    const ns_node *focused_doc;
     gboolean      pointer_input;
     gboolean      autofocus_processed;
     const ns_node *active_modal;
