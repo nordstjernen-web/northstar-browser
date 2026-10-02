@@ -10,7 +10,7 @@ though no C++ source is built.
 Debian / Ubuntu:
 
 ```sh
-sudo apt install build-essential pkg-config meson ninja-build cmake \
+sudo apt install build-essential git pkg-config meson ninja-build cmake \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
     libharfbuzz-dev libfribidi-dev libcairo2-dev libfontconfig-dev \
     libfreetype-dev libpsl-dev libsqlite3-dev libseccomp-dev libsdl2-dev \
@@ -20,7 +20,7 @@ sudo apt install build-essential pkg-config meson ninja-build cmake \
 Fedora / RHEL:
 
 ```sh
-sudo dnf install gcc gcc-c++ pkgconf meson ninja-build cmake gtk4-devel \
+sudo dnf install gcc gcc-c++ git pkgconf meson ninja-build cmake gtk4-devel \
     libcurl-devel openssl-devel uchardet-devel harfbuzz-devel \
     fribidi-devel cairo-devel fontconfig-devel freetype-devel \
     libpsl-devel sqlite-devel libseccomp-devel SDL2-devel zlib-devel
@@ -29,7 +29,7 @@ sudo dnf install gcc gcc-c++ pkgconf meson ninja-build cmake gtk4-devel \
 openSUSE:
 
 ```sh
-sudo zypper install gcc gcc-c++ pkgconf meson ninja cmake gtk4-devel \
+sudo zypper install gcc gcc-c++ git pkgconf meson ninja cmake gtk4-devel \
     libcurl-devel libopenssl-devel libuchardet-devel harfbuzz-devel \
     fribidi-devel cairo-devel fontconfig-devel freetype2-devel \
     libpsl-devel sqlite3-devel libseccomp-devel libSDL2-devel zlib-devel
