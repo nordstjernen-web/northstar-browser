@@ -116,7 +116,9 @@ struct ns_js {
     ns_node       *current_doc;
     const ns_node *main_document;
     GHashTable    *frame_urls;
+    GHashTable    *frame_referrers;
     gpointer       realm_scope_base;
+    char         **top_url_slot;
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
