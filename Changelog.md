@@ -4,6 +4,15 @@ Significant changes in each release:
 
 1.0.12:
 =======
+* A page with a few hundred nested elements, or a script that recurses
+  deeply, no longer crashes the browser on macOS. Pages run on the
+  engine thread, which was created with the system's default thread
+  stack -- 512 KB on macOS and 128 KB with musl -- while layout needs a
+  few KB per nesting level and page JavaScript is allowed 5 MB of stack.
+  Around 200 nested `<div>` elements, or `function f(){return f()}`,
+  overflowed it instead of being laid out or throwing `RangeError`. The
+  engine thread now gets an 8 MB stack on every platform, the same as
+  the main thread.
 * Shadow roots behave as document fragments: nodes directly inside one
   have a `null` `parentElement`, the root's `nodeName` is
   `#document-fragment`, it is not `instanceof Element`, and `closest()`,

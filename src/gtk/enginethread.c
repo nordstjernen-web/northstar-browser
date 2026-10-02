@@ -3,9 +3,18 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "enginethread.h"
 #include "mainctx.h"
 #include "trace.h"
+
+#ifndef G_OS_WIN32
+#include <pthread.h>
+#endif
+
+#define NS_ENGINE_STACK_BYTES ((size_t)8 * 1024 * 1024)
 
 typedef struct {
     NsEngineJob fn;
@@ -56,10 +65,21 @@ static GSourceFuncs jobs_funcs = {
     .dispatch = jobs_dispatch,
 };
 
+static void
+engine_set_os_thread_name(void)
+{
+#if defined(__APPLE__)
+    pthread_setname_np("ns-engine");
+#elif defined(__linux__)
+    pthread_setname_np(pthread_self(), "ns-engine");
+#endif
+}
+
 static gpointer
 engine_main(gpointer data)
 {
     (void)data;
+    engine_set_os_thread_name();
     g_main_context_push_thread_default(g_ctx);
     ns_engine_context_set(g_ctx);
     ns_trace_thread_name("ns-engine");
@@ -74,13 +94,29 @@ engine_main(gpointer data)
 }
 
 static void
+engine_spawn(void)
+{
+#ifndef G_OS_WIN32
+    pthread_attr_t attr;
+    pthread_t thread;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, NS_ENGINE_STACK_BYTES);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    int rc = pthread_create(&thread, &attr, engine_main, NULL);
+    pthread_attr_destroy(&attr);
+    if (rc == 0) return;
+#endif
+    g_thread_unref(g_thread_new("ns-engine", engine_main, NULL));
+}
+
+static void
 engine_start(void)
 {
     static gsize started;
     if (g_once_init_enter(&started)) {
         g_ctx = g_main_context_new();
         g_jobs = g_async_queue_new();
-        g_thread_unref(g_thread_new("ns-engine", engine_main, NULL));
+        engine_spawn();
         g_once_init_leave(&started, 1);
     }
 }
