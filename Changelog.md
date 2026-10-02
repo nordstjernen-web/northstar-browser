@@ -4,6 +4,56 @@ Significant changes in each release:
 
 1.0.12:
 =======
+* Shadow roots behave as document fragments: nodes directly inside one
+  have a `null` `parentElement`, the root's `nodeName` is
+  `#document-fragment`, it is not `instanceof Element`, and `closest()`,
+  `contains()` and `compareDocumentPosition()` stop at the shadow
+  boundary. Selectors with an id run inside a shadow root, such as
+  `shadowRoot.querySelector('p#x')`, find their element; they used to
+  look it up in the document and come back empty.
+* A frame starts with its own `onload`, `onclick` and other window event
+  handlers set to `null`. It used to start with copies of its parent's,
+  so the page's `window.onload` could run again for the frame.
+* Nested frames know their place: a frame inside a frame has the middle
+  frame as its `parent`, so `parent.frames`, `parent.document` and
+  `parent.name` refer to it, while `top` stays the page. `parent.location`
+  and `top.location` read in a frame give that window's URL instead of
+  the frame's own, setting `parent.location.hash` fires `hashchange` at
+  the page, and a frame's `document.referrer` is the URL of the document
+  holding it, cut down by the referrer policy as in other browsers.
+* Focus follows the HTML focus update steps. `blur` and `focusout` run
+  while no element has focus, `relatedTarget` names the other element,
+  and the windows get `blur` and `focus` when focus moves between a page
+  and its frames, by script or by a click. `document.activeElement` is
+  the iframe, not the element inside it, when a frame has focus, so a
+  page can no longer see which element of a cross-origin frame is
+  focused. `document.hasFocus()` is true only for the focused document
+  and the documents containing it, and `focus()` does nothing on an
+  element that cannot take focus or is not in the document. Clicking
+  plain content inside a frame focuses the frame's document, as in other
+  browsers, instead of the iframe element around it.
+* Events the browser fires carry the flags other browsers give them:
+  `focus`, `blur`, `readystatechange`, element `scroll` and media events
+  no longer bubble, and `DOMContentLoaded`, `input`, `change`, `scroll`
+  and `focusin`/`focusout` can no longer be cancelled. `invalid` can be.
+* Window events look as they do in other browsers: `load` reaches only
+  window listeners, with the document as its target; `hashchange` and
+  `popstate` are fired at the window and do not bubble; `pageshow` and
+  `pagehide` have the document as their target; `window.onload`,
+  `window.onmessage` and the other window handlers see `eventPhase` and
+  `currentTarget`; and `<body onload>`-style handlers run with the window
+  as `this`. Scrolling the page fires one `scroll` event instead of two,
+  and `resize` is fired at the window only. `message` and `storage`
+  events have the window as their target; they used to report the
+  document.
+* Transferring a `MessagePort` moves it: the receiver gets a new port
+  object, references to the port inside the message point to that new
+  port, and the sender's port stops sending and receiving. Messages
+  already queued for the port go with it. Transferring a port twice,
+  transferring the port that sends the message, or listing a port twice
+  throws `DataCloneError`, and a message that fails to clone leaves its
+  ports in place. `window.postMessage` transfers its ports even when the
+  target origin does not match, as in other browsers.
 * A frame's origin comes from the URL the engine loaded it from, not from
   its `location.origin`, which the frame could redefine to send messages
   under another origin and receive messages posted to that origin.
