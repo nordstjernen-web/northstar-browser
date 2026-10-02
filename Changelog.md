@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.13:
 =======
+* Builds on the original QuickJS (`-Djs_engine=quickjs`) no longer crash
+  when a page loads a module script from the bytecode cache. A cached
+  module was evaluated without resolving its imports first. quickjs-ng
+  resolves them on evaluation; the original engine dereferenced the
+  missing import and crashed. In practice, any site built from ES modules
+  crashed the second time it was opened, once its modules were cached.
 * `docs/js-engine-comparison.md` measures the quickjs-ng and the original
   QuickJS builds against each other: build cost, startup, Octane, DOM and
   built-in micro-benchmarks, Speedometer 3.1, web-platform-tests and

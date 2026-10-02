@@ -55362,6 +55362,10 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
             if (!JS_IsException(m) && JS_VALUE_GET_TAG(m) == JS_TAG_MODULE) {
                 ns_js_set_import_meta_url(ctx, m, module_name);
                 g_free(key);
+                if (JS_ResolveModule(ctx, m) < 0) {
+                    JS_FreeValue(ctx, m);
+                    return JS_EXCEPTION;
+                }
                 return m;
             }
             if (JS_IsException(m)) JS_FreeValue(ctx, JS_GetException(ctx));
