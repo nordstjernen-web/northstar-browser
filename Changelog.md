@@ -4,6 +4,10 @@ Significant changes in each release:
 
 1.0.13:
 =======
+* `docs/js-engine-comparison.md` measures the quickjs-ng and the original
+  QuickJS builds against each other: build cost, startup, Octane, DOM and
+  built-in micro-benchmarks, Speedometer 3.1, web-platform-tests and
+  language features.
 
 1.0.12:
 =======

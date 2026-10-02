@@ -26,6 +26,9 @@ Both builds carry the same Web API surface. The engine — `src/js.c` and its
 satellites — is written against the quickjs-ng API; the original engine gets
 that API through `src/quickjs_compat.c` instead of a second binding.
 
+[js-engine-comparison.md](js-engine-comparison.md) measures the two builds
+against each other: speed, memory, conformance and build cost.
+
 ## How the original engine is built
 
 `subprojects/quickjs.wrap` pins the upstream repository at the commit that
