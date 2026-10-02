@@ -59,6 +59,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.12" date="2026-10-02">
+      <description>
+        <p>Frames, messaging and stability release.</p>
+        <ul>
+          <li>Deeply nested pages and deeply recursive scripts no longer crash the browser on macOS and musl.</li>
+          <li>Frames get their own window events, document lifecycle, origin, focus and name.</li>
+          <li>postMessage, MessageChannel and structured cloning follow the HTML standard across windows, frames and workers.</li>
+          <li>Events, built-in objects and engine-implemented functions look as they do in other browsers.</li>
+          <li>Northstar can optionally be built on Fabrice Bellard's original QuickJS.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.11" date="2026-09-27">
       <description>
         <p>Packaging release.</p>
