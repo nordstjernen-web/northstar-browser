@@ -43887,6 +43887,7 @@ static const char ns_iframe_global_bootstrap[] =
     "      if (pk === '_listeners') continue;"
     "      if (crossOrigin && (parentOnly[pk] || !platformNames ||"
     "          !Object.prototype.hasOwnProperty.call(platformNames, pk))) continue;"
+    "      if (pk.charCodeAt(0) === 0xfffd) continue;"
     "      try {"
     "        var pd = Object.getOwnPropertyDescriptor(realWin, pk);"
     "        if (pd) Object.defineProperty(G, pk, pd);"
