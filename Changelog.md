@@ -21,6 +21,12 @@ Significant changes in each release:
   keyword as an animation list and crashed about a third of the loads of
   a page that used one. The 1.0.12 fix was among the withdrawn commits;
   this one is written anew.
+* Web and service workers run on threads with an 8 MiB stack on every
+  POSIX platform, like the engine thread. They had the platform's default
+  thread stack, 512 KiB on macOS and 128 KiB with musl, under a 5 MiB
+  JavaScript stack limit, so deep recursion in a worker crashed the
+  browser instead of throwing `RangeError`. 1.0.12 fixed this another
+  way in a withdrawn commit; this fix is written anew.
 * Builds on the original QuickJS (`-Djs_engine=quickjs`) no longer crash
   when a page loads a module script from the bytecode cache. A cached
   module was evaluated without resolving its imports first. quickjs-ng

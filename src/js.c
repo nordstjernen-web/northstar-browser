@@ -22,6 +22,8 @@
 
 #ifdef G_OS_WIN32
 #include <windows.h>
+#else
+#include <pthread.h>
 #endif
 
 #include "anim.h"
@@ -106,6 +108,10 @@ struct ns_worker_host {
     JSContext    *owner_ctx;
     JSValue       owner_obj;
     GThread      *thread;
+#ifndef G_OS_WIN32
+    pthread_t     pthread;
+    gboolean      has_pthread;
+#endif
     gint          joined;
     GMainContext *context;
     GMainContext *owner_context;
@@ -155,6 +161,7 @@ struct ns_js_drag_session {
 };
 
 #define NS_JS_BODY_BYTES_MAX (32u * 1024u * 1024u)
+#define NS_WORKER_STACK_BYTES ((size_t)8 * 1024 * 1024)
 
 static GPrivate g_active_js_key = G_PRIVATE_INIT(NULL);
 
@@ -20200,13 +20207,23 @@ ns_worker_host_stop(ns_worker_host *host, gboolean join)
     if (!join) return;
 
     GThread *thread = NULL;
+    gboolean join_now = FALSE;
     g_mutex_lock(&host->lock);
     if (!host->joined) {
         thread = host->thread;
+        join_now = TRUE;
         host->joined = 1;
     }
     g_mutex_unlock(&host->lock);
 
+    if (!join_now) return;
+#ifndef G_OS_WIN32
+    if (host->has_pthread) {
+        if (!pthread_equal(host->pthread, pthread_self()))
+            pthread_join(host->pthread, NULL);
+        return;
+    }
+#endif
     if (thread && thread != g_thread_self())
         g_thread_join(thread);
 }
@@ -21985,6 +22002,27 @@ ns_worker_js_new(ns_worker_host *host)
     return js;
 }
 
+static gpointer ns_worker_thread(gpointer data);
+
+static void
+ns_worker_spawn(ns_worker_host *host, const char *name)
+{
+#ifndef G_OS_WIN32
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, NS_WORKER_STACK_BYTES);
+    ns_worker_host *ref = ns_worker_host_ref(host);
+    int rc = pthread_create(&host->pthread, &attr, ns_worker_thread, ref);
+    pthread_attr_destroy(&attr);
+    if (rc == 0) {
+        host->has_pthread = TRUE;
+        return;
+    }
+    ns_worker_host_unref(ref);
+#endif
+    host->thread = g_thread_new(name, ns_worker_thread, ns_worker_host_ref(host));
+}
+
 static gpointer
 ns_worker_thread(gpointer data)
 {
@@ -22183,8 +22221,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 
     if (!js->workers) js->workers = g_ptr_array_new();
     g_ptr_array_add(js->workers, host);
-    host->thread = g_thread_new("nd-js-worker", ns_worker_thread,
-                                ns_worker_host_ref(host));
+    ns_worker_spawn(host, "nd-js-worker");
     return obj;
 }
 
@@ -22384,8 +22421,7 @@ ns_sw_start_registration(JSContext *ctx, JSValueConst container, ns_js *js,
 
     if (!js->workers) js->workers = g_ptr_array_new();
     g_ptr_array_add(js->workers, host);
-    host->thread = g_thread_new("nd-service-worker", ns_worker_thread,
-                                ns_worker_host_ref(host));
+    ns_worker_spawn(host, "nd-service-worker");
     if (fire_update) ns_target_fire_event(ctx, reg, "updatefound");
     JS_FreeValue(ctx, sw);
     return reg;
