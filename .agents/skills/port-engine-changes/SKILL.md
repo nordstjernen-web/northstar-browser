@@ -48,7 +48,7 @@ Name the source commit in the message and describe the behavior in the destinati
 
 ## Northstar context
 
-Northstar is the GPL edition of Nordstjernen; the engine sources are largely shared and changes flow both ways. Both trees are edited continuously, so re-read the destination head immediately before porting.
+Northstar is the purist GPL edition of Nordstjernen; the engine sources are largely shared, but code crosses into Northstar only under the provenance rules in `AGENTS.md`: from Nordstjernen only the copyright holder's own commits, never an external contributor's without their written GPL license, and from open-internet-navigator anything. Check the author of every source commit before checking applicability, and stop if it fails. Both trees are edited continuously, so re-read the destination head immediately before porting.
 
 Differences that break ports in practice: Northstar consumes quickjs-ng as an upstream meson subproject and carries no in-tree engine fork, so changes that patch a vendored JavaScript engine do not apply; the features the repository instructions exclude from this edition are absent here; and helper availability in `src/js.c` differs between the trees even where the surrounding code matches.
 
