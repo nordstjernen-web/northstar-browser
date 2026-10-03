@@ -15,6 +15,12 @@ Significant changes in each release:
   keyword and `SourceBuffer.appendBuffer` fixes (`acc38d3`, `b27c3f4`).
   Those areas behave as in 1.0.11 again. The bytecode cache format moves
   on, so no script compiled by 1.0.11 or 1.0.12 is reused.
+* `animation` and `transition` set to a CSS-wide keyword (`inherit`,
+  `initial`, `unset`, `revert`) set every longhand to that keyword, as
+  the background shorthand already did. The shorthand expansion read the
+  keyword as an animation list and crashed about a third of the loads of
+  a page that used one. The 1.0.12 fix was among the withdrawn commits;
+  this one is written anew.
 * Builds on the original QuickJS (`-Djs_engine=quickjs`) no longer crash
   when a page loads a module script from the bytecode cache. A cached
   module was evaluated without resolving its imports first. quickjs-ng

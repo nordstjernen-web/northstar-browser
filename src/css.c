@@ -15591,6 +15591,20 @@ static const ns_css_prop kTransitionLonghands[] = {
 };
 
 static void
+anim_shorthand_emit_wide_longhands(GArray *decls, const ns_css_value *wide,
+                                   gboolean is_animation, gboolean important)
+{
+    const ns_css_prop *lh = is_animation ? kAnimationLonghands : kTransitionLonghands;
+    gsize n = is_animation ? G_N_ELEMENTS(kAnimationLonghands)
+                           : G_N_ELEMENTS(kTransitionLonghands);
+    for (gsize i = 0; i < n; i++) {
+        ns_css_decl d = { .prop = lh[i], .value = ns_css_value_dup(wide),
+                          .important = important };
+        g_array_append_val(decls, d);
+    }
+}
+
+static void
 anim_shorthand_emit_longhands(GArray *decls, const ns_css_anim_list *list,
                               gboolean is_animation, gboolean important)
 {
@@ -18540,10 +18554,15 @@ parse_declaration_block(const char **pp, const char *end,
                 if (vv) {
                     ns_css_decl d = { .prop = (ns_css_prop)pid, .value = vv, .important = important };
                     g_array_append_val(decls_out, d);
-                    if (pid == NS_CSS_ANIMATION || pid == NS_CSS_TRANSITION)
+                    if ((pid == NS_CSS_ANIMATION || pid == NS_CSS_TRANSITION) &&
+                        vv->kind == NS_CSS_V_ANIM)
                         anim_shorthand_emit_longhands(decls_out, &vv->u.anim,
                                                       pid == NS_CSS_ANIMATION,
                                                       important);
+                    else if (pid == NS_CSS_ANIMATION || pid == NS_CSS_TRANSITION)
+                        anim_shorthand_emit_wide_longhands(decls_out, vv,
+                                                           pid == NS_CSS_ANIMATION,
+                                                           important);
                 }
             }
         }
