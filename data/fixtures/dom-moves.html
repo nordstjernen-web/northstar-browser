@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DOM moves</title>
+<style>
+body { font: 16px sans-serif; margin: 0; padding: 16px; }
+</style>
+</head>
+<body>
+<pre id="out"></pre>
+<script>
+var lines = [];
+function make() {
+  var d = document.createElement('div');
+  d.innerHTML = '<i>a</i><i>b</i><i>c</i>';
+  return d;
+}
+function check(name, move) {
+  var d = make();
+  move(d, d.children[0], d.children[1], d.children[2]);
+  lines.push(name + ': ' + d.textContent);
+}
+check('prepend first', function (d, a) { d.prepend(a); });
+check('prepend first and second', function (d, a, b) { d.prepend(a, b); });
+check('prepend second', function (d, a, b) { d.prepend(b); });
+check('prepend reversed', function (d, a, b, c) { d.prepend(c, b, a); });
+check('append last', function (d, a, b, c) { d.append(c); });
+check('append last and first', function (d, a, b, c) { d.append(c, a); });
+check('before previous', function (d, a, b) { b.before(a); });
+check('before previous and self', function (d, a, b) { b.before(a, b); });
+check('after next', function (d, a, b) { a.after(b); });
+check('after next and self', function (d, a, b) { a.after(b, a); });
+check('replaceWith next', function (d, a, b) { a.replaceWith(b); });
+check('replaceWith self', function (d, a) { a.replaceWith(a); });
+check('insertBefore self', function (d, a) { d.insertBefore(a, a); });
+check('replaceChildren', function (d, a, b, c) { d.replaceChildren(c, a); });
+document.getElementById('out').textContent = lines.join('\n');
+</script>
+</body>
+</html>

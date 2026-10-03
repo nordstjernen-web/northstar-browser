@@ -29161,7 +29161,6 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
             if (JS_IsException(verr)) return verr;
         }
     }
-    ns_node *ref = parent->first_child;
     GPtrArray *seq = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
@@ -29176,6 +29175,7 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
+    ns_node *ref = parent->first_child;
     for (guint k = 0; k < seq->len; k++) {
         ns_node *to_insert = g_ptr_array_index(seq, k);
         if (!ref) {

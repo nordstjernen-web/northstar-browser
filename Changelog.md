@@ -27,6 +27,13 @@ Significant changes in each release:
   JavaScript stack limit, so deep recursion in a worker crashed the
   browser instead of throwing `RangeError`. 1.0.12 fixed this another
   way in a withdrawn commit; this fix is written anew.
+* `prepend()` no longer links a node to itself when it is handed the
+  parent's current first child. It took the reference child before
+  moving the nodes, so that node ended up as its own next sibling and the
+  next walk over the children never finished; example.com's script does
+  exactly this for English-language visitors, and the page hung, which is
+  also what kept the musl CI smoke test running until it was cancelled.
+  Ported from open-internet-navigator.
 * Builds on the original QuickJS (`-Djs_engine=quickjs`) no longer crash
   when a page loads a module script from the bytecode cache. A cached
   module was evaluated without resolving its imports first. quickjs-ng

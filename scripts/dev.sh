@@ -46,6 +46,7 @@ data/fixtures/flex-order.html
 data/fixtures/grid-order.html
 data/fixtures/table.html
 data/fixtures/js-dom.html
+data/fixtures/dom-moves.html
 layout data/fixtures/geo-flex.html
 layout data/fixtures/geo-grid.html
 layout data/fixtures/geo-position.html

@@ -1,0 +1,14 @@
+prepend first: abc
+prepend first and second: abc
+prepend second: bac
+prepend reversed: cba
+append last: abc
+append last and first: bca
+before previous: abc
+before previous and self: abc
+after next: abc
+after next and self: bac
+replaceWith next: bc
+replaceWith self: abc
+insertBefore self: abc
+replaceChildren: ca
