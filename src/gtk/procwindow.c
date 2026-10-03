@@ -18,7 +18,6 @@
 #include "version.h"
 #include "image.h"
 
-#include <locale.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -2370,7 +2369,6 @@ static void
 on_proc_activate(GtkApplication *app, gpointer user_data)
 {
     ProcAppCtx *ctx = user_data;
-    setlocale(LC_NUMERIC, "C");
     configure_media_inputs();
     install_icon_search_paths();
     gtk_window_set_default_icon_name("northstar");

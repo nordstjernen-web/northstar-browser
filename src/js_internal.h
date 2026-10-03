@@ -115,10 +115,6 @@ struct ns_js {
     char         *doc_charset;
     ns_node       *current_doc;
     const ns_node *main_document;
-    GHashTable    *frame_urls;
-    GHashTable    *frame_referrers;
-    gpointer       realm_scope_base;
-    char         **top_url_slot;
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
@@ -142,8 +138,6 @@ struct ns_js {
     const void   *box_lookup_pending_root;
     int           box_lookup_pending_count;
     const ns_node *focused_node;
-    const ns_node *focused_doc;
-    gpointer       focus_guard;
     gboolean      pointer_input;
     gboolean      autofocus_processed;
     const ns_node *active_modal;
@@ -196,12 +190,6 @@ struct ns_js {
     guint64       opaque_counter;
     char         *referrer;
     int           ready_state;
-    GHashTable   *doc_ready_states;
-    GHashTable   *initial_blank_realms;
-    GHashTable   *window_forwards;
-    GHashTable   *window_outwards;
-    GQueue       *message_tasks;
-    guint         message_task_source;
     guint         lifecycle_source;
     GArray       *lifecycle_tasks;
     ns_node      *lifecycle_doc;

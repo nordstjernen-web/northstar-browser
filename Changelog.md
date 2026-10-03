@@ -4,6 +4,17 @@ Significant changes in each release:
 
 1.0.13:
 =======
+* The standards-conformance backport released in 1.0.12 is withdrawn.
+  Thirteen of its commits ported work that outside contributors wrote
+  for Nordstjernen under the Nordstjernen Source License, which this GPL
+  edition may not distribute without their permission: frame named
+  access, realms, messaging and event dispatch (`a41234d`, `37a597c`,
+  `68d06b8`, `293b46f`), focus tracking, nested-frame parents,
+  `MessagePort` transfer, browser-fired event flags and shadow-tree
+  separation (`93901bf` to `d0b0e7a`), and the CSS-wide animation
+  keyword and `SourceBuffer.appendBuffer` fixes (`acc38d3`, `b27c3f4`).
+  Those areas behave as in 1.0.11 again. The bytecode cache format moves
+  on, so no script compiled by 1.0.11 or 1.0.12 is reused.
 * Builds on the original QuickJS (`-Djs_engine=quickjs`) no longer crash
   when a page loads a module script from the bytecode cache. A cached
   module was evaluated without resolving its imports first. quickjs-ng

@@ -15591,21 +15591,12 @@ static const ns_css_prop kTransitionLonghands[] = {
 };
 
 static void
-anim_shorthand_emit_longhands(GArray *decls, ns_css_value *shorthand,
+anim_shorthand_emit_longhands(GArray *decls, const ns_css_anim_list *list,
                               gboolean is_animation, gboolean important)
 {
     const ns_css_prop *lh = is_animation ? kAnimationLonghands : kTransitionLonghands;
     gsize n = is_animation ? G_N_ELEMENTS(kAnimationLonghands)
                            : G_N_ELEMENTS(kTransitionLonghands);
-    if (shorthand->kind != NS_CSS_V_ANIM) {
-        for (gsize i = 0; i < n; i++) {
-            ns_css_decl d = { .prop = lh[i], .value = ns_css_value_dup(shorthand),
-                              .important = important };
-            g_array_append_val(decls, d);
-        }
-        return;
-    }
-    const ns_css_anim_list *list = &shorthand->u.anim;
     for (gsize i = 0; i < n; i++) {
         GString *text = g_string_new(NULL);
         gboolean single = lh[i] == NS_CSS_ANIMATION_TIMELINE ||
@@ -18550,7 +18541,7 @@ parse_declaration_block(const char **pp, const char *end,
                     ns_css_decl d = { .prop = (ns_css_prop)pid, .value = vv, .important = important };
                     g_array_append_val(decls_out, d);
                     if (pid == NS_CSS_ANIMATION || pid == NS_CSS_TRANSITION)
-                        anim_shorthand_emit_longhands(decls_out, vv,
+                        anim_shorthand_emit_longhands(decls_out, &vv->u.anim,
                                                       pid == NS_CSS_ANIMATION,
                                                       important);
                 }

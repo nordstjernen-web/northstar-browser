@@ -19,18 +19,6 @@ int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
 
 JSClassID ns_new_class_id(JSClassID *pclass_id);
 
-enum {
-    JS_BOXED_NONE, JS_BOXED_NUMBER, JS_BOXED_STRING, JS_BOXED_BOOLEAN,
-    JS_BOXED_BIGINT, JS_BOXED_SYMBOL,
-};
-
-JSContext *ns_quickjs_new_context(JSRuntime *rt);
-#define JS_NewContext(rt) ns_quickjs_new_context(rt)
-
-int JS_GetBoxedPrimitiveKind(JSValueConst val);
-bool JS_IsRunningScript(JSContext *ctx);
-JSContext *JS_GetPendingJobRealm(JSRuntime *rt);
-
 #ifdef NS_QUICKJS_ORIGINAL
 
 #define NS_QUICKJS_ENGINE_NAME "QuickJS"
@@ -49,6 +37,7 @@ typedef struct JSEvalOptions {
 typedef void *JSReallocArrayBufferDataFunc(JSRuntime *rt, void *opaque,
                                            void *ptr, size_t size);
 
+JSContext *ns_quickjs_new_context(JSRuntime *rt);
 JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
                                     size_t max_len,
                                     JSReallocArrayBufferDataFunc *realloc_func,
@@ -71,6 +60,7 @@ JS_IsStrictEqual(JSContext *ctx, JSValueConst op1, JSValueConst op2)
     return JS_StrictEq(ctx, op1, op2);
 }
 
+#define JS_NewContext(rt) ns_quickjs_new_context(rt)
 #define JS_NewArrayBuffer(ctx, buf, len, max_len, realloc_func, opaque, is_shared) \
     ns_quickjs_new_array_buffer((ctx), (buf), (len), (max_len), (realloc_func), \
                                 (opaque), (is_shared))
@@ -82,13 +72,6 @@ JS_IsStrictEqual(JSContext *ctx, JSValueConst op1, JSValueConst op2)
 
 const char *JS_GetVersion(void);
 bool JS_IsArrayBuffer(JSValueConst obj);
-bool JS_IsDate(JSValueConst val);
-bool JS_IsRegExp(JSValueConst val);
-bool JS_IsMap(JSValueConst val);
-bool JS_IsSet(JSValueConst val);
-bool JS_IsDataView(JSValueConst val);
-bool JS_IsProxy(JSValueConst val);
-int JS_FreezeObject(JSContext *ctx, JSValueConst obj);
 int JS_GetTypedArrayType(JSValueConst obj);
 JSValue JS_NewUint8ArrayCopy(JSContext *ctx, const uint8_t *buf, size_t len);
 uint8_t *JS_GetUint8Array(JSContext *ctx, size_t *psize, JSValueConst obj);
@@ -106,10 +89,5 @@ JSValue JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
 typedef bool ns_js_bool;
 
 #endif
-
-JSValue JS_CompileHidingSource(JSContext *ctx, const char *input,
-                               size_t input_len, JSEvalOptions *options);
-JSValue JS_EvalHidingSource(JSContext *ctx, const char *input, size_t input_len,
-                            const char *filename, int eval_flags);
 
 #endif

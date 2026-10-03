@@ -6,7 +6,10 @@ Bellard's original **QuickJS 2026-06-04** (`-Djs_engine=quickjs`). This
 report builds both from the same tree, runs them through the same tests
 and benchmarks, and compares the results.
 
-Measured 2026-10-02 at `da7e522` (1.0.13-dev).
+Measured 2026-10-02 at `da7e522` (1.0.13-dev). That tree still carried
+the 1.0.12 standards-conformance backport, which has since been withdrawn
+(see the 1.0.13 changelog), so the web-platform-tests counts below include
+work that is no longer in Northstar.
 
 ## Verdict
 

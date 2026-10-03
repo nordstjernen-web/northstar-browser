@@ -9,7 +9,6 @@
 #include <gio/gio.h>
 #include <glib.h>
 
-#include "config.h"
 #include "fetch_policy.h"
 #include "version.h"
 
@@ -169,8 +168,6 @@ char    *ns_net_hsts_upgrade(const char *url);
 gboolean ns_net_hsts_should_upgrade(const char *host);
 char    *ns_net_https_first_upgrade(const char *url);
 gboolean ns_net_header_is_nosniff(const char *value);
-char    *ns_net_referer_for(const char *url, const char *referrer_url,
-                            ns_referer_policy policy);
 
 void  ns_net_log_clear(void);
 char *ns_net_log_dump(void);
