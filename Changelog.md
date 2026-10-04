@@ -44,6 +44,8 @@ Significant changes in each release:
   QuickJS builds against each other: build cost, startup, Octane, DOM and
   built-in micro-benchmarks, Speedometer 3.1, web-platform-tests and
   language features.
+* `docs/building.md` documents a MacPorts build on macOS beside the
+  Homebrew one.
 
 1.0.12:
 =======

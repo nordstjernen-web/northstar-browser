@@ -127,6 +127,9 @@ meson compile -C builddir
 ./builddir/src/gtk/northstar
 ```
 
+For macOS (Homebrew or MacPorts), other Linux distributions and Windows,
+see [docs/building.md](docs/building.md).
+
 The development helper configures the default build directory when
 needed and runs the same compile command:
 
