@@ -66,6 +66,20 @@ Export `PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix ope
 before configuring. The macOS build uses the same setup and compile commands
 shown below.
 
+With MacPorts (verified on macOS 27.0.1, Apple Silicon, Xcode 27 /
+Apple clang 21):
+
+```sh
+sudo port install meson ninja pkgconfig cmake gtk4 +quartz curl openssl3 \
+    uchardet libpsl sqlite3 libsdl2 zlib
+```
+
+`+quartz` builds GTK with the native macOS backend; the default `+x11`
+variant needs XQuartz to run. MacPorts' `pkg-config` already
+searches `/opt/local`, so no `PKG_CONFIG_PATH` is needed. The optional
+libraries are the `libavif`, `opusfile`, `libvorbis`, `enchant2` and
+`libthai` ports.
+
 ## Windows dependencies
 
 Install MSYS2 MINGW64, then install the packages listed by
