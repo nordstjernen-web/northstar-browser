@@ -76,6 +76,7 @@ struct ns_js {
     NsAudioContext *audio_context;
     GHashTable   *media_players;
     GPtrArray    *media_tasks;
+    GPtrArray    *media_tasks_flushing;
     guint         media_poll_source;
     guint         media_task_source;
     ns_js_scroll_to_cb scroll_to_cb;

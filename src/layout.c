@@ -768,6 +768,7 @@ node_has_media_metadata(const ns_node *n)
 }
 
 #define NS_LAYOUT_MAX_DEPTH 512
+#define NS_LAYOUT_MAX_LAYOUT_DEPTH 256
 #define NS_TABLE_MAX_COLS 4096
 #define BIDI_LRI "\xe2\x81\xa6"
 #define BIDI_RLI "\xe2\x81\xa7"
@@ -8777,9 +8778,17 @@ cq_set_dims_from_ancestors(const ns_box *box)
     ns_css_set_container_dims(inline_size, block_size);
 }
 
+static int g_layout_box_depth;
+
 static void
 layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
+    if (g_layout_box_depth >= NS_LAYOUT_MAX_LAYOUT_DEPTH) {
+        box->content_width = parent_content_width;
+        box->content_height = 0;
+        return;
+    }
+    g_layout_box_depth++;
     if (box_is_query_container(box)) g_cq_seen_container = TRUE;
     if (g_cq_seen_container) cq_set_dims_from_ancestors(box);
     GArray *entry_floats = g_bfc_floats;
@@ -8810,6 +8819,7 @@ layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_s
         box->content_height = 0;
     }
     g_bfc_floats = entry_floats;
+    g_layout_box_depth--;
 }
 
 static gboolean
@@ -12728,6 +12738,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     double col_gap = 16;
     int n_cols = box->style ? ns_css_used_column_count(box->style, cw, &col_gap)
                             : 1;
+    if (n_cols > 1000) n_cols = 1000;
     ns_box *column_host = NULL;
     if (n_cols > 1) {
         int distributable = multicol_distributable_children(box);

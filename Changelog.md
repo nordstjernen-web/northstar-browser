@@ -4,6 +4,37 @@ Significant changes in each release:
 
 1.0.13:
 =======
+* Security: a source-wide audit fixed several memory-safety and
+  denial-of-service bugs reachable from an ordinary web page.
+  - WebAssembly: an exported function that returned an `externref` not
+    held by a table or global freed the host box before converting it to
+    a JavaScript value, so the 64th such call dereferenced freed memory
+    and crashed. The periodic externref reclaim now runs after the
+    results are converted.
+  - `IntersectionObserver`: the observer tick held a raw pointer into the
+    targets array across the `DOMRect` construction it triggers, so a page
+    that replaced `window.DOMRect` and called `observe()` from it
+    reallocated the array and left the tick writing through freed memory.
+    The tick now addresses targets by index and re-checks bounds.
+  - `setAttributeNS(ns, "class", …)` fed the class-token cache but only
+    `class` in the null namespace cleared it, so overwriting a namespaced
+    `class` attribute freed the backing string while the cache still
+    pointed into it. Both namespaced mutators now clear the cache.
+  - Inserting an element more than 512 levels above its target parent
+    escaped the depth-capped ancestor check and formed a parent-pointer
+    cycle, which hung the browser on the next tree walk. The cycle check
+    is no longer depth-limited.
+  - Deeply nested `display:grid` boxes recursed layout until the stack
+    overflowed; layout recursion is now depth-bounded.
+  - A `conic-gradient()` with an enormous `from` angle span-looped
+    forever during paint; the angle is now normalised with `floor`.
+  - An enormous `column-count` tried to allocate a multi-gigabyte column
+    array and aborted the process; the used column count is clamped.
+  - `Intl.DateTimeFormat` formatting a non-finite time value is handled
+    as an invalid date instead of converting an infinity to `time_t`.
+  - Media event tasks already in flight are now scrubbed when their
+    element is released, closing a dangling-pointer window in the task
+    queue.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

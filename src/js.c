@@ -24113,11 +24113,16 @@ ns_io_call_cb(JSContext *ctx, ns_io_observer *o, JSValue entries)
 
 static gboolean
 ns_io_evaluate_one(JSContext *ctx, ns_io_observer *o,
-                   ns_io_target *t, JSValue *out_entry)
+                   guint idx, JSValue *out_entry)
 {
     ns_js *js = js_from_ctx(ctx);
     const struct ns_box *root = js ? js->layout_root : NULL;
-    const ns_node *target = ns_unwrap_element(t->wrapper);
+    ns_io_target *t = &g_array_index(o->targets, ns_io_target, idx);
+    JSValue wrapper = JS_DupValue(ctx, t->wrapper);
+    gboolean prev_fired = t->has_fired;
+    gboolean prev_intersecting = t->last_intersecting;
+    double prev_ratio = t->last_ratio;
+    const ns_node *target = ns_unwrap_element(wrapper);
     double tx, ty, tw, th, rx, ry, rw, rh, ix, iy, iw, ih, ratio;
     gboolean intersecting;
     gboolean has_box = ns_io_compute_entry(ctx, o, root, target,
@@ -24135,18 +24140,22 @@ ns_io_evaluate_one(JSContext *ctx, ns_io_observer *o,
     ry -= viewport_y;
     ix -= viewport_x;
     iy -= viewport_y;
-    *out_entry = ns_io_make_entry(ctx, t->wrapper,
+    *out_entry = ns_io_make_entry(ctx, wrapper,
                                   tx, ty, tw, th,
                                   rx, ry, rw, rh,
                                   ix, iy, iw, ih,
                                   ratio, intersecting);
-    gboolean changed = !t->has_fired || intersecting != t->last_intersecting;
-    if (!changed && ns_io_threshold_index(o, t->last_ratio) !=
+    JS_FreeValue(ctx, wrapper);
+    gboolean changed = !prev_fired || intersecting != prev_intersecting;
+    if (!changed && ns_io_threshold_index(o, prev_ratio) !=
                     ns_io_threshold_index(o, ratio))
         changed = TRUE;
-    t->last_intersecting = intersecting;
-    t->last_ratio = ratio;
-    t->has_fired = TRUE;
+    if (idx < o->targets->len) {
+        ns_io_target *cur = &g_array_index(o->targets, ns_io_target, idx);
+        cur->last_intersecting = intersecting;
+        cur->last_ratio = ratio;
+        cur->has_fired = TRUE;
+    }
     return changed;
 }
 
@@ -24163,9 +24172,8 @@ ns_intersection_observers_tick(ns_js *js)
         JSValue entries = JS_UNDEFINED;
         guint n_entries = 0;
         for (guint i = 0; i < o->targets->len; i++) {
-            ns_io_target *t = &g_array_index(o->targets, ns_io_target, i);
             JSValue entry;
-            gboolean changed = ns_io_evaluate_one(ctx, o, t, &entry);
+            gboolean changed = ns_io_evaluate_one(ctx, o, i, &entry);
             if (changed) {
                 if (JS_IsUndefined(entries)) entries = JS_NewArray(ctx);
                 JS_SetPropertyUint32(ctx, entries, n_entries++, entry);
@@ -30563,8 +30571,7 @@ ns_node_ancestor_or_self(const ns_node *desc, const ns_node *root)
 {
     if (!desc || !root) return NULL;
     if (desc == root) return desc;
-    int depth = 0;
-    for (const ns_node *p = desc->parent; p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent)
+    for (const ns_node *p = desc->parent; p; p = p->parent)
         if (p == root) return desc;
     return NULL;
 }

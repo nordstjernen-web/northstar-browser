@@ -278,11 +278,13 @@ media_tasks_flush(gpointer data)
     }
     GPtrArray *tasks = js->media_tasks;
     js->media_tasks = NULL;
+    js->media_tasks_flushing = tasks;
     for (guint i = 0; tasks && i < tasks->len; i++) {
         ns_media_task *task = g_ptr_array_index(tasks, i);
         media_task_run(js, task);
         media_task_free(js, task);
     }
+    js->media_tasks_flushing = NULL;
     if (tasks) g_ptr_array_free(tasks, TRUE);
     ns_drain_microtasks(js);
     return G_SOURCE_REMOVE;
@@ -739,6 +741,11 @@ media_forget_tasks(ns_js *js, const ns_node *el)
 {
     for (guint i = 0; js->media_tasks && i < js->media_tasks->len; i++) {
         ns_media_task *task = g_ptr_array_index(js->media_tasks, i);
+        if (task->el == el) task->el = NULL;
+    }
+    for (guint i = 0; js->media_tasks_flushing &&
+                      i < js->media_tasks_flushing->len; i++) {
+        ns_media_task *task = g_ptr_array_index(js->media_tasks_flushing, i);
         if (task->el == el) task->el = NULL;
     }
 }
