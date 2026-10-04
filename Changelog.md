@@ -46,6 +46,10 @@ Significant changes in each release:
   language features.
 * `docs/building.md` documents a MacPorts build on macOS beside the
   Homebrew one.
+* The README's project-home link at the bottom points at Northstar's own
+  page, <https://nordstjernen.org/northstar-browser/>, instead of the
+  Nordstjernen front page, and its links to the Nordstjernen repository
+  use that repository's current name, `nordstjernen-browser`.
 
 1.0.12:
 =======

@@ -8,7 +8,7 @@ without embedding Gecko, WebKit, Blink or another browser engine. Linux
 is the primary platform; macOS and Windows are also supported.
 
 This repository is the open-source GPL edition of the
-[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
+[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen-browser).
 Northstar is licensed under the GNU General Public License, version 3 or
 later.
 
@@ -41,7 +41,7 @@ small enough for one person to read and audit end-to-end. See
 
 This edition strips Northstar down to a tab-less, single-process
 desktop browser, based on the
-[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
+[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen-browser).
 It deliberately omits tabs, per-tab renderer processes, WebGL, WebGPU,
 an embedded PDF viewer and AI-style web APIs. It does not send telemetry
 or update pings.
@@ -160,7 +160,7 @@ a pin is moved.
 
 Northstar's engine is written from scratch — it contains no forked
 browser engine (no Gecko, WebKit, or Blink). It is the GPL edition of the
-[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen).
+[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen-browser).
 
 **Pinned upstream meson subprojects** (`subprojects/*.wrap`), fetched by
 `meson setup`:
@@ -204,7 +204,7 @@ vorbisfile (in-process Ogg audio), Enchant (spell-checking) and libthai
 Northstar is free software, licensed under the **GNU General Public
 License, version 3 or later** — see [LICENSE](LICENSE).
 
-Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.
+Project home: <https://nordstjernen.org/northstar-browser/> · Copyright 2026 Andreas Røsdal.
 
 ## Builds
 [![linux](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/linux.yml)
