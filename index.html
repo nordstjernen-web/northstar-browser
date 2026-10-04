@@ -14,7 +14,7 @@
 <meta property="og:description" content="A web browser written from scratch in C.">
 <meta property="og:url" content="https://www.nordstjernen.org/">
 <meta property="og:image" content="https://www.nordstjernen.org/screenshots/screenshot.png">
-<meta property="og:image:alt" content="Nordstjernen 1.0.24's about:start start page">
+<meta property="og:image:alt" content="Nordstjernen 1.0.28 running a Google search">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
 <script type="application/ld+json">
@@ -24,10 +24,10 @@
   "name": "Nordstjernen",
   "applicationCategory": "BrowserApplication",
   "operatingSystem": "Windows, macOS, Linux, Android, iOS",
-  "softwareVersion": "1.0.24",
+  "softwareVersion": "1.0.28",
   "url": "https://www.nordstjernen.org/",
-  "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.24",
-  "license": "https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md",
+  "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28",
+  "license": ["https://www.gnu.org/licenses/gpl-3.0.html", "https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md"],
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
 </script>
@@ -71,33 +71,73 @@
         <h1 id="about" style="color:#003366;">Nordstjernen Web Browser</h1>
         <p class="lead">Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, macOS and Linux, with builds for Android, iOS, FreeBSD, NetBSD and the JVM. Nordstjernen is built in Norway.</p>
 
-        <p class="release-line">Nordstjernen Browser version 1.0.24 released! The source-available flagship &mdash; flexbox and grid rebuilt against the specifications, the page itself scroll-snaps, printing in the default process-per-tab mode, text selection that behaves, registered custom properties, a JavaScript off switch, and a painted about:start. <a href="release-1-0-24.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.24">More info here</a>.</p>
-        <p class="release-line">Northstar Browser version 1.0.8 released! The GPL-licensed, more minimalist sibling &mdash; transitions and animations on every property with a Web Animations API, <code>border-image</code>, <code>position: fixed</code> that stays put, and lexbor 3.0.1. <a href="northstar-browser/">About Northstar</a> &middot; <a href="northstar-release-1-0-8.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.8">More info here</a>.</p>
+        <p class="release-line">Nordstjernen Browser version 1.0.28 released! Nordstjernen is now dual-licensed &mdash; <b>GNU GPL version 3 or later</b>, or the Nordstjernen Source License, at your option &mdash; with a redesigned browser window, Google&rsquo;s search pages running, and faster style resolution and layout. <a href="release-1-0-28.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28">More info here</a>.</p>
+        <p class="release-line">Northstar Browser version 1.0.12 released! The minimalist GPL sibling &mdash; a sunny ark comic on about:start, a classic toolbar with address-bar suggestions, faster relayout and repaint, the Microsoft Store package, and a build on the original QuickJS. <a href="northstar-browser/">About Northstar</a> &middot; <a href="northstar-release-1-0-12.html">Read the announcement</a> &middot; <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.12">More info here</a>.</p>
 
         <figure class="shot">
-          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="985" height="677" loading="lazy" alt="Nordstjernen 1.0.25 rendering the Wikipedia article on Linux"></a>
-          <figcaption class="cap">Nordstjernen 1.0.24&rsquo;s about:start page &mdash; the Nordstjernen Navigator splash, painted in an impressionist hand with a gilded frame, over the night side of the earth. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
+          <a href="screenshots/screenshot.png"><img src="screenshots/screenshot.png" width="1280" height="948" loading="lazy" alt="Nordstjernen 1.0.28 in its redesigned window, showing a Google search for Svalbard with images, a map and the knowledge panel"></a>
+          <figcaption class="cap">Nordstjernen 1.0.28 in its redesigned window, running Google&rsquo;s own search page for Svalbard. <a href="screenshots.html">more screenshots &raquo;</a></figcaption>
         </figure>
 
         <div class="features">
         <p class="feature"><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial and 0 absent across WHATWG HTML sections 1&ndash;16 (July 2026). No element or API row is fully absent any more: every one is implemented, partial, or a deliberate non-goal. Against the <a href="https://github.com/web-platform-tests/wpt">Web Platform Tests</a>, the full wpt-fast tree now passes <b>88.4% of subtests overall</b> &mdash; 91.7% of the HTML suite &mdash; and QuickJS runs the test262 conformance suite clean. See <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
         <p class="feature"><b>Secure.</b> Process-per-tab design &mdash; each tab runs in its own sandboxed renderer process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
-        <p class="feature"><b>Minimalism.</b> The core engine is about 185,000 lines of project C and headers, excluding the vendored libraries and generated assets &mdash; small enough for one person to read and audit end-to-end.</p>
-        <p class="feature"><b>Capable.</b> JavaScript on QuickJS (quickjs-ng 0.16.1) with Canvas&nbsp;2D, WebCrypto, Service Workers and the Navigation API &middot; an experimental V8 backend behind <code>-Djs_engine=v8</code> &middot; WebAssembly via WAMR &middot; WebGL&nbsp;1&nbsp;&amp;&nbsp;2, enabled by default since 1.0.20 &middot; inline <code>&lt;video&gt;</code> (MPEG-1 always, WebM/VP9 where FFmpeg is present) with WebVTT captions, and HLS and DASH streams fed through Media Source Extensions &middot; in-engine SVG with masks and markers &middot; presentation MathML &middot; CSS Scroll Snap on scroll containers and, since 1.0.24, on the page itself &middot; on-device safe browsing against a local blocklist.</p>
+        <p class="feature"><b>Minimalism.</b> The core engine is about 210,000 lines of project C and headers, excluding the vendored libraries and generated assets &mdash; small enough for one person to read and audit end-to-end.</p>
+        <p class="feature"><b>Capable.</b> JavaScript on QuickJS (quickjs-ng 0.16.2, or Fabrice Bellard&rsquo;s original QuickJS) with Canvas&nbsp;2D, WebCrypto, Service Workers and the Navigation API &middot; an experimental V8 backend behind <code>-Djs_engine=v8</code> &middot; WebAssembly via WAMR &middot; WebGL&nbsp;1&nbsp;&amp;&nbsp;2, enabled by default since 1.0.20 &middot; inline <code>&lt;video&gt;</code> (MPEG-1 always, WebM/VP9 where FFmpeg is present) with WebVTT captions, and HLS and DASH streams fed through Media Source Extensions &middot; in-engine SVG with masks and markers &middot; presentation MathML &middot; CSS Scroll Snap on scroll containers and, since 1.0.24, on the page itself &middot; on-device safe browsing against a local blocklist.</p>
         <p class="feature"><b>Prints.</b> Since 1.0.23, <code>Ctrl+P</code> lays the page out for paper and hands the sheets to the operating system's own print dialog &mdash; CUPS on Linux, the Win32 dialog on Windows, the Cocoa panel on macOS &mdash; so no printing code is written per platform and no dependency is added. <code>@media print</code> matches, <code>@page</code> sets the sheet size and its margins, and <code>break-before</code>, <code>break-after</code> and <code>break-inside</code> decide where a sheet may end. <code>--dump=print:FILE</code> renders the same pagination to a multi-page PDF without a printer. Since 1.0.24 printing works in the default process-per-tab mode, not only under <code>--single-process</code>.</p>
         <p class="feature"><b>Fast.</b> Desktop builds shape text through <a href="https://github.com/nordstjernen-web/ns-pango">ns-pango</a>, a Pango fork that caches finished glyph strings and font metrics across layouts &mdash; on a table-heavy page it serves 92% of shaping requests and cuts layout time by 24%. Regular-expression search skips positions that cannot start a match, the way V8's Irregexp does, and a page on an origin that does not speak QUIC is upgraded to HTTP/3 through the alt-svc cache instead of stalling on a connect timeout: Acid3 loads in 2.2 seconds rather than 15.5.</p>
         <p class="feature"><b>Private.</b> No telemetry and no update pings. Since 1.0.21 the client hints identify Nordstjernen as itself rather than impersonating Chrome, and <code>--private</code> starts a private-browsing session. Cookies are partitioned, and the safe-browsing check never leaves your machine.</p>
         </div>
+        <p class="feature"><b>Free software.</b> Since 1.0.28 Nordstjernen is dual-licensed: use, modify and redistribute it under the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL, version 3 or later</a>, or under the <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">Nordstjernen Source License 1.0</a>, at your option.</p>
         <p>Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind, and deliberately includes no AI assistant and no AI-style web APIs.</p>
 
         <h2 id="northstar">the Northstar browser</h2>
-        <p><a href="northstar-browser/">Northstar</a> is the free-software sibling of Nordstjernen: a single-window, single-page, single-process desktop browser built from the same clean-room C engine, licensed under the <b>GNU GPL, version 3 or later</b>. It keeps the standards-first engine &mdash; lexbor, quickjs-ng (no JIT), ns-pango, WAMR, Wuffs &mdash; in about 160,000 lines of original C, and adds WebExtensions support, while leaving out multi-window browsing, per-tab renderer processes, WebGL and WebGPU. It renders SVG in-engine, decodes WebP and APNG, plays MPEG-1 <code>&lt;video&gt;</code> with play, pause and seeking, prints through the system print dialog, and since 1.0.8 runs CSS transitions and animations on every property, driven from a stylesheet or the Web Animations API. It runs on Linux, macOS and Windows, behind a Landlock filesystem sandbox and a default-deny seccomp filter on Linux.</p>
+        <p><a href="northstar-browser/">Northstar</a> is the minimalist sibling of Nordstjernen: a single-window, single-page, single-process desktop browser built from the same clean-room C engine, licensed under the <b>GNU GPL, version 3 or later</b>. It keeps the standards-first engine &mdash; lexbor, quickjs-ng (no JIT), ns-pango, WAMR, Wuffs &mdash; in about 160,000 lines of original C, and adds WebExtensions support, while leaving out multi-window browsing, per-tab renderer processes, WebGL and WebGPU. It renders SVG in-engine, decodes WebP and APNG, plays MPEG-1 <code>&lt;video&gt;</code> with play, pause and seeking, prints through the system print dialog, runs CSS transitions and animations on every property, and since 1.0.9 greets you with a sunny ark comic and a classic Mozilla-style toolbar. It runs on Linux, macOS and Windows &mdash; on Windows from the <a href="https://apps.microsoft.com/detail/9P39ZB79JV0T">Microsoft Store</a> &mdash; behind a Landlock filesystem sandbox and a default-deny seccomp filter on Linux.</p>
         <p><a href="northstar-browser/">Read the full Northstar documentation &raquo;</a> &middot; or see the <a href="#specs">comparison table below</a> for how the two browsers differ.</p>
 
         <p>Read more about the <a href="innovations-in-nordstjernen-web-browser.html">innovations in the Nordstjernen web browser</a>.</p>
 
         <h2 id="news">news</h2>
         <ul class="news">
+        <li><time class="date" datetime="2026-10-04">4&nbsp;OCT&nbsp;2026</time> &middot;
+        Nordstjernen <b>1.0.28</b> released &mdash; dual-licensed under the GNU GPL v3+ or the NSL, a redesigned window and built-in pages, Google&rsquo;s search pages running, and faster style resolution, script parsing and container-query layout.
+        <a href="release-1-0-28.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28">Release notes &raquo;</a></li>
+
+        <li><time class="date" datetime="2026-10-02">2&nbsp;OCT&nbsp;2026</time> &middot;
+        Nordstjernen <b>1.0.27</b> released &mdash; DuckDuckGo as the default search, History that records, a <code>.deb</code> and a portable Linux zip on every release, frames and workers that follow the HTML event model, and MSE video again.
+        <a href="release-1-0-28.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.27">Release notes &raquo;</a></li>
+
+        <li><time class="date" datetime="2026-10-02">2&nbsp;OCT&nbsp;2026</time> &middot;
+        Northstar <b>1.0.12</b> released &mdash; an 8&nbsp;MB engine stack so deep pages no longer crash, and a build on Fabrice Bellard&rsquo;s original QuickJS.
+        <a href="northstar-release-1-0-12.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.12">Release notes &raquo;</a></li>
+
+        <li><time class="date" datetime="2026-09-27">27&nbsp;SEP&nbsp;2026</time> &middot;
+        Northstar <b>1.0.11</b> released &mdash; Northstar on the <a href="https://apps.microsoft.com/detail/9P39ZB79JV0T">Microsoft Store</a>.
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.11">Release notes &raquo;</a></li>
+
+        <li><time class="date" datetime="2026-09-26">26&nbsp;SEP&nbsp;2026</time> &middot;
+        Nordstjernen <b>1.0.26</b> released &mdash; full grid layout, popovers and dialogs per the HTML standard, a faster cascade, and a round of security fixes.
+        <a href="release-1-0-28.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.26">Release notes &raquo;</a></li>
+
+        <li><time class="date" datetime="2026-09-26">26&nbsp;SEP&nbsp;2026</time> &middot;
+        Northstar <b>1.0.10</b> released &mdash; text measurements that outlive relayout, partial repaint, an idle page that stays idle, popovers, grid fixes and canvas security.
+        <a href="northstar-release-1-0-12.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.10">Release notes &raquo;</a></li>
+
+        <li><time class="date" datetime="2026-09-20">20&nbsp;SEP&nbsp;2026</time> &middot;
+        Nordstjernen <b>1.0.25</b> released &mdash; a 40% faster restyle, the classic Northstar toolbar and splash, the full container-query grammar, and transitions and animations on every property.
+        <a href="release-1-0-28.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.25">Release notes &raquo;</a></li>
+
+        <li><time class="date" datetime="2026-09-20">20&nbsp;SEP&nbsp;2026</time> &middot;
+        Northstar <b>1.0.9</b> released &mdash; a sunny ark comic on about:start, a Mozilla-style toolbar, address-bar suggestions, and a full-screen notice.
+        <a href="northstar-release-1-0-12.html">Announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.9">Release notes &raquo;</a></li>
+
         <li><time class="date" datetime="2026-09-16">16&nbsp;SEP&nbsp;2026</time> &middot;
         Nordstjernen <b>1.0.24</b> released &mdash; flexbox and grid rebuilt against the specifications, the page itself scroll-snaps, printing in process-per-tab mode, text selection that behaves, registered custom properties, a JavaScript off switch, and a painted about:start.
         <a href="release-1-0-24.html">Announcement &raquo;</a> &middot;
@@ -202,20 +242,20 @@
         </ul>
 
         <h2 id="specs">specifications</h2>
-        <p>Two browsers, one clean-room engine. <b>Nordstjernen</b> is the flagship multi-tab browser; <b>Northstar</b> is the GPL-licensed single-window, single-process edition.</p>
+        <p>Two browsers, one clean-room engine. <b>Nordstjernen</b> is the flagship multi-tab browser; <b>Northstar</b> is the minimalist GPL-licensed single-window, single-process edition.</p>
         <p class="scroll-hint">Swipe the table sideways to see both browsers.</p>
         <div class="table-scroll">
         <table class="spec compare">
-          <caption class="sr-only">Technical specifications: Nordstjernen 1.0.24 compared with Northstar 1.0.8</caption>
-          <tr><th></th><th scope="col">Nordstjernen 1.0.24</th><th scope="col"><a href="northstar-browser/">Northstar 1.0.8</a></th></tr>
+          <caption class="sr-only">Technical specifications: Nordstjernen 1.0.28 compared with Northstar 1.0.12</caption>
+          <tr><th></th><th scope="col">Nordstjernen 1.0.28</th><th scope="col"><a href="northstar-browser/">Northstar 1.0.12</a></th></tr>
           <tr><th scope="row">version</th>
-              <td><b>1.0.24</b> &mdash; released 16 September 2026 &middot; <a href="release-1-0-24.html">announcement</a></td>
-              <td><b>1.0.8</b> &mdash; released 16 September 2026 &middot; <a href="northstar-release-1-0-8.html">announcement</a></td></tr>
+              <td><b>1.0.28</b> &mdash; released 4 October 2026 &middot; <a href="release-1-0-28.html">announcement</a></td>
+              <td><b>1.0.12</b> &mdash; released 2 October 2026 &middot; <a href="northstar-release-1-0-12.html">announcement</a></td></tr>
           <tr><th scope="row">character</th>
               <td>flagship browser &middot; multi-window, multi-tab</td>
-              <td>free-software edition &middot; single window, single page</td></tr>
+              <td>minimalist edition &middot; single window, single page</td></tr>
           <tr><th scope="row">language</th>
-              <td>C &middot; ~185 kLOC clean-room &middot; GTK&nbsp;4 shell &middot; Java/JVM binding via JNI &middot; fully auditable</td>
+              <td>C &middot; ~210 kLOC clean-room &middot; GTK&nbsp;4 shell &middot; Java/JVM binding via JNI &middot; fully auditable</td>
               <td>C &middot; ~160 kLOC original &middot; GTK&nbsp;4 shell &middot; fully auditable</td></tr>
           <tr><th scope="row">architecture</th>
               <td>process-per-tab &mdash; each tab in its own sandboxed renderer process, IPC + shared-memory framebuffers</td>
@@ -224,8 +264,8 @@
               <td><a href="https://github.com/lexbor/lexbor">lexbor</a> (parser, WHATWG URL, selectors)</td>
               <td><a href="https://github.com/lexbor/lexbor">lexbor</a> v3.0.1 (parser, WHATWG URL, selectors)</td></tr>
           <tr><th scope="row">javascript</th>
-              <td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> v0.16.1 &mdash; bytecode interpreter, no JIT &middot; experimental V8 backend</td>
-              <td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> v0.16.2 &mdash; bytecode interpreter, no JIT</td></tr>
+              <td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> v0.16.2 &mdash; bytecode interpreter, no JIT &middot; original QuickJS selectable &middot; experimental V8 backend</td>
+              <td><a href="https://github.com/quickjs-ng/quickjs">quickjs-ng</a> v0.17.0 &mdash; bytecode interpreter, no JIT &middot; original QuickJS selectable with <code>-Djs_engine=quickjs</code></td></tr>
           <tr><th scope="row">text</th>
               <td><a href="https://github.com/nordstjernen-web/ns-pango">ns-pango</a> on the desktop &mdash; a Pango fork with a process-wide shaping cache &middot; system Pango on Android and iOS</td>
               <td><a href="https://github.com/nordstjernen-web/ns-pango">ns-pango</a> &mdash; the same fork, sharded sixteen ways for thread throughput</td></tr>
@@ -269,7 +309,7 @@
               <td>linux (gtk) &middot; alpine (musl) &middot; windows &middot; macos &middot; android &middot; ios &middot; java/jvm &middot; freebsd &middot; netbsd</td>
               <td>linux &middot; macos &middot; windows</td></tr>
           <tr><th scope="row">license</th>
-              <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years &middot; The Nordstjernen Source License is inspired by the <a href="https://fsl.software/">Functional Source License (FSL)</a>, a Fair Source license that converts to Apache 2.0 or MIT.</td>
+              <td>dual-licensed since 1.0.28, at your option: <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL v3 or later</a> &mdash; free software &middot; or <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">NSL-1.0</a> &rarr; MIT after 10 years, inspired by the <a href="https://fsl.software/">Functional Source License</a></td>
               <td><a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL v3 or later</a> &mdash; free software</td></tr>
           <tr><th scope="row">source</th>
               <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser">github.com/nordstjernen-web/nordstjernen-browser</a></td>
@@ -281,15 +321,18 @@
         </div>
 
         <h2 id="download">download</h2>
-        <p>Latest tagged release: Nordstjernen <b>1.0.24</b> &mdash; released 16 September 2026, as
-        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.24">source</a>.
-        The most recent prebuilt packages &mdash; Windows, macOS and Linux, plus Debian, Ubuntu, openSUSE, Alpine, FreeBSD, NetBSD and a Java jar &mdash; are from 1.0.23 and are all on the download page.
-        Android is available on <a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a>,
-        and Windows on the <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a>.</p>
+        <p>Latest release: Nordstjernen <b>1.0.28</b> &mdash; released 4 October 2026, with a
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/nordstjernen-1.0.28-linux-x86_64.zip">portable Linux zip</a>, a
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/nordstjernen_1.0.28_amd64.deb">Debian/Ubuntu package</a> and the
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28">source</a>.
+        Windows is on the <a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a>,
+        Android on <a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a>,
+        and the macOS, openSUSE, Alpine, FreeBSD, NetBSD and Java packages from 1.0.23 are on the download page.</p>
 
-        <p>Northstar <b>1.0.8</b> &mdash; released 16 September 2026 &mdash; is on
-        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.8">GitHub</a> as GPL source; the most recent binaries
-        (a Windows build, a portable Linux zip, an AppImage and a Debian package) are from 1.0.7.
+        <p>Northstar <b>1.0.12</b> &mdash; released 2 October 2026 &mdash; is on
+        <a href="https://github.com/nordstjernen-web/northstar-browser/releases/tag/1.0.12">GitHub</a> as GPL source and on the
+        <a href="https://apps.microsoft.com/detail/9P39ZB79JV0T">Microsoft Store</a> for Windows; the most recent Linux binaries
+        (a portable zip, an AppImage and a Debian package) are from 1.0.7.
         <a href="northstar-browser/#download">Northstar downloads &raquo;</a></p>
 
         <p><a class="btn-red" href="download.html">Download Nordstjernen &raquo;</a></p>
@@ -324,7 +367,7 @@
   <footer class="footer">
     <div class="badges"><a href="download.html"><img src="assets/nordstjernen-now.gif" width="144" height="50" alt="Nordstjernen Now — download the browser"></a></div>
     Copyright &copy; 2026 the Nordstjernen project &middot;
-    <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">NSL-1.0</a> &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">GPL-3.0-or-later or NSL-1.0</a> &middot;
     <a href="https://discord.gg/4W959nW5vF">Discord</a> &middot;
     <a href="privacy/">Privacy</a>
   </footer>

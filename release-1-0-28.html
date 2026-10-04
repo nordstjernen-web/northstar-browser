@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nordstjernen Browser 1.0.28 released!</title>
+<meta name="description" content="Nordstjernen Browser 1.0.28 released - now dual-licensed under the GNU GPL version 3 or later or the Nordstjernen Source License, a redesigned browser window, Google search pages that run, and faster style resolution, script parsing and container-query layout. An independent web browser written from scratch in C. No telemetry, no JIT.">
+<link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="header">
+    <a class="bestviewed" href="https://github.com/nordstjernen-web/nordstjernen-browser">
+      <img src="assets/best-viewed-in-nordstjernen.png" width="144" height="50" alt="Best viewed in Nordstjernen">
+    </a>
+    <div class="brand">
+      <a href="."><img class="logo" src="assets/nordstjernen.svg" alt="*"></a>
+      <span class="title"><a href=".">nordstjernen.org</a></span>
+    </div>
+    <div class="tag">small, steady, independent &middot; written from scratch in C &middot; no JIT, no telemetry</div>
+  </div>
+
+  <nav class="nav" aria-label="Primary">
+    <a href="index.html#about">About</a>
+    <a href="index.html#news">News</a>
+    <a href="screenshots.html">Screenshots</a>
+    <a href="download.html">Download</a>
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser">GitHub</a>
+    <input type="checkbox" id="nav-more" class="nav-more-toggle">
+    <label class="nav-more-btn" for="nav-more">More <span aria-hidden="true">&#9662;</span></label>
+    <div class="nav-sec">
+      <a href="index.html#specs">Specifications</a>
+      <a href="northstar-browser/">Northstar</a>
+      <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">Releases</a>
+      <a href="https://discord.gg/4W959nW5vF">Discord</a>
+    </div>
+  </nav>
+
+  <div class="content">
+
+        <a id="about"></a>
+        <h1>Nordstjernen Browser 1.0.28 released!</h1>
+        <p>Today, 4 October 2026, we are pleased to announce the release of <b>Nordstjernen 1.0.28</b>. The headline is the license: Nordstjernen is now <b>dual-licensed</b>, and may be used, modified and redistributed under either the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU General Public License, version 3 or later</a>, or the Nordstjernen Source License 1.0, at the recipient&rsquo;s option. Around it, 1.0.28 gives the browser window and the built-in pages a new look, runs Google&rsquo;s search pages, and makes style resolution, script parsing and container-query layout markedly faster. Nordstjernen is a web browser, written from scratch in C, focused on supporting the HTML and CSS standards. It runs on Windows, macOS and Linux, with builds for Android, iOS, FreeBSD, NetBSD and the JVM. Nordstjernen is built in Norway.</p>
+
+        <p>Nordstjernen Browser version 1.0.28 is available now, with a portable Linux zip and a Debian/Ubuntu package. <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28">Read the full release notes here</a>, or <a href="#download">jump straight to the downloads</a>. This page also covers 1.0.25, 1.0.26 and 1.0.27, released in the weeks since <a href="release-1-0-24.html">1.0.24</a>.</p>
+
+        <p>It ships alongside <a href="northstar-release-1-0-12.html">Northstar 1.0.12</a>, the minimalist GPL edition of the same engine.</p>
+
+        <p>&laquo; <a href="index.html">Back to nordstjernen.org</a></p>
+
+        <div class="shot">
+          <a href="screenshots/screenshot-1-0-28.png"><img src="screenshots/screenshot-1-0-28.png" width="1280" height="948" alt="Nordstjernen 1.0.28 showing a Google search for Svalbard, with the image gallery, the map and the knowledge panel"></a>
+          <div class="cap">Nordstjernen 1.0.28 in its redesigned window, running Google&rsquo;s own search page &mdash; images, the map and the knowledge panel. <a href="screenshots.html">more screenshots &raquo;</a></div>
+        </div>
+
+        <h2>what&rsquo;s new in 1.0.28</h2>
+        <ul class="news">
+          <li><b>GPL 3 or NSL, your choice.</b> Nordstjernen is dual-licensed under <code>LicenseRef-NSL-1.0 OR GPL-3.0-or-later</code>. A recipient who takes the GPL option receives the browser under the GPL alone. The GPL text ships as <code>COPYING</code> in every package and shows at <code>about:gpl</code>; the About page and the Debian, RPM, openSUSE, Alpine, Maven and AppStream metadata declare both licenses.</li>
+          <li><b>A new window.</b> The browser window has a flatter look that follows the light or dark desktop theme, and the built-in pages share one modern style with light and dark colours. Switching tabs updates the tab strip, the address bar and the window title together.</li>
+          <li><b>Google&rsquo;s pages run.</b> Frames are their own JavaScript realms, timers are no longer lost, and the engine&rsquo;s interfaces have the shapes other browsers give them &mdash; <code>instanceof</code> follows the prototype chain, the canvas, WebGL, IndexedDB, <code>MediaSource</code>, <code>Cache</code> and <code>Observable</code> interfaces are real. Content too wide for a centred line starts at the line&rsquo;s start, which puts reCAPTCHA&rsquo;s image tiles where they belong.</li>
+          <li><b>Faster.</b> Whether an attribute selector compares case-insensitively is decided once per selector, not once per element: Speedometer&rsquo;s Complex-DOM suites run about 18% faster. Scripts with many functions parse about 9% faster, a <code>&lt;form&gt;</code> caches its control list (three times faster on a form with a hundred controls), and pages with container queries relayout in one pass instead of two when no container changed size &mdash; Google&rsquo;s results page ran the second pass on 44 of its 45 relayouts.</li>
+          <li><b>Correctness.</b> Constructed style sheets adopted by a shadow root style it again, a style sheet styles only its own document, a page with many shadow roots no longer crashes the renderer, <code>prepend()</code> with the parent&rsquo;s first child no longer hangs, a box that sizes itself to its content counts <code>calc()</code> widths, and YouTube playback gets a faster restyle and no stale stream after ads.</li>
+          <li><b>Fetch.</b> Empty <code>POST</code>s, request body types and redirect rules follow the Fetch standard, <code>XMLHttpRequest</code> sends the <code>Content-Type</code> its body calls for, and <code>SharedArrayBuffer</code> is only on the global object of cross-origin-isolated pages.</li>
+        </ul>
+
+        <h2>since 1.0.24</h2>
+        <ul class="news">
+          <li><b>1.0.27</b> (2 October) &mdash; DuckDuckGo is the default search engine; the desktop browser records visited pages in History; every published release gets a Debian/Ubuntu <code>.deb</code> and a portable Linux zip; deeply nested CSS values, SVGs and documents no longer crash the renderer; frames, workers and message ports follow the HTML event and document-lifecycle model; Nordstjernen can be built on Fabrice Bellard&rsquo;s original QuickJS as well as quickjs-ng; lexbor is refreshed; and YouTube and other MSE players play video again.</li>
+          <li><b>1.0.26</b> (26 September) &mdash; grids with more than 24 rows and with <code>grid-template-areas</code> lay out fully; popovers and <code>&lt;dialog&gt;</code> follow the HTML show and close steps; <code>:focus-visible</code> and <code>autofocus</code> work; the default stylesheet follows the HTML rendering section; styling a large page is much faster; and a round of security fixes &mdash; the audio helper opens only what a page may play, the Windows process mitigations are the ones intended, and a page can no longer read the pixels of another site&rsquo;s images or script a cross-origin frame.</li>
+          <li><b>1.0.25</b> (20 September) &mdash; restyling a large document is about 40% faster; the toolbar and <code>about:start</code> take the classic look of the Northstar browser; container queries evaluate the full condition grammar; transitions and animations run on every property, with the Web Animations API; the <code>background</code> and <code>border</code> shorthands parse per the grammar; <code>position: fixed</code> stays anchored while the page scrolls; and quickjs-ng moves to 0.16.2.</li>
+        </ul>
+
+        <h2>about Nordstjernen</h2>
+        <p><b>HTML Standard.</b> Behaviour is measured against the spec text, section by section, not against another browser &mdash; 140 spec rows fully implemented, 31 partial, 0 absent across WHATWG HTML sections 1&ndash;16. See <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/docs/HTML-compatibility.md">docs/HTML-compatibility.md</a>.</p>
+        <p><b>Secure.</b> Process-per-tab design &mdash; each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux), talking to the UI over IPC and shared-memory framebuffers &middot; no JIT.</p>
+        <p><b>Minimalism.</b> The core engine is about 210,000 lines of project C and headers, excluding the vendored libraries and generated assets &mdash; small enough for one person to read and audit end-to-end.</p>
+        <p><b>Private.</b> Nordstjernen ships no telemetry of any kind, and deliberately includes no AI assistant and no AI-style web APIs.</p>
+
+        <a id="download"></a>
+        <h2>download</h2>
+        <p>Nordstjernen <b>1.0.28</b> &mdash; released 4 October 2026.
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28">full release notes &raquo;</a></p>
+
+        <table class="spec dl">
+          <caption class="sr-only">Nordstjernen 1.0.28 downloads</caption>
+          <tr>
+            <th scope="row">Linux (portable)</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/nordstjernen-1.0.28-linux-x86_64.zip">nordstjernen-1.0.28-linux-x86_64.zip</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Debian / Ubuntu</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/nordstjernen_1.0.28_amd64.deb">nordstjernen_1.0.28_amd64.deb</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Checksums</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/SHA256SUMS">SHA256SUMS</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Windows</th>
+            <td><a href="https://apps.microsoft.com/detail/9nw8t7w5z4pl">Microsoft Store</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Android</th>
+            <td><a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Source</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.28.tar.gz">1.0.28.tar.gz</a> &middot;
+                <a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.28.zip">1.0.28.zip</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Other platforms</th>
+            <td><a href="download.html">the download page</a></td>
+          </tr>
+        </table>
+
+  </div>
+
+  <div class="footer">
+    Copyright &copy; 2026 the Nordstjernen project &middot;
+    <a href="https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md">GPL-3.0-or-later or NSL-1.0</a> &middot;
+    <a href="https://discord.gg/4W959nW5vF">Discord</a>
+  </div>
+
+</div>
+
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('a').forEach(function (link) {
+    link.addEventListener('mouseenter', function () {
+      window.status = link.getAttribute('href') || '';
+    });
+    link.addEventListener('mouseleave', function () {
+      window.status = 'nordstjernen.org';
+    });
+  });
+  window.status = 'nordstjernen.org';
+});
+</script>
+
+</body>
+</html>
