@@ -6,7 +6,8 @@
 # at /src. GitHub's JavaScript actions cannot run in a 32-bit
 # container, so the workflow starts this script with `docker run`:
 #
-#   docker run --rm --platform linux/386 -v "$PWD:/src" -w /src \
+#   docker run --rm --platform linux/386 --network host \
+#       -v "$PWD:/src" -w /src \
 #       i386/debian:trixie bash scripts/ci-linux-i386.sh
 #
 # Set CCACHE_DIR to a mounted directory to keep ccache across runs.
@@ -14,7 +15,7 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries
-apt-get update -qq
+apt-get update -qq --error-on=any
 apt-get install -y -qq --no-install-recommends \
     ccache gcc g++ make cmake pkg-config meson ninja-build git file \
     libgtk-4-dev libcurl4-openssl-dev libssl-dev \

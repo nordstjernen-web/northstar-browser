@@ -34,6 +34,8 @@ jobs:
 
       # Actions run on the 64-bit host; only the build runs in the 32-bit
       # container, since the runner's node binary cannot execute in one.
+      # Host networking: the default bridge network has no working DNS
+      # on the runner, so apt inside the container cannot resolve hosts.
       - name: Restore ccache
         uses: actions/cache@v6
         with:
@@ -44,7 +46,7 @@ jobs:
 
       - name: Build and smoke-test in an i386 Debian 13 container
         run: |
-          docker run --rm --platform linux/386 \
+          docker run --rm --platform linux/386 --network host \
             -v "$PWD:/src" -w /src -e CCACHE_DIR=/src/.ccache \
             i386/debian:trixie bash scripts/ci-linux-i386.sh
 
