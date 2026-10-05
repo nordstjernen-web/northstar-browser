@@ -7,7 +7,8 @@ engine targets practical HTML5, modern CSS and JavaScript compatibility
 without embedding Gecko, WebKit, Blink or another browser engine. Linux
 is the primary platform; macOS and Windows are also supported.
 
-See [Nordstjernen Web Browser](https://github.com/nordstjernen-web/nordstjernen-browser)  also.
+**See [Nordstjernen Web Browser](https://github.com/nordstjernen-web/nordstjernen-browser)  also, which is
+the most complete, fully featured web browser project we are making.**
 
 Northstar is licensed under the GNU General Public License, version 3 or
 later.
