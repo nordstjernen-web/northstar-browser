@@ -7,11 +7,18 @@ engine targets practical HTML5, modern CSS and JavaScript compatibility
 without embedding Gecko, WebKit, Blink or another browser engine. Linux
 is the primary platform; macOS and Windows are also supported.
 
-This repository is the open-source GPL edition of the
-[Nordstjernen project](https://github.com/nordstjernen-web/nordstjernen-browser).
+See [Nordstjernen Web Browser](https://github.com/nordstjernen-web/nordstjernen-browser)  also.
+
 Northstar is licensed under the GNU General Public License, version 3 or
 later.
 
+## Multiple browser variants
+* This repo is the Northstar web browser, a minimalist, simple and good web browser.
+* [Nordstjernen Web Browser](https://github.com/nordstjernen-web/nordstjernen-browser) is the most complete, fully featured we browser. 
+We are doing web browser innovation, research and development, and part of this is 
+making multiple web browser variants to test and compare 
+
+## Downloads 
 **Download for Windows:** Northstar Browser is available from the
 [Microsoft Store](https://apps.microsoft.com/detail/9P39ZB79JV0T).
 
