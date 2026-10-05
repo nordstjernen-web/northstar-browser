@@ -15,7 +15,7 @@ later.
 
 ## Multiple browser variants
 * This repo is the Northstar web browser, a minimalist, simple and good web browser. This is more about research about browser tech.
-* [Nordstjernen Web Browser](https://github.com/nordstjernen-web/nordstjernen-browser) is the most complete, fully featured we browser.
+* [Nordstjernen Web Browser](https://github.com/nordstjernen-web/nordstjernen-browser) is the most complete, fully featured web browser.
   
 We are doing web browser innovation, research and development, and part of this is 
 making multiple web browser variants to test and compare 
