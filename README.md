@@ -189,7 +189,8 @@ loads.
 **Required system libraries:** GTK 4 (≥ 4.14; ≥ 4.22.1 on Windows),
 GLib (≥ 2.80), Cairo (≥ 1.18), HarfBuzz (≥ 8.3), FriBidi, fontconfig
 (≥ 2.15), FreeType, libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet,
-libpsl, SQLite and zlib — Ubuntu 24.04 meets every floor. The engine lays
+libpsl, SQLite and zlib — Ubuntu 24.04, Debian 13 and Fedora 40 meet
+every floor; Ubuntu 22.04 and older cannot build it. The engine lays
 text out through ns-pango rather than the system Pango; GTK still links
 the system Pango for its own widgets, and the two coexist because every
 symbol in the fork is renamed. Linux builds also require libseccomp. SDL2 is

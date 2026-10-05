@@ -81,6 +81,15 @@ Significant changes in each release:
   page, <https://nordstjernen.org/northstar-browser/>, instead of the
   Nordstjernen front page, and its links to the Nordstjernen repository
   use that repository's current name, `nordstjernen-browser`.
+* `meson setup` checks every system-library version floor -- GLib 2.80,
+  Cairo 1.18, HarfBuzz 8.3, FriBidi 1.0.6, fontconfig 2.15, GTK 4.14 and
+  libcurl 8.5 -- before it configures ns-pango, and names each library
+  that is missing or too old in one error. On a release older than
+  Ubuntu 24.04 the build used to stop inside the ns-pango subproject on
+  whichever floor it met first, as a bare GLib version mismatch, with
+  nothing saying that GTK and the rest of the text stack were too old as
+  well (#13). The Debian and RPM build dependencies carry the same
+  floors, and `docs/building.md` says which releases meet them.
 
 1.0.12:
 =======

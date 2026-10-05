@@ -40,11 +40,17 @@ macOS and Windows it is unused and the syscall filter is a no-op.
 
 The text stack has version floors set by ns-pango: GLib ≥ 2.80,
 HarfBuzz ≥ 8.3, fontconfig ≥ 2.15, Cairo ≥ 1.18 and FriBidi ≥ 1.0.6.
-They are what Ubuntu 24.04 ships; older distributions (Debian 12, for
-one) need newer copies of those libraries.
-GTK must be ≥ 4.14 and libcurl ≥ 8.5. With a libcurl older than 8.11 the
-build warns that WebSocket is unavailable unless that libcurl was built
-with WebSocket support.
+GTK must be ≥ 4.14 and libcurl ≥ 8.5. These are what Ubuntu 24.04 ships;
+Debian 13 and Fedora 40 meet them too. Older releases — Ubuntu 22.04 and
+20.04, Debian 12 — cannot build Northstar from their own packages: their
+GTK 4 is too old or absent, alongside the text-stack libraries.
+`meson setup` checks every floor before configuring ns-pango and lists
+each library that is missing or too old in a single error. ns-pango is
+linked into the same process as GTK, so it cannot fall back to building
+GLib or Cairo from source; on an older release, build inside an Ubuntu
+24.04 (or newer) container instead.
+With a libcurl older than 8.11 the build warns that WebSocket is
+unavailable unless that libcurl was built with WebSocket support.
 
 **Optional, auto-detected:** `libavif-dev` (AVIF images — it pulls in a
 full AV1 decoder for a format that is rare on the web, so

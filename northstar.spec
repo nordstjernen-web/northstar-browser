@@ -22,8 +22,13 @@ BuildRequires:  meson >= 1.0
 BuildRequires:  ninja
 BuildRequires:  pkgconfig
 BuildRequires:  update-desktop-files
+BuildRequires:  pkgconfig(cairo) >= 1.18
 BuildRequires:  pkgconfig(enchant-2)
-BuildRequires:  pkgconfig(gtk4)
+BuildRequires:  pkgconfig(fontconfig) >= 2.15
+BuildRequires:  pkgconfig(fribidi) >= 1.0.6
+BuildRequires:  pkgconfig(glib-2.0) >= 2.80
+BuildRequires:  pkgconfig(gtk4) >= 4.14
+BuildRequires:  pkgconfig(harfbuzz) >= 8.3
 BuildRequires:  pkgconfig(libcrypto)
 BuildRequires:  pkgconfig(libcurl) >= 8.5
 BuildRequires:  pkgconfig(libpsl)

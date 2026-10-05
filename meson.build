@@ -119,6 +119,36 @@ message('northstar build profile: ' +
         (ns_is_release ? ns_release_profile
                        : 'development (debug symbols + frame pointer + hardened)'))
 
+# ns-pango enforces the text-stack floors from inside the subproject, where a
+# too-old library surfaces as a bare version mismatch and only the first of
+# several is reported. Checking every floor here first names them all at once.
+gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
+ns_dependency_floors = [
+  ['glib-2.0', '>=2.80'],
+  ['gobject-2.0', '>=2.80'],
+  ['gio-2.0', '>=2.80'],
+  ['cairo', '>=1.18'],
+  ['harfbuzz', '>=8.3'],
+  ['fribidi', '>=1.0.6'],
+  ['fontconfig', '>=2.15'],
+  ['gtk4', gtk4_min],
+  ['libcurl', '>=8.5'],
+]
+ns_unmet_floors = []
+foreach floor : ns_dependency_floors
+  if not dependency(floor[0], version: floor[1], required: false).found()
+    installed = dependency(floor[0], required: false)
+    ns_unmet_floors += '  @0@ @1@ (@2@)'.format(floor[0], floor[1],
+      installed.found() ? 'found ' + installed.version() : 'not found')
+  endif
+endforeach
+if ns_unmet_floors.length() > 0
+  error('Northstar needs newer system libraries than this machine has:\n' +
+        '\n'.join(ns_unmet_floors) + '\n' +
+        'Ubuntu 24.04, Debian 13 and Fedora 40 are the oldest releases of ' +
+        'their distributions that ship all of them; see docs/building.md.')
+endif
+
 glib       = dependency('glib-2.0')
 gobject    = dependency('gobject-2.0')
 gio        = dependency('gio-2.0')
@@ -137,7 +167,6 @@ ns_pango_sp = subproject('ns-pango',
 pango      = ns_pango_sp.get_variable('libpango_dep')
 pangocairo = ns_pango_sp.get_variable('libpangocairo_dep')
 
-gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
 gtk4 = dependency('gtk4', version: gtk4_min)
 if host_machine.system() == 'windows'
   message('GTK @0@ — Windows requires the MSYS2 stock GTK (>= 4.22.1).'.format(gtk4.version()))
