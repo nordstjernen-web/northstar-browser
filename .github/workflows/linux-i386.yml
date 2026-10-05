@@ -34,8 +34,6 @@ jobs:
 
       # Actions run on the 64-bit host; only the build runs in the 32-bit
       # container, since the runner's node binary cannot execute in one.
-      # Host networking: the default bridge network has no working DNS
-      # on the runner, so apt inside the container cannot resolve hosts.
       - name: Restore ccache
         uses: actions/cache@v6
         with:
@@ -44,9 +42,15 @@ jobs:
           restore-keys: |
             ccache-linux-i386-
 
+      # Docker's default seccomp profile on the runner blocks a syscall
+      # the 32-bit glibc resolver needs, so every DNS lookup in the
+      # container fails ("Temporary failure resolving") while 64-bit
+      # containers resolve fine. The job VM is disposable; drop the
+      # profile for this container.
       - name: Build and smoke-test in an i386 Debian 13 container
         run: |
-          docker run --rm --platform linux/386 --network host \
+          docker run --rm --platform linux/386 \
+            --security-opt seccomp=unconfined \
             -v "$PWD:/src" -w /src -e CCACHE_DIR=/src/.ccache \
             i386/debian:trixie bash scripts/ci-linux-i386.sh
 

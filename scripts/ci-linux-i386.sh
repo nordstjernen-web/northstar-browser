@@ -6,7 +6,7 @@
 # at /src. GitHub's JavaScript actions cannot run in a 32-bit
 # container, so the workflow starts this script with `docker run`:
 #
-#   docker run --rm --platform linux/386 --network host \
+#   docker run --rm --platform linux/386 --security-opt seccomp=unconfined \
 #       -v "$PWD:/src" -w /src \
 #       i386/debian:trixie bash scripts/ci-linux-i386.sh
 #
