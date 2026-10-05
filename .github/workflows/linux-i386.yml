@@ -1,0 +1,71 @@
+name: linux-i386
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: linux-i386-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: gcc on debian-13 i386
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Actions run on the 64-bit host; only the build runs in the 32-bit
+      # container, since the runner's node binary cannot execute in one.
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-linux-i386-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-i386-
+
+      - name: Build and smoke-test in an i386 Debian 13 container
+        run: |
+          docker run --rm --platform linux/386 \
+            -v "$PWD:/src" -w /src -e CCACHE_DIR=/src/.ccache \
+            i386/debian:trixie bash scripts/ci-linux-i386.sh
+
+      - name: Fix ownership of container-written files
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .
+
+      - name: Upload build log
+        if: always() && hashFiles('build-i386.log') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-log-linux-i386
+          path: build-i386.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload northstar binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: northstar-linux-i386
+          path: builddir-i386/src/gtk/northstar
+          if-no-files-found: error
+          retention-days: 14

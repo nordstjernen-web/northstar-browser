@@ -126,7 +126,8 @@ This repo is driven by Claude in long uninterrupted sessions.
   `Start-Process .\builddir\src\gtk\northstar.exe <url>` and kill it
   again afterwards. Never wait on user input: `.claude/settings.json`
   allow-lists both the Bash and PowerShell tools.
-- **CI is enabled.** The Linux (Ubuntu gcc), musl (Alpine), macOS and Windows workflows run on
+- **CI is enabled.** The Linux (Ubuntu gcc), Linux i386 (Debian 13 container), musl (Alpine),
+  macOS and Windows workflows run on
   every push to `main` and every PR targeting `main`, plus manual
   `workflow_dispatch` — except for changes that touch only Markdown,
   `docs/` or `LICENSE`, which skip CI. Local Linux is still the primary

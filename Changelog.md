@@ -96,6 +96,13 @@ Significant changes in each release:
   it shifted by zero and the hash came out as 0 for every key, so
   each style lookup scanned the whole cache. GCC warned about it on
   i386 (`-Wshift-count-overflow`, #15). The fold is now done in 64 bits.
+* The i386 GCC build links cleanly with `--werror`. GCC's link-time
+  optimiser could not see that the MP3 decoder's short-block scalefactor
+  loop stays inside its 40-entry array and reported
+  `-Wstringop-overflow` (#15); the loop now carries that bound
+  explicitly. A new `linux-i386` CI workflow builds and smoke-tests
+  Northstar in a 32-bit Debian 13 container on every push, using
+  `scripts/ci-linux-i386.sh`.
 
 1.0.12:
 =======

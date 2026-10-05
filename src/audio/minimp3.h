@@ -690,7 +690,10 @@ static void L3_decode_scalefactors(const uint8_t *hdr, uint8_t *ist_pos, bs_t *b
     if (gr->n_short_sfb)
     {
         int sh = 3 - scf_shift;
-        for (i = 0; i < gr->n_short_sfb; i += 3)
+        /* Valid side info keeps n_long_sfb + n_short_sfb <= 39; the
+         * explicit bound lets GCC see that on 32-bit LTO builds, where
+         * -Wstringop-overflow otherwise fails the link under -Werror. */
+        for (i = 0; i < gr->n_short_sfb && gr->n_long_sfb + i + 2 < (int)sizeof(iscf); i += 3)
         {
             iscf[gr->n_long_sfb + i + 0] += gr->subblock_gain[0] << sh;
             iscf[gr->n_long_sfb + i + 1] += gr->subblock_gain[1] << sh;

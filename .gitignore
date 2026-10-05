@@ -25,6 +25,7 @@
 /builddir/
 /builddir-release/
 /builddir-verify/
+/builddir-i386/
 /release-build/
 /build-*/
 
