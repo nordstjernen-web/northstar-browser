@@ -90,6 +90,12 @@ Significant changes in each release:
   nothing saying that GTK and the rest of the text stack were too old as
   well (#13). The Debian and RPM build dependencies carry the same
   floors, and `docs/building.md` says which releases meet them.
+* 32-bit builds no longer put every cached selector match in one hash
+  bucket. The selector-cache hash folded a pointer-sized value with
+  `h >> 32`, which is undefined where pointers are 32 bits wide. On x86
+  it shifted by zero and the hash came out as 0 for every key, so
+  each style lookup scanned the whole cache. GCC warned about it on
+  i386 (`-Wshift-count-overflow`, #15). The fold is now done in 64 bits.
 
 1.0.12:
 =======

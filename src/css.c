@@ -27424,7 +27424,9 @@ selector_cache_hash(gconstpointer data)
     h ^= (guintptr)key->selector * 0x9e3779b1u;
     h ^= (guintptr)key->element * 0x85ebca6bu;
     h ^= (guintptr)key->pseudo * 0xc2b2ae35u;
-    return (guint)(h ^ (h >> 32));
+    /* guintptr is 32 bits on i386, where h >> 32 is undefined and folds
+     * every key into the same bucket. */
+    return (guint)((guint64)h ^ ((guint64)h >> 32));
 }
 
 static gboolean
