@@ -52,7 +52,9 @@ space.
 - **GTK shell** (`src/gtk/procwindow.c`) — the window chrome: toolbar,
   omnibox, bookmarks, history, downloads, find bar, settings, printing,
   zoom and full screen. *New Window* opens another window in the same
-  process; each window shows one page — there are no tabs.
+  process; each window shows one page — there are no tabs. Its own
+  icons are the bundled SVGs drawn by the in-engine SVG renderer
+  (`src/gtk/icons.c`), so they never depend on a GdkPixbuf SVG loader.
 - **Page view** (`src/gtk/procview.c`) — the widget that shows a page.
   It turns input into typed requests (`REQ_LOAD`, `REQ_RENDER`,
   `REQ_CLICK`, `REQ_KEY`, `REQ_SCROLL`, `REQ_PRINT`, …), posts each as a

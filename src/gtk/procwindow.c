@@ -6,6 +6,7 @@
 #include "procwindow.h"
 #include <glib/gstdio.h>
 #include "audio/audio.h"
+#include "icons.h"
 #include "procview.h"
 #include "i18n.h"
 #include "bookmarks.h"
@@ -440,7 +441,7 @@ toolbar_button(const char *icon, const char *label, const char *tooltip,
         GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
         gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
         gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
-        GtkWidget *img = gtk_image_new_from_icon_name(icon);
+        GtkWidget *img = ns_icon_image_new(icon);
         GtkWidget *lbl = gtk_label_new(label);
         gtk_widget_add_css_class(lbl, "ns-toolbar-label");
         gtk_box_append(GTK_BOX(box), img);
@@ -448,7 +449,7 @@ toolbar_button(const char *icon, const char *label, const char *tooltip,
         gtk_button_set_child(GTK_BUTTON(b), box);
         gtk_widget_add_css_class(b, "ns-nav-button");
     } else {
-        GtkWidget *img = gtk_image_new_from_icon_name(icon);
+        GtkWidget *img = ns_icon_image_new(icon);
         gtk_button_set_child(GTK_BUTTON(b), img);
     }
     gtk_widget_set_tooltip_text(b, tooltip);
@@ -556,8 +557,7 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
         break;
     }
     if (!icon_name || !url || !*url) {
-        gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY,
-                                          "northstar-bookmarks");
+        ns_icon_entry_set(entry, GTK_ENTRY_ICON_PRIMARY, "northstar-bookmarks");
         gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_PRIMARY,
                                         ns_i18n("Page location"));
         return;
@@ -594,8 +594,8 @@ update_bookmark_indicator(ProcWindow *pw)
     gboolean saved = current_page_bookmarked(pw);
     GtkImage *img = toolbar_button_image(pw->bookmarks_button);
     if (img)
-        gtk_image_set_from_icon_name(img, saved ? "northstar-bookmarks-saved"
-                                                : "northstar-bookmarks");
+        ns_icon_image_set(img, saved ? "northstar-bookmarks-saved"
+                                     : "northstar-bookmarks");
     gtk_widget_set_tooltip_text(pw->bookmarks_button,
                                 saved ? ns_i18n("Bookmarked — open bookmarks")
                                       : ns_i18n("Bookmarks"));
@@ -1968,9 +1968,8 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_widget_set_hexpand(pw->address, TRUE);
     gtk_widget_set_valign(pw->address, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(pw->address, "ns-address");
-    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(pw->address),
-                                      GTK_ENTRY_ICON_PRIMARY,
-                                      "northstar-bookmarks");
+    ns_icon_entry_set(GTK_ENTRY(pw->address), GTK_ENTRY_ICON_PRIMARY,
+                      "northstar-bookmarks");
     gtk_entry_set_icon_tooltip_text(GTK_ENTRY(pw->address),
                                     GTK_ENTRY_ICON_PRIMARY,
                                     ns_i18n("Page location"));
@@ -2035,7 +2034,7 @@ proc_window_new(GtkApplication *app, const char *home_url,
     gtk_widget_set_valign(menu_button, GTK_ALIGN_CENTER);
     g_object_unref(appmenu);
 
-    GtkWidget *logo = gtk_image_new_from_icon_name("northstar");
+    GtkWidget *logo = ns_icon_image_new("northstar");
     gtk_image_set_pixel_size(GTK_IMAGE(logo), 22);
     GtkWidget *logo_button = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(logo_button), logo);
@@ -2371,7 +2370,7 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
     ProcAppCtx *ctx = user_data;
     configure_media_inputs();
     install_icon_search_paths();
-    gtk_window_set_default_icon_name("northstar");
+    ns_icon_install_window_icon("northstar");
     install_status_css();
     ProcWindow *pw = proc_window_new(app, "about:start", ctx->private_mode);
     pw->session_path = g_strdup(ctx->session_path);

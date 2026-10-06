@@ -1,5 +1,6 @@
 northstar_gtk_sources = files(
   '../appmain.c',
+  'icons.c',
   'procview.c',
   'procwindow.c',
   '../libnorthstar.c',

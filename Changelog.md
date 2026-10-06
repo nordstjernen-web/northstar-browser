@@ -239,6 +239,14 @@ Significant changes in each release:
   `e.source === iframe.contentWindow` checks -- with which Google's
   frame APIs and reCAPTCHA authenticate messages -- failed. Written
   independently of Nordstjernen's fixes in the same area.
+* The toolbar, address-bar and logo icons render on systems without
+  librsvg's GdkPixbuf loader (Debian/Ubuntu `librsvg2-common`), which a
+  KDE or minimal desktop often lacks. GTK hands full-colour SVG icons to
+  GdkPixbuf, so without that loader every icon was GTK's image-missing
+  placeholder, with no warning. The shell now draws its bundled icons
+  through the in-engine SVG renderer (`src/gtk/icons.c`), at the
+  screen's own scale, and sets the window icon only when GTK can load
+  it. Fixes #16.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL
