@@ -35,6 +35,16 @@ Significant changes in each release:
   - Media event tasks already in flight are now scrubbed when their
     element is released, closing a dangling-pointer window in the task
     queue.
+* A grid item can span more than 24 rows. `span N` in `grid-row`,
+  `grid-row-start`, `grid-row-end` and `grid-area` was cut to 24, the
+  limit on explicit tracks in a template, although implicit rows go up
+  to 4096. Google's image results lay their tiles out as a masonry of
+  5px auto rows with `grid-row-start: span 25` to `span 100`, so every
+  tile came out 120px tall and its caption was drawn over the picture.
+  Spans now go up to the implicit row limit; a column span is still
+  clamped to the 24 column tracks the layout holds. Nordstjernen fixed
+  the same bug; this fix is written from the bug and the CSS Grid
+  specification.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

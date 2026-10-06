@@ -10843,6 +10843,14 @@ grid_resolve_line_number(const char *s, int n_tracks)
     return grid_resolve_line_from(s, n_tracks, 0);
 }
 
+#define NS_GRID_ROWS_MAX 4096
+
+static int
+grid_parse_span(const char *s)
+{
+    return ns_parse_int(s, 1, 1, NS_GRID_ROWS_MAX);
+}
+
 static int
 grid_pos_span(const ns_css_value *v, int n_tracks,
               int *out_start, int *out_span)
@@ -10852,7 +10860,7 @@ grid_pos_span(const ns_css_value *v, int n_tracks,
     if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return 0;
     const char *s = v->u.keyword;
     if (g_str_has_prefix(s, "span ")) {
-        *out_span = ns_parse_int(s + 5, 1, 1, NS_CSS_TRACKS_MAX);
+        *out_span = grid_parse_span(s + 5);
         return 0;
     }
     const char *slash = strchr(s, '/');
@@ -10864,7 +10872,7 @@ grid_pos_span(const ns_css_value *v, int n_tracks,
         *out_start = n > 0 ? n - 1 : 0;
         g_free(a);
         if (g_str_has_prefix(b, "span ")) {
-            *out_span = ns_parse_int(b + 5, 1, 1, NS_CSS_TRACKS_MAX);
+            *out_span = grid_parse_span(b + 5);
         } else {
             int e = grid_resolve_line_from(b, n_tracks, n > 0 ? n : 0);
             if (n > 0 && e > n) *out_span = e - n;
@@ -10902,7 +10910,7 @@ grid_area_axis_pos(const ns_style *st, gboolean row_axis, int n_tracks,
         char *ss = g_strstrip(sstr);
         int s = grid_resolve_line_number(ss, n_tracks);
         if (g_str_has_prefix(ss, "span "))
-            *out_span = ns_parse_int(ss + 5, 1, 1, NS_CSS_TRACKS_MAX);
+            *out_span = grid_parse_span(ss + 5);
         if (s > 0) {
             *out_start = s - 1;
             *out_span = 1;
@@ -10921,7 +10929,7 @@ grid_area_axis_pos(const ns_style *st, gboolean row_axis, int n_tracks,
     if (estr) {
         char *es = g_strstrip(estr);
         if (g_str_has_prefix(es, "span ")) {
-            *out_span = ns_parse_int(es + 5, 1, 1, NS_CSS_TRACKS_MAX);
+            *out_span = grid_parse_span(es + 5);
         } else if (got) {
             int e = grid_resolve_line_from(es, n_tracks, *out_start + 1);
             if (e > *out_start + 1) *out_span = e - (*out_start + 1);
@@ -10953,24 +10961,21 @@ grid_resolve_pos(const ns_style *st, ns_css_prop shorthand,
             *out_span = el - sl;
         else if (ev && ev->kind == NS_CSS_V_KEYWORD && ev->u.keyword &&
                  g_str_has_prefix(ev->u.keyword, "span "))
-            *out_span = ns_parse_int(ev->u.keyword + 5, 1, 1,
-                                     NS_CSS_TRACKS_MAX);
+            *out_span = grid_parse_span(ev->u.keyword + 5);
         return 1;
     }
     const ns_css_value *sv = st->values[start_prop];
     if (sv && sv->kind == NS_CSS_V_KEYWORD && sv->u.keyword &&
         g_str_has_prefix(sv->u.keyword, "span ")) {
-        *out_span = ns_parse_int(sv->u.keyword + 5, 1, 1, NS_CSS_TRACKS_MAX);
+        *out_span = grid_parse_span(sv->u.keyword + 5);
         return 0;
     }
     const ns_css_value *ev = st->values[end_prop];
     if (ev && ev->kind == NS_CSS_V_KEYWORD && ev->u.keyword &&
         g_str_has_prefix(ev->u.keyword, "span "))
-        *out_span = ns_parse_int(ev->u.keyword + 5, 1, 1, NS_CSS_TRACKS_MAX);
+        *out_span = grid_parse_span(ev->u.keyword + 5);
     return 0;
 }
-
-#define NS_GRID_ROWS_MAX 4096
 
 typedef gboolean grid_occupancy_row[NS_CSS_TRACKS_MAX];
 
@@ -11422,6 +11427,7 @@ layout_grid(ns_box *box, double cw,
                                        NS_CSS_GRID_COLUMN_END, n_cols,
                                        &s, &sp);
             if (!got) s = -1;
+            if (sp > NS_CSS_TRACKS_MAX) sp = NS_CSS_TRACKS_MAX;
             g_grid_lines = &row_lines;
             got = grid_resolve_pos(c->style, NS_CSS_GRID_ROW,
                                    NS_CSS_GRID_ROW_START,
