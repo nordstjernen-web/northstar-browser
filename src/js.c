@@ -1552,8 +1552,10 @@ ns_timer_this_is_detached_window(ns_js *js, JSContext *ctx,
     if (!doc || doc == js->current_doc) return FALSE;
     if (doc->kind != NS_NODE_DOCUMENT || (doc->flags & NS_NODE_FRAGMENT))
         return FALSE;
+    const ns_node *page = js->main_document ? js->main_document
+                                            : js->current_doc;
     for (const ns_node *p = doc; p; p = p->parent)
-        if (p == js->current_doc) return FALSE;
+        if (p == js->current_doc || p == page) return FALSE;
     return TRUE;
 }
 

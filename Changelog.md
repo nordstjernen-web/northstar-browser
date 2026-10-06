@@ -135,6 +135,16 @@ Significant changes in each release:
   it. Ties now go by document order, and a positioned sibling ranks above
   a non-positioned one, as in painting. Written independently of
   Nordstjernen's fix for the same bug.
+* `window.setTimeout()` and `window.setInterval()` called by the page
+  while a frame is loading -- from a frame's script calling into its
+  parent, or from the frame's `load` handler -- are no longer dropped.
+  The check for a detached window compared the window's document with
+  the document currently being run, which is the frame's at that
+  moment, and took the page's own window for a detached one. A window
+  now counts as detached only when its document is outside the page's
+  tree. reCAPTCHA continues its work in such timers, so
+  `grecaptcha.execute()` never produced a token. Written independently
+  of Nordstjernen's fix for the same bug.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL
