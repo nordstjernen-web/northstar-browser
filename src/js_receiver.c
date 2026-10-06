@@ -13,13 +13,16 @@ enum {
     RECEIVER_ATTR    = 1 << 1,
     RECEIVER_REJECTS = 1 << 2,
     RECEIVER_LENIENT = 1 << 3,
-    RECEIVER_KINDS   = 1 << 4,
+    RECEIVER_SETTER  = 1 << 4,
+    RECEIVER_KINDS   = 1 << 5,
 };
 
 enum {
     RECEIVER_DATA_TARGET,
     RECEIVER_DATA_NODE_CLASS,
     RECEIVER_DATA_ATTR_CLASS,
+    RECEIVER_DATA_NODE_PROTO,
+    RECEIVER_DATA_NAME,
     RECEIVER_DATA_LEN,
 };
 
@@ -27,7 +30,9 @@ typedef struct {
     JSContext *ctx;
     JSClassID node_class;
     JSClassID attr_class;
+    JSValueConst node_proto;
     GHashTable *made[RECEIVER_KINDS];
+    GHashTable *made_setters;
     GHashTable *event_target_names;
 } receiver_pass;
 
@@ -80,12 +85,47 @@ receiver_rejected_promise(JSContext *ctx)
     return promise;
 }
 
+static gboolean
+receiver_proto_extends(JSContext *ctx, JSValueConst proto, JSValueConst base);
+
+static gboolean
+receiver_is_derived_ordinary_object(JSContext *ctx, JSValueConst this_val,
+                                    JSValueConst *data)
+{
+    JSClassID id = JS_GetClassID(this_val);
+    if (id == (JSClassID)JS_VALUE_GET_INT(data[RECEIVER_DATA_NODE_CLASS]) ||
+        id == (JSClassID)JS_VALUE_GET_INT(data[RECEIVER_DATA_ATTR_CLASS]) ||
+        JS_IsFunction(ctx, this_val))
+        return FALSE;
+    JSValue proto = JS_GetPrototype(ctx, this_val);
+    gboolean derived = receiver_proto_extends(ctx, proto,
+                                              data[RECEIVER_DATA_NODE_PROTO]);
+    JS_FreeValue(ctx, proto);
+    return derived;
+}
+
+static JSValue
+receiver_shadowing_set(JSContext *ctx, JSValueConst this_val, int argc,
+                       JSValueConst *argv, JSValueConst *data)
+{
+    JSAtom atom = JS_ValueToAtom(ctx, data[RECEIVER_DATA_NAME]);
+    if (atom == JS_ATOM_NULL) return JS_EXCEPTION;
+    JSValue val = argc > 0 ? JS_DupValue(ctx, argv[0]) : JS_UNDEFINED;
+    int ok = JS_DefinePropertyValue(ctx, this_val, atom, val,
+                                    JS_PROP_C_W_E | JS_PROP_THROW);
+    JS_FreeAtom(ctx, atom);
+    return ok < 0 ? JS_EXCEPTION : JS_UNDEFINED;
+}
+
 static JSValue
 receiver_checked_call(JSContext *ctx, JSValueConst this_val, int argc,
                       JSValueConst *argv, int kind, JSValueConst *data)
 {
     if (receiver_matches(this_val, kind, data))
         return JS_Call(ctx, data[RECEIVER_DATA_TARGET], this_val, argc, argv);
+    if ((kind & RECEIVER_SETTER) && JS_IsObject(this_val) &&
+        receiver_is_derived_ordinary_object(ctx, this_val, data))
+        return receiver_shadowing_set(ctx, this_val, argc, argv, data);
     if (kind & RECEIVER_LENIENT) return JS_UNDEFINED;
     if (kind & RECEIVER_REJECTS) return receiver_rejected_promise(ctx);
     return JS_ThrowTypeError(ctx, "Illegal invocation");
@@ -105,22 +145,38 @@ receiver_function_length(JSContext *ctx, JSValueConst fn)
 }
 
 static JSValue
-receiver_checked(receiver_pass *pass, JSValueConst fn, int kind)
+receiver_checked(receiver_pass *pass, JSValueConst fn, int kind, JSAtom atom)
 {
     JSContext *ctx = pass->ctx;
     if (!JS_IsFunction(ctx, fn)) return JS_DupValue(ctx, fn);
-    gpointer hit = g_hash_table_lookup(pass->made[kind], JS_VALUE_GET_PTR(fn));
-    if (hit) return JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, hit));
+    GHashTable *made_for_kind = pass->made[kind];
+    gpointer key = JS_VALUE_GET_PTR(fn);
+    char *setter_key = NULL;
+    if (kind & RECEIVER_SETTER) {
+        made_for_kind = pass->made_setters;
+        setter_key = g_strdup_printf("%p/%d/%u", key, kind, (unsigned)atom);
+        key = setter_key;
+    }
+    gpointer hit = g_hash_table_lookup(made_for_kind, key);
+    if (hit) {
+        g_free(setter_key);
+        return JS_DupValue(ctx, JS_MKPTR(JS_TAG_OBJECT, hit));
+    }
+    JSValue name_value = JS_AtomToString(ctx, atom);
     JSValueConst data[RECEIVER_DATA_LEN] = {
         [RECEIVER_DATA_TARGET] = fn,
         [RECEIVER_DATA_NODE_CLASS] = JS_NewInt32(ctx, (int32_t)pass->node_class),
         [RECEIVER_DATA_ATTR_CLASS] = JS_NewInt32(ctx, (int32_t)pass->attr_class),
+        [RECEIVER_DATA_NODE_PROTO] = pass->node_proto,
+        [RECEIVER_DATA_NAME] = name_value,
     };
     JSValue made = JS_NewCFunctionData(ctx, receiver_checked_call,
                                receiver_function_length(ctx, fn), kind,
                                RECEIVER_DATA_LEN, data);
+    JS_FreeValue(ctx, name_value);
     if (JS_IsException(made)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
+        g_free(setter_key);
         return JS_DupValue(ctx, fn);
     }
     JSValue name = JS_GetPropertyStr(ctx, fn, "name");
@@ -128,7 +184,8 @@ receiver_checked(receiver_pass *pass, JSValueConst fn, int kind)
         JS_DefinePropertyValueStr(ctx, made, "name", name, JS_PROP_CONFIGURABLE);
     else
         JS_FreeValue(ctx, name);
-    g_hash_table_insert(pass->made[kind], JS_VALUE_GET_PTR(fn),
+    g_hash_table_insert(made_for_kind,
+                        setter_key ? setter_key : JS_VALUE_GET_PTR(fn),
                         JS_VALUE_GET_PTR(JS_DupValue(ctx, made)));
     return made;
 }
@@ -164,13 +221,14 @@ receiver_check_member(receiver_pass *pass, JSValueConst proto, JSAtom atom,
         strcmp(name, "constructor") != 0) {
         int kind = receiver_kind_for(name, accepted, accessor);
         if (accessor) {
-            JSValue get = receiver_checked(pass, desc.getter, kind);
-            JSValue set = receiver_checked(pass, desc.setter, kind);
+            JSValue get = receiver_checked(pass, desc.getter, kind, atom);
+            JSValue set = receiver_checked(pass, desc.setter,
+                                           kind | RECEIVER_SETTER, atom);
             JS_DefinePropertyGetSet(ctx, proto, atom, get, set,
                                     desc.flags & (JS_PROP_CONFIGURABLE |
                                                   JS_PROP_ENUMERABLE));
         } else if (JS_IsFunction(ctx, desc.value)) {
-            JSValue fn = receiver_checked(pass, desc.value, kind);
+            JSValue fn = receiver_checked(pass, desc.value, kind, atom);
             JS_DefinePropertyValue(ctx, proto, atom, fn,
                                    desc.flags & (JS_PROP_CONFIGURABLE |
                                                  JS_PROP_ENUMERABLE |
@@ -310,6 +368,9 @@ ns_js_require_node_receivers(JSContext *ctx, JSValueConst global,
     JSValue target_proto = receiver_named_proto(ctx, global, "EventTarget");
     receiver_pass pass = {
         .ctx = ctx, .node_class = node_class, .attr_class = attr_class,
+        .node_proto = node_proto,
+        .made_setters = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                              g_free, NULL),
         .event_target_names = g_hash_table_new(g_direct_hash, g_direct_equal),
     };
     for (int k = 0; k < RECEIVER_KINDS; k++)
@@ -324,6 +385,12 @@ ns_js_require_node_receivers(JSContext *ctx, JSValueConst global,
             JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, made));
         g_hash_table_destroy(pass.made[k]);
     }
+    GHashTableIter setters;
+    gpointer setter_key, setter;
+    g_hash_table_iter_init(&setters, pass.made_setters);
+    while (g_hash_table_iter_next(&setters, &setter_key, &setter))
+        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, setter));
+    g_hash_table_destroy(pass.made_setters);
     receiver_free_event_target_names(&pass);
     JS_FreeValue(ctx, target_proto);
     JS_FreeValue(ctx, attr_proto);

@@ -80,6 +80,16 @@ Significant changes in each release:
   extra native call, about 15 ns. Written independently of Nordstjernen's
   fix, which patches its in-tree JavaScript engine; Northstar carries no
   engine fork, so the check wraps the members instead.
+* Assigning to a property of a custom element's prototype
+  (`MyElement.prototype.async = function () {...}`) no longer throws
+  `Illegal invocation` when Northstar's shared element prototype carries
+  an accessor of that name. Chrome keeps such accessors on the specific
+  interface (`async` lives only on `HTMLScriptElement`), so the
+  assignment creates an own property there; the checked setters now do
+  the same for an ordinary object that inherits from `Node.prototype`,
+  while a setter called directly on a foreign object still throws.
+  YouTube's Polymer runtime assigns `async` this way and stopped at its
+  loading skeleton after the receiver checks landed; it boots again.
 * `window.postMessage()`, `MessagePort.postMessage()`, a port's queued
   messages when it starts, and `BroadcastChannel` deliver their messages
   as tasks, as HTML specifies, instead of on the microtask queue. A
