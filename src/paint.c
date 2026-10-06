@@ -2249,6 +2249,35 @@ ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *s)
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_LEFT);
 }
 
+void
+ns_paint_start_align_overflowing_lines(NsPangoLayout *layout)
+{
+    int width = ns_pango_layout_get_width(layout);
+    if (width <= 0 || ns_pango_layout_get_justify(layout)) return;
+    gboolean rtl = ns_pango_context_get_base_dir(
+        ns_pango_layout_get_context(layout)) == NS_PANGO_DIRECTION_RTL;
+    NsPangoAlignment start = rtl ? NS_PANGO_ALIGN_RIGHT : NS_PANGO_ALIGN_LEFT;
+    if (ns_pango_layout_get_alignment(layout) == start) return;
+    gboolean any_overflow = FALSE;
+    for (NsPangoLayoutIter *it = ns_pango_layout_get_iter(layout); it; ) {
+        NsPangoLayoutLine *line = ns_pango_layout_iter_get_line_readonly(it);
+        if (line && line->length > 0) {
+            NsPangoRectangle logical;
+            ns_pango_layout_line_get_extents(line, NULL, &logical);
+            if (logical.width <= width) {
+                ns_pango_layout_iter_free(it);
+                return;
+            }
+            any_overflow = TRUE;
+        }
+        if (!ns_pango_layout_iter_next_line(it)) {
+            ns_pango_layout_iter_free(it);
+            it = NULL;
+        }
+    }
+    if (any_overflow) ns_pango_layout_set_alignment(layout, start);
+}
+
 static void
 apply_nowrap_align_width(NsPangoLayout *layout, const ns_box *b)
 {
@@ -2902,6 +2931,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     const ns_css_value *ta = s ? s->values[NS_CSS_TEXT_ALIGN] : NULL;
     if (keyword_is(ta, "justify"))
         ns_pango_layout_set_justify(layout, TRUE);
+    ns_paint_start_align_overflowing_lines(layout);
     return layout;
 }
 
@@ -3563,6 +3593,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
 
     ns_paint_apply_text_align(layout, s);
     apply_nowrap_align_width(layout, b);
+    ns_paint_start_align_overflowing_lines(layout);
     return layout;
 }
 

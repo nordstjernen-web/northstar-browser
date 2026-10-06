@@ -56,6 +56,7 @@ int ns_paint_pango_font_size(double size_px);
 NsPangoWeight ns_paint_pango_weight(int weight);
 NsPangoStretch ns_paint_pango_stretch(int rank);
 void ns_paint_apply_text_align(NsPangoLayout *layout, const ns_style *style);
+void ns_paint_start_align_overflowing_lines(NsPangoLayout *layout);
 
 void ns_paint_apply_i18n(NsPangoLayout *layout, NsPangoAttrList *attrs,
                          const ns_box *box);

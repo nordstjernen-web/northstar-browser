@@ -6156,6 +6156,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     double measured;
     int line_count;
     ns_pango_layout_set_text(layout, box->text, -1);
+    ns_paint_start_align_overflowing_lines(layout);
     int ph;
     ns_pango_layout_get_pixel_size(layout, NULL, &ph);
     line_count = ns_pango_layout_get_line_count(layout);
@@ -6355,6 +6356,7 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
         ns_pango_layout_set_justify(layout, TRUE);
     else
         ns_pango_layout_set_alignment(layout, NS_PANGO_ALIGN_LEFT);
+    ns_paint_start_align_overflowing_lines(layout);
 
     int index = 0, trailing = 0;
     gboolean inside = ns_pango_layout_xy_to_index(

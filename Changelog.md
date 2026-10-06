@@ -106,6 +106,14 @@ Significant changes in each release:
   and one registration goes from 300-400 ms to 13-17 ms; computed
   values are unchanged. Written independently of Nordstjernen's fix for
   the same problem.
+* An image or inline block wider than a centred, right-aligned or
+  end-aligned line starts at the line's start edge and overflows the end,
+  as CSS Text requires, instead of hanging off both sides. Pango centres
+  an overflowing line with a negative offset, so the left part of an
+  oversized picture in a `text-align: center` box -- reCAPTCHA's image
+  challenge tiles, for one -- was cut off. A layout whose lines all
+  overflow is now laid out, hit-tested and painted start-aligned.
+  Written independently of Nordstjernen's fix for the same bug.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL
