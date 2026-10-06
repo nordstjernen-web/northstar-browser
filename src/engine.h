@@ -29,7 +29,8 @@ ns_response *ns_engine_post_blocking(const char *url, const char *top_url,
                                      const char *content_type, GError **error);
 
 void ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
-                                   GPtrArray *out, GHashTable *css_cache);
+                                   GPtrArray *out, GPtrArray *out_docs,
+                                   GHashTable *css_cache);
 
 char *ns_engine_linked_css_text(const char *url);
 

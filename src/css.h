@@ -1265,6 +1265,10 @@ void ns_css_append_unescaped(GString *out, const char **pp);
 GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
                            gsize                     n_sheets);
+GHashTable *ns_css_compute_scoped(ns_node *doc,
+                                  const ns_css_stylesheet *const *author_sheets,
+                                  const ns_node *const *sheet_docs,
+                                  gsize n_sheets);
 void ns_css_selector_cache_begin(void);
 void ns_css_selector_cache_end(void);
 

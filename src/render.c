@@ -317,7 +317,8 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         cache_selectors = ns_css_stylesheet_has_container_rules(c->sheets[i]);
     if (cache_selectors) ns_css_selector_cache_begin();
     gint64 trace_start = ns_trace_now();
-    GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->n_sheets);
+    GHashTable *styles = ns_css_compute_scoped(c->doc, c->sheets, c->sheet_docs,
+                                               c->n_sheets);
     ns_trace_complete("style", "cascade", trace_start, NULL);
     gint64 t1 = profile ? g_get_monotonic_time() : 0;
 
@@ -357,7 +358,8 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         ns_css_container_features_begin();
         gint64 t4 = profile ? g_get_monotonic_time() : 0;
         trace_start = ns_trace_now();
-        GHashTable *styles2 = ns_css_compute(c->doc, c->sheets, c->n_sheets);
+        GHashTable *styles2 = ns_css_compute_scoped(c->doc, c->sheets, c->sheet_docs,
+                                               c->n_sheets);
         ns_trace_complete("style", "cascade for container queries",
                           trace_start, NULL);
         gint64 t5 = profile ? g_get_monotonic_time() : 0;

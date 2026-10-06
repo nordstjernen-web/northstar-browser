@@ -30621,6 +30621,17 @@ cascade_walk(ns_node *node,
              GHashTable *out,
              gboolean under_dirty);
 
+static __thread const ns_node *const *g_author_sheet_docs;
+static __thread const ns_node *g_cascade_doc;
+
+static gboolean
+cascade_sheet_applies(gsize sheet_index)
+{
+    if (!g_author_sheet_docs || !g_cascade_doc) return TRUE;
+    const ns_node *owner = g_author_sheet_docs[sheet_index];
+    return !owner || owner == g_cascade_doc;
+}
+
 static GHashTable    *g_incr_prev_styles;
 static GHashTable    *g_incr_before_styles;
 
@@ -32255,9 +32266,10 @@ cascade_walk(ns_node *node,
                              (guint)n_pe + 1,
                              layer_ranks);
         for (gsize i = 0; i < n_author; i++)
-            gather_matches_multi(author[i], NS_CSS_ORIGIN_AUTHOR,
-                                 (int)(i + 1), node, &el_keys, dests,
-                                 (guint)n_pe + 1, layer_ranks);
+            if (cascade_sheet_applies(i))
+                gather_matches_multi(author[i], NS_CSS_ORIGIN_AUTHOR,
+                                     (int)(i + 1), node, &el_keys, dests,
+                                     (guint)n_pe + 1, layer_ranks);
 
         char *pres_css = presentational_hints_css(node);
         const ns_css_stylesheet *pres_sheet = NULL;
@@ -32504,6 +32516,10 @@ cascade_walk(ns_node *node,
             pushed = TRUE;
         }
     }
+    const ns_node *outer_cascade_doc = g_cascade_doc;
+    if (node->kind == NS_NODE_DOCUMENT && !(node->flags & NS_NODE_FRAGMENT) &&
+        g_author_sheet_docs)
+        g_cascade_doc = node;
     gboolean filter_element = g_ancestor_filter_active &&
                               node->kind == NS_NODE_ELEMENT && node->first_child;
     guint8 *outer_filter = NULL;
@@ -32523,6 +32539,7 @@ cascade_walk(ns_node *node,
         g_free(outer_filter);
     }
     if (pushed) g_array_set_size(g_cq_stack, g_cq_stack->len - 1);
+    g_cascade_doc = outer_cascade_doc;
     if (frame_viewport) {
         g_viewport_w = frame_vw;
         g_viewport_h = frame_vh;
@@ -33190,6 +33207,21 @@ ns_css_stylesheet_from_style_element_cached(ns_node *style)
     ne->vh = ns_css_media_viewport_current_h();
     g_hash_table_replace(g_style_el_cache, style, ne);
     return sh;
+}
+
+GHashTable *
+ns_css_compute_scoped(ns_node *doc,
+                      const ns_css_stylesheet *const *author_sheets,
+                      const ns_node *const *sheet_docs, gsize n_sheets)
+{
+    const ns_node *const *outer_docs = g_author_sheet_docs;
+    const ns_node *outer_doc = g_cascade_doc;
+    g_author_sheet_docs = sheet_docs;
+    g_cascade_doc = doc;
+    GHashTable *styles = ns_css_compute(doc, author_sheets, n_sheets);
+    g_author_sheet_docs = outer_docs;
+    g_cascade_doc = outer_doc;
+    return styles;
 }
 
 GHashTable *

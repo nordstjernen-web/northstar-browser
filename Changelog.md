@@ -181,6 +181,16 @@ Significant changes in each release:
   element ids. reCAPTCHA's challenge frames find each other this way and
   failed with "Cannot read properties of undefined (reading
   'postMessage')". Written independently of Nordstjernen's fix.
+* A document is styled with its own style sheets only. A frame's
+  document sits inside the page's tree, and every sheet of the page and
+  of its frames was matched against every element: the page's
+  `body { height: 1200px }` made the body of each of its frames 1200px
+  tall, and a sheet a frame linked styled the page. Only a frame's
+  `<style>` elements were kept to it. The sheet collector now records the
+  document each sheet belongs to, and the cascade matches an element
+  only against its own document's sheets. Gmail, Google sign-in and
+  reCAPTCHA all run in frames. Written independently of Nordstjernen's
+  fix for the same bug.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL
