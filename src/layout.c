@@ -13479,44 +13479,76 @@ relative_pct_cb_height(const ns_box *box)
     return -1;
 }
 
+static gboolean
+relative_offset(const ns_box *box, double parent_w, double parent_h,
+                double *out_dx, double *out_dy)
+{
+    *out_dx = 0;
+    *out_dy = 0;
+    if (!style_is_relative(box->style)) return FALSE;
+    const ns_css_value *lv = box->style->values[NS_CSS_LEFT];
+    const ns_css_value *rv = box->style->values[NS_CSS_RIGHT];
+    const ns_css_value *tv = box->style->values[NS_CSS_TOP];
+    const ns_css_value *bv = box->style->values[NS_CSS_BOTTOM];
+    gboolean l_auto = !lv || length_is_auto(lv);
+    gboolean t_auto = !tv || length_is_auto(tv);
+    double dx = 0, dy = 0;
+    if (!l_auto)
+        dx = length_resolve(lv, parent_w, 0);
+    else if (rv && !length_is_auto(rv))
+        dx = -length_resolve(rv, parent_w, 0);
+    double cb_h = -2;
+    if (!t_auto) {
+        if (value_is_percent(tv)) {
+            if (cb_h == -2) cb_h = relative_pct_cb_height(box);
+            dy = cb_h < 0 ? 0 : length_resolve(tv, cb_h, 0);
+        } else {
+            dy = length_resolve(tv, parent_h, 0);
+        }
+    } else if (bv && !length_is_auto(bv)) {
+        if (value_is_percent(bv)) {
+            if (cb_h == -2) cb_h = relative_pct_cb_height(box);
+            dy = cb_h < 0 ? 0 : -length_resolve(bv, cb_h, 0);
+        } else {
+            dy = -length_resolve(bv, parent_h, 0);
+        }
+    }
+    *out_dx = dx;
+    *out_dy = dy;
+    return dx != 0 || dy != 0;
+}
+
+static void apply_position_offsets(ns_box *box, double parent_w,
+                                   double parent_h);
+
+static void
+apply_child_position_offsets(ns_box *box)
+{
+    double child_w = box->content_width;
+    double child_h = box->content_height;
+    for (ns_box *c = box->first_child; c; c = c->next_sibling)
+        apply_position_offsets(c, child_w, child_h);
+    if (!box->inline_atomics) return;
+    for (guint i = 0; i < box->inline_atomics->len; i++) {
+        ns_inline_atomic *atomic =
+            &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+        if (!atomic->box) continue;
+        if (relative_offset(atomic->box, child_w, child_h,
+                            &atomic->relative_x, &atomic->relative_y))
+            translate_subtree(atomic->box, atomic->relative_x,
+                              atomic->relative_y);
+        apply_child_position_offsets(atomic->box);
+    }
+}
+
 static void
 apply_position_offsets(ns_box *box, double parent_w, double parent_h)
 {
     if (!box) return;
-    double child_w = box->content_width;
-    double child_h = box->content_height;
-    if (style_is_relative(box->style)) {
-        const ns_css_value *lv = box->style->values[NS_CSS_LEFT];
-        const ns_css_value *rv = box->style->values[NS_CSS_RIGHT];
-        const ns_css_value *tv = box->style->values[NS_CSS_TOP];
-        const ns_css_value *bv = box->style->values[NS_CSS_BOTTOM];
-        gboolean l_auto = !lv || length_is_auto(lv);
-        gboolean t_auto = !tv || length_is_auto(tv);
-        double dx = 0, dy = 0;
-        if (!l_auto)
-            dx = length_resolve(lv, parent_w, 0);
-        else if (rv && !length_is_auto(rv))
-            dx = -length_resolve(rv, parent_w, 0);
-        double cb_h = -2;
-        if (!t_auto) {
-            if (value_is_percent(tv)) {
-                if (cb_h == -2) cb_h = relative_pct_cb_height(box);
-                dy = cb_h < 0 ? 0 : length_resolve(tv, cb_h, 0);
-            } else {
-                dy = length_resolve(tv, parent_h, 0);
-            }
-        } else if (bv && !length_is_auto(bv)) {
-            if (value_is_percent(bv)) {
-                if (cb_h == -2) cb_h = relative_pct_cb_height(box);
-                dy = cb_h < 0 ? 0 : -length_resolve(bv, cb_h, 0);
-            } else {
-                dy = -length_resolve(bv, parent_h, 0);
-            }
-        }
+    double dx, dy;
+    if (relative_offset(box, parent_w, parent_h, &dx, &dy))
         translate_subtree(box, dx, dy);
-    }
-    for (ns_box *c = box->first_child; c; c = c->next_sibling)
-        apply_position_offsets(c, child_w, child_h);
+    apply_child_position_offsets(box);
 }
 
 static void

@@ -3490,8 +3490,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             if (!a->box) continue;
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
-            double sx = text_x + (double)pos.x / NS_PANGO_SCALE;
-            double sy = b->y + (double)pos.y / NS_PANGO_SCALE;
+            double sx = text_x + (double)pos.x / NS_PANGO_SCALE + a->relative_x;
+            double sy = b->y + (double)pos.y / NS_PANGO_SCALE + a->relative_y;
             a->owner_offset_x = sx - b->x;
             a->owner_offset_y = sy - b->y;
             cairo_save(cr);
@@ -3612,8 +3612,10 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
                 &g_array_index(root->inline_atomics, ns_inline_atomic, i);
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)atomic->byte_off, &pos);
-            atomic->owner_offset_x = text_x + (double)pos.x / NS_PANGO_SCALE;
-            atomic->owner_offset_y = (double)pos.y / NS_PANGO_SCALE;
+            atomic->owner_offset_x = text_x + (double)pos.x / NS_PANGO_SCALE +
+                                     atomic->relative_x;
+            atomic->owner_offset_y = (double)pos.y / NS_PANGO_SCALE +
+                                     atomic->relative_y;
         }
         g_object_unref(layout);
     }

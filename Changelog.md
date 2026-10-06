@@ -114,6 +114,17 @@ Significant changes in each release:
   challenge tiles, for one -- was cut off. A layout whose lines all
   overflow is now laid out, hit-tested and painted start-aligned.
   Written independently of Nordstjernen's fix for the same bug.
+* `position: relative` moves inline images, inline blocks and inline
+  flex or grid boxes, and every relatively positioned element inside
+  one. The offset pass never entered the boxes a line holds, and the
+  paint, hit test and geometry code placed those boxes where the text
+  put them, so a relative offset on or inside an inline-block was
+  dropped. reCAPTCHA's image challenge shows each tile as a window on
+  one large picture moved with percentage `top` and `left`, and every
+  tile showed the same corner of it. Painting, hit testing,
+  `getBoundingClientRect()` and `offsetLeft`/`offsetTop` now include the
+  offset, as in Chrome. Written independently of Nordstjernen's fix for
+  the inline-box case; the nested case was not part of it.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

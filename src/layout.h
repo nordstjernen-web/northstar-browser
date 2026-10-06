@@ -101,6 +101,8 @@ typedef struct ns_inline_atomic {
     struct ns_box *box;
     double owner_offset_x;
     double owner_offset_y;
+    double relative_x;
+    double relative_y;
 } ns_inline_atomic;
 
 typedef struct ns_box_media {
