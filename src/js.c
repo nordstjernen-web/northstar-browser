@@ -1271,14 +1271,13 @@ ns_message_tasks_clear(ns_js *js)
 static gboolean ns_message_tasks_run(gpointer data);
 
 static void
-ns_message_tasks_schedule(ns_js *js, gboolean behind_timers)
+ns_message_tasks_schedule(ns_js *js, guint delay_ms, int priority)
 {
-    if (js->message_task_source || !js->message_tasks ||
-        g_queue_is_empty(js->message_tasks))
+    if (js->message_task_source || js->running_message_tasks ||
+        !js->message_tasks || g_queue_is_empty(js->message_tasks))
         return;
-    GSource *source = g_timeout_source_new(0);
-    g_source_set_priority(source, behind_timers ? G_PRIORITY_DEFAULT
-                                                : G_PRIORITY_DEFAULT - 1);
+    GSource *source = g_timeout_source_new(delay_ms);
+    g_source_set_priority(source, priority);
     g_source_set_callback(source, ns_message_tasks_run, js, NULL);
     js->message_task_source = g_source_attach(source, js->main_context);
     g_source_unref(source);
@@ -1298,7 +1297,7 @@ ns_queue_message_task(JSContext *ctx, JSJobFunc *run, int argc,
     for (int i = 0; i < t->argc; i++)
         t->argv[i] = JS_DupValue(ctx, argv[i]);
     g_queue_push_tail(js->message_tasks, t);
-    ns_message_tasks_schedule(js, FALSE);
+    ns_message_tasks_schedule(js, 0, G_PRIORITY_DEFAULT - 1);
 }
 
 static void ns_drain_mutations(ns_js *js);
@@ -1312,10 +1311,13 @@ ns_message_tasks_run(gpointer data)
         ns_message_tasks_clear(js);
         return G_SOURCE_REMOVE;
     }
-    if (js->in_pump || ns_engine_in_blocking_fetch())
-        return G_SOURCE_CONTINUE;
     js->message_task_source = 0;
+    if (js->in_pump || ns_engine_in_blocking_fetch()) {
+        ns_message_tasks_schedule(js, 4, G_PRIORITY_DEFAULT);
+        return G_SOURCE_REMOVE;
+    }
     guint queued = g_queue_get_length(js->message_tasks);
+    js->running_message_tasks = TRUE;
     for (guint i = 0; i < queued && !js->halted; i++) {
         ns_message_task *t = g_queue_pop_head(js->message_tasks);
         if (!t) break;
@@ -1325,8 +1327,9 @@ ns_message_tasks_run(gpointer data)
         ns_message_task_free(t);
         ns_drain_microtasks(js);
     }
+    js->running_message_tasks = FALSE;
     ns_drain_mutations(js);
-    ns_message_tasks_schedule(js, TRUE);
+    ns_message_tasks_schedule(js, 0, G_PRIORITY_DEFAULT_IDLE);
     return G_SOURCE_REMOVE;
 }
 

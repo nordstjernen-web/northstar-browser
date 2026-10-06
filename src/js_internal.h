@@ -211,6 +211,7 @@ struct ns_js {
     gboolean      draining_microtasks;
     GQueue       *message_tasks;
     guint         message_task_source;
+    gboolean      running_message_tasks;
     GPtrArray    *document_write_states;
     ns_node      *parser_write_body;
     gboolean      document_write_parser_open;

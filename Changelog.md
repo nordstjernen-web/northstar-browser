@@ -90,8 +90,10 @@ Significant changes in each release:
   library (`goog.async.nextTick`) and React's scheduler both use
   `MessageChannel` to yield a task. Each turn delivers the messages
   queued before it began, with a microtask checkpoint after each one; a
-  page whose handler keeps posting to itself still lets timers run.
-  Written independently of Nordstjernen's fix for the same bug.
+  page whose handler keeps posting to itself continues at idle priority,
+  so timers, network completions and repaints still get their turn, and
+  delivery waits while a synchronous load pumps the main loop. Written
+  independently of Nordstjernen's fix for the same bug.
 * A page that registers a custom property with `@property` or
   `CSS.registerProperty()` no longer copies every inherited custom
   property for each element that declares one of its own. The
