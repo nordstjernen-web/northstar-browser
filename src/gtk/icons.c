@@ -148,11 +148,20 @@ ns_icon_lookup(const char *name)
     return GDK_PAINTABLE(icon);
 }
 
+static GtkWidget *
+centered_image(GdkPaintable *paintable)
+{
+    GtkWidget *image = gtk_image_new_from_paintable(paintable);
+    gtk_widget_set_halign(image, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(image, GTK_ALIGN_CENTER);
+    return image;
+}
+
 GtkWidget *
 ns_icon_image_new(const char *name)
 {
     GdkPaintable *paintable = ns_icon_lookup(name);
-    return paintable ? gtk_image_new_from_paintable(paintable)
+    return paintable ? centered_image(paintable)
                      : gtk_image_new_from_icon_name(name);
 }
 
