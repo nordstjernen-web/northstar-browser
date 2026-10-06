@@ -53,6 +53,18 @@ Significant changes in each release:
   picture mosaic in a Google results knowledge panel is such a grid and
   showed one picture beside an empty tile. Written independently of
   Nordstjernen's fix for the same bug.
+* `round()`, `mod()`, `rem()` and `abs()` with a percentage argument
+  resolve it at layout time against the property's real basis, as
+  `min()`, `max()` and `clamp()` already did. They were folded into a
+  pixel length when the declaration was parsed, taking the percentage of
+  the viewport width, so `width: round(nearest, 100%, 1px)` -- which
+  Google's results page puts on every top-level section -- made each
+  section as wide as the window and ran it over the right-hand column.
+  `round()` with a length and no step, or with more than two values, is
+  now rejected as the specification requires. One of these functions
+  nested inside `calc()`, `min()`, `max()` or `clamp()` still uses the
+  viewport-based value. Written independently of Nordstjernen's fix for
+  the same bug.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

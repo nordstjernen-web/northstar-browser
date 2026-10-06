@@ -748,6 +748,19 @@ const ns_css_value *ns_css_value_layer(const ns_css_value *head, int index);
 int                 ns_css_value_layer_count(const ns_css_value *head);
 
 double   ns_css_length_or(const ns_css_value *v, double fallback);
+typedef enum {
+    NS_CSS_MATH_MIN = 1,
+    NS_CSS_MATH_MAX = 2,
+    NS_CSS_MATH_CLAMP = 3,
+    NS_CSS_MATH_ROUND_NEAREST,
+    NS_CSS_MATH_ROUND_UP,
+    NS_CSS_MATH_ROUND_DOWN,
+    NS_CSS_MATH_ROUND_TO_ZERO,
+    NS_CSS_MATH_MOD,
+    NS_CSS_MATH_REM,
+    NS_CSS_MATH_ABS,
+} ns_css_math_fn;
+
 gboolean ns_css_calc_is_math_fn(const ns_css_value *v);
 gboolean ns_css_calc_media(const char *text, gsize len, gboolean resolution,
                            double *out);

@@ -926,6 +926,9 @@ ns_css_calc_is_math_fn(const ns_css_value *v)
            v->u.calc.n_args > 0;
 }
 
+static double css_round_step(int strategy, double a, double b);
+static double css_mod_rem(gboolean is_mod, double a, double b);
+
 double
 ns_css_calc_math_fn_px(const ns_css_value *v, double basis)
 {
@@ -934,7 +937,22 @@ ns_css_calc_math_fn_px(const ns_css_value *v, double basis)
     double k[4] = {0, 0, 0, 0};
     for (int i = 0; i < n; i++)
         k[i] = v->u.calc.args[i].px + v->u.calc.args[i].pct * 0.01 * basis;
-    if (v->u.calc.fn == 3) {
+    switch (v->u.calc.fn) {
+    case NS_CSS_MATH_ROUND_NEAREST:
+    case NS_CSS_MATH_ROUND_UP:
+    case NS_CSS_MATH_ROUND_DOWN:
+    case NS_CSS_MATH_ROUND_TO_ZERO:
+        return css_round_step(v->u.calc.fn - NS_CSS_MATH_ROUND_NEAREST,
+                              k[0], k[1]);
+    case NS_CSS_MATH_MOD:
+    case NS_CSS_MATH_REM:
+        return css_mod_rem(v->u.calc.fn == NS_CSS_MATH_MOD, k[0], k[1]);
+    case NS_CSS_MATH_ABS:
+        return fabs(k[0]);
+    default:
+        break;
+    }
+    if (v->u.calc.fn == NS_CSS_MATH_CLAMP) {
         double lo  = (v->u.calc.arg_none & 1u) ? -HUGE_VAL : k[0];
         double hi  = (v->u.calc.arg_none & 4u) ?  HUGE_VAL : k[2];
         double out = k[1];
@@ -944,8 +962,8 @@ ns_css_calc_math_fn_px(const ns_css_value *v, double basis)
     }
     double out = k[0];
     for (int i = 1; i < n; i++) {
-        if (v->u.calc.fn == 1 && k[i] < out) out = k[i];
-        if (v->u.calc.fn == 2 && k[i] > out) out = k[i];
+        if (v->u.calc.fn == NS_CSS_MATH_MIN && k[i] < out) out = k[i];
+        if (v->u.calc.fn == NS_CSS_MATH_MAX && k[i] > out) out = k[i];
     }
     return out;
 }
@@ -5687,6 +5705,49 @@ css_mod_rem(gboolean is_mod, double a, double b)
     return r;
 }
 
+static gboolean
+calc_term_defers_to_layout(const ns_calc_term *t)
+{
+    return t->kind == CALC_LENGTH && !t->fn &&
+           (calc_term_basis_dependent(t) || t->vw != 0 || t->vh != 0 ||
+            t->vmin != 0 || t->vmax != 0);
+}
+
+static void
+calc_arg_from_term(ns_css_value *v, int i, const ns_calc_term *t)
+{
+    v->u.calc.args[i].px = t->px;
+    v->u.calc.args[i].pct = t->pct;
+    v->u.calc.args[i].em = t->em;
+    v->u.calc.args[i].rem = t->rem;
+    v->u.calc.args[i].lh = t->lh;
+    v->u.calc.args[i].rlh = t->rlh;
+    v->u.calc.args[i].vw = t->vw;
+    v->u.calc.args[i].vh = t->vh;
+    v->u.calc.args[i].vmin = t->vmin;
+    v->u.calc.args[i].vmax = t->vmax;
+}
+
+static ns_css_value *
+calc_stepped_value(ns_css_math_fn fn, const ns_calc_term *a,
+                   const ns_calc_term *b, double folded)
+{
+    gboolean nested = a->fn || (b && b->fn);
+    gboolean deferred = calc_term_defers_to_layout(a) ||
+                        (b && calc_term_defers_to_layout(b));
+    if (nested || !deferred) return calc_value_like(a, folded);
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_CALC;
+    v->u.calc.px = folded;
+    v->u.calc.fn = (guint8)fn;
+    v->u.calc.n_args = b ? 2 : 1;
+    v->u.calc.parsed_vw = g_viewport_w;
+    v->u.calc.parsed_vh = g_viewport_h;
+    calc_arg_from_term(v, 0, a);
+    if (b) calc_arg_from_term(v, 1, b);
+    return v;
+}
+
 static ns_css_value *
 parse_calc_any(const char *text)
 {
@@ -6060,7 +6121,8 @@ parse_calc_inner(const char *text)
         double x = 0, y = 0;
         if (fn == 7 && n == 1) {
             if (calc_eval_arg(parts[0], &a))
-                out = calc_value_like(&a, fabs(calc_term_key(&a)));
+                out = calc_stepped_value(NS_CSS_MATH_ABS, &a, NULL,
+                                         fabs(calc_term_key(&a)));
         } else if (fn == 4 && n >= 1) {
             int vi = 0;
             int strategy = 0;
@@ -6073,24 +6135,29 @@ parse_calc_inner(const char *text)
             } else if (g_ascii_strcasecmp(parts[0], "to-zero") == 0) {
                 strategy = 3; vi = 1;
             }
-            if (vi < n && calc_eval_arg(parts[vi], &a)) {
-                double step = 1;
-                gboolean ok = TRUE;
-                if (vi + 1 < n) {
-                    ok = calc_eval_arg(parts[vi + 1], &b) && b.kind == a.kind;
-                    step = calc_term_key(&b);
-                }
-                if (ok)
-                    out = calc_value_like(&a, css_round_step(strategy,
-                                                             calc_term_key(&a),
-                                                             step));
+            if (vi < n && n <= vi + 2 && calc_eval_arg(parts[vi], &a)) {
+                gboolean has_step = vi + 1 < n;
+                gboolean ok = has_step
+                    ? calc_eval_arg(parts[vi + 1], &b) && b.kind == a.kind
+                    : a.kind == CALC_NUMBER;
+                if (ok && has_step)
+                    out = calc_stepped_value(NS_CSS_MATH_ROUND_NEAREST + strategy,
+                                             &a, &b,
+                                             css_round_step(strategy,
+                                                            calc_term_key(&a),
+                                                            calc_term_key(&b)));
+                else if (ok)
+                    out = calc_num_value(css_round_step(strategy, a.num, 1));
             }
         } else if ((fn == 5 || fn == 6) && n == 2) {
             if (calc_eval_arg(parts[0], &a) && calc_eval_arg(parts[1], &b) &&
                 a.kind == b.kind)
-                out = calc_value_like(&a, css_mod_rem(fn == 5,
-                                                      calc_term_key(&a),
-                                                      calc_term_key(&b)));
+                out = calc_stepped_value(fn == 5 ? NS_CSS_MATH_MOD
+                                                 : NS_CSS_MATH_REM,
+                                         &a, &b,
+                                         css_mod_rem(fn == 5,
+                                                     calc_term_key(&a),
+                                                     calc_term_key(&b)));
         } else if (fn == 8 && n >= 1) {
             double sum = 0;
             gboolean ok = TRUE;
