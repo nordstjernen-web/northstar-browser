@@ -45,6 +45,14 @@ Significant changes in each release:
   clamped to the 24 column tracks the layout holds. Nordstjernen fixed
   the same bug; this fix is written from the bug and the CSS Grid
   specification.
+* An absolutely positioned grid whose height comes from `top` and
+  `bottom` gives its `fr` rows that height to share. The row sizing read
+  only the `height` property, so `grid-template-rows: repeat(2,
+  minmax(0, 1fr))` on a `position: absolute; inset: 0` grid resolved to
+  two empty rows and the items were only as tall as their content. The
+  picture mosaic in a Google results knowledge panel is such a grid and
+  showed one picture beside an empty tile. Written independently of
+  Nordstjernen's fix for the same bug.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

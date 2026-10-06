@@ -201,6 +201,17 @@ specified_height_to_content(const ns_box *b, double h)
 }
 
 static double
+inset_sized_height(const ns_box *b)
+{
+    if (!b || !b->style || !style_is_absolute_or_fixed(b->style)) return -1;
+    const ns_css_value *top = b->style->values[NS_CSS_TOP];
+    const ns_css_value *bottom = b->style->values[NS_CSS_BOTTOM];
+    if (!top || length_is_auto(top) || !bottom || length_is_auto(bottom))
+        return -1;
+    return b->content_height > 0 ? b->content_height : -1;
+}
+
+static double
 containing_block_definite_height(const ns_box *box)
 {
     if (box && box->cb_height_override > 0) return box->cb_height_override;
@@ -219,13 +230,8 @@ containing_block_definite_height(const ns_box *box)
     }
     if (h && h->kind == NS_CSS_V_KEYWORD) h = NULL;
     if (!h) {
-        const ns_css_value *top = p->style->values[NS_CSS_TOP];
-        const ns_css_value *bottom = p->style->values[NS_CSS_BOTTOM];
-        if (style_is_absolute_or_fixed(p->style) &&
-            top && !length_is_auto(top) &&
-            bottom && !length_is_auto(bottom) &&
-            p->content_height > 0)
-            return p->content_height;
+        double inset_h = inset_sized_height(p);
+        if (inset_h > 0) return inset_h;
         double ratio = aspect_ratio_number(p->style->values[NS_CSS_ASPECT_RATIO], NULL);
         if (ratio > 0 && p->content_width > 0)
             return p->content_width / ratio;
@@ -11367,6 +11373,8 @@ layout_grid(ns_box *box, double cw,
         ? clamp_height_minmax_px(box->style,
                                  resolve_used_height(box, hv_box, cw, -1))
         : -1;
+    if (row_basis <= 0 && (!hv_box || length_is_auto(hv_box)))
+        row_basis = inset_sized_height(box);
     double row_gap = gap_px(
         box->style ? box->style->values[NS_CSS_ROW_GAP] : NULL,
         box->style ? box->style->values[NS_CSS_GAP] : NULL,
