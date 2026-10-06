@@ -145,6 +145,19 @@ Significant changes in each release:
   tree. reCAPTCHA continues its work in such timers, so
   `grecaptcha.execute()` never produced a token. Written independently
   of Nordstjernen's fix for the same bug.
+* `Event.prototype` no longer carries an `isTrusted` getter, which
+  WebIDL makes an unforgeable own property of each event, so assigning
+  `isTrusted` on an object derived from `Event.prototype` works as in
+  Chrome instead of throwing. Events the engine fires take the prototype
+  of the interface their type belongs to -- `click` a `PointerEvent`,
+  `mousedown` a `MouseEvent`, `focus` a `FocusEvent`, `input` an
+  `InputEvent`, `message` a `MessageEvent`, `hashchange`, `popstate`,
+  `storage`, `pageshow`, animation, transition, clipboard and toggle
+  events theirs -- instead of all being plain `Event`s, so
+  `e instanceof MouseEvent` and `e instanceof MessageEvent` hold; port
+  messages, which had no event prototype at all, get the same. Both
+  were found by Nordstjernen while tracing Google's reCAPTCHA frames;
+  this fix is written independently of its change.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

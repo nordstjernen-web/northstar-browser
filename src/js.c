@@ -10850,6 +10850,8 @@ ns_freeze_array(JSContext *ctx, JSValueConst array)
     return frozen;
 }
 
+static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
+
 static JSValue
 ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -10881,7 +10883,8 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JS_SetPropertyStr(ctx, ev, "target",           JS_DupValue(ctx, port));
     JS_SetPropertyStr(ctx, ev, "currentTarget",    JS_DupValue(ctx, port));
     JS_SetPropertyStr(ctx, ev, "defaultPrevented", JS_FALSE);
-    JS_DefinePropertyValueStr(ctx, ev, "isTrusted", JS_TRUE, JS_PROP_C_W_E);
+    JS_SetPropertyStr(ctx, ev, "_is_trusted",      JS_TRUE);
+    ns_event_define_cancel_bubble(ctx, ev);
     JS_SetPropertyStr(ctx, ev, "bubbles",          JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable",       JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "composed",         JS_FALSE);
@@ -15591,7 +15594,6 @@ static JSValue ns_event_get_modifier_state(JSContext *ctx, JSValueConst this_val
                                            int argc, JSValueConst *argv);
 static JSValue ns_event_stop_propagation(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv);
-static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
 static JSValue ns_event_initEvent(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv);
 static void ns_event_link_proto(JSContext *ctx, JSValueConst global,
@@ -25090,6 +25092,95 @@ ns_event_define_source(JSContext *ctx, JSValueConst ev, JSValue source)
     ns_event_define_accessor(ctx, ev, "source", ns_event_get_source, NULL);
 }
 
+static const char *
+ns_event_interface_for_type(const char *type)
+{
+    static const struct { const char *type; const char *iface; } map[] = {
+        { "click", "PointerEvent" }, { "auxclick", "PointerEvent" },
+        { "contextmenu", "PointerEvent" },
+        { "pointerdown", "PointerEvent" }, { "pointerup", "PointerEvent" },
+        { "pointermove", "PointerEvent" }, { "pointerover", "PointerEvent" },
+        { "pointerout", "PointerEvent" }, { "pointerenter", "PointerEvent" },
+        { "pointerleave", "PointerEvent" }, { "pointercancel", "PointerEvent" },
+        { "gotpointercapture", "PointerEvent" },
+        { "lostpointercapture", "PointerEvent" },
+        { "mousedown", "MouseEvent" }, { "mouseup", "MouseEvent" },
+        { "mousemove", "MouseEvent" }, { "mouseover", "MouseEvent" },
+        { "mouseout", "MouseEvent" }, { "mouseenter", "MouseEvent" },
+        { "mouseleave", "MouseEvent" }, { "dblclick", "MouseEvent" },
+        { "wheel", "WheelEvent" },
+        { "keydown", "KeyboardEvent" }, { "keyup", "KeyboardEvent" },
+        { "keypress", "KeyboardEvent" },
+        { "focus", "FocusEvent" }, { "blur", "FocusEvent" },
+        { "focusin", "FocusEvent" }, { "focusout", "FocusEvent" },
+        { "input", "InputEvent" }, { "beforeinput", "InputEvent" },
+        { "compositionstart", "CompositionEvent" },
+        { "compositionupdate", "CompositionEvent" },
+        { "compositionend", "CompositionEvent" },
+        { "touchstart", "TouchEvent" }, { "touchmove", "TouchEvent" },
+        { "touchend", "TouchEvent" }, { "touchcancel", "TouchEvent" },
+        { "drag", "DragEvent" }, { "dragstart", "DragEvent" },
+        { "dragend", "DragEvent" }, { "dragenter", "DragEvent" },
+        { "dragleave", "DragEvent" }, { "dragover", "DragEvent" },
+        { "drop", "DragEvent" },
+        { "message", "MessageEvent" }, { "messageerror", "MessageEvent" },
+        { "hashchange", "HashChangeEvent" }, { "popstate", "PopStateEvent" },
+        { "storage", "StorageEvent" },
+        { "pageshow", "PageTransitionEvent" },
+        { "pagehide", "PageTransitionEvent" },
+        { "unhandledrejection", "PromiseRejectionEvent" },
+        { "rejectionhandled", "PromiseRejectionEvent" },
+        { "animationstart", "AnimationEvent" },
+        { "animationend", "AnimationEvent" },
+        { "animationiteration", "AnimationEvent" },
+        { "animationcancel", "AnimationEvent" },
+        { "transitionrun", "TransitionEvent" },
+        { "transitionstart", "TransitionEvent" },
+        { "transitionend", "TransitionEvent" },
+        { "transitioncancel", "TransitionEvent" },
+        { "submit", "SubmitEvent" },
+        { "toggle", "ToggleEvent" }, { "beforetoggle", "ToggleEvent" },
+        { "copy", "ClipboardEvent" }, { "cut", "ClipboardEvent" },
+        { "paste", "ClipboardEvent" },
+    };
+    for (gsize i = 0; type && i < G_N_ELEMENTS(map); i++)
+        if (strcmp(type, map[i].type) == 0) return map[i].iface;
+    return "Event";
+}
+
+static JSValue
+ns_event_interface_proto(JSContext *ctx, JSValueConst global,
+                         JSValueConst ev)
+{
+    JSValue type_v = JS_GetPropertyStr(ctx, ev, "type");
+    const char *type = JS_IsString(type_v) ? JS_ToCString(ctx, type_v) : NULL;
+    const char *iface = ns_event_interface_for_type(type);
+    if (type) JS_FreeCString(ctx, type);
+    JS_FreeValue(ctx, type_v);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, iface);
+    if (!JS_IsObject(ctor) && strcmp(iface, "Event") != 0) {
+        JS_FreeValue(ctx, ctor);
+        ctor = JS_GetPropertyStr(ctx, global, "Event");
+    }
+    JSValue proto = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    return proto;
+}
+
+static void
+ns_event_define_legacy_accessors(JSContext *ctx, JSValueConst target)
+{
+    ns_event_define_accessor(ctx, target, "cancelBubble",
+                             ns_event_get_cancel_bubble,
+                             ns_event_set_cancel_bubble);
+    ns_event_define_accessor(ctx, target, "returnValue",
+                             ns_event_get_return_value,
+                             ns_event_set_return_value);
+    ns_event_define_accessor(ctx, target, "srcElement",
+                             ns_event_get_src_element, NULL);
+}
+
 static void
 ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
 {
@@ -25103,27 +25194,16 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
     JS_FreeValue(ctx, object_ctor);
     JS_FreeValue(ctx, cur_proto);
     if (plain) {
-        JSValue ev_ctor = JS_GetPropertyStr(ctx, global, "Event");
-        if (JS_IsObject(ev_ctor)) {
-            JSValue proto = JS_GetPropertyStr(ctx, ev_ctor, "prototype");
-            if (JS_IsObject(proto) &&
-                JS_VALUE_GET_PTR(proto) != JS_VALUE_GET_PTR(ev))
-                JS_SetPrototype(ctx, ev, proto);
-            JS_FreeValue(ctx, proto);
-        }
-        JS_FreeValue(ctx, ev_ctor);
+        JSValue proto = ns_event_interface_proto(ctx, global, ev);
+        if (JS_IsObject(proto) &&
+            JS_VALUE_GET_PTR(proto) != JS_VALUE_GET_PTR(ev))
+            JS_SetPrototype(ctx, ev, proto);
+        JS_FreeValue(ctx, proto);
     }
     JS_FreeValue(ctx, global);
     ns_event_define_accessor(ctx, ev, "isTrusted",
                              ns_event_get_is_trusted, NULL);
-    ns_event_define_accessor(ctx, ev, "cancelBubble",
-                             ns_event_get_cancel_bubble,
-                             ns_event_set_cancel_bubble);
-    ns_event_define_accessor(ctx, ev, "returnValue",
-                             ns_event_get_return_value,
-                             ns_event_set_return_value);
-    ns_event_define_accessor(ctx, ev, "srcElement",
-                             ns_event_get_src_element, NULL);
+    ns_event_define_legacy_accessors(ctx, ev);
 }
 
 static gboolean
@@ -48403,7 +48483,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             ns_bind_fn(ctx, ev_proto, "stopPropagation",          ns_event_stop_propagation, 0);
             ns_bind_fn(ctx, ev_proto, "stopImmediatePropagation", ns_event_stop_immediate, 0);
             ns_bind_fn(ctx, ev_proto, "composedPath",             ns_event_composed_path, 0);
-            ns_event_define_cancel_bubble(ctx, ev_proto);
+            ns_event_define_legacy_accessors(ctx, ev_proto);
         }
         JS_FreeValue(ctx, ev_proto);
         JS_FreeValue(ctx, ev_ctor_obj);
