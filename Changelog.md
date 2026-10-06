@@ -220,6 +220,15 @@ Significant changes in each release:
   correctly across breakpoints, and 30 forced relayouts take 443 ms
   instead of 788 ms. Written independently of Nordstjernen's work on the
   same problem.
+* A node counts as connected when it is in the page, not only when it is
+  under the document whose code is running. While a frame's script runs
+  -- or the page's code runs on its behalf, as when a frame calls a
+  function of its parent -- the engine's current document is the frame's,
+  so a script or iframe the page inserted into its own document then
+  never ran or loaded, and custom elements, form submission and
+  `scrollend` treated page nodes as disconnected too. Gmail and Google's
+  sign-in pages drive their frames this way. Written independently of
+  Nordstjernen's fix for the same bug.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL
