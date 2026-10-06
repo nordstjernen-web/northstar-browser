@@ -158,6 +158,17 @@ Significant changes in each release:
   messages, which had no event prototype at all, get the same. Both
   were found by Nordstjernen while tracing Google's reCAPTCHA frames;
   this fix is written independently of its change.
+* A message posted between a page and its frames arrives as objects of
+  the receiving window: `e.data instanceof Array`, `Object`, `Date`,
+  `Map`, `Set`, `RegExp`, `Number`, a typed array or an error class, and
+  `e instanceof MessageEvent`, now hold in the receiver. The structured
+  clone ran once, in the sender's realm, and recognised dates, maps,
+  sets, regular expressions, data views and boxed primitives with
+  `instanceof` against that realm's constructors. It now recognises them
+  by their engine class, and a window message is cloned again into the
+  receiving realm when it is delivered. Ladybird reported this class of
+  bug as what kept Google reCAPTCHA from passing; Nordstjernen fixed it
+  too, and this fix is written independently of its change.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

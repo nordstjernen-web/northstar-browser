@@ -11365,6 +11365,61 @@ ns_window_url_of(JSContext *ctx, JSValueConst win)
 }
 
 
+static JSValue ns_sc_run(JSContext *ctx, JSValueConst value,
+                         GPtrArray *transfer_ports, gboolean ports_by_identity);
+
+static JSContext *
+ns_js_window_realm(ns_js *js, JSValueConst window)
+{
+    if (!js || !JS_IsObject(window)) return NULL;
+    for (guint i = 0; js->frame_ctxs && i < js->frame_ctxs->len; i++) {
+        JSContext *fctx = g_ptr_array_index(js->frame_ctxs, i);
+        JSValue g = JS_GetGlobalObject(fctx);
+        gboolean hit = JS_VALUE_GET_PTR(g) == JS_VALUE_GET_PTR(window);
+        JS_FreeValue(fctx, g);
+        if (hit) return fctx;
+    }
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    if (!main_ctx) return NULL;
+    JSValue g = JS_GetGlobalObject(main_ctx);
+    gboolean hit = JS_VALUE_GET_PTR(g) == JS_VALUE_GET_PTR(window);
+    JS_FreeValue(main_ctx, g);
+    return hit ? main_ctx : NULL;
+}
+
+static JSValue
+ns_message_event_in_realm(JSContext *ctx, JSContext *rctx,
+                          JSValueConst target, JSValueConst ev)
+{
+    JSValue ports = JS_GetPropertyStr(ctx, ev, "ports");
+    GPtrArray *port_ptrs = g_ptr_array_new();
+    uint32_t n_ports = JS_IsArray(ports) ? ns_js_array_length(ctx, ports) : 0;
+    for (uint32_t i = 0; i < n_ports; i++) {
+        JSValue port = JS_GetPropertyUint32(ctx, ports, i);
+        if (JS_IsObject(port))
+            g_ptr_array_add(port_ptrs, JS_VALUE_GET_PTR(port));
+        JS_FreeValue(ctx, port);
+    }
+    JSValue data = JS_GetPropertyStr(ctx, ev, "data");
+    JSValue cloned = ns_sc_run(rctx, data, port_ptrs, TRUE);
+    JS_FreeValue(ctx, data);
+    g_ptr_array_free(port_ptrs, TRUE);
+    gboolean failed = JS_IsException(cloned);
+    if (failed) {
+        JS_FreeValue(rctx, JS_GetException(rctx));
+        cloned = JS_NULL;
+    }
+    JSValue out = ns_target_make_event(rctx, target,
+                                       failed ? "messageerror" : "message");
+    JS_SetPropertyStr(rctx, out, "data", cloned);
+    static const char *const copied[] = { "origin", "lastEventId", "source" };
+    for (gsize i = 0; i < G_N_ELEMENTS(copied); i++)
+        JS_SetPropertyStr(rctx, out, copied[i],
+                          JS_GetPropertyStr(ctx, ev, copied[i]));
+    JS_SetPropertyStr(rctx, out, "ports", ports);
+    return out;
+}
+
 static JSValue
 ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -11394,6 +11449,11 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         JS_FreeValue(ctx, parent_global);
         JS_FreeValue(ctx, source);
     }
+    JSContext *receiving = ns_js_window_realm(js, actual_target);
+    JSValue delivered = receiving && receiving != ctx
+        ? ns_message_event_in_realm(ctx, receiving, actual_target, argv[1])
+        : JS_DupValue(ctx, argv[1]);
+    ev = delivered;
     JSValue deliver = JS_GetPropertyStr(ctx, actual_target, "__nsDeliverMessage");
     if (JS_IsFunction(ctx, deliver)) {
         ns_budget_guard bg = {0};
@@ -11430,6 +11490,7 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         }
     }
     JS_FreeValue(ctx, deliver);
+    JS_FreeValue(ctx, delivered);
     JS_FreeValue(ctx, actual_target);
     JS_FreeValue(ctx, forwarded);
     return JS_UNDEFINED;
@@ -11817,6 +11878,49 @@ ns_sc_isa(JSContext *ctx, JSValueConst v, JSValueConst ctor)
     return JS_IsInstanceOf(ctx, v, ctor) > 0;
 }
 
+typedef struct {
+    JSClassID date, regexp, map, set, dataview;
+    JSClassID number, string, boolean, bigint;
+} ns_sc_builtin_classes;
+
+static ns_sc_builtin_classes ns_sc_classes;
+
+static JSClassID
+ns_sc_class_of_eval(JSContext *ctx, const char *expr)
+{
+    JSValue v = JS_Eval(ctx, expr, strlen(expr), "<structured-clone>",
+                        JS_EVAL_TYPE_GLOBAL);
+    JSClassID id = JS_IsObject(v) ? JS_GetClassID(v) : JS_INVALID_CLASS_ID;
+    if (JS_IsException(v)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, v);
+    return id;
+}
+
+static void
+ns_sc_learn_builtin_classes(JSContext *ctx)
+{
+    static gsize learned;
+    if (!g_once_init_enter(&learned)) return;
+    ns_sc_builtin_classes *c = &ns_sc_classes;
+    c->date     = ns_sc_class_of_eval(ctx, "new Date(0)");
+    c->regexp   = ns_sc_class_of_eval(ctx, "/a/");
+    c->map      = ns_sc_class_of_eval(ctx, "new Map()");
+    c->set      = ns_sc_class_of_eval(ctx, "new Set()");
+    c->dataview = ns_sc_class_of_eval(ctx, "new DataView(new ArrayBuffer(1))");
+    c->number   = ns_sc_class_of_eval(ctx, "Object(0)");
+    c->string   = ns_sc_class_of_eval(ctx, "Object('')");
+    c->boolean  = ns_sc_class_of_eval(ctx, "Object(false)");
+    c->bigint   = ns_sc_class_of_eval(ctx, "Object(0n)");
+    g_once_init_leave(&learned, 1);
+}
+
+static gboolean
+ns_sc_is_class(JSValueConst v, JSClassID id, JSContext *ctx, JSValueConst ctor)
+{
+    if (id != JS_INVALID_CLASS_ID) return JS_GetClassID(v) == id;
+    return ns_sc_isa(ctx, v, ctor);
+}
+
 static JSValue
 ns_sc_fail(JSContext *ctx)
 {
@@ -11995,7 +12099,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->date_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.date, ctx, s->date_ctor)) {
         JSValue gt = JS_GetPropertyStr(ctx, v, "getTime");
         JSValue tv = JS_Call(ctx, gt, v, 0, NULL);
         JS_FreeValue(ctx, gt);
@@ -12006,7 +12110,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->regexp_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.regexp, ctx, s->regexp_ctor)) {
         JSValue src = JS_GetPropertyStr(ctx, v, "source");
         JSValue flg = JS_GetPropertyStr(ctx, v, "flags");
         JSValueConst a[2] = { src, flg };
@@ -12017,7 +12121,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->map_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.map, ctx, s->map_ctor)) {
         JSValue clone = JS_CallConstructor(ctx, s->map_ctor, 0, NULL);
         if (JS_IsException(clone)) return clone;
         ns_sc_memo_put(s, ptr, clone);
@@ -12028,7 +12132,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->set_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.set, ctx, s->set_ctor)) {
         JSValue clone = JS_CallConstructor(ctx, s->set_ctor, 0, NULL);
         if (JS_IsException(clone)) return clone;
         ns_sc_memo_put(s, ptr, clone);
@@ -12067,7 +12171,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->dataview_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.dataview, ctx, s->dataview_ctor)) {
         JSValue offset = ns_sc_fail_on_exception(ctx,
             JS_GetPropertyStr(ctx, v, "byteOffset"));
         if (JS_IsException(offset)) return offset;
@@ -12165,7 +12269,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->number_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.number, ctx, s->number_ctor)) {
         double d = 0;
         JS_ToFloat64(ctx, &d, v);
         JSValue a = JS_NewFloat64(ctx, d);
@@ -12175,7 +12279,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->string_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.string, ctx, s->string_ctor)) {
         JSValue prim = JS_ToString(ctx, v);
         JSValueConst a = prim;
         JSValue clone = JS_CallConstructor(ctx, s->string_ctor, 1, &a);
@@ -12184,7 +12288,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->bigint_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.bigint, ctx, s->bigint_ctor)) {
         JSValue vo = JS_GetPropertyStr(ctx, v, "valueOf");
         JSValue prim = JS_Call(ctx, vo, v, 0, NULL);
         JS_FreeValue(ctx, vo);
@@ -12195,7 +12299,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->boolean_ctor)) {
+    if (ns_sc_is_class(v, ns_sc_classes.boolean, ctx, s->boolean_ctor)) {
         JSValue vo = JS_GetPropertyStr(ctx, v, "valueOf");
         JSValue prim = JS_Call(ctx, vo, v, 0, NULL);
         JS_FreeValue(ctx, vo);
@@ -21981,6 +22085,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_fn(ctx, global, "close",         ns_worker_global_close, 0);
     ns_bind_fn(ctx, global, "importScripts", ns_worker_import_scripts, 1);
     ns_bind_fn(ctx, global, "structuredClone", ns_window_structured_clone, 1);
+    ns_sc_learn_builtin_classes(ctx);
     ns_bind_fn(ctx, global, "queueMicrotask", ns_window_queue_microtask, 1);
     ns_bind_fn(ctx, global, "btoa", ns_window_btoa, 1);
     ns_bind_fn(ctx, global, "atob", ns_window_atob, 1);
@@ -49060,6 +49165,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "screen", screen);
 
     ns_bind_fn(ctx, global, "structuredClone",  ns_window_structured_clone,  1);
+    ns_sc_learn_builtin_classes(ctx);
     ns_bind_fn(ctx, global, "reportError",      ns_window_report_error,      1);
     ns_bind_fn(ctx, global, "queueMicrotask",   ns_window_queue_microtask,   1);
     ns_bind_ctor(ctx, global, "MessageChannel",   ns_window_message_channel,   0);
