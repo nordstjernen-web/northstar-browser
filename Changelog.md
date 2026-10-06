@@ -169,6 +169,18 @@ Significant changes in each release:
   receiving realm when it is delivered. Ladybird reported this class of
   bug as what kept Google reCAPTCHA from passing; Nordstjernen fixed it
   too, and this fix is written independently of its change.
+* A window's child frames can be reached by index and by name, also
+  from inside a frame: `window.kid` and `parent['kid']` return the frame
+  named `kid`, `parent.frames.length` and `parent.frames[0]` work from a
+  frame's own script, and a cross-origin frame can reach its siblings
+  through `parent.frames[name]` and `parent[i]` and post messages to
+  them, which HTML allows across origins; the parent's document and its
+  elements stay out of reach. The page's window resolved indices,
+  `length` and names against whichever document was running, which is
+  the frame's own while frame code runs, and looked names up only as
+  element ids. reCAPTCHA's challenge frames find each other this way and
+  failed with "Cannot read properties of undefined (reading
+  'postMessage')". Written independently of Nordstjernen's fix.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

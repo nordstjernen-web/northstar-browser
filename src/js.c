@@ -3700,25 +3700,38 @@ ns_unwrap_element(JSValueConst val)
     return JS_GetOpaque(val, ns_element_class_id);
 }
 
+static const ns_node *
+ns_window_properties_document(ns_js *js)
+{
+    return js->main_document ? js->main_document : js->current_doc;
+}
+
 static ns_node *
 ns_window_named_lookup(ns_js *js, const char *name)
 {
-    if (!js || !js->current_doc || !name || !*name) return NULL;
-    return ns_node_find_by_id(js->current_doc, name);
+    const ns_node *doc = ns_window_properties_document(js);
+    if (!doc || !name || !*name) return NULL;
+    return ns_node_find_by_id((ns_node *)doc, name);
 }
 
 static gboolean ns_live_is_array_index(const char *name);
 static JSValue ns_element_get_contentWindow(JSContext *ctx,
                                             JSValueConst this_val);
 
+static gboolean
+ns_node_is_frame_element(const ns_node *n)
+{
+    return n->kind == NS_NODE_ELEMENT && n->name &&
+           (g_ascii_strcasecmp(n->name, "iframe") == 0 ||
+            g_ascii_strcasecmp(n->name, "frame") == 0);
+}
+
 static const ns_node *
 ns_frame_at_index(const ns_node *n, uint32_t *index, int depth)
 {
     if (!n || depth >= 256) return NULL;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind == NS_NODE_ELEMENT && c->name &&
-            (g_ascii_strcasecmp(c->name, "iframe") == 0 ||
-             g_ascii_strcasecmp(c->name, "frame") == 0)) {
+        if (ns_node_is_frame_element(c)) {
             if ((*index)-- == 0) return c;
             continue;
         }
@@ -3728,15 +3741,106 @@ ns_frame_at_index(const ns_node *n, uint32_t *index, int depth)
     return NULL;
 }
 
-static JSValue
-ns_window_indexed_frame(JSContext *ctx, ns_js *js, uint32_t index)
+static gboolean
+ns_frame_is_child_of(const ns_node *doc, const ns_node *frame)
 {
-    const ns_node *frame = ns_frame_at_index(js->current_doc, &index, 0);
+    for (const ns_node *p = frame->parent; p; p = p->parent) {
+        if (p == doc) return TRUE;
+        if (ns_node_is_frame_element(p)) return FALSE;
+    }
+    return FALSE;
+}
+
+static const ns_node *
+ns_frame_named_walk(const ns_node *n, const char *name, int depth)
+{
+    if (!n || depth >= 256) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_frame_element(c)) {
+            const char *frame_name = ns_element_get_attr(c, "name");
+            if (frame_name && strcmp(frame_name, name) == 0) return c;
+            continue;
+        }
+        const ns_node *hit = ns_frame_named_walk(c, name, depth + 1);
+        if (hit) return hit;
+    }
+    return NULL;
+}
+
+static const ns_node *
+ns_frame_named(const ns_node *doc, const char *name)
+{
+    if (!doc->tag_index) return ns_frame_named_walk(doc, name, 0);
+    static const char *const tags[] = { "iframe", "frame" };
+    const ns_node *first = NULL;
+    for (gsize t = 0; t < G_N_ELEMENTS(tags); t++) {
+        GPtrArray *list = ns_doc_tag_index_lookup(doc, tags[t]);
+        for (guint i = 0; list && i < list->len; i++) {
+            const ns_node *frame = g_ptr_array_index(list, i);
+            const char *frame_name = ns_element_get_attr(frame, "name");
+            if (!frame_name || strcmp(frame_name, name) != 0 ||
+                !ns_frame_is_child_of(doc, frame))
+                continue;
+            if (!first || ns_node_document_order_cmp(frame, first) < 0)
+                first = frame;
+            break;
+        }
+    }
+    return first;
+}
+
+static uint32_t
+ns_frame_count(const ns_node *n, int depth)
+{
+    if (!n || depth >= 256) return 0;
+    uint32_t count = 0;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        count += ns_node_is_frame_element(c) ? 1 : ns_frame_count(c, depth + 1);
+    return count;
+}
+
+static JSValue
+ns_frame_window(JSContext *ctx, const ns_node *frame)
+{
     if (!frame) return JS_UNDEFINED;
     JSValue el = ns_make_element(ctx, frame);
     JSValue win = ns_element_get_contentWindow(ctx, el);
     JS_FreeValue(ctx, el);
     return win;
+}
+
+static const ns_node *
+ns_window_child_frame_for(const ns_node *doc, const char *key)
+{
+    if (ns_live_is_array_index(key)) {
+        uint32_t index = (uint32_t)strtoul(key, NULL, 10);
+        return ns_frame_at_index(doc, &index, 0);
+    }
+    return *key ? ns_frame_named(doc, key) : NULL;
+}
+
+static JSValue
+ns_window_child_frame(JSContext *ctx, JSValueConst this_val, int argc,
+                      JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    const ns_node *doc = js ? ns_window_properties_document(js) : NULL;
+    if (!doc || argc < 1 || !JS_IsString(argv[0])) return JS_UNDEFINED;
+    const char *key = JS_ToCString(ctx, argv[0]);
+    if (!key) return JS_EXCEPTION;
+    const ns_node *frame = ns_window_child_frame_for(doc, key);
+    JS_FreeCString(ctx, key);
+    return frame ? ns_frame_window(ctx, frame) : JS_UNDEFINED;
+}
+
+static void
+ns_window_named_fill(JSPropertyDescriptor *desc, JSValue value, int flags)
+{
+    desc->flags  = flags;
+    desc->value  = value;
+    desc->getter = JS_UNDEFINED;
+    desc->setter = JS_UNDEFINED;
 }
 
 static int
@@ -3745,33 +3849,23 @@ ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
 {
     (void)obj;
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->current_doc) return 0;
+    const ns_node *doc = js ? ns_window_properties_document(js) : NULL;
+    if (!doc) return 0;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return 0;
-    if (ns_live_is_array_index(name)) {
-        uint32_t index = (uint32_t)strtoul(name, NULL, 10);
-        JS_FreeCString(ctx, name);
-        JSValue frame = ns_window_indexed_frame(ctx, js, index);
-        if (JS_IsUndefined(frame)) return 0;
-        if (desc) {
-            desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
-            desc->value  = frame;
-            desc->getter = JS_UNDEFINED;
-            desc->setter = JS_UNDEFINED;
-        } else {
-            JS_FreeValue(ctx, frame);
-        }
-        return 1;
+    gboolean indexed = ns_live_is_array_index(name);
+    int flags = indexed ? JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE
+                        : JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
+    const ns_node *frame = ns_window_child_frame_for(doc, name);
+    JSValue value = frame ? ns_frame_window(ctx, frame) : JS_UNDEFINED;
+    if (JS_IsUndefined(value) && !indexed) {
+        ns_node *el = ns_window_named_lookup(js, name);
+        if (el) value = ns_make_element(ctx, el);
     }
-    ns_node *el = ns_window_named_lookup(js, name);
     JS_FreeCString(ctx, name);
-    if (!el) return 0;
-    if (desc) {
-        desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
-        desc->value  = ns_make_element(ctx, el);
-        desc->getter = JS_UNDEFINED;
-        desc->setter = JS_UNDEFINED;
-    }
+    if (JS_IsUndefined(value)) return 0;
+    if (desc) ns_window_named_fill(desc, value, flags);
+    else JS_FreeValue(ctx, value);
     return 1;
 }
 
@@ -42682,7 +42776,7 @@ static const char ns_iframe_global_bootstrap[] =
     "  def('self',       { value: win, writable: true });"
     "  def('event',      { value: undefined, writable: true });"
     "  function crossWindow(target){"
-    "    var proxy, loc = {};"
+    "    var proxy, loc = {}, childFrame = target.__ndChildFrame;"
     "    function denied(){ throw new DOMException('Blocked cross-origin frame access', 'SecurityError'); }"
     "    Object.defineProperty(loc, 'href', { enumerable:true, set:function(v){ target.location.href=v; }, get:denied });"
     "    loc.replace = function(v){ target.location.replace(v); };"
@@ -42695,6 +42789,7 @@ static const char ns_iframe_global_bootstrap[] =
     "        if(p==='length') return target.length >>> 0;"
     "        if(p==='close'||p==='focus'||p==='blur') return function(){ return target[p](); };"
     "        if(p===Symbol.toStringTag) return 'Window';"
+    "        if(typeof p==='string' && childFrame){ var cf=childFrame(p); if(cf) return cf; }"
     "        return denied(); },"
     "      set:function(t,p,v){ if(p==='location'){ target.location.href=v; return true; } return denied(); },"
     "      has:function(t,p){ return p==='window'||p==='self'||p==='frames'||p==='parent'||p==='top'||"
@@ -43157,25 +43252,6 @@ ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
     return ns_iframe_cross_origin_window(ctx, win);
 }
 
-static void
-ns_collect_frames_walk(JSContext *ctx, const ns_node *n, JSValue arr,
-                       uint32_t *i, int depth)
-{
-    if (!n || depth >= 256) return;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind == NS_NODE_ELEMENT && c->name &&
-            (g_ascii_strcasecmp(c->name, "iframe") == 0 ||
-             g_ascii_strcasecmp(c->name, "frame") == 0)) {
-            JSValue el = ns_make_element(ctx, c);
-            JS_SetPropertyUint32(ctx, arr, (*i)++,
-                                 ns_element_get_contentWindow(ctx, el));
-            JS_FreeValue(ctx, el);
-            continue;
-        }
-        ns_collect_frames_walk(ctx, c, arr, i, depth + 1);
-    }
-}
-
 static JSValue
 ns_window_get_window(JSContext *ctx, JSValueConst this_val, int argc,
                      JSValueConst *argv)
@@ -43196,15 +43272,8 @@ static JSValue
 ns_window_get_length(JSContext *ctx, JSValueConst this_val, int argc,
                      JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
-    JSValue arr = JS_NewArray(ctx);
-    uint32_t i = 0;
-    if (js && js->current_doc)
-        ns_collect_frames_walk(ctx, js->current_doc, arr, &i, 0);
-    JSValue len = JS_GetPropertyStr(ctx, arr, "length");
-    JS_FreeValue(ctx, arr);
-    return len;
+    (void)argc; (void)argv;
+    return JS_NewUint32(ctx, ns_frame_count(ns_window_document_for(ctx, this_val), 0));
 }
 
 static JSValue
@@ -48576,6 +48645,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__ndMediaSourceTypeSupported",
                ns_media_source_type_supported, 1);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
+    ns_bind_fn(ctx, global, "__ndChildFrame",        ns_window_child_frame,            1);
 
     ns_bind_ctor(ctx, global, "Event",        ns_event_ctor,        2);
     {
