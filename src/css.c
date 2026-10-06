@@ -27996,26 +27996,6 @@ css_collect_property_rules(GHashTable *reg, const ns_css_stylesheet *sh)
     }
 }
 
-static GHashTable *
-flatten_var_map(const ns_var_map *m)
-{
-    GHashTable *flat = g_hash_table_new(g_str_hash, g_str_equal);
-    GPtrArray *chain = g_ptr_array_new();
-    for (const ns_var_map *c = m; c; c = c->parent)
-        g_ptr_array_add(chain, (gpointer)c);
-    for (guint ci = chain->len; ci-- > 0; ) {
-        const ns_var_map *c = g_ptr_array_index(chain, ci);
-        if (!c->own) continue;
-        GHashTableIter it;
-        gpointer k, v;
-        g_hash_table_iter_init(&it, c->own);
-        while (g_hash_table_iter_next(&it, &k, &v))
-            g_hash_table_replace(flat, k, v);
-    }
-    g_ptr_array_free(chain, TRUE);
-    return flat;
-}
-
 static void
 var_map_apply_unregistered(GHashTable *own, const ns_var_map *parent,
                            GArray *matches, guint index)
@@ -28068,7 +28048,7 @@ var_map_restore_default(GHashTable *vars, const ns_var_map *parent,
     } else if (pr && pr->has_initial) {
         g_hash_table_replace(vars, g_strdup(name),
                              g_strdup(pr->initial_value));
-    } else if (inherit) {
+    } else if (inherit || (parent && ns_var_map_lookup(parent, name))) {
         g_hash_table_replace(vars, g_strdup(name), g_strdup("initial"));
     } else {
         g_hash_table_remove(vars, name);
@@ -28076,8 +28056,8 @@ var_map_restore_default(GHashTable *vars, const ns_var_map *parent,
 }
 
 static void
-var_map_apply_flat(GHashTable *vars, const ns_var_map *parent,
-                   GArray *matches, guint index)
+var_map_apply_registered(GHashTable *vars, const ns_var_map *parent,
+                         GArray *matches, guint index)
 {
     var_match *current = &g_array_index(matches, var_match, index);
     const var_match *resolved = var_resolved_match(matches, index);
@@ -28092,7 +28072,8 @@ var_map_apply_flat(GHashTable *vars, const ns_var_map *parent,
     ns_custom_prop_wide kind = custom_prop_wide_kind(value_text);
     char *expanded = NULL;
     if (kind == NS_CUSTOM_WIDE_NONE && strstr(resolved->text, "var(")) {
-        ns_var_map scope = { .ref = 1, .own = vars };
+        ns_var_map scope = { .ref = 1, .own = vars,
+                             .parent = (ns_var_map *)parent };
         expanded = substitute_vars_with(value_text, &scope, 0);
         kind = custom_prop_wide_kind(expanded);
     }
@@ -28394,6 +28375,26 @@ compute_registered_vars(ns_style *s, const ns_style *parent_style,
     g_free(current_color);
 }
 
+static void
+var_layer_registered_defaults(GHashTable *own, const ns_var_map *parent)
+{
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, g_registered_props);
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        const ns_css_property_rule *pr = v;
+        const char *inherited = parent ? ns_var_map_lookup(parent, k) : NULL;
+        if (pr->inherits && inherited) continue;
+        if (pr->has_initial) {
+            if (!inherited || strcmp(inherited, pr->initial_value) != 0)
+                g_hash_table_replace(own, g_strdup(k),
+                                     g_strdup(pr->initial_value));
+        } else if (inherited) {
+            g_hash_table_replace(own, g_strdup(k), g_strdup("initial"));
+        }
+    }
+}
+
 static ns_var_map *
 build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
 {
@@ -28446,40 +28447,19 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
             return ns_var_map_ref(parent);
         }
     }
-    GHashTable *parent_flat = parent_has ? flatten_var_map(parent) : NULL;
-    GHashTable *vars = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                             g_free, g_free);
-    if (parent_flat) {
-        GHashTableIter it;
-        gpointer k, v;
-        g_hash_table_iter_init(&it, parent_flat);
-        while (g_hash_table_iter_next(&it, &k, &v)) {
-            ns_css_property_rule *pr =
-                g_hash_table_lookup(g_registered_props, k);
-            if (pr && !pr->inherits) continue;
-            g_hash_table_replace(vars, g_strdup(k), g_strdup(v));
-        }
-        g_hash_table_destroy(parent_flat);
-    }
-    {
-        GHashTableIter it;
-        gpointer k, v;
-        g_hash_table_iter_init(&it, g_registered_props);
-        while (g_hash_table_iter_next(&it, &k, &v)) {
-            ns_css_property_rule *pr = v;
-            if (pr->has_initial && !g_hash_table_contains(vars, k))
-                g_hash_table_replace(vars, g_strdup(k),
-                                     g_strdup(pr->initial_value));
+    GHashTable *own = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                            g_free, g_free);
+    var_layer_registered_defaults(own, parent);
+    if (have_local) {
+        g_array_sort(var_matches, var_match_cmp);
+        for (guint i = 0; i < var_matches->len; i++) {
+            var_match *vm = &g_array_index(var_matches, var_match, i);
+            if (!vm->name || !vm->text) continue;
+            var_map_apply_registered(own, parent, var_matches, i);
         }
     }
-    g_array_sort(var_matches, var_match_cmp);
-    for (guint i = 0; i < var_matches->len; i++) {
-        var_match *vm = &g_array_index(var_matches, var_match, i);
-        if (!vm->name || !vm->text) continue;
-        var_map_apply_flat(vars, parent, var_matches, i);
-    }
-    var_map_expand(vars, NULL, parent);
-    ns_var_map *built = ns_var_map_new(vars, NULL);
+    var_map_expand(own, parent, parent);
+    ns_var_map *built = ns_var_map_new(own, ns_var_map_ref(parent));
     if (parent_has && !have_local && g_var_adjust_cache)
         g_hash_table_insert(g_var_adjust_cache, ns_var_map_ref(parent),
                             ns_var_map_ref(built));

@@ -92,6 +92,20 @@ Significant changes in each release:
   queued before it began, with a microtask checkpoint after each one; a
   page whose handler keeps posting to itself still lets timers run.
   Written independently of Nordstjernen's fix for the same bug.
+* A page that registers a custom property with `@property` or
+  `CSS.registerProperty()` no longer copies every inherited custom
+  property for each element that declares one of its own. The
+  registered path built a flat table of the whole inherited chain per
+  such element and then walked all of it again to compute registered
+  values; YouTube registers one property and carries about 1,300
+  variables, so every forced layout of a watch page spent most of its
+  cascade copying them. An element's own table now holds its
+  declarations and the registered properties whose value differs from
+  what it would inherit, on top of the parent's chain, as it already did
+  without registrations. Restyling 800 elements under 1,361 variables
+  and one registration goes from 300-400 ms to 13-17 ms; computed
+  values are unchanged. Written independently of Nordstjernen's fix for
+  the same problem.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL
