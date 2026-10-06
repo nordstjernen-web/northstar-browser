@@ -65,6 +65,21 @@ Significant changes in each release:
   nested inside `calc()`, `min()`, `max()` or `clamp()` still uses the
   viewport-based value. Written independently of Nordstjernen's fix for
   the same bug.
+* The methods and attributes of `Node` and every interface that
+  inherits from it throw `TypeError: Illegal invocation` when they are
+  called on something that is not a node, as WebIDL requires and Chrome
+  and Firefox do; promise-returning operations (`play()`, `decode()`,
+  `requestFullscreen()`, ...) reject instead, and the
+  `[LegacyLenientThis]` event handlers return `undefined`. They used to
+  return `null`, `0` or `false` for a plain object or an
+  `Object.create(Element.prototype)`: only 76 of 2,897 such members threw,
+  now 2,848 do and the rest are the rejecting, lenient and `EventTarget`
+  members. Google's sign-in page probes exactly this and sends a browser
+  that does not throw to "This browser or app may not be secure"; Gmail
+  cannot be reached without passing it. Each checked call costs one
+  extra native call, about 15 ns. Written independently of Nordstjernen's
+  fix, which patches its in-tree JavaScript engine; Northstar carries no
+  engine fork, so the check wraps the members instead.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

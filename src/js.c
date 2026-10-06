@@ -46,6 +46,7 @@
 #include "js_date.h"
 #include "js_intl.h"
 #include "js_realm.h"
+#include "js_receiver.h"
 #include "layout.h"
 #include "net.h"
 #include "paint.h"
@@ -52581,6 +52582,8 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
         ns_document_lift_methods_to_proto(ctx, doc_val);
         JS_FreeValue(ctx, doc_val);
         ns_seal_interface_objects(ctx, g);
+        ns_js_require_node_receivers(ctx, g, ns_element_class_id,
+                                     ns_attr_class_id);
         JS_FreeValue(ctx, g);
     }
 }
