@@ -2021,6 +2021,12 @@ svg_find_root(const ns_node *n, int depth)
     return NULL;
 }
 
+const ns_node *
+ns_svg_document_root(const ns_node *doc)
+{
+    return svg_find_root(doc, 0);
+}
+
 ns_texture *
 ns_svg_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
 {
