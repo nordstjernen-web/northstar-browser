@@ -1241,6 +1241,95 @@ ns_js_run_due_timers(ns_js *js)
     js->running_due_timers = FALSE;
 }
 
+typedef struct {
+    JSContext *ctx;
+    JSJobFunc *run;
+    int argc;
+    JSValue argv[3];
+} ns_message_task;
+
+static void
+ns_message_task_free(ns_message_task *t)
+{
+    for (int i = 0; i < t->argc; i++) JS_FreeValue(t->ctx, t->argv[i]);
+    g_free(t);
+}
+
+static void
+ns_message_tasks_clear(ns_js *js)
+{
+    if (js->message_task_source) {
+        ns_js_source_remove(js, js->message_task_source);
+        js->message_task_source = 0;
+    }
+    if (!js->message_tasks) return;
+    ns_message_task *t;
+    while ((t = g_queue_pop_head(js->message_tasks)))
+        ns_message_task_free(t);
+}
+
+static gboolean ns_message_tasks_run(gpointer data);
+
+static void
+ns_message_tasks_schedule(ns_js *js, gboolean behind_timers)
+{
+    if (js->message_task_source || !js->message_tasks ||
+        g_queue_is_empty(js->message_tasks))
+        return;
+    GSource *source = g_timeout_source_new(0);
+    g_source_set_priority(source, behind_timers ? G_PRIORITY_DEFAULT
+                                                : G_PRIORITY_DEFAULT - 1);
+    g_source_set_callback(source, ns_message_tasks_run, js, NULL);
+    js->message_task_source = g_source_attach(source, js->main_context);
+    g_source_unref(source);
+}
+
+static void
+ns_queue_message_task(JSContext *ctx, JSJobFunc *run, int argc,
+                      JSValueConst *argv)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || js->halted) return;
+    if (!js->message_tasks) js->message_tasks = g_queue_new();
+    ns_message_task *t = g_new0(ns_message_task, 1);
+    t->ctx = ctx;
+    t->run = run;
+    t->argc = MIN(argc, (int)G_N_ELEMENTS(t->argv));
+    for (int i = 0; i < t->argc; i++)
+        t->argv[i] = JS_DupValue(ctx, argv[i]);
+    g_queue_push_tail(js->message_tasks, t);
+    ns_message_tasks_schedule(js, FALSE);
+}
+
+static void ns_drain_mutations(ns_js *js);
+
+static gboolean
+ns_message_tasks_run(gpointer data)
+{
+    ns_js *js = data;
+    if (js->halted) {
+        js->message_task_source = 0;
+        ns_message_tasks_clear(js);
+        return G_SOURCE_REMOVE;
+    }
+    if (js->in_pump || ns_engine_in_blocking_fetch())
+        return G_SOURCE_CONTINUE;
+    js->message_task_source = 0;
+    guint queued = g_queue_get_length(js->message_tasks);
+    for (guint i = 0; i < queued && !js->halted; i++) {
+        ns_message_task *t = g_queue_pop_head(js->message_tasks);
+        if (!t) break;
+        JSValue r = t->run(t->ctx, t->argc, (JSValueConst *)t->argv);
+        if (JS_IsException(r)) JS_FreeValue(t->ctx, JS_GetException(t->ctx));
+        JS_FreeValue(t->ctx, r);
+        ns_message_task_free(t);
+        ns_drain_microtasks(js);
+    }
+    ns_drain_mutations(js);
+    ns_message_tasks_schedule(js, TRUE);
+    return G_SOURCE_REMOVE;
+}
+
 static void
 ns_drain_mutations(ns_js *js)
 {
@@ -10907,12 +10996,12 @@ ns_port_enable(JSContext *ctx, JSValueConst port)
                 JSValue data = JS_GetPropertyStr(ctx, item, "data");
                 JSValue ports = JS_GetPropertyStr(ctx, item, "ports");
                 JSValueConst job_args[3] = { port, data, ports };
-                JS_EnqueueJob(ctx, ns_port_deliver_job, 3, job_args);
+                ns_queue_message_task(ctx, ns_port_deliver_job, 3, job_args);
                 JS_FreeValue(ctx, ports);
                 JS_FreeValue(ctx, data);
             } else {
                 JSValueConst job_args[2] = { port, item };
-                JS_EnqueueJob(ctx, ns_port_deliver_job, 2, job_args);
+                ns_queue_message_task(ctx, ns_port_deliver_job, 2, job_args);
             }
             JS_FreeValue(ctx, marker);
             JS_FreeValue(ctx, item);
@@ -11021,7 +11110,7 @@ ns_port_post_message(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, started);
     if (pair_started) {
         JSValueConst job_args[3] = { pair, cloned, ports };
-        JS_EnqueueJob(ctx, ns_port_deliver_job, 3, job_args);
+        ns_queue_message_task(ctx, ns_port_deliver_job, 3, job_args);
     } else {
         JSValue queue = JS_GetPropertyStr(ctx, pair, "_queue");
         if (!JS_IsArray(queue)) {
@@ -11440,7 +11529,7 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
     JS_FreeValue(ctx, transfer);
 
     JSValueConst job_args[2] = { target, ev };
-    JS_EnqueueJob(ctx, ns_window_post_message_deliver_job, 2, job_args);
+    ns_queue_message_task(ctx, ns_window_post_message_deliver_job, 2, job_args);
     JS_FreeValue(ctx, ev);
     JS_FreeValue(ctx, target);
     return JS_UNDEFINED;
@@ -11554,7 +11643,7 @@ ns_broadcast_post_message(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, cname);
         if (!cc && same) {
             JSValueConst job_args[2] = { ch, data };
-            JS_EnqueueJob(ctx, ns_port_deliver_job, 2, job_args);
+            ns_queue_message_task(ctx, ns_port_deliver_job, 2, job_args);
         }
         JS_FreeValue(ctx, ch);
     }
@@ -27218,6 +27307,9 @@ ns_js_has_pending_work(const ns_js *js)
 {
     if (!js) return FALSE;
     if (js->microtask_source || JS_IsJobPending(js->rt)) return TRUE;
+    if (js->message_task_source ||
+        (js->message_tasks && !g_queue_is_empty(js->message_tasks)))
+        return TRUE;
     if (js->timers && g_hash_table_size(js->timers) > 0) {
         GHashTableIter it;
         gpointer k, v;
@@ -52033,6 +52125,7 @@ ns_js_reset_runtime_state(ns_js *js)
         js->microtask_source = 0;
     }
     js->draining_microtasks = FALSE;
+    ns_message_tasks_clear(js);
     if (js->async_script_roots)
         g_ptr_array_set_size(js->async_script_roots, 0);
     if (js->deferred_iframe_loads)
@@ -52614,6 +52707,8 @@ ns_js_free(ns_js *js)
         ns_js_source_remove(js, js->microtask_source);
         js->microtask_source = 0;
     }
+    ns_message_tasks_clear(js);
+    g_clear_pointer(&js->message_tasks, g_queue_free);
     ns_js_blob_registry_remove(js);
     ns_storage_flush(js);
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);

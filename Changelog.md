@@ -80,6 +80,18 @@ Significant changes in each release:
   extra native call, about 15 ns. Written independently of Nordstjernen's
   fix, which patches its in-tree JavaScript engine; Northstar carries no
   engine fork, so the check wraps the members instead.
+* `window.postMessage()`, `MessagePort.postMessage()`, a port's queued
+  messages when it starts, and `BroadcastChannel` deliver their messages
+  as tasks, as HTML specifies, instead of on the microtask queue. A
+  message overtook the promise callbacks queued before it, so a script
+  that posted to a port and to the window, queued a promise callback and
+  set a zero-delay timer saw "port, window, timeout, microtask"; it now
+  sees "microtask, port, window, timeout", as in Chrome. Google's Closure
+  library (`goog.async.nextTick`) and React's scheduler both use
+  `MessageChannel` to yield a task. Each turn delivers the messages
+  queued before it began, with a microtask checkpoint after each one; a
+  page whose handler keeps posting to itself still lets timers run.
+  Written independently of Nordstjernen's fix for the same bug.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL
