@@ -201,6 +201,23 @@ Significant changes in each release:
   control 9 ms instead of 640 ms; Google's results page reads its search
   form this way while it settles. Written independently of
   Nordstjernen's fix for the same problem.
+* Pages with container queries are laid out once per relayout when no
+  container changed size, instead of always twice. Every relayout of such
+  a page ran the cascade and the layout without container sizes, measured
+  the containers and ran both again with the sizes; Google's results page
+  is one, and relaid out dozens of times while it loads. The relayout now
+  starts from the container sizes the previous relayout of the same
+  document measured, and only cascades and lays out again when the new
+  layout's containers differ, repeating until they agree (at most three
+  extra passes). Incremental restyling stays in use while the container
+  sizes are unchanged, and the selector match cache is only kept when a
+  second pass is likely. Inline-block and other atomic inline containers
+  are now measured at all, and a container whose size depends on an
+  outer container's query gets the size it really has rather than one
+  from the first pass: 300 cards in a `container-type` wrapper resize
+  correctly across breakpoints, and 30 forced relayouts take 443 ms
+  instead of 788 ms. Written independently of Nordstjernen's work on the
+  same problem.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

@@ -19576,6 +19576,58 @@ ns_css_container_map_add(GHashTable *map, const void *node,
 }
 
 static gboolean
+cq_container_equal(const ns_cq_container *a, const ns_cq_container *b)
+{
+    return a->width == b->width && a->height == b->height &&
+           a->type == b->type && a->vertical == b->vertical &&
+           a->sibling_index == b->sibling_index &&
+           a->sibling_count == b->sibling_count &&
+           g_strcmp0(a->names, b->names) == 0;
+}
+
+gboolean
+ns_css_container_maps_equal(GHashTable *a, GHashTable *b)
+{
+    guint na = a ? g_hash_table_size(a) : 0;
+    guint nb = b ? g_hash_table_size(b) : 0;
+    if (na != nb) return FALSE;
+    if (na == 0) return TRUE;
+    GHashTableIter it;
+    gpointer node, info;
+    g_hash_table_iter_init(&it, a);
+    while (g_hash_table_iter_next(&it, &node, &info)) {
+        const ns_cq_container *other = g_hash_table_lookup(b, node);
+        if (!other || !cq_container_equal(info, other)) return FALSE;
+    }
+    return TRUE;
+}
+
+static guint64
+cq_map_signature(GHashTable *map)
+{
+    if (!map || g_hash_table_size(map) == 0) return 0;
+    guint64 sig = g_hash_table_size(map);
+    GHashTableIter it;
+    gpointer node, info;
+    g_hash_table_iter_init(&it, map);
+    while (g_hash_table_iter_next(&it, &node, &info)) {
+        const ns_cq_container *c = info;
+        guint64 h = (guint64)(guintptr)node * 0x9e3779b97f4a7c15ULL;
+        double dims[2] = { c->width, c->height };
+        guint64 bits[2];
+        memcpy(bits, dims, sizeof bits);
+        h ^= bits[0] + 0x632be59bd9b4e019ULL + (h << 6) + (h >> 2);
+        h ^= bits[1] + 0x8cb92ba72f3d8dd7ULL + (h << 6) + (h >> 2);
+        h ^= ((guint64)c->type << 48) ^ ((guint64)c->vertical << 40) ^
+             ((guint64)(guint32)c->sibling_index << 20) ^
+             (guint64)(guint32)c->sibling_count;
+        if (c->names) h ^= (guint64)g_str_hash(c->names) << 13;
+        sig += h * 0xbf58476d1ce4e5b9ULL;
+    }
+    return sig;
+}
+
+static gboolean
 cq_names_contain(const char *names, const char *name, gsize nlen)
 {
     if (!names) return FALSE;
@@ -30643,6 +30695,7 @@ ns_css_style_before_change(const void *node)
 }
 static ns_node       *g_incr_prev_doc;
 static guint64        g_incr_prev_sig;
+static guint64        g_incr_prev_cq_sig;
 static const ns_node *g_incr_prev_focus;
 static const ns_node *g_incr_prev_hover;
 static const ns_node *g_incr_prev_active;
@@ -33299,11 +33352,13 @@ ns_css_compute(ns_node *doc,
     gboolean incr_usable = g_getenv("NS_NO_INCR_RESTYLE") == NULL
         && g_incr_eligible
         && fabs(g_incr_zoom - 1.0) <= 0.001;
-    gboolean incr_want = incr_usable && g_cq_map == NULL;
+    guint64 cq_sig = cq_map_signature(g_cq_map);
+    gboolean incr_want = incr_usable;
     g_incr_pass_active = incr_want
         && g_incr_prev_styles != NULL
         && g_incr_prev_doc == doc
-        && g_incr_prev_sig == sig;
+        && g_incr_prev_sig == sig
+        && g_incr_prev_cq_sig == cq_sig;
     g_incr_reused = 0;
     g_incr_recomputed = 0;
     if (!g_incr_pass_active && !g_cq_map)
@@ -33340,6 +33395,7 @@ ns_css_compute(ns_node *doc,
         g_incr_prev_styles = new_prev;
         g_incr_prev_doc = doc;
         g_incr_prev_sig = sig;
+        g_incr_prev_cq_sig = cq_sig;
         g_incr_prev_focus = g_css_focus_node;
         g_incr_prev_hover = g_css_hover_node;
         g_incr_prev_active = g_css_active_node;

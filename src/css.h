@@ -1289,6 +1289,7 @@ gboolean ns_css_container_features_used(void);
 gboolean ns_css_container_units_seen(void);
 void ns_css_style_scale_font_size(ns_style *s, double factor);
 GHashTable *ns_css_container_map_new(void);
+gboolean    ns_css_container_maps_equal(GHashTable *a, GHashTable *b);
 void ns_css_container_map_add(GHashTable *map, const void *node,
                               const char *type_kw, const char *name_kw,
                               double w, double h, gboolean vertical);
