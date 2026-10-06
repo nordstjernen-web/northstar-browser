@@ -11495,6 +11495,60 @@ ns_js_window_realm(ns_js *js, JSValueConst window)
     return hit ? main_ctx : NULL;
 }
 
+static const ns_node *
+ns_js_frame_of_window(ns_js *js, JSValueConst window)
+{
+    if (!js || !js->frame_contexts || !JS_IsObject(window)) return NULL;
+    GHashTableIter it;
+    gpointer iframe, fctx;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, &iframe, &fctx)) {
+        JSValue g = JS_GetGlobalObject(fctx);
+        gboolean hit = JS_VALUE_GET_PTR(g) == JS_VALUE_GET_PTR(window);
+        JS_FreeValue(fctx, g);
+        gpointer outward = js->frame_windows
+            ? g_hash_table_lookup(js->frame_windows, iframe) : NULL;
+        if (hit || outward == JS_VALUE_GET_PTR(window)) return iframe;
+    }
+    return NULL;
+}
+
+static JSValue
+ns_message_source_seen_by(ns_js *js, JSContext *rctx, JSValueConst receiver,
+                          JSValue source)
+{
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    if (!rctx || !main_ctx || !JS_IsObject(source)) return source;
+    JSValue main_global = JS_GetGlobalObject(main_ctx);
+    gboolean to_page = JS_VALUE_GET_PTR(receiver) ==
+                       JS_VALUE_GET_PTR(main_global);
+    gboolean from_page = JS_VALUE_GET_PTR(source) ==
+                         JS_VALUE_GET_PTR(main_global);
+    JS_FreeValue(main_ctx, main_global);
+    if (to_page) {
+        const ns_node *frame = ns_js_frame_of_window(js, source);
+        if (!frame) return source;
+        JSValue el = ns_make_element(main_ctx, frame);
+        JSValue seen = ns_element_get_contentWindow(main_ctx, el);
+        JS_FreeValue(main_ctx, el);
+        if (!JS_IsObject(seen)) {
+            JS_FreeValue(main_ctx, seen);
+            return source;
+        }
+        JS_FreeValue(main_ctx, source);
+        return seen;
+    }
+    if (from_page && rctx != main_ctx) {
+        JSValue parent = JS_GetPropertyStr(rctx, receiver, "parent");
+        if (JS_IsObject(parent)) {
+            JS_FreeValue(rctx, source);
+            return parent;
+        }
+        JS_FreeValue(rctx, parent);
+    }
+    return source;
+}
+
 static JSValue
 ns_message_event_in_realm(JSContext *ctx, JSContext *rctx,
                           JSValueConst target, JSValueConst ev)
@@ -11562,6 +11616,15 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         ? ns_message_event_in_realm(ctx, receiving, actual_target, argv[1])
         : JS_DupValue(ctx, argv[1]);
     ev = delivered;
+    if (js && receiving) {
+        JSValue source = JS_GetPropertyStr(ctx, ev, "source");
+        JSValue seen = ns_message_source_seen_by(js, receiving, actual_target,
+                                                 JS_DupValue(ctx, source));
+        if (JS_VALUE_GET_PTR(seen) != JS_VALUE_GET_PTR(source))
+            JS_SetPropertyStr(ctx, ev, "source", JS_DupValue(ctx, seen));
+        JS_FreeValue(ctx, seen);
+        JS_FreeValue(ctx, source);
+    }
     JSValue deliver = JS_GetPropertyStr(ctx, actual_target, "__nsDeliverMessage");
     if (JS_IsFunction(ctx, deliver)) {
         ns_budget_guard bg = {0};
@@ -11730,14 +11793,38 @@ ns_window_post_message_this(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_js_incumbent_window(ns_js *js)
+{
+    const ns_node *doc = js ? js->current_doc : NULL;
+    JSContext *main_ctx = js ? (js->main_realm_ctx ? js->main_realm_ctx
+                                                   : js->ctx) : NULL;
+    if (!doc || !main_ctx) return JS_UNDEFINED;
+    if (doc == js->main_document || !doc->parent)
+        return JS_GetGlobalObject(main_ctx);
+    JSContext *fctx = js->frame_contexts
+        ? g_hash_table_lookup(js->frame_contexts, doc->parent) : NULL;
+    return fctx ? JS_GetGlobalObject(fctx) : JS_UNDEFINED;
+}
+
+static JSValue
 ns_window_post_message_from(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
     if (argc < 3 || !JS_IsObject(argv[0]) || !JS_IsObject(argv[1]))
         return JS_UNDEFINED;
-    return ns_post_message_to_target(ctx, JS_DupValue(ctx, argv[0]), argv[1],
-                                     argc - 2, argv + 2);
+    JSValue source = JS_DupValue(ctx, argv[1]);
+    if (JS_VALUE_GET_PTR(argv[0]) == JS_VALUE_GET_PTR(argv[1])) {
+        JSValue incumbent = ns_js_incumbent_window(js_from_ctx(ctx));
+        if (JS_IsObject(incumbent)) {
+            JS_FreeValue(ctx, source);
+            source = incumbent;
+        }
+    }
+    JSValue r = ns_post_message_to_target(ctx, JS_DupValue(ctx, argv[0]),
+                                          source, argc - 2, argv + 2);
+    JS_FreeValue(ctx, source);
+    return r;
 }
 
 static void

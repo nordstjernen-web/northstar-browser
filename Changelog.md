@@ -229,6 +229,16 @@ Significant changes in each release:
   `scrollend` treated page nodes as disconnected too. Gmail and Google's
   sign-in pages drive their frames this way. Written independently of
   Nordstjernen's fix for the same bug.
+* `event.source` of a message between a page and its frame is the
+  window as the receiver sees it: in the page, the frame's
+  `contentWindow` (also for a cross-origin frame), and in the frame, its
+  `parent`. A message the page sent through `frame.contentWindow.postMessage()`
+  claimed to come from the frame itself, with the frame's origin, and a
+  message from a cross-origin frame inserted by script carried the
+  frame's own global rather than the parent's view of it, so
+  `e.source === iframe.contentWindow` checks -- with which Google's
+  frame APIs and reCAPTCHA authenticate messages -- failed. Written
+  independently of Nordstjernen's fixes in the same area.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL
