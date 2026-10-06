@@ -170,6 +170,7 @@ gboolean    ns_node_is_element_named(const ns_node *n, const char *tag);
 gboolean    ns_input_is_one_line_text(const ns_node *n);
 
 const ns_node *ns_node_root(const ns_node *n);
+int ns_node_document_order_cmp(const ns_node *a, const ns_node *b);
 ns_node    *ns_node_find_first_element(const ns_node *root, const char *tag);
 ns_node    *ns_node_find_by_id(const ns_node *root, const char *id);
 ns_node    *ns_node_find_fragment_target(const ns_node *root, const char *frag);

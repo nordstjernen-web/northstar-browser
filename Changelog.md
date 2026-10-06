@@ -125,6 +125,16 @@ Significant changes in each release:
   `getBoundingClientRect()` and `offsetLeft`/`offsetTop` now include the
   offset, as in Chrome. Written independently of Nordstjernen's fix for
   the inline-box case; the nested case was not part of it.
+* Clicks go to the positioned box that is painted on top when several
+  share a stack level. The box tree puts absolutely and fixed positioned
+  boxes after their in-flow siblings, and hit testing broke ties by that
+  order while painting uses document order, so a `position: relative`
+  box drawn over an earlier fixed overlay lost its clicks to the
+  overlay. reCAPTCHA puts exactly such an overlay under its challenge to
+  close it on an outside click, and every click on the challenge closed
+  it. Ties now go by document order, and a positioned sibling ranks above
+  a non-positioned one, as in painting. Written independently of
+  Nordstjernen's fix for the same bug.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

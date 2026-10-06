@@ -6763,23 +6763,42 @@ box_hit_uses_border_bounds(const ns_box *box)
                    box->kind == NS_BOX_TABLE_CELL);
 }
 
+static gboolean
+hit_box_is_positioned(const ns_box *b)
+{
+    if (!b || !b->style) return FALSE;
+    const ns_css_value *p = b->style->values[NS_CSS_POSITION];
+    if (!p || p->kind != NS_CSS_V_KEYWORD || !p->u.keyword) return FALSE;
+    const char *kw = p->u.keyword;
+    return !strcmp(kw, "relative") || !strcmp(kw, "absolute") ||
+           !strcmp(kw, "fixed") || !strcmp(kw, "sticky");
+}
+
 static int
 hit_box_stack_key(const ns_box *b)
 {
-    if (!b || !b->style) return 0;
-    const ns_css_value *p = b->style->values[NS_CSS_POSITION];
-    if (!p || p->kind != NS_CSS_V_KEYWORD || !p->u.keyword) return 0;
-    const char *kw = p->u.keyword;
-    if (strcmp(kw, "relative") && strcmp(kw, "absolute") &&
-        strcmp(kw, "fixed") && strcmp(kw, "sticky")) return 0;
+    if (!hit_box_is_positioned(b)) return 0;
     const ns_css_value *v = b->style->values[NS_CSS_Z_INDEX];
     if (!v || v->kind != NS_CSS_V_LENGTH) return 0;
     return (int)v->u.length.v;
 }
 
+static int
+hit_tree_order_cmp(const ns_box *a, guint order_a,
+                   const ns_box *b, guint order_b)
+{
+    if (a->dom && b->dom && a->dom != b->dom &&
+        ns_node_root(a->dom) == ns_node_root(b->dom)) {
+        int c = ns_node_document_order_cmp(a->dom, b->dom);
+        if (c) return c;
+    }
+    return order_a < order_b ? -1 : order_a > order_b ? 1 : 0;
+}
+
 typedef struct {
     const ns_box *box;
     int          key;
+    gboolean     positioned;
     guint        order;
 } hit_stack_entry;
 
@@ -6788,6 +6807,9 @@ hit_stack_cmp(const void *a, const void *b)
 {
     const hit_stack_entry *pa = a, *pb = b;
     if (pa->key != pb->key) return pa->key < pb->key ? -1 : 1;
+    if (pa->positioned != pb->positioned) return pa->positioned ? 1 : -1;
+    if (pa->positioned)
+        return hit_tree_order_cmp(pa->box, pa->order, pb->box, pb->order);
     if (pa->order != pb->order) return pa->order < pb->order ? -1 : 1;
     return 0;
 }
@@ -6807,6 +6829,7 @@ hit_children_stacked(const ns_box *parent, guint *out_n)
     for (const ns_box *c = parent->first_child; c; c = c->next_sibling) {
         e[i].box = c;
         e[i].key = hit_box_stack_key(c);
+        e[i].positioned = hit_box_is_positioned(c);
         e[i].order = i;
         i++;
     }
@@ -15541,7 +15564,7 @@ hit_deferred_cmp(const void *a, const void *b)
 {
     const hit_deferred *pa = a, *pb = b;
     if (pa->z != pb->z) return pa->z < pb->z ? -1 : 1;
-    return pa->order < pb->order ? -1 : pa->order > pb->order ? 1 : 0;
+    return hit_tree_order_cmp(pa->box, pa->order, pb->box, pb->order);
 }
 
 static const ns_box *box_hit_test_tree(const ns_box *root, double x, double y);
