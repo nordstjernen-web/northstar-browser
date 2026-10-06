@@ -191,6 +191,16 @@ Significant changes in each release:
   only against its own document's sheets. Gmail, Google sign-in and
   reCAPTCHA all run in frames. Written independently of Nordstjernen's
   fix for the same bug.
+* Reading a property of a `<form>` no longer walks the document. A form's
+  named properties override its own members, so every read -- `form.action`
+  and `form.method` included -- ran the named-property hook, which built
+  a fresh `form.elements` collection and searched it. The form's controls
+  and an index of their names and ids are now kept until the DOM next
+  changes. On a form with 300 controls, 40,000 reads of `action` and
+  `method` take 29 ms instead of 1.3 s, and 20,000 reads of a named
+  control 9 ms instead of 640 ms; Google's results page reads its search
+  form this way while it settles. Written independently of
+  Nordstjernen's fix for the same problem.
 * The standards-conformance backport released in 1.0.12 is withdrawn.
   Thirteen of its commits ported work that outside contributors wrote
   for Nordstjernen under the Nordstjernen Source License, which this GPL

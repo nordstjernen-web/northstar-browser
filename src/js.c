@@ -37298,6 +37298,78 @@ ns_form_elements_named_lookup(JSContext *ctx, JSValueConst this_val,
     return first;
 }
 
+static JSValue
+ns_form_controls(JSContext *ctx, JSValueConst form, const ns_node *form_node)
+{
+    ns_js *js = js_from_ctx(ctx);
+    JSValue cached = ns_qcache_get(js, form_node, 'f', "");
+    if (!JS_IsUndefined(cached)) return cached;
+    JSValue elements = ns_element_get_form_elements(ctx, form);
+    ns_live_back *b = JS_GetOpaque(elements, ns_live_class_id);
+    JSValue controls = b ? JS_DupValue(ctx, ns_live_snapshot(ctx, b))
+                         : JS_DupValue(ctx, elements);
+    JS_FreeValue(ctx, elements);
+    ns_qcache_put(js, form_node, 'f', "", controls);
+    return controls;
+}
+
+static void
+ns_form_name_index_add(JSContext *ctx, JSValue index, const char *key,
+                       JSValueConst control)
+{
+    if (!key || !*key) return;
+    JSAtom atom = JS_NewAtom(ctx, key);
+    int present = JS_GetOwnProperty(ctx, NULL, index, atom);
+    JS_DefinePropertyValue(ctx, index, atom,
+                           present > 0 ? JS_TRUE : JS_DupValue(ctx, control),
+                           JS_PROP_C_W_E);
+    JS_FreeAtom(ctx, atom);
+}
+
+static JSValue
+ns_form_name_index(JSContext *ctx, JSValueConst form, const ns_node *form_node)
+{
+    ns_js *js = js_from_ctx(ctx);
+    JSValue cached = ns_qcache_get(js, form_node, 'n', "");
+    if (!JS_IsUndefined(cached)) return cached;
+    JSValue controls = ns_form_controls(ctx, form, form_node);
+    JSValue index = JS_NewObjectProto(ctx, JS_NULL);
+    uint32_t len = ns_js_array_length(ctx, controls);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue control = JS_GetPropertyUint32(ctx, controls, i);
+        const ns_node *el = ns_unwrap_element(control);
+        if (el) {
+            const char *id = ns_element_get_attr(el, "id");
+            const char *name = ns_element_get_attr(el, "name");
+            ns_form_name_index_add(ctx, index, id, control);
+            if (!id || !name || strcmp(id, name) != 0)
+                ns_form_name_index_add(ctx, index, name, control);
+        }
+        JS_FreeValue(ctx, control);
+    }
+    JS_FreeValue(ctx, controls);
+    ns_qcache_put(js, form_node, 'n', "", index);
+    return index;
+}
+
+static JSValue
+ns_form_named_control(JSContext *ctx, JSValueConst form,
+                      const ns_node *form_node, const char *name)
+{
+    JSValue index = ns_form_name_index(ctx, form, form_node);
+    JSValue hit = JS_GetPropertyStr(ctx, index, name);
+    JS_FreeValue(ctx, index);
+    if (JS_IsObject(hit)) return hit;
+    if (!JS_IsBool(hit)) {
+        JS_FreeValue(ctx, hit);
+        return JS_NULL;
+    }
+    JSValue controls = ns_form_controls(ctx, form, form_node);
+    JSValue several = ns_form_elements_named_lookup(ctx, controls, name);
+    JS_FreeValue(ctx, controls);
+    return several;
+}
+
 static int
 ns_element_named_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
                          JSValueConst obj, JSAtom prop)
@@ -37320,7 +37392,7 @@ ns_element_named_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
         char *end = NULL;
         unsigned long idx = strtoul(name, &end, 10);
         JS_FreeCString(ctx, name);
-        JSValue elements = ns_element_get_form_elements(ctx, obj);
+        JSValue elements = ns_form_controls(ctx, obj, n);
         uint32_t len = ns_js_array_length(ctx, elements);
         if ((unsigned long)idx >= len) { JS_FreeValue(ctx, elements); return 0; }
         JSValue el = JS_GetPropertyUint32(ctx, elements, (uint32_t)idx);
@@ -37335,9 +37407,7 @@ ns_element_named_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
         }
         return 1;
     }
-    JSValue elements = ns_element_get_form_elements(ctx, obj);
-    JSValue result = ns_form_elements_named_lookup(ctx, elements, name);
-    JS_FreeValue(ctx, elements);
+    JSValue result = ns_form_named_control(ctx, obj, n, name);
     if (!JS_IsNull(result) && !JS_IsUndefined(result)) {
         JSValue past_map = JS_GetPropertyStr(ctx, obj, "_ns_past_names");
         if (!JS_IsObject(past_map)) {
