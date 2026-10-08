@@ -62,6 +62,7 @@
       <a href="#build">Build</a>
       <a href="#news">News</a>
       <a href="../index.html">Nordstjernen</a>
+      <a href="https://github.com/nordstjernen-web/southstar-browser">Southstar</a>
       <a href="https://github.com/nordstjernen-web/northstar-browser/releases">Releases</a>
       <a href="https://discord.gg/4W959nW5vF">Discord</a>
     </div>
@@ -83,6 +84,7 @@
         <p class="feature"><b>Free software.</b> Licensed under the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL, version 3 or later</a> &mdash; use it, read it, change it, share it. The whole engine is in the repository at <a href="https://github.com/nordstjernen-web/northstar-browser">github.com/nordstjernen-web/northstar-browser</a>.</p>
         <p class="feature"><b>Written from scratch.</b> Every behaviour is implemented in the project's own C &mdash; the parser glue, the cascade and value parsing, layout, paint, and the DOM and CSSOM bindings. Compliance is not inherited from an upstream engine; it is measured, section by section, against the specification text.</p>
         <p class="feature"><b>One window, one page, one process.</b> All rendering happens in a single compact process, prioritizing auditability over the isolation a multi-process browser buys. On Linux it runs behind a Landlock filesystem sandbox (plus <code>PR_SET_NO_NEW_PRIVS</code>) with a default-deny seccomp syscall filter, in both GUI and headless modes. There is no JIT.</p>
+        <p class="feature"><b>A family of browsers.</b> Northstar shares its hand-written engine with <a href="../">Nordstjernen</a>, the flagship multi-tab browser, and with <a href="https://github.com/nordstjernen-web/southstar-browser">Southstar</a>, the Rust version, which starts from the Nordstjernen codebase and is being ported to Rust module by module.</p>
         <p class="feature"><b>Private by construction.</b> No telemetry, no update pings, and no AI assistant or AI-style web APIs. Safe browsing checks a top-level navigation's host against a local SHA-256 blocklist before it is fetched &mdash; the check never leaves your machine. Cookies, storage and the cache are partitioned by origin.</p>
         </div>
 
@@ -258,6 +260,10 @@
 
         <h2 id="news">news</h2>
         <ul class="news">
+        <li><time class="date" datetime="2026-10-05">5&nbsp;OCT&nbsp;2026</time> &middot;
+        Nordstjernen <b>1.0.29</b> released &mdash; sharp pages on HiDPI screens, smooth tiled scrolling, the clipboard in text fields, Google sign-in and a security audit of the engine.
+        <a href="../release-1-0-29.html">Announcement &raquo;</a></li>
+
         <li><time class="date" datetime="2026-10-04">4&nbsp;OCT&nbsp;2026</time> &middot;
         Nordstjernen <b>1.0.28</b> is now dual-licensed under the GNU GPL version 3 or later or the Nordstjernen Source License.
         <a href="../release-1-0-28.html">Announcement &raquo;</a></li>

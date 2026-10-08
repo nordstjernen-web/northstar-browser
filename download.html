@@ -14,7 +14,7 @@
 <meta property="og:description" content="An independent web browser written from scratch in C. No telemetry, no JIT.">
 <meta property="og:url" content="https://www.nordstjernen.org/download.html">
 <meta property="og:image" content="https://www.nordstjernen.org/screenshots/screenshot.png">
-<meta property="og:image:alt" content="Nordstjernen's about:start start page">
+<meta property="og:image:alt" content="Nordstjernen 1.0.29 showing the Wikipedia article on Svalbard">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="assets/nordstjernen.svg">
 <script type="application/ld+json">
@@ -24,9 +24,9 @@
   "name": "Nordstjernen",
   "applicationCategory": "BrowserApplication",
   "operatingSystem": "Windows, macOS, Linux",
-  "softwareVersion": "1.0.28",
+  "softwareVersion": "1.0.29",
   "url": "https://www.nordstjernen.org/download.html",
-  "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28",
+  "downloadUrl": "https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.29",
   "license": "https://github.com/nordstjernen-web/nordstjernen-browser/blob/main/License.md",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
@@ -61,6 +61,7 @@
     <div class="nav-sec">
       <a href="index.html#specs">Specifications</a>
       <a href="northstar-browser/">Northstar</a>
+      <a href="https://github.com/nordstjernen-web/southstar-browser">Southstar</a>
       <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">Releases</a>
       <a href="https://discord.gg/4W959nW5vF">Discord</a>
     </div>
@@ -71,15 +72,16 @@
         <h1 id="download">download</h1>
 
         <div class="os-hero">
-          <a id="os-download" class="btn-red" href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28">Download Nordstjernen</a>
-          <p class="os-note">Nordstjernen 1.0.28 &middot; GPL&nbsp;3+ or NSL-1.0 &middot; free to use &middot; no telemetry. <a href="#downloads">All platforms below &raquo;</a></p>
+          <a id="os-download" class="btn-red" href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.29">Download Nordstjernen</a>
+          <p class="os-note">Nordstjernen 1.0.29 &middot; GPL&nbsp;3+ or NSL-1.0 &middot; free to use &middot; no telemetry. <a href="#downloads">All platforms below &raquo;</a></p>
         </div>
 
         <h2 id="downloads">all downloads</h2>
-        <p>Latest release: Nordstjernen <b>1.0.28</b> &mdash; released 4 October 2026, with a portable Linux zip and a Debian/Ubuntu package.
-        Nordstjernen is now dual-licensed: use it under the GNU GPL version 3 or later, or under the Nordstjernen Source License 1.0, at your option.
-        <a href="release-1-0-28.html">read the announcement &raquo;</a> &middot;
-        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.28">full release notes &raquo;</a></p>
+        <p>Latest release: Nordstjernen <b>1.0.29</b> &mdash; released 5 October 2026, with a portable Linux zip and a Debian/Ubuntu package for each of
+        Ubuntu 24.04, Ubuntu 26.04 and Debian 13, built against that release&rsquo;s own libraries.
+        Nordstjernen is dual-licensed: use it under the GNU GPL version 3 or later, or under the Nordstjernen Source License 1.0, at your option.
+        <a href="release-1-0-29.html">read the announcement &raquo;</a> &middot;
+        <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/tag/1.0.29">full release notes &raquo;</a></p>
 
         <p>The most recent macOS, Alpine, openSUSE and Java packages are from Nordstjernen <b>1.0.23</b> &mdash; released 8 August 2026.
         <a href="release-1-0-23.html">read the announcement &raquo;</a> &middot;
@@ -99,15 +101,19 @@
         <a href="northstar-release-1-0-12.html">Read the 1.0.12 announcement &raquo;</a> &middot;
         <a href="northstar-browser/#download">all Northstar downloads &raquo;</a></p>
 
+        <p>Interested in Rust? <a href="https://github.com/nordstjernen-web/southstar-browser">Southstar</a> is the Rust version of the browser,
+        being ported from the Nordstjernen codebase one module at a time. It has no release or binaries yet &mdash; build it from source on
+        <a href="https://github.com/nordstjernen-web/southstar-browser">GitHub</a>.</p>
+
         <p><b>Platform-specific builds</b> of Nordstjernen are below; every file is also on the
         <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases">GitHub releases page</a>.</p>
 
         <table class="spec dl">
           <caption class="sr-only">Nordstjernen downloads by platform</caption>
           <tr>
-            <th scope="row">Source (1.0.28)</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.28.tar.gz">1.0.28.tar.gz</a> &middot;
-                <a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.28.zip">1.0.28.zip</a></td>
+            <th scope="row">Source (1.0.29)</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.29.tar.gz">1.0.29.tar.gz</a> &middot;
+                <a href="https://github.com/nordstjernen-web/nordstjernen-browser/archive/refs/tags/1.0.29.zip">1.0.29.zip</a></td>
           </tr>
           <tr>
             <th scope="row">Windows</th>
@@ -123,8 +129,16 @@
             <td><a href="https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser">Google Play</a></td>
           </tr>
           <tr>
-            <th scope="row">Debian / Ubuntu</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/nordstjernen_1.0.28_amd64.deb">nordstjernen_1.0.28_amd64.deb</a></td>
+            <th scope="row">Ubuntu 24.04</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.29/nordstjernen_1.0.29_ubuntu24.04_amd64.deb">nordstjernen_1.0.29_ubuntu24.04_amd64.deb</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Ubuntu 26.04</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.29/nordstjernen_1.0.29_ubuntu26.04_amd64.deb">nordstjernen_1.0.29_ubuntu26.04_amd64.deb</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Debian 13</th>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.29/nordstjernen_1.0.29_debian13_amd64.deb">nordstjernen_1.0.29_debian13_amd64.deb</a></td>
           </tr>
           <tr>
             <th scope="row">openSUSE</th>
@@ -132,7 +146,7 @@
           </tr>
           <tr>
             <th scope="row">Linux (portable)</th>
-            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/nordstjernen-1.0.28-linux-x86_64.zip">nordstjernen-1.0.28-linux-x86_64.zip</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/SHA256SUMS">SHA256SUMS</a></td>
+            <td><a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.29/nordstjernen-1.0.29-linux-x86_64.zip">nordstjernen-1.0.29-linux-x86_64.zip</a> &middot; <a href="https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.29/SHA256SUMS">SHA256SUMS</a></td>
           </tr>
           <tr>
             <th scope="row">Alpine (musl)</th>
@@ -195,7 +209,7 @@
       href = release + 'nordstjernen-macos.dmg';
     } else if (/Linux|X11|CrOS/i.test(probe)) {
       os = 'Linux';
-      href = 'https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.28/nordstjernen-1.0.28-linux-x86_64.zip';
+      href = 'https://github.com/nordstjernen-web/nordstjernen-browser/releases/download/1.0.29/nordstjernen-1.0.29-linux-x86_64.zip';
     }
 
     if (os && href) {
