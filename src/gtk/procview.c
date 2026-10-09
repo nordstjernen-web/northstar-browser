@@ -107,6 +107,7 @@ typedef struct {
     int              pw, ph;
     char            *title;
     char            *url;
+    gboolean         url_pushed;
     char            *nav;
     int              security;
     char            *remote_ip;
@@ -715,9 +716,12 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
                               trace_start, NULL);
         }
         res->nav = fr.nav;
+        res->url = fr.url;
+        res->url_pushed = fr.url_pushed ? TRUE : FALSE;
+        res->title = fr.title;
         res->camera = fr.camera;
         res->download = fr.download;
-        fr.nav = fr.camera = fr.download = NULL;
+        fr.nav = fr.url = fr.title = fr.camera = fr.download = NULL;
         if (fr.clipboard)
             res->clipboard = ns_page_session_clipboard(s);
     }
@@ -1403,6 +1407,16 @@ push_history(NsProcView *v, const char *url)
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
 }
 
+static void
+replace_history(NsProcView *v, const char *url)
+{
+    if (!url || !*url || v->hist_index < 0 ||
+        v->hist_index >= (int)v->history->len)
+        return;
+    g_free(g_ptr_array_index(v->history, v->hist_index));
+    g_ptr_array_index(v->history, v->hist_index) = g_strdup(url);
+}
+
 static void pv_perm_resolve(NsProcView *v, gboolean allow);
 
 static void
@@ -1700,9 +1714,30 @@ on_result(gpointer data)
         post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
         post_emit(v, NS_PROC_EVT_STATUS, "");
         finish_loading(v);
+        /* The window may have changed size while the page loaded. */
+        maybe_update_viewport(v);
         request_render(v);
     } else if (res->type == RES_FRAME) {
         gboolean current = res->seq == v->render_seq;
+        if (current && res->ok && v->opened && !v->loading) {
+            if (res->url && *res->url &&
+                g_strcmp0(res->url, v->current_url) != 0) {
+                g_free(v->current_url);
+                v->current_url = g_strdup(res->url);
+                /* The page moved to another address of its own: Back,
+                 * Forward and Reload use that address from now on. */
+                if (res->url_pushed)
+                    push_history(v, v->current_url);
+                else
+                    replace_history(v, v->current_url);
+                post_emit(v, NS_PROC_EVT_URL, v->current_url);
+            }
+            if (res->title && g_strcmp0(res->title, v->current_title) != 0) {
+                g_free(v->current_title);
+                v->current_title = g_strdup(res->title);
+                post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
+            }
+        }
         if (current && res->ok) {
             v->page_animating = res->animating;
             v->caret_blinking = res->caret_blinking;

@@ -51,6 +51,7 @@ struct ns_browser {
     ns_image_cache *images;
     GHashTable     *css_cache;
     char           *base_url;
+    gboolean        url_pushed;
     char           *doc_charset;
     char           *doc_language;
     int             vw;
@@ -648,13 +649,13 @@ browser_js_scroll_to(const ns_node *target, gpointer user_data)
 static void
 browser_js_soft_navigate(const char *url, gboolean replace, gpointer user_data)
 {
-    (void)replace;
     ns_browser *browser = user_data;
     if (!browser || !url) return;
     gboolean has_fragment = FALSE;
     g_autofree char *fragment = browser_url_fragment(url, &has_fragment);
     ns_css_set_target_fragment(has_fragment && fragment && *fragment
                                    ? fragment : NULL);
+    if (!replace) browser->url_pushed = TRUE;
     g_free(browser->base_url);
     browser->base_url = g_strdup(url);
     browser->dirty = TRUE;
@@ -3428,6 +3429,14 @@ ns_browser_url(ns_browser *browser)
 {
     if (!browser || !browser->base_url) return NULL;
     return strdup(browser->base_url);
+}
+
+int
+ns_browser_take_url_pushed(ns_browser *browser)
+{
+    if (!browser || !browser->url_pushed) return 0;
+    browser->url_pushed = FALSE;
+    return 1;
 }
 
 int

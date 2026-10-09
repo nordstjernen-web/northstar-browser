@@ -44,6 +44,9 @@ typedef struct {
     guint64              base_gen;
     const unsigned char *pixels;
     char                *nav;
+    char                *url;
+    int                  url_pushed;
+    char                *title;
     char                *camera;
     char                *download;
     int                  clipboard;

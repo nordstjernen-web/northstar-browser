@@ -4,6 +4,25 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* The address bar and window title follow a page that changes its
+  address with `history.pushState()` or its title from script. They were
+  only read when a navigation finished, so single-page sites (YouTube)
+  kept showing the first page's address.
+* Back, Forward and Reload follow the address a page moves to by itself
+  (history.pushState, replaceState, a new fragment): after clicking from
+  one YouTube video to another and following a link off the site, Back
+  returns to the second video and Reload stays on it, where they used to
+  load the address the page was first opened at.
+* Space no longer reloads the page. Toolbar buttons took the keyboard
+  focus when clicked, and a new window could start with it on one, so
+  Space pressed Reload instead of reaching the page (YouTube's
+  play/pause). Toolbar buttons no longer take focus on click, and a
+  finished page load hands the keyboard to the page unless the address
+  bar is being typed in.
+* A page lays itself out for the window's size when the window was
+  resized while the page loaded. It kept the size the window had when the
+  load began, leaving the rest of the window blank (the Twitch landing
+  page, maximised during its load, stayed 1014 pixels wide).
 * Interface-specific DOM members live on the prototypes of the interfaces
   that define them (`href` and the URL parts on `HTMLAnchorElement` and
   `HTMLAreaElement`, `src` on the media, image, script and frame

@@ -389,6 +389,8 @@ ns_page_frame_clear(ns_page_frame *frame)
     if (!frame)
         return;
     free(frame->nav);
+    free(frame->url);
+    free(frame->title);
     free(frame->camera);
     free(frame->download);
     free(frame->damage);
@@ -768,6 +770,11 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     scrub_line_breaks(out->nav);
     if (out->nav)
         session_stash_post(s, out->nav);
+    /* The page can change its address and title without a navigation
+     * (history.pushState, document.title): report them with every frame. */
+    out->url = empty_to_null(ns_browser_url(s->cur));
+    out->url_pushed = ns_browser_take_url_pushed(s->cur);
+    out->title = ns_browser_title(s->cur);
     out->camera = empty_to_null(ns_browser_take_pending_camera(s->cur));
     scrub_line_breaks(out->camera);
     out->download = empty_to_null(ns_browser_take_pending_download(s->cur));
