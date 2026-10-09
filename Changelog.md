@@ -53,6 +53,13 @@ Significant changes in each release:
     while the mouse button was still down could have it freed, after
     which the next restyle walked freed memory. Freeing a node now
     clears every such pointer that refers to it.
+  - A text input whose value is longer than its `size` is widened on a
+    second layout pass to the number of characters its CSS width can
+    show, and that count was not bounded: `width: 1e10px` asked for
+    hundreds of millions of padding characters and aborted the browser
+    when the allocation failed, and a still larger width converted a
+    double that does not fit in an `int`. The count is now worked out
+    in floating point and clamped to 4096 columns.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
