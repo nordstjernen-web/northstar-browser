@@ -4,6 +4,47 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Video decoding runs on a thread of its own. An MSE video stream hands
+  coded frames (references to the buffered samples) to a decode thread
+  that decodes and converts to BGRA up to four frames ahead; the
+  animation tick only picks the decoded frame for the playback clock and
+  keeps the queue topped up, restarting it from a keyframe on seeks and
+  after `remove()`. Main-thread time per video tick drops from 9-44 ms
+  (1080p H.264, AV1) to about 0.3 ms.
+* libdav1d and libvpx decode with up to four threads (one per core),
+  still one picture out per sample in. With the decode thread, 1080p AV1
+  plays all 150 of 150 frames of a 5 s test stream where it showed 95.
+* The view composites playing Media Source Extensions videos (and MP4 or
+  WebM files in `<video src>`) itself. The page frame keeps a transparent
+  hole where the picture goes, and at each tick of its own frame clock the
+  view picks the decoded frame for the playback clock and draws it under
+  the page, so overlays stay on top. YouTube's player rereads its size
+  twice per frame while its controls show, and each read relaid the whole
+  watch page (about 25 ms), so the engine thread managed 13 frames a
+  second and a 25 fps video slowed down whenever the mouse was over it;
+  it now plays at its full rate, and new pictures no longer repaint the
+  page. The decoder is handed about three seconds of coded frames and
+  keeps up to 48 MB of decoded pictures ready, so the picture also rides
+  out engine stalls of a few seconds, and it never steps back except on
+  a seek.
+* A video's picture follows its sound smoothly and never jumps back. The
+  stream clock follows the audio device's sample clock, anchored where
+  the device asks for more data, so it advances evenly however the device
+  schedules its callbacks (PulseAudio and PipeWire top up deep buffers in
+  bursts), and it never steps back between seeks. Drift is slewed out by
+  moving the frame timeline a little each poll (at most a 5% rate change);
+  a picture ahead of a starved sound holds instead of jumping back, and
+  only one more than half a second behind jumps forward. The picture used
+  to fall behind the sound and then jump 100 ms forward every 20 seconds
+  or so, or jump back whenever the sound ran ahead of it.
+* A video that switches sources no longer loses its sound, and no longer
+  freezes at the next pause and play, when the old source's close reaches
+  the audio thread after the new stream has opened. This is how YouTube
+  froze when the content came on after an ad.
+* A playing video no longer stops for 100-450 ms every second or so.
+  When the view had already shown the frame the engine was aiming at, the
+  engine took it for lost and restarted the decoder from the last keyframe,
+  up to 4 s back.
 * `<video>` plays ordinary MP4 (H.264, AV1, VP9 with AAC or Opus) and
   WebM files, not only MPEG-1, and `canPlayType("video/mp4")` and
   `"video/webm"` answer "maybe" (or "probably" for codecs Northstar

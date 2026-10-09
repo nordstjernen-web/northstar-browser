@@ -12,6 +12,10 @@
 
 #include "yuv.h"
 
+enum {
+    NS_VP9_MAX_THREADS = 4,
+};
+
 struct ns_vp9_decoder {
     vpx_codec_ctx_t codec;
 };
@@ -46,7 +50,11 @@ ns_vp9_decoder *
 ns_vp9_decoder_new(void)
 {
     ns_vp9_decoder *decoder = g_new0(ns_vp9_decoder, 1);
-    vpx_codec_dec_cfg_t config = { .threads = 1, .w = 0, .h = 0 };
+    vpx_codec_dec_cfg_t config = {
+        .threads = (unsigned int)CLAMP((int)g_get_num_processors(), 1, NS_VP9_MAX_THREADS),
+        .w = 0,
+        .h = 0,
+    };
     if (vpx_codec_dec_init(&decoder->codec, vpx_codec_vp9_dx(), &config, 0) !=
         VPX_CODEC_OK) {
         g_free(decoder);

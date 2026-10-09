@@ -798,6 +798,23 @@ ns_image_anim_duration(const ns_image *img)
     return ns_image_is_animation(img) ? img->anim_total_ms / 1000.0 : 0.0;
 }
 
+/* Hands the timeline to the video's layer, which picks pictures for it on
+ * the view's frame clock. */
+static void
+image_sync_video_clock(const ns_image *img)
+{
+    if (!img || !img->video || !ns_video_stream_is_mse(img->video)) return;
+    ns_video_clock clock = {
+        .paused = img->anim_paused,
+        .loop = img->anim_loop,
+        .start_us = img->anim_start_us,
+        .paused_ms = img->anim_paused_phase_ms,
+        .total_ms = img->anim_total_ms,
+        .seek_gen = img->anim_seek_gen,
+    };
+    ns_video_stream_set_clock(img->video, &clock);
+}
+
 static int
 ns_image_anim_phase_ms(const ns_image *img, gint64 now_us)
 {
@@ -826,6 +843,7 @@ ns_image_anim_set_loop(ns_image *img, gboolean loop, gint64 now_us)
     if (loop) phase %= img->anim_total_ms;
     if (img->anim_paused) img->anim_paused_phase_ms = phase;
     else img->anim_start_us = now_us - (gint64)phase * 1000;
+    image_sync_video_clock(img);
 }
 
 double
@@ -841,10 +859,12 @@ ns_image_anim_set_paused(ns_image *img, gboolean paused, gint64 now_us)
     if (paused) {
         img->anim_paused_phase_ms = ns_image_anim_phase_ms(img, now_us);
         img->anim_paused = TRUE;
+        image_sync_video_clock(img);
         return;
     }
     img->anim_paused = FALSE;
     img->anim_start_us = now_us - (gint64)img->anim_paused_phase_ms * 1000;
+    image_sync_video_clock(img);
 }
 
 void
@@ -859,6 +879,18 @@ ns_image_anim_seek(ns_image *img, double seconds, gint64 now_us)
     if (img->anim_loop) phase %= img->anim_total_ms;
     if (img->anim_paused) img->anim_paused_phase_ms = phase;
     else img->anim_start_us = now_us - (gint64)phase * 1000;
+    img->anim_seek_gen++;
+    image_sync_video_clock(img);
+}
+
+/* Moves a playing timeline by delta_us without the millisecond rounding
+ * of a seek: a positive delta holds it back. */
+void
+ns_image_anim_shift(ns_image *img, gint64 delta_us)
+{
+    if (!ns_image_is_animation(img) || img->anim_paused) return;
+    img->anim_start_us += delta_us;
+    image_sync_video_clock(img);
 }
 
 static gboolean
@@ -867,11 +899,12 @@ ns_image_apply_phase(ns_image *img, int phase)
     if (img->video) {
         if (ns_video_stream_is_mse(img->video))
             img->anim_total_ms = ns_video_stream_duration_ms(img->video);
-        if (!ns_video_stream_show(img->video, phase)) return FALSE;
+        image_sync_video_clock(img);
+        gboolean changed = ns_video_stream_show(img->video, phase);
         img->texture = ns_video_stream_texture(img->video);
         img->natural_width = ns_video_stream_width(img->video);
         img->natural_height = ns_video_stream_height(img->video);
-        return TRUE;
+        return changed;
     }
     int idx = 0;
     gint64 acc = 0;
@@ -928,6 +961,7 @@ ns_image_cache_animating(const ns_image_cache *cache)
         if (ns_image_is_animation(img) && !img->anim_paused &&
             !ns_image_anim_ended(img, now))
             return TRUE;
+        if (img->video && ns_video_stream_waiting(img->video)) return TRUE;
     }
     return FALSE;
 }

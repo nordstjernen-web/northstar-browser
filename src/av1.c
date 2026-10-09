@@ -14,6 +14,10 @@
 
 #include "yuv.h"
 
+enum {
+    NS_AV1_MAX_THREADS = 4,
+};
+
 struct ns_av1_decoder {
     Dav1dContext *context;
 };
@@ -58,7 +62,7 @@ ns_av1_decoder_new(void)
 {
     Dav1dSettings settings;
     dav1d_default_settings(&settings);
-    settings.n_threads = 1;
+    settings.n_threads = CLAMP((int)g_get_num_processors(), 1, NS_AV1_MAX_THREADS);
     settings.max_frame_delay = 1;
     ns_av1_decoder *decoder = g_new0(ns_av1_decoder, 1);
     if (dav1d_open(&decoder->context, &settings) < 0) {

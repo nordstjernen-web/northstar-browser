@@ -10,6 +10,7 @@
 #include "trace.h"
 #include "enginethread.h"
 #include "page_session.h"
+#include "videolayer.h"
 #include "net.h"
 
 #include <cairo.h>
@@ -139,6 +140,7 @@ typedef struct {
     gboolean         inspect;
     GPtrArray       *print_pages;
     ns_print_setup   print_setup;
+    GArray          *video_layers;
 } Res;
 
 struct NsProcView {
@@ -169,6 +171,8 @@ struct NsProcView {
     gboolean    opened;
 
     cairo_surface_t *frame;
+    GArray          *video_layers;
+    GHashTable      *video_surfaces;
     guint64          frame_gen;
     gboolean         frame_force_full;
 
@@ -476,11 +480,22 @@ static void print_run(NsProcView *v, GPtrArray *pages,
                       const ns_print_setup *setup);
 
 static void
+pv_set_video_layers(NsProcView *v, GArray *layers)
+{
+    if (v->video_layers)
+        g_array_free(v->video_layers, TRUE);
+    v->video_layers = layers;
+}
+
+static void
 pv_free(NsProcView *v)
 {
     if (v->frame)
         cairo_surface_destroy(v->frame);
     v->frame = NULL;
+    pv_set_video_layers(v, NULL);
+    if (v->video_surfaces)
+        g_hash_table_destroy(v->video_surfaces);
     if (v->ctx_popover)
         gtk_widget_unparent(v->ctx_popover);
     if (v->ctx_actions)
@@ -721,6 +736,8 @@ run_render(NsProcView *v, ns_page_session *s, Req *req)
         res->title = fr.title;
         res->camera = fr.camera;
         res->download = fr.download;
+        res->video_layers = fr.video_layers;
+        fr.video_layers = NULL;
         fr.nav = fr.url = fr.title = fr.camera = fr.download = NULL;
         if (fr.clipboard)
             res->clipboard = ns_page_session_clipboard(s);
@@ -765,6 +782,7 @@ run_req(gpointer data)
         v->session = ns_page_session_new(NS_PROC_MAX_WIDTH,
                                          NS_PROC_MAX_HEIGHT);
         ns_page_session_set_wake(v->session, pv_session_wake, v);
+        ns_page_session_set_video_layers(v->session, TRUE);
     }
     ns_page_session *s = v->session;
     Res *res;
@@ -1036,6 +1054,100 @@ on_area_focus_notify(GObject *object, GParamSpec *pspec, gpointer data)
     request_render(v);
 }
 
+/* Picks each composited video's picture for this frame of the view's own
+ * clock, whatever the engine thread is busy with. */
+static void
+present_video_layers(NsProcView *v, gint64 now)
+{
+    gboolean changed = FALSE;
+    for (guint i = 0; v->video_layers && i < v->video_layers->len; i++) {
+        ns_video_layer_rect *r =
+            &g_array_index(v->video_layers, ns_video_layer_rect, i);
+        if (ns_video_layer_present_now(r->layer, now))
+            changed = TRUE;
+    }
+    if (changed)
+        gtk_widget_queue_draw(v->area);
+}
+
+static const cairo_user_data_key_t video_texture_key;
+
+static void
+video_texture_release(void *data)
+{
+    ns_texture_unref(data);
+}
+
+/* A Cairo surface over a decoded picture's pixels that holds the picture,
+ * kept while the picture is shown: GTK may record the drawing and replay
+ * it later, and a surface that went away meanwhile would be copied. */
+static cairo_surface_t *
+video_surface_for(NsProcView *v, ns_texture *tex, GHashTable *used)
+{
+    int tw = ns_texture_get_width(tex);
+    int th = ns_texture_get_height(tex);
+    gsize stride = 0;
+    const guchar *px = ns_texture_peek(tex, &stride);
+    if (!px || tw <= 0 || th <= 0 ||
+        stride != (gsize)cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, tw))
+        return NULL;
+    if (!v->video_surfaces)
+        v->video_surfaces = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL,
+            (GDestroyNotify)cairo_surface_destroy);
+    cairo_surface_t *s = g_hash_table_lookup(v->video_surfaces, tex);
+    if (!s) {
+        s = cairo_image_surface_create_for_data((unsigned char *)px,
+                                                CAIRO_FORMAT_ARGB32, tw, th,
+                                                (int)stride);
+        cairo_surface_set_user_data(s, &video_texture_key,
+                                    ns_texture_ref(tex), video_texture_release);
+        g_hash_table_insert(v->video_surfaces, tex, s);
+    }
+    g_hash_table_add(used, tex);
+    return s;
+}
+
+static gboolean
+video_surface_unused(gpointer key, gpointer value, gpointer used)
+{
+    (void)value;
+    return !g_hash_table_contains(used, key);
+}
+
+static void
+draw_video_layers(NsProcView *v, cairo_t *cr)
+{
+    GHashTable *used = g_hash_table_new(g_direct_hash, g_direct_equal);
+    for (guint i = 0; v->video_layers && i < v->video_layers->len; i++) {
+        const ns_video_layer_rect *r =
+            &g_array_index(v->video_layers, ns_video_layer_rect, i);
+        if (r->w <= 0 || r->h <= 0)
+            continue;
+        cairo_save(cr);
+        cairo_rectangle(cr, r->x, r->y, r->w, r->h);
+        cairo_clip(cr);
+        cairo_set_source_rgb(cr, 0, 0, 0);
+        cairo_paint(cr);
+        ns_texture *tex = ns_video_layer_texture(r->layer, NULL);
+        cairo_surface_t *s = tex ? video_surface_for(v, tex, used) : NULL;
+        if (s) {
+            cairo_translate(cr, r->x, r->y);
+            cairo_scale(cr, r->w / ns_texture_get_width(tex),
+                        r->h / ns_texture_get_height(tex));
+            cairo_set_source_surface(cr, s, 0, 0);
+            cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+            cairo_paint(cr);
+        }
+        ns_texture_unref(tex);
+        cairo_restore(cr);
+    }
+    if (v->video_surfaces)
+        g_hash_table_foreach_remove(v->video_surfaces, video_surface_unused,
+                                    used);
+    g_hash_table_destroy(used);
+}
+
 static gboolean
 anim_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
 {
@@ -1049,6 +1161,7 @@ anim_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
     }
     gint64 now = clock ? gdk_frame_clock_get_frame_time(clock) : 0;
     if (now <= 0) now = g_get_monotonic_time();
+    present_video_layers(v, now);
     gint64 interval = v->page_animating ? G_USEC_PER_SEC / 60
                                          : NS_PROC_CARET_BLINK_US;
     if (v->last_anim_frame_us > 0 && now - v->last_anim_frame_us < interval)
@@ -1461,6 +1574,7 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history,
     if (v->frame)
         cairo_surface_destroy(v->frame);
     v->frame = NULL;
+    pv_set_video_layers(v, NULL);
     gtk_widget_queue_draw(v->area);
     if (!v->loading) {
         v->loading = TRUE;
@@ -1739,6 +1853,8 @@ on_result(gpointer data)
             }
         }
         if (current && res->ok) {
+            pv_set_video_layers(v, res->video_layers);
+            res->video_layers = NULL;
             v->page_animating = res->animating;
             v->caret_blinking = res->caret_blinking;
             if (v->page_animating || v->caret_blinking)
@@ -2040,6 +2156,8 @@ done:
         cairo_surface_destroy(res->surface);
     if (res->patch)
         cairo_surface_destroy(res->patch);
+    if (res->video_layers)
+        g_array_free(res->video_layers, TRUE);
     free(res->damage);
     g_free(res->title);
     g_free(res->url);
@@ -2072,6 +2190,7 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         cairo_fill(cr);
     }
     if (v->frame) {
+        draw_video_layers(v, cr);
         cairo_set_source_surface(cr, v->frame, 0, 0);
         cairo_paint(cr);
     }

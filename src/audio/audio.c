@@ -41,6 +41,7 @@
 #define NS_AUDIO_MAX_PLAYERS 16
 #define NS_AUDIO_MAX_SECONDS 1800
 #define NS_AUDIO_DEVICE_RATE 44100
+#define NS_AUDIO_CLOCK_RISE  0.02
 #define NS_AUDIO_MAX_BYTES   (256u * 1024u * 1024u)
 #define NS_AUDIO_MAX_FLOATS  ((size_t)200u * 1024u * 1024u)
 
@@ -61,7 +62,15 @@ typedef struct {
     int     stream_ended;
     double  stream_base;
     size_t  capacity;
+    double  clock_offset;
+    int     clock_offset_valid;
+    gint64  clock_cb_us;
+    double  clock_floor;
+    int     clock_floor_valid;
     SDL_AudioStream *converter;
+    /* The command sequence number when this player was opened: commands
+     * queued before then were meant for a player it replaced. */
+    guint   open_seq;
 } ns_audio_player;
 
 struct NsAudioContext {
@@ -92,6 +101,7 @@ typedef struct {
     ns_audio_op     op;
     NsAudioContext *context;
     int             generation;
+    guint           seq;
     char           *token;
     char           *url;
     char           *document_url;
@@ -109,6 +119,7 @@ static GAsyncQueue      *g_commands;
 static GThread          *g_worker;
 static gint              g_shutting_down;
 static gint              g_silent;
+static guint             g_command_seq;
 
 #if defined(__GNUC__)
 #define NS_AUDIO_PRINTF(a, b) __attribute__((format(printf, a, b)))
@@ -182,6 +193,31 @@ player_release(ns_audio_player *p)
     memset(p, 0, sizeof *p);
 }
 
+/* The frames a player has played follow the device's sample clock, a
+ * straight line in wall time: position = rate * now + offset. Whenever the
+ * device asks for more, its buffer is nearly drained, so the cursor at
+ * that moment sits just ahead of what has been played; the offset follows
+ * those samples down at once and up slowly. Back-to-back requests (the
+ * device topping up a deep buffer, as PulseAudio and PipeWire do) carry no
+ * information and are skipped. The clock is thus smooth however the device
+ * schedules its callbacks, instead of moving in buffer-sized steps. */
+static void
+player_clock_sample(ns_audio_player *p, gint64 now_us, int nframes)
+{
+    double period_us = (double)nframes * 1e6 / NS_AUDIO_DEVICE_RATE;
+    gboolean topup = p->clock_cb_us > 0 &&
+                     (double)(now_us - p->clock_cb_us) < period_us * 0.5;
+    p->clock_cb_us = now_us;
+    if (topup) return;
+    double sample = (double)p->cursor -
+                    (double)now_us / 1e6 * NS_AUDIO_DEVICE_RATE;
+    if (!p->clock_offset_valid || sample < p->clock_offset)
+        p->clock_offset = sample;
+    else
+        p->clock_offset += (sample - p->clock_offset) * NS_AUDIO_CLOCK_RISE;
+    p->clock_offset_valid = 1;
+}
+
 static void
 audio_cb(void *userdata, Uint8 *stream, int len)
 {
@@ -190,10 +226,12 @@ audio_cb(void *userdata, Uint8 *stream, int len)
     int frame_bytes = (int)(2 * sizeof(float));
     int nframes = len / frame_bytes;
     SDL_memset(stream, 0, (size_t)len);
+    gint64 now = g_get_monotonic_time();
 
     for (int i = 0; i < NS_AUDIO_MAX_PLAYERS; i++) {
         ns_audio_player *p = &g_players[i];
         if (!p->used || !p->playing || !p->pcm) continue;
+        player_clock_sample(p, now, nframes);
         for (int f = 0; f < nframes; f++) {
             if (p->streaming && p->cursor >= p->frames) {
                 if (p->stream_ended) {
@@ -205,6 +243,8 @@ audio_cb(void *userdata, Uint8 *stream, int len)
             if (p->cursor >= p->frames) {
                 if (p->loop && p->frames > 0) {
                     p->cursor = 0;
+                    p->clock_floor_valid = 0;
+                    p->clock_offset_valid = 0;
                 } else {
                     p->playing = 0;
                     p->reached_end = 1;
@@ -627,6 +667,8 @@ load_audio_bytes(ns_audio_player *p, const unsigned char *bytes, size_t n)
     p->pcm = dev;
     p->frames = dev_frames;
     p->cursor = 0;
+    p->clock_floor_valid = 0;
+    p->clock_offset_valid = 0;
     p->reached_end = 0;
     p->playing = 0;
     audio_unlock();
@@ -742,13 +784,14 @@ player_fail(NsAudioContext *context, ns_audio_player *p, const char *token,
 }
 
 static ns_audio_player *
-player_begin_load(NsAudioContext *context, const char *token)
+player_begin_load(NsAudioContext *context, const char *token, guint seq)
 {
     context_set_failure(context, token, NS_AUDIO_ERROR_NONE);
     audio_lock();
     ns_audio_player *p = player_find(context, token);
     if (p) player_release(p);
     p = player_alloc(context, token);
+    if (p) p->open_seq = seq;
     audio_unlock();
     if (!p) {
         player_fail(context, NULL, token, NS_AUDIO_ERROR_TOO_MANY,
@@ -781,7 +824,8 @@ player_load_bytes(NsAudioContext *context, ns_audio_player *p,
 static void
 cmd_open(NsAudioContext *context, const ns_audio_command *command)
 {
-    ns_audio_player *p = player_begin_load(context, command->token);
+    ns_audio_player *p = player_begin_load(context, command->token,
+                                           command->seq);
     if (!p) return;
     GBytes *bytes = fetch_audio_bytes(context, command->url,
                                       command->document_url);
@@ -802,17 +846,19 @@ cmd_open(NsAudioContext *context, const ns_audio_command *command)
 }
 
 static void
-cmd_open_bytes(NsAudioContext *context, const char *token, GBytes *bytes)
+cmd_open_bytes(NsAudioContext *context, const char *token, GBytes *bytes,
+               guint seq)
 {
-    ns_audio_player *p = player_begin_load(context, token);
+    ns_audio_player *p = player_begin_load(context, token, seq);
     if (p) player_load_bytes(context, p, token, bytes);
 }
 
 static void
-cmd_reload_bytes(NsAudioContext *context, const char *token, GBytes *bytes)
+cmd_reload_bytes(NsAudioContext *context, const char *token, GBytes *bytes,
+                 guint seq)
 {
     ns_audio_player *p = player_find(context, token);
-    if (!p) { cmd_open_bytes(context, token, bytes); return; }
+    if (!p) { cmd_open_bytes(context, token, bytes, seq); return; }
 
     gsize size = 0;
     const guint8 *data = g_bytes_get_data(bytes, &size);
@@ -840,6 +886,7 @@ cmd_reload_bytes(NsAudioContext *context, const char *token, GBytes *bytes)
     if (p->reached_end && p->cursor < p->frames) {
         p->reached_end = 0;
         p->playing = 1;
+        p->clock_offset_valid = 0;
     }
     p->reload_size = (long)size;
     p->reload_ticks = now;
@@ -855,8 +902,13 @@ cmd_play(NsAudioContext *context, const char *token)
     ns_audio_player *p = player_find(context, token);
     if (!p || (!p->pcm && !p->streaming)) return;
     audio_lock();
-    if (p->cursor >= p->frames && !p->streaming) p->cursor = 0;
+    if (p->cursor >= p->frames && !p->streaming) {
+        p->cursor = 0;
+        p->clock_floor_valid = 0;
+        p->clock_offset_valid = 0;
+    }
     p->reached_end = 0;
+    if (!p->playing) p->clock_offset_valid = 0;
     p->playing = 1;
     audio_unlock();
     emit("playing %s", token);
@@ -885,6 +937,8 @@ cmd_seek(NsAudioContext *context, const char *token, double seconds)
     audio_lock();
     if (frame > p->frames) frame = p->frames;
     p->cursor = frame;
+    p->clock_floor_valid = 0;
+    p->clock_offset_valid = 0;
     p->reached_end = 0;
     audio_unlock();
 }
@@ -957,15 +1011,23 @@ run_command(const ns_audio_command *command)
 {
     NsAudioContext *context = command->context;
     const char *token = command->token;
+    /* A stream opened on the calling thread replaces the player at once,
+     * while commands queued before it (a close, a pause or a load for the
+     * page's previous source) are still on their way: they are dropped. */
+    audio_lock();
+    ns_audio_player *current = player_find(context, token);
+    gboolean stale = current && current->open_seq > command->seq;
+    audio_unlock();
+    if (stale) return;
     switch (command->op) {
     case NS_AUDIO_OP_OPEN:
         cmd_open(context, command);
         break;
     case NS_AUDIO_OP_OPEN_BYTES:
-        cmd_open_bytes(context, token, command->bytes);
+        cmd_open_bytes(context, token, command->bytes, command->seq);
         break;
     case NS_AUDIO_OP_RELOAD_BYTES:
-        cmd_reload_bytes(context, token, command->bytes);
+        cmd_reload_bytes(context, token, command->bytes, command->seq);
         break;
     case NS_AUDIO_OP_PLAY:
         cmd_play(context, token);
@@ -1051,6 +1113,7 @@ push_command(ns_audio_op op, NsAudioContext *context, const char *token,
     ns_audio_command *command = g_new0(ns_audio_command, 1);
     command->op = op;
     command->context = context;
+    command->seq = (guint)g_atomic_int_add((gint *)&g_command_seq, 1) + 1;
     command->generation = context ? g_atomic_int_get(&context->generation)
                                    : 0;
     command->token = g_strdup(token);
@@ -1162,6 +1225,16 @@ ns_audio_context_close(NsAudioContext *context, const char *token)
     queue_player_command(context, NS_AUDIO_OP_CLOSE, token, NULL, NULL, 0.0);
 }
 
+/* The frames played so far, by the device clock while playing. */
+static double
+player_clock_frames(const ns_audio_player *p)
+{
+    if (!p->playing || !p->clock_offset_valid) return (double)p->cursor;
+    double frames = (double)g_get_monotonic_time() / 1e6 * NS_AUDIO_DEVICE_RATE +
+                    p->clock_offset;
+    return CLAMP(frames, 0.0, (double)p->cursor);
+}
+
 gboolean
 ns_audio_context_status(NsAudioContext *context, const char *token,
                         NsAudioStatus *out)
@@ -1183,7 +1256,14 @@ ns_audio_context_status(NsAudioContext *context, const char *token,
         out->state = p->pcm || p->streaming ? NS_AUDIO_PLAYER_READY
                                            : NS_AUDIO_PLAYER_LOADING;
         out->duration = p->stream_base + (double)p->frames / NS_AUDIO_DEVICE_RATE;
-        out->position = p->stream_base + (double)p->cursor / NS_AUDIO_DEVICE_RATE;
+        out->position = p->stream_base + player_clock_frames(p) /
+                                         NS_AUDIO_DEVICE_RATE;
+        /* Between seeks the clock never steps back, however the device
+         * schedules its callbacks. */
+        if (p->clock_floor_valid && out->position < p->clock_floor)
+            out->position = p->clock_floor;
+        p->clock_floor = out->position;
+        p->clock_floor_valid = 1;
         out->playing = p->playing ? TRUE : FALSE;
         out->ended = p->reached_end ? TRUE : FALSE;
     }
@@ -1212,12 +1292,15 @@ ns_audio_context_open_stream(NsAudioContext *context, const char *token,
         SDL_FreeAudioStream(converter);
         return FALSE;
     }
+    p->open_seq = (guint)g_atomic_int_add((gint *)&g_command_seq, 1) + 1;
     free(p->pcm);
     if (p->converter) SDL_FreeAudioStream(p->converter);
     p->pcm = NULL;
     p->frames = 0;
     p->capacity = 0;
     p->cursor = 0;
+    p->clock_floor_valid = 0;
+    p->clock_offset_valid = 0;
     p->streaming = 1;
     p->stream_ended = 0;
     p->stream_base = 0.0;
@@ -1235,6 +1318,7 @@ stream_drop_played(ns_audio_player *p)
     memmove(p->pcm, p->pcm + drop * 2, (p->frames - drop) * 2 * sizeof(float));
     p->frames -= drop;
     p->cursor -= drop;
+    p->clock_offset -= (double)drop;
     p->stream_base += (double)drop / NS_AUDIO_DEVICE_RATE;
 }
 
@@ -1288,6 +1372,8 @@ ns_audio_context_stream_restart(NsAudioContext *context, const char *token,
         if (p->converter) SDL_AudioStreamClear(p->converter);
         p->frames = 0;
         p->cursor = 0;
+        p->clock_floor_valid = 0;
+        p->clock_offset_valid = 0;
         p->stream_base = seconds > 0 ? seconds : 0.0;
         p->stream_ended = 0;
         p->reached_end = 0;

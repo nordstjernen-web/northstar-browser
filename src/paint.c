@@ -21,6 +21,7 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "mathml.h"
 #include "selection.h"
 #include "svg.h"
+#include "video.h"
 
 typedef struct rgba {
     double r, g, b, a;
@@ -36,6 +37,7 @@ static GHashTable    *g_paint_hoisted;
 static gboolean       g_paint_any_negative_z = TRUE;
 static ns_js         *g_paint_js;
 static ns_anim       *g_paint_anim;
+static GArray        *g_paint_video_layers;
 static gboolean       g_search_case_sensitive;
 static const ns_box  *g_search_active_box;
 
@@ -120,6 +122,12 @@ void
 ns_paint_set_js(ns_js *js)
 {
     g_paint_js = js;
+}
+
+void
+ns_paint_set_video_layers(GArray *out)
+{
+    g_paint_video_layers = out;
 }
 
 void
@@ -4514,24 +4522,13 @@ object_position_offset(const ns_style *st, ns_css_prop prop,
     return delta * 0.5;
 }
 
-static gboolean
-paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
+/* The object-fit scale and object-position offset of an iw x ih picture
+ * in b's content box. */
+static void
+object_fit_scale(const ns_box *b, int iw, int ih, double *out_sx,
+                 double *out_sy, double *out_ox, double *out_oy)
 {
-    int iw = ns_texture_get_width(tex);
-    int ih = ns_texture_get_height(tex);
-    if (iw <= 0 || ih <= 0) return FALSE;
-    if (b->content_width <= 0 || b->content_height <= 0) return FALSE;
     const ns_style *st = b->style;
-    const char *filter_kw = NULL;
-    if (st && st->values[NS_CSS_FILTER] &&
-        st->values[NS_CSS_FILTER]->kind == NS_CSS_V_KEYWORD &&
-        st->values[NS_CSS_FILTER]->u.keyword) {
-        filter_kw = st->values[NS_CSS_FILTER]->u.keyword;
-    }
-    const char *surface_filter =
-        filter_has_bitmap_effect(filter_kw) ? filter_kw : NULL;
-    cairo_surface_t *surf = texture_surface_cached(tex, surface_filter);
-    if (!surf) return FALSE;
     double cw = b->content_width, ch = b->content_height;
     double sx = cw / iw, sy = ch / ih;
     const char *fit = (st && st->values[NS_CSS_OBJECT_FIT] &&
@@ -4553,6 +4550,80 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
                                         ch, ih * s);
         }
     }
+    *out_sx = sx;
+    *out_sy = sy;
+    *out_ox = ox;
+    *out_oy = oy;
+}
+
+/* Leaves a hole for a playing MSE video's picture, which the view draws
+ * under the page on its own frame clock. Only where the picture lands on
+ * the target unchanged: an axis-aligned scale and offset, no group
+ * (opacity, blending) and no filter in between. */
+static gboolean
+paint_video_layer(cairo_t *cr, const ns_box *b, const ns_image *img)
+{
+    if (!g_paint_video_layers || !img->video ||
+        !ns_video_stream_is_mse(img->video))
+        return FALSE;
+    ns_video_layer *layer = ns_video_stream_layer(img->video);
+    int iw = ns_texture_get_width(img->texture);
+    int ih = ns_texture_get_height(img->texture);
+    cairo_matrix_t m;
+    cairo_get_matrix(cr, &m);
+    const ns_style *st = b->style;
+    gboolean direct = cairo_get_group_target(cr) == cairo_get_target(cr) &&
+                      m.xy == 0 && m.yx == 0 && m.xx > 0 && m.yy > 0 &&
+                      !(st && st->values[NS_CSS_FILTER]);
+    if (!direct || iw <= 0 || ih <= 0 ||
+        b->content_width <= 0 || b->content_height <= 0) {
+        ns_video_layer_set_composited(layer, FALSE);
+        return FALSE;
+    }
+    double sx, sy, ox, oy;
+    object_fit_scale(b, iw, ih, &sx, &sy, &ox, &oy);
+    double cx = b->x + b->margin.left + b->border.left + b->padding.left;
+    double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
+    double x0 = cx + ox, y0 = cy + oy;
+    double x1 = x0 + iw * sx, y1 = y0 + ih * sy;
+    apply_box_content_clip(cr, b);
+    cairo_rectangle(cr, cx, cy, b->content_width, b->content_height);
+    cairo_clip(cr);
+    cairo_rectangle(cr, x0, y0, x1 - x0, y1 - y0);
+    cairo_clip(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(cr);
+    cairo_user_to_device(cr, &x0, &y0);
+    cairo_user_to_device(cr, &x1, &y1);
+    ns_video_layer_rect rect = {
+        ns_video_layer_ref(layer), x0, y0, x1 - x0, y1 - y0,
+    };
+    g_array_append_val(g_paint_video_layers, rect);
+    ns_video_layer_set_composited(layer, TRUE);
+    return TRUE;
+}
+
+static gboolean
+paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
+{
+    int iw = ns_texture_get_width(tex);
+    int ih = ns_texture_get_height(tex);
+    if (iw <= 0 || ih <= 0) return FALSE;
+    if (b->content_width <= 0 || b->content_height <= 0) return FALSE;
+    const ns_style *st = b->style;
+    const char *filter_kw = NULL;
+    if (st && st->values[NS_CSS_FILTER] &&
+        st->values[NS_CSS_FILTER]->kind == NS_CSS_V_KEYWORD &&
+        st->values[NS_CSS_FILTER]->u.keyword) {
+        filter_kw = st->values[NS_CSS_FILTER]->u.keyword;
+    }
+    const char *surface_filter =
+        filter_has_bitmap_effect(filter_kw) ? filter_kw : NULL;
+    cairo_surface_t *surf = texture_surface_cached(tex, surface_filter);
+    if (!surf) return FALSE;
+    double cw = b->content_width, ch = b->content_height;
+    double sx, sy, ox, oy;
+    object_fit_scale(b, iw, ih, &sx, &sy, &ox, &oy);
     double cx = b->x + b->margin.left + b->border.left + b->padding.left;
     double cy = b->y + b->margin.top  + b->border.top  + b->padding.top;
     paint_texture_drop_shadows(cr, surf, b, iw, ih, sx, sy, ox, oy, filter_kw);
@@ -4838,7 +4909,8 @@ paint_video(cairo_t *cr, const ns_box *b)
     const ns_image *decoded = b->media ? b->media->video : NULL;
     if (decoded && decoded->loaded && decoded->texture) {
         cairo_save(cr);
-        paint_texture(cr, b, decoded->texture);
+        if (!paint_video_layer(cr, b, decoded))
+            paint_texture(cr, b, decoded->texture);
         cairo_restore(cr);
         paint_media_controls(cr, b, TRUE);
         return;

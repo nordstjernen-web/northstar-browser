@@ -9,6 +9,7 @@
 #include <glib.h>
 
 #include "texture.h"
+#include "videolayer.h"
 
 G_BEGIN_DECLS
 
@@ -31,6 +32,10 @@ gsize        ns_video_stream_memory(const ns_video_stream *stream);
 ns_texture  *ns_video_stream_texture(const ns_video_stream *stream);
 gboolean     ns_video_stream_show(ns_video_stream *stream, int phase_ms);
 gboolean     ns_video_stream_is_mse(const ns_video_stream *stream);
+gboolean     ns_video_stream_waiting(const ns_video_stream *stream);
+ns_video_layer *ns_video_stream_layer(const ns_video_stream *stream);
+void         ns_video_stream_set_clock(ns_video_stream *stream,
+                                       const ns_video_clock *clock);
 
 G_END_DECLS
 

@@ -20,7 +20,17 @@
 
 #define NS_MEDIA_POLL_MS 50
 #define NS_MEDIA_TIMEUPDATE_US (250 * 1000)
-#define NS_MEDIA_AV_DRIFT_S 0.1
+/* The picture follows the sound's clock without ever stepping back. A
+ * drift is slewed out by moving the frame timeline a fraction of it per
+ * poll, at most NS_MEDIA_AV_SLEW_US (a 5% rate change, which the eye does
+ * not see). A picture more than NS_MEDIA_AV_HOLD_S ahead (the sound
+ * starved or its device clock jumped) holds until the sound catches up; one
+ * more than NS_MEDIA_AV_RESYNC_S behind jumps forward. */
+#define NS_MEDIA_AV_RESYNC_S 0.5
+#define NS_MEDIA_AV_HOLD_S 0.1
+#define NS_MEDIA_AV_SLEW_US 2500
+#define NS_MEDIA_AV_SLEW_GAIN 0.25
+#define NS_MEDIA_AV_DEADBAND_S 0.004
 #define NS_MEDIA_MSE_AUDIO_AHEAD_S 2.0
 #define NS_MEDIA_MSE_ENOUGH_S 1.0
 #define NS_MEDIA_MSE_FUTURE_S 0.25
@@ -981,15 +991,30 @@ media_video_follow_audio(ns_media_player *p, ns_image *frames, gint64 now)
         return;
     }
     if (frames->anim_paused) {
-        ns_image_anim_seek(frames, status.position, now);
         ns_image_anim_set_paused(frames, FALSE, now);
+        double ahead = ns_image_anim_position(frames, now) - status.position;
+        if (ahead < -NS_MEDIA_AV_RESYNC_S)
+            ns_image_anim_seek(frames, status.position, now);
+        else
+            ns_image_anim_shift(frames, (gint64)(ahead * 1e6));
         ns_js_request_repaint(p->js);
         return;
     }
-    if (status.playing &&
-        fabs(ns_image_anim_position(frames, now) - status.position) >
-            NS_MEDIA_AV_DRIFT_S)
+    double drift = ns_image_anim_position(frames, now) - status.position;
+    if (!status.playing) {
+        if (drift > NS_MEDIA_AV_HOLD_S)
+            ns_image_anim_shift(frames, (gint64)(drift * 1e6));
+        return;
+    }
+    if (drift < -NS_MEDIA_AV_RESYNC_S) {
         ns_image_anim_seek(frames, status.position, now);
+    } else if (drift > NS_MEDIA_AV_HOLD_S) {
+        ns_image_anim_shift(frames, (gint64)(drift * 1e6));
+    } else if (fabs(drift) > NS_MEDIA_AV_DEADBAND_S) {
+        double step = CLAMP(drift * NS_MEDIA_AV_SLEW_GAIN * 1e6,
+                            -NS_MEDIA_AV_SLEW_US, NS_MEDIA_AV_SLEW_US);
+        ns_image_anim_shift(frames, (gint64)step);
+    }
 }
 
 static gboolean

@@ -76,6 +76,8 @@ northstar_engine_sources = files(
   'vp9.c',
   'h264.c',
   'videodec.c',
+  'videoworker.c',
+  'videolayer.c',
   'audiodec.c',
   'audio/aac.c',
   'js_mse.c',

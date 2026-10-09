@@ -50,6 +50,9 @@ typedef struct {
     char                *camera;
     char                *download;
     int                  clipboard;
+    /* ns_video_layer_rect in viewport device pixels: MSE videos left as
+     * transparent holes in pixels, for the view to draw under the frame. */
+    GArray              *video_layers;
 } ns_page_frame;
 
 ns_page_session *ns_page_session_new(int max_width, int max_height);
@@ -57,6 +60,7 @@ void ns_page_session_free(ns_page_session *s);
 void ns_page_session_set_wake(ns_page_session *s, ns_page_session_wake_cb cb,
                               gpointer user_data);
 void ns_page_session_set_frame_time(ns_page_session *s, gint64 frame_time_us);
+void ns_page_session_set_video_layers(ns_page_session *s, gboolean enabled);
 
 int  ns_page_session_open(ns_page_session *s, const char *url, int width,
                           int height, int settle_ms, int history,
