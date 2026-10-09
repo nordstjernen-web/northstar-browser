@@ -40,14 +40,42 @@ ns_engine_in_blocking_fetch(void)
 static guint64 g_engine_relayout_count;
 static gint64  g_engine_relayout_us;
 
+static const char *
+engine_base_href_walk(const ns_node *n, int depth)
+{
+    if (!n || depth >= 512) return NULL;
+    if (ns_node_is_element_named(n, "base")) {
+        const char *href = ns_element_get_attr(n, "href");
+        if (href && *href) return href;
+    }
+    if (ns_node_is_element_named(n, "template")) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_DOCUMENT) continue;
+        const char *href = engine_base_href_walk(c, depth + 1);
+        if (href) return href;
+    }
+    return NULL;
+}
+
+static const char *
+engine_document_base_href(const ns_node *doc)
+{
+    if (!doc) return NULL;
+    if (!doc->tag_index) return engine_base_href_walk(doc, 0);
+    GPtrArray *bases = ns_doc_tag_index_lookup(doc, "base");
+    for (guint i = 0; bases && i < bases->len; i++) {
+        const char *href =
+            ns_element_get_attr(g_ptr_array_index(bases, i), "href");
+        if (href && *href) return href;
+    }
+    return NULL;
+}
+
 static char *
 engine_document_base_url(ns_node *doc, const char *fallback)
 {
-    GPtrArray *bases = doc ? ns_doc_tag_index_lookup(doc, "base") : NULL;
-    for (guint i = 0; bases && i < bases->len; i++) {
-        const ns_node *base = g_ptr_array_index(bases, i);
-        const char *href = ns_element_get_attr(base, "href");
-        if (!href || !*href) continue;
+    const char *href = engine_document_base_href(doc);
+    if (href) {
         if (fallback && *fallback) {
             char *resolved = ns_url_resolve(fallback, href);
             if (resolved) return resolved;
@@ -350,7 +378,8 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                                              g_free, NULL);
     GHashTable *connect_seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                      g_free, NULL);
-    preload_collect(doc, base_url, include_images, urls, seen,
+    g_autofree char *document_base = engine_document_base_url(doc, base_url);
+    preload_collect(doc, document_base, include_images, urls, seen,
                     connects, connect_seen, 0);
     g_hash_table_destroy(seen);
     g_hash_table_destroy(connect_seen);

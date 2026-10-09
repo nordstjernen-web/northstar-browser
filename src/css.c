@@ -32198,6 +32198,26 @@ display_contents_to_none(const ns_node *el, ns_style *s)
     return TRUE;
 }
 
+static gboolean
+scripted_noscript_to_none(const ns_node *el, ns_style *s)
+{
+    if (!ns_node_is_element_named(el, "noscript") ||
+        ns_display_is_none(s->display))
+        return FALSE;
+    const ns_node *root = ns_node_root(el);
+    if (root && (root->flags & NS_NODE_SCRIPTING_DISABLED)) return FALSE;
+    ns_css_value_free(s->values[NS_CSS_DISPLAY]);
+    s->values[NS_CSS_DISPLAY] = keyword_value("none");
+    s->display = ns_css_display_from_keyword("none");
+    return TRUE;
+}
+
+static gboolean
+display_forced_none(const ns_node *el, ns_style *s)
+{
+    return display_contents_to_none(el, s) || scripted_noscript_to_none(el, s);
+}
+
 static void
 strip_native_widget_decorations(const ns_node *el, ns_style *s)
 {
@@ -32556,7 +32576,7 @@ cascade_walk(ns_node *node,
         if (shared) {
             ns_style_free(s);
             s = ns_style_clone_shared(shared);
-            if (display_contents_to_none(node, s))
+            if (display_forced_none(node, s))
                 s->share_id = ++g_style_share_next_id;
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
@@ -32573,7 +32593,7 @@ cascade_walk(ns_node *node,
                         node->parent->kind == NS_NODE_DOCUMENT, *root_px);
             compute_registered_vars(s, parent_style, *root_px);
             strip_native_widget_decorations(node, s);
-            if (display_contents_to_none(node, s)) have_key = FALSE;
+            if (display_forced_none(node, s)) have_key = FALSE;
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
             g_array_set_size(pending_matches, 0);

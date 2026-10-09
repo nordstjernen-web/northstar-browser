@@ -4,6 +4,46 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Interface-specific DOM members live on the prototypes of the interfaces
+  that define them (`href` and the URL parts on `HTMLAnchorElement` and
+  `HTMLAreaElement`, `src` on the media, image, script and frame
+  interfaces, `value`/`checked`/`form`/`disabled` on the form controls,
+  `length` and the data methods on `CharacterData`, and so on), and
+  `<video>`/`<audio>` inherit from `HTMLMediaElement`. They all sat on
+  one prototype shared by every node, so a `<div>`, an unknown element,
+  a text node and the document each reported `text`, `href`, `src`,
+  `type`, `checked` and hundreds more. Feature tests such as
+  `'text' in el` went wrong: YouTube's Polymer sanitizer replaced every
+  `text` binding with "zClosurez", leaving the consent dialog, video
+  title, description and related videos blank. `document.open()` works
+  again; the element `open` accessor had shadowed it.
+* `<noscript>` is never rendered when scripting is enabled, even when
+  an author rule gives it a display.
+* `<link rel=stylesheet>` elements in the parsed document fire `load`
+  and `error`, so the `media="print" onload="this.media='all'"`
+  asynchronous stylesheet pattern applies its stylesheet.
+* Headless settling no longer ends while a script is blocked fetching a
+  module or resource, which cut single-page apps off before their first
+  XHRs completed.
+* Scripts and speculative preloads resolve against the document's
+  `<base href>`. Parser-inserted `<script src>` used the document URL,
+  so sites built with Angular CLI (PeerTube) fetched their scripts from
+  the wrong path and never started.
+* A `blob:` URL has the origin of the page that created it, as the URL
+  standard defines, so a worker started from one sends that `Origin`
+  and passes CORS checks against it. Twitch's player worker failed its
+  cross-origin `fetch()` of the WebAssembly player
+  (`Access-Control-Allow-Origin: https://www.twitch.tv`) and never
+  asked for the stream's playlist.
+* Assigning any value to an error's `stack` stores it as an own data
+  property, as other engines do. quickjs-ng's `Error.prototype.stack`
+  setter throws "expects a string" for anything else, which broke
+  Twitch's Kasada script; Northstar replaces the setter in every new
+  context.
+* A request that carries a `Range` header bypasses the HTTP cache in
+  both directions. The cache is keyed by URL, so a stored 206 answered
+  later requests for other byte ranges of the same file with the wrong
+  bytes.
 * A same-origin `<iframe>` no longer sees the parent page's own global
   variables as its own. Its window was seeded with every property of the
   parent window, including those the page's scripts had defined; it now

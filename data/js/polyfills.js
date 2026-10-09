@@ -1031,40 +1031,6 @@
                         return c.toUpperCase();
                     });
                 }
-                function defineFrameAccessor(name, getter) {
-                    if (Object.getOwnPropertyDescriptor(elementProto, name)) return;
-                    var nativeGet = null;
-                    for (var anc = Object.getPrototypeOf(elementProto); anc;
-                         anc = Object.getPrototypeOf(anc)) {
-                        var d = Object.getOwnPropertyDescriptor(anc, name);
-                        if (d && d.get) { nativeGet = d.get; break; }
-                    }
-                    Object.defineProperty(elementProto, name, {
-                        configurable: true, get: nativeGet || getter
-                    });
-                }
-                function isFrameElement(el) {
-                    var tag = el && el.nodeName ? String(el.nodeName).toLowerCase() : '';
-                    return tag === 'iframe' || tag === 'frame' ||
-                           tag === 'object' || tag === 'embed';
-                }
-                defineFrameAccessor('contentDocument', function () {
-                    return isFrameElement(this) ? null : null;
-                });
-                defineFrameAccessor('contentWindow', function () {
-                    if (!isFrameElement(this)) return null;
-                    return {
-                        document: null,
-                        location: { href: '', replace: function () {}, assign: function () {} },
-                        postMessage: function () {},
-                        addEventListener: function () {},
-                        removeEventListener: function () {},
-                        focus: function () {},
-                        blur: function () {},
-                        close: function () {},
-                        closed: true
-                    };
-                });
                 if (!('dataset' in probe)) {
                     Object.defineProperty(elementProto, 'dataset', {
                         configurable: true,
@@ -3670,96 +3636,6 @@
         }
         try {
             Object.defineProperty(mediaProto, 'disableRemotePlayback', {
-                configurable: true, enumerable: true, writable: true,
-                value: false
-            });
-        } catch (e) {}
-    }
-
-    var actualMediaProto = global.Element && global.Element.prototype;
-    if (actualMediaProto && actualMediaProto !== mediaProto) {
-        try {
-            Object.defineProperty(actualMediaProto, 'requestPictureInPicture', {
-                configurable: true, enumerable: true,
-                value: function () {
-                    if (typeof document !== 'undefined') {
-                        try {
-                            Object.defineProperty(document, 'pictureInPictureElement', {
-                                configurable: true,
-                                value: this
-                            });
-                        } catch (e) {}
-                    }
-                    return Promise.resolve(this);
-                }
-            });
-        } catch (e) {}
-        try {
-            Object.defineProperty(actualMediaProto, 'disablePictureInPicture', {
-                configurable: true, enumerable: true, writable: true,
-                value: false
-            });
-        } catch (e) {}
-        try {
-            Object.defineProperty(actualMediaProto, 'webkitSupportsFullscreen', {
-                configurable: true, enumerable: true,
-                value: false
-            });
-            Object.defineProperty(actualMediaProto, 'webkitDisplayingFullscreen', {
-                configurable: true, enumerable: true,
-                value: false
-            });
-            Object.defineProperty(actualMediaProto, 'webkitPresentationMode', {
-                configurable: true, enumerable: true,
-                value: 'inline'
-            });
-            Object.defineProperty(actualMediaProto, 'webkitEnterFullscreen', {
-                configurable: true, enumerable: true,
-                value: function () {}
-            });
-            Object.defineProperty(actualMediaProto, 'webkitExitFullscreen', {
-                configurable: true, enumerable: true,
-                value: function () {}
-            });
-            Object.defineProperty(actualMediaProto, 'webkitSetPresentationMode', {
-                configurable: true, enumerable: true,
-                value: function () {}
-            });
-        } catch (e) {}
-        if (!('remote' in actualMediaProto)) {
-            try {
-                Object.defineProperty(actualMediaProto, 'remote', {
-                    configurable: true, enumerable: true,
-                    get: function () {
-                        if (!this.__nd_remotePlayback) {
-                            Object.defineProperty(this, '__nd_remotePlayback', {
-                                configurable: true,
-                                value: {
-                                    state: 'disconnected',
-                                    onconnect: null,
-                                    onconnecting: null,
-                                    ondisconnect: null,
-                                    prompt: function () { return Promise.resolve(); },
-                                    watchAvailability: function (callback) {
-                                        if (typeof callback === 'function') {
-                                            try { callback(false); } catch (e) {}
-                                        }
-                                        return Promise.resolve(1);
-                                    },
-                                    cancelWatchAvailability: function () { return Promise.resolve(); },
-                                    addEventListener: function () {},
-                                    removeEventListener: function () {},
-                                    dispatchEvent: function () { return true; }
-                                }
-                            });
-                        }
-                        return this.__nd_remotePlayback;
-                    }
-                });
-            } catch (e) {}
-        }
-        try {
-            Object.defineProperty(actualMediaProto, 'disableRemotePlayback', {
                 configurable: true, enumerable: true, writable: true,
                 value: false
             });
@@ -6496,12 +6372,9 @@
                 });
             } catch (e) {}
         }
-        if (global.Element && global.Element.prototype)
-            defSheet(global.Element.prototype);
-        else {
-            defSheet(global.HTMLStyleElement && global.HTMLStyleElement.prototype);
-            defSheet(global.HTMLLinkElement && global.HTMLLinkElement.prototype);
-        }
+        defSheet(global.HTMLStyleElement && global.HTMLStyleElement.prototype);
+        defSheet(global.HTMLLinkElement && global.HTMLLinkElement.prototype);
+        defSheet(global.SVGElement && global.SVGElement.prototype);
 
         try {
             var styleSheetsDef = {
@@ -9345,8 +9218,9 @@
     })();
 
     (function () {
-        var hrefDesc = global.Element &&
-            Object.getOwnPropertyDescriptor(global.Element.prototype, 'href');
+        var hrefDesc = global.HTMLAnchorElement &&
+            Object.getOwnPropertyDescriptor(global.HTMLAnchorElement.prototype,
+                                            'href');
         if (!hrefDesc || typeof hrefDesc.get !== 'function') return;
         ['HTMLAnchorElement', 'HTMLAreaElement'].forEach(function (name) {
             var ctor = global[name];
