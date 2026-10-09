@@ -2,6 +2,9 @@ Changelog:
 =========
 Significant changes in each release:
 
+1.0.14:
+=======
+
 1.0.13:
 =======
 * WebAssembly runs on WAMR's fast interpreter instead of the classic one.
