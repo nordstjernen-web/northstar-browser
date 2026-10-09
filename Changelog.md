@@ -10,6 +10,10 @@ Significant changes in each release:
   and the picture follows the sound's clock (measured within 15 ms). Like
   `<audio>`, a video with sound autoplays only when muted or after a user
   gesture.
+* Closing the window no longer crashes. The address bar's suggestion
+  popover was unparented from the window's destroy handler, after GTK had
+  already finalized the address entry it belonged to; it is now
+  unparented when the entry itself is destroyed.
 * `<video controls>` and `<audio controls>` show working playback
   controls: play/pause, a seek bar that seeks on click or drag, the
   current time and duration, and a mute button. `<audio controls>` drew
