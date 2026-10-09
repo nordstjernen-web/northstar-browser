@@ -19,15 +19,16 @@ inspect workflow. On a harness that does not read that file the
 equivalent is full-access / never-ask; those routine commands must never
 prompt.
 
-## The three editions
+## The editions
 
-Northstar is one of three browsers built on the same hand-written engine:
+Northstar shares its hand-written engine with these browsers:
 
 | Edition | Purpose | License |
 |---|---|---|
 | **Northstar** (this tree) | The purist GPL browser: free software under copyleft, every line of it distributable under the GPL | GPL-3.0-or-later |
-| **open-internet-navigator** (`nordstjernen-web/open-internet-navigator`) | The minimalist project | `Apache-2.0 OR MIT` |
-| **Nordstjernen** (`nordstjernen-web/nordstjernen-browser`) | The flagship: every feature and platform, developed with external contributors | NSL-1.0 |
+| **northstar-wasm** (`nordstjernen-web/northstar-wasm`) | This engine compiled to WebAssembly with Emscripten | GPL-3.0-or-later |
+| **Nordstjernen** (`nordstjernen-web/nordstjernen-browser`) | The flagship: every feature and platform, developed with external contributors | NSL-1.0 OR GPL-3.0-or-later |
+| **Southstar** (`nordstjernen-web/southstar-browser`) | Nordstjernen's code base, being ported to Rust | NSL-1.0 OR GPL-3.0-or-later |
 
 ## Licensing and code provenance
 
@@ -37,11 +38,13 @@ the GPL, or third-party code under a GPL-compatible license listed in
 `THIRD-PARTY-LICENSES.md`. Purity is the point of this edition, so check
 where code comes from before porting it:
 
-- **From Nordstjernen, only the copyright holder's own commits.** The
-  flagship is under the Nordstjernen Source License (NSL-1.0) and its
-  external developers' contributions belong to them. A Nordstjernen
-  commit may come across only when the copyright holder wrote it, or a
-  Claude session wrote it on the copyright holder's behalf. Check the
+- **From Nordstjernen and Southstar, only the copyright holder's own
+  commits.** The flagship has offered the GPL alongside the Nordstjernen
+  Source License since 1.0.28 (2026-10-04), but its external developers'
+  contributions belong to them, and those made before then were
+  contributed under NSL-1.0 alone. A Nordstjernen or Southstar commit
+  may come across only when the copyright holder wrote it, or a Claude
+  session wrote it on the copyright holder's behalf. Check the
   author of every source commit, including each commit inside a pull
   request (`git log --format='%an: %s'`); anything by another author
   stays out unless that author has licensed it under the GPL in writing.
@@ -49,10 +52,22 @@ where code comes from before porting it:
   from the bug and the specification, without working from the
   contributor's diff. The 1.0.12 standards-conformance backport broke
   this rule and was withdrawn in 1.0.13.
-- **From open-internet-navigator, anything.** It is the copyright
-  holder's own work under `Apache-2.0 OR MIT`, which the GPL can carry.
-- **Name the source commit** in the message, as the
+- **Name the source commit** in a `Ported-From:` trailer, as the
   `port-engine-changes` skill describes.
+- **Mark security fixes.** Give every memory-safety or denial-of-service
+  fix a `Security-Fix:` trailer with a stable slug, and keep the slug
+  when the fix is ported, so the same bug has the same name in every
+  edition:
+
+  ```
+  Security-Fix: css-grid-auto-repeat-overread
+  Ported-From: nordstjernen-web/nordstjernen-browser@<full sha>
+  Co-Authored-By: ...
+  ```
+
+  Both lines go in the final trailer block. Running
+  `git log --format=%B | sed -n 's/^Security-Fix: //p' | sort -u` in two
+  trees and comparing the lists shows which fixes have not crossed yet.
 - **Outbound:** Nordstjernen may take only the copyright holder's own
   Northstar commits; GPL contributions from others stay GPL.
 - **Dependencies** must be GPL-compatible. Nothing under NSL or a

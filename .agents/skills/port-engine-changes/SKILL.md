@@ -44,11 +44,11 @@ Then exercise the behavior the change is supposed to alter, and confirm it diffe
 
 ## Record the origin
 
-Name the source commit in the message and describe the behavior in the destination's own terms. Do not copy a message that refers to code, tests, or scores that do not exist in the destination.
+Name the source commit in a `Ported-From: <owner>/<repo>@<full sha>` trailer, taking the sha from `git rev-parse` rather than typing it, and describe the behavior in the destination's own terms. When the source carries a `Security-Fix:` slug, keep it; when it is a security fix without one, give the port a new slug. Both trailers belong in the final trailer block next to `Co-Authored-By`, where `git interpret-trailers` finds them. Do not copy a message that refers to code, tests, or scores that do not exist in the destination.
 
 ## Northstar context
 
-Northstar is the purist GPL edition of Nordstjernen; the engine sources are largely shared, but code crosses into Northstar only under the provenance rules in `AGENTS.md`: from Nordstjernen only the copyright holder's own commits, never an external contributor's without their written GPL license, and from open-internet-navigator anything. Check the author of every source commit before checking applicability, and stop if it fails. Both trees are edited continuously, so re-read the destination head immediately before porting.
+Northstar is the purist GPL edition of Nordstjernen; the engine sources are largely shared, but code crosses into Northstar only under the provenance rules in `AGENTS.md`: from Nordstjernen and Southstar only the copyright holder's own commits, never an external contributor's without their written GPL license. Check the author of every source commit before checking applicability, and stop if it fails. A Claude-authored commit can still build on code an outside contributor wrote; port only the parts that stand without it. Both trees are edited continuously, so re-read the destination head immediately before porting.
 
 Differences that break ports in practice: Northstar consumes quickjs-ng as an upstream meson subproject and carries no in-tree engine fork, so changes that patch a vendored JavaScript engine do not apply; the features the repository instructions exclude from this edition are absent here; and helper availability in `src/js.c` differs between the trees even where the surrounding code matches.
 
