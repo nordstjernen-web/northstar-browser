@@ -2394,6 +2394,36 @@ ns_ctx_createConicGradient(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
+static JSValue
+ns_image_data_new_object(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "ImageData");
+    JSValue proto = JS_IsObject(ctor) ? JS_GetPropertyStr(ctx, ctor, "prototype")
+                                      : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+    JSValue obj = JS_IsObject(proto) ? JS_NewObjectProto(ctx, proto)
+                                     : JS_NewObject(ctx);
+    JS_FreeValue(ctx, proto);
+    return obj;
+}
+
+static JSValue
+ns_image_data_wrap(JSContext *ctx, int w, int h, JSValue data)
+{
+    JSValue obj = ns_image_data_new_object(ctx);
+    if (JS_IsException(obj)) {
+        JS_FreeValue(ctx, data);
+        return obj;
+    }
+    JS_SetPropertyStr(ctx, obj, "width",  JS_NewInt32(ctx, w));
+    JS_SetPropertyStr(ctx, obj, "height", JS_NewInt32(ctx, h));
+    JS_SetPropertyStr(ctx, obj, "data",   data);
+    JS_SetPropertyStr(ctx, obj, "colorSpace", JS_NewString(ctx, "srgb"));
+    return obj;
+}
+
 JSValue
 ns_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba)
 {
@@ -2418,11 +2448,86 @@ ns_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba)
     JS_FreeValue(ctx, u8c);
     JS_FreeValue(ctx, ab);
     if (JS_IsException(data)) return data;
-    JSValue obj = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, obj, "width",  JS_NewInt32(ctx, w));
-    JS_SetPropertyStr(ctx, obj, "height", JS_NewInt32(ctx, h));
-    JS_SetPropertyStr(ctx, obj, "data",   data);
-    return obj;
+    return ns_image_data_wrap(ctx, w, h, data);
+}
+
+static JSValue
+ns_image_data_ctor(JSContext *ctx, JSValueConst new_target,
+                   int argc, JSValueConst *argv)
+{
+    (void)new_target;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "ImageData needs at least 2 arguments");
+    if (!JS_IsObject(argv[0])) {
+        uint32_t w = 0, h = 0;
+        if (JS_ToUint32(ctx, &w, argv[0]) || JS_ToUint32(ctx, &h, argv[1]))
+            return JS_EXCEPTION;
+        if (w == 0 || h == 0)
+            return ns_canvas_throw_dom(ctx, "IndexSizeError",
+                                       "ImageData width and height must be nonzero");
+        if (w > 32767 || h > 32767)
+            return JS_ThrowRangeError(ctx, "ImageData too large");
+        return ns_image_data_make(ctx, (int)w, (int)h, NULL);
+    }
+
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue u8c = JS_GetPropertyStr(ctx, global, "Uint8ClampedArray");
+    JS_FreeValue(ctx, global);
+    int is_u8c = JS_IsInstanceOf(ctx, argv[0], u8c);
+    JS_FreeValue(ctx, u8c);
+    if (is_u8c < 0)
+        return JS_EXCEPTION;
+    if (!is_u8c)
+        return JS_ThrowTypeError(ctx, "ImageData data must be a Uint8ClampedArray");
+
+    size_t byte_offset = 0, byte_len = 0, bpe = 0;
+    JSValue ab = JS_GetTypedArrayBuffer(ctx, argv[0], &byte_offset, &byte_len, &bpe);
+    if (JS_IsException(ab))
+        return ab;
+    JS_FreeValue(ctx, ab);
+    uint32_t w = 0;
+    if (JS_ToUint32(ctx, &w, argv[1]))
+        return JS_EXCEPTION;
+    if (byte_len == 0 || byte_len % 4 != 0)
+        return ns_canvas_throw_dom(ctx, "InvalidStateError",
+                                   "ImageData data length must be a nonzero multiple of 4");
+    if (w == 0 || (byte_len / 4) % w != 0)
+        return ns_canvas_throw_dom(ctx, "IndexSizeError",
+                                   "ImageData data length is not a multiple of the width");
+    size_t h = (byte_len / 4) / w;
+    if (argc >= 3 && !JS_IsUndefined(argv[2])) {
+        uint32_t want_h = 0;
+        if (JS_ToUint32(ctx, &want_h, argv[2]))
+            return JS_EXCEPTION;
+        if (want_h != h)
+            return ns_canvas_throw_dom(ctx, "IndexSizeError",
+                                       "ImageData height does not match the data length");
+    }
+    if (w > 32767 || h > 32767)
+        return JS_ThrowRangeError(ctx, "ImageData too large");
+    return ns_image_data_wrap(ctx, (int)w, (int)h, JS_DupValue(ctx, argv[0]));
+}
+
+void
+ns_image_data_install(JSContext *ctx, JSValueConst global)
+{
+    JSValue ctor = JS_NewCFunction2(ctx, ns_image_data_ctor, "ImageData", 2,
+                                    JS_CFUNC_constructor_or_func, 0);
+    JSValue proto = JS_NewObject(ctx);
+    JS_SetConstructor(ctx, ctor, proto);
+    JSValue sym = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue tst = JS_GetPropertyStr(ctx, sym, "toStringTag");
+    JSAtom tag = JS_ValueToAtom(ctx, tst);
+    if (tag != JS_ATOM_NULL) {
+        JS_DefinePropertyValue(ctx, proto, tag, JS_NewString(ctx, "ImageData"),
+                               JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, tag);
+    }
+    JS_FreeValue(ctx, tst);
+    JS_FreeValue(ctx, sym);
+    JS_FreeValue(ctx, proto);
+    JS_DefinePropertyValueStr(ctx, (JSValue)global, "ImageData", ctor,
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
 }
 
 JSValue

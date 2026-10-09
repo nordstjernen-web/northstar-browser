@@ -48738,8 +48738,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     };
     for (gsize i = 0; i < G_N_ELEMENTS(scroll_getters); i++) {
         JSAtom a = JS_NewAtom(ctx, scroll_getters[i].name);
-        JSValue g = JS_NewCFunction2(ctx, (JSCFunction *)(void *)scroll_getters[i].fn,
-                                     scroll_getters[i].name, 0, JS_CFUNC_getter, 0);
+        JSValue g = JS_NewCFunction2(ctx, scroll_getters[i].fn,
+                                     scroll_getters[i].name, 0, JS_CFUNC_generic, 0);
         JSValue s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)ns_element_noop_set,
                                      scroll_getters[i].name, 1, JS_CFUNC_setter, 0);
         JS_DefinePropertyGetSet(ctx, global, a, g, s, JS_PROP_CONFIGURABLE);
@@ -52909,7 +52909,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
         { "DocumentType", 0 },
         { "HTMLOptionsCollection", 0 }, { "HTMLAllCollection", 0 },
         { "RadioNodeList", 0 }, { "TextMetrics", 0 },
-        { "CanvasRenderingContext2D", 0 }, { "ImageData", 4 },
+        { "CanvasRenderingContext2D", 0 },
         { "ValidityState", 0 },
         { "DOMRect", 4 }, { "DOMRectReadOnly", 4 },
         { "DOMPoint", 4 }, { "DOMPointReadOnly", 4 },
@@ -52928,6 +52928,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
         { "Crypto", 0 },
     };
     ns_bind_ctors(ctx, global, ns_window_event_ctor, shim_ctors, G_N_ELEMENTS(shim_ctors));
+    ns_image_data_install(ctx, global);
     {
         JSValue proto = ns_proto_of(ctx, global, "NamedNodeMap");
         if (JS_IsObject(proto)) {

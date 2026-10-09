@@ -651,6 +651,7 @@ ns_ctx_createConicGradient(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv);
 JSValue
 ns_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba);
+void ns_image_data_install(JSContext *ctx, JSValueConst global);
 JSValue
 ns_ctx_createImageData(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv);

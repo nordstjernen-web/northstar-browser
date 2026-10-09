@@ -77,7 +77,7 @@ PIE, full RELRO, non-executable stack, separate-code segments,
 `-fcf-protection=full` (Intel CET / AMD IBT), `_FORTIFY_SOURCE=3`
 (`=2` fallback), `-Wformat=2 -Wformat-security`. No JIT is used or
 linked — JavaScript runs on the QuickJS interpreter and WebAssembly on
-WAMR's classic interpreter — so the browser never needs
+WAMR's fast interpreter — so the browser never needs
 writable-and-executable memory. Only headless runs on Windows have the
 kernel enforce that (see *Windows process mitigations*); elsewhere it is
 a property of the code, and neither the Linux seccomp filter nor the

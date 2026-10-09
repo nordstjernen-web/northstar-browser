@@ -4,6 +4,23 @@ Significant changes in each release:
 
 1.0.13:
 =======
+* WebAssembly runs on WAMR's fast interpreter instead of the classic one.
+  It is still an interpreter, with no JIT and no writable-and-executable
+  memory, and large modules run several times faster.
+* WebAssembly: a JavaScript exception thrown into a wasm call that
+  JavaScript made from inside another wasm call now reaches that
+  JavaScript caller. It used to surface only at the outermost call, so
+  the `try`/`catch` around the inner call never ran. Emscripten's
+  `setjmp`/`longjmp` and C++ exceptions rely on catching it there.
+* `new ImageData(data, width[, height])` and `new ImageData(width,
+  height)` construct real `ImageData` objects, validating the sizes as
+  the HTML standard requires. The constructor was a placeholder that
+  ignored its arguments, so `putImageData` of such an object drew
+  nothing. Objects from `getImageData` and `createImageData` are now
+  `instanceof ImageData`.
+* `window.scrollX`, `scrollY`, `pageXOffset` and `pageYOffset` were
+  registered as QuickJS getters with a four-argument function, a
+  mismatched call that only worked by accident.
 * `<video>` plays the sound of an MPEG-1 program stream. The MP2 track
   plays in the audio mixer from the bytes the video already downloaded,
   `play()`, `pause()`, seeking, `volume`, `muted` and `loop` drive both,
