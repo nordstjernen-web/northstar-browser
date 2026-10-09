@@ -21,6 +21,12 @@ Significant changes in each release:
     nested, so a value nested a few thousand levels deep cost quadratic
     memory and could overflow the stack. A `random-item()` nested more
     than 16 deep is now invalid.
+  - An `@supports (prop: value)` test parses the declaration as a
+    stylesheet of its own, and an `@supports` hidden in braces inside
+    the value was evaluated by that inner parse, which tested its own
+    declaration the same way, each round starting a fresh parse that no
+    depth limit could see. A declaration more than 32 such rounds deep
+    is now unsupported.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
