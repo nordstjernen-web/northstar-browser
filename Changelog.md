@@ -128,6 +128,14 @@ Significant changes in each release:
     Setting a `<template>`'s `innerHTML` orphans the old content instead
     of freeing nodes page script may still hold, and SVG
     `beginElement()` passes a copy of its `to` value.
+  - Looking up a custom element's class read a property that a page
+    getter on `Function.prototype` could intercept, and a getter that
+    called `customElements.define()` for the same name freed the
+    registry entry the lookup then returned. The upgrade itself borrowed
+    the class across its constructor and callbacks the same way. Both
+    now hold their own reference, and a deep chain of not-yet-upgraded
+    custom elements is bounded by the 512-level limit instead of
+    restarting it at every level.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
