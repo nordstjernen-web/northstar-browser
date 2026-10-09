@@ -42130,12 +42130,12 @@ static JSValue
 ns_table_insertRow(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
+    int32_t idx = -1;
+    if (argc >= 1 && JS_ToInt32(ctx, &idx, argv[0])) return JS_EXCEPTION;
     ns_node *tbl = ns_unwrap_element_mut(this_val);
     if (!tbl) return JS_NULL;
     GPtrArray *rows = g_ptr_array_new();
     ns_collect_descendants_named(tbl, "tr", rows);
-    int32_t idx = -1;
-    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
     if (idx > (int32_t)rows->len) idx = (int32_t)rows->len;
     ns_node *new_tr = ns_node_new_element(g_strdup("tr"));
     ns_js *_j = js_from_ctx(ctx);
@@ -42203,6 +42203,8 @@ static JSValue
 ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
+    int32_t idx = -1;
+    if (argc >= 1 && JS_ToInt32(ctx, &idx, argv[0])) return JS_EXCEPTION;
     ns_node *tr = ns_unwrap_element_mut(this_val);
     if (!tr) return JS_NULL;
     GPtrArray *cells = g_ptr_array_new();
@@ -42212,8 +42214,6 @@ ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
              g_ascii_strcasecmp(c->name, "th") == 0))
             g_ptr_array_add(cells, c);
     }
-    int32_t idx = -1;
-    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
     if (idx > (int32_t)cells->len) idx = (int32_t)cells->len;
     ns_node *cell = ns_node_new_element(g_strdup("td"));
     ns_js *_j = js_from_ctx(ctx);

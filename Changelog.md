@@ -112,6 +112,12 @@ Significant changes in each release:
     was freed while the loop still compared its event type. Listeners
     are now kept until the loop ends, and one removed by the getter is
     skipped.
+  - `insertRow()` and `insertCell()` collected the existing rows or cells
+    before converting the index argument, whose `valueOf()` runs page
+    script. A `valueOf()` that moved the table into a `<template>` and
+    reset the template's `innerHTML` freed those rows, which were then
+    used as the insertion point. The argument is now converted first,
+    and a throwing `valueOf()` propagates.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
