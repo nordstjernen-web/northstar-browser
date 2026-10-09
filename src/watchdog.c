@@ -79,12 +79,9 @@ ns_watchdog_hang_thread(gpointer user_data)
     return NULL;
 }
 
-static gboolean g_watchdog_child;
-
 void
 ns_watchdog_child_guard_parent_death(void)
 {
-    g_watchdog_child = TRUE;
 #ifdef __linux__
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     if (getppid() == 1)

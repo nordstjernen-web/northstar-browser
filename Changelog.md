@@ -365,6 +365,9 @@ Significant changes in each release:
   updated to a revision that no longer hands HarfBuzz made-up glyph ids,
   whose high bits HarfBuzz's coverage cache dropped, so shaping a space
   in an icon font marked glyph 32 as uncovered for the life of the face.
+* The Windows CI build compiles again with clang 23, whose new
+  `-Wunused-but-set-global` warning stopped it on a watchdog flag that
+  was set and never read. The flag is gone.
 
 1.0.12:
 =======
