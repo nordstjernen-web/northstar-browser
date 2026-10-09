@@ -373,7 +373,7 @@ verified by running the browser.
 | `_msys_build.sh`, `_msys_eval.sh`, `_msys_act.sh`, `_msys_wpt.sh`, `run-windows.ps1`, `smoke-windows.ps1` | Build, drive and smoke-test the Windows binary. |
 | `pack-linux.sh`, `pack-deb.sh`, `pack-rpm.sh`, `pack-srpm.sh`, `pack-appimage.sh`, `pack-bsd.sh`, `pack-windows.sh`, `pack-windows-installer.sh`, `pack-msix.sh` | Release packaging. |
 | `nightly.sh`, `nightly-distro-build.sh` | Nightly build orchestration. |
-| `ci-linux-i386.sh` | The 32-bit x86 CI build and smoke test, run inside an `i386/debian:trixie` container. |
+| `ci-linux-i386.sh` | The 32-bit x86 CI build and smoke test, run inside a 32-bit Debian 13 container (`debian:trixie` with `--platform linux/386`). |
 | `render-screenshots.sh` | Render each URL listed in `data/screenshots/sites.txt` to a PNG beside it. |
 | `speedometer-bench.sh`, `speedometer4-bench.sh`, `sample-profile.sh` | Benchmarks and a sampling profiler. |
 | `gen-architecture.py`, `gen-badge.sh`, `gen-splash.py`, `gen-splash.sh`, `gen-windows-icon.py` | Regenerate the architecture diagram, the badge, the splash and the Windows icon. |

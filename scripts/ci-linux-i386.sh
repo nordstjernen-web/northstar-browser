@@ -1,14 +1,14 @@
 #!/bin/bash
 # Build and smoke-test Northstar on 32-bit x86 Linux.
 #
-# Runs inside an i386/debian:trixie container -- a native 32-bit
+# Runs inside a 32-bit Debian 13 (trixie) container -- a native 32-bit
 # userland, as on antiX or Debian i386 -- with the source tree mounted
 # at /src. GitHub's JavaScript actions cannot run in a 32-bit
 # container, so the workflow starts this script with `docker run`:
 #
 #   docker run --rm --platform linux/386 --security-opt seccomp=unconfined \
 #       -v "$PWD:/src" -w /src \
-#       i386/debian:trixie bash scripts/ci-linux-i386.sh
+#       public.ecr.aws/docker/library/debian:trixie bash scripts/ci-linux-i386.sh
 #
 # Set CCACHE_DIR to a mounted directory to keep ccache across runs.
 set -euo pipefail

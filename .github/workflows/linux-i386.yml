@@ -46,13 +46,16 @@ jobs:
       # the 32-bit glibc resolver needs, so every DNS lookup in the
       # container fails ("Temporary failure resolving") while 64-bit
       # containers resolve fine. The job VM is disposable; drop the
-      # profile for this container.
+      # profile for this container. The image comes from the ECR Public
+      # mirror of Docker's official images, because Docker Hub rate-limits
+      # anonymous pulls from the shared runners (429 Too Many Requests).
       - name: Build and smoke-test in an i386 Debian 13 container
         run: |
           docker run --rm --platform linux/386 \
             --security-opt seccomp=unconfined \
             -v "$PWD:/src" -w /src -e CCACHE_DIR=/src/.ccache \
-            i386/debian:trixie bash scripts/ci-linux-i386.sh
+            public.ecr.aws/docker/library/debian:trixie \
+            bash scripts/ci-linux-i386.sh
 
       - name: Fix ownership of container-written files
         if: always()

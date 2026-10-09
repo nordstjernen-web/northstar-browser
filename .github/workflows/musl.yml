@@ -25,7 +25,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-26.04
-    container: alpine:3.24
+    container: public.ecr.aws/docker/library/alpine:3.24
     timeout-minutes: 40
     steps:
       - name: Install build dependencies (musl)
