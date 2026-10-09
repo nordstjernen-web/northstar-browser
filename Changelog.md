@@ -60,6 +60,10 @@ Significant changes in each release:
     when the allocation failed, and a still larger width converted a
     double that does not fit in an `int`. The count is now worked out
     in floating point and clamped to 4096 columns.
+  - Canvas `shadowBlur` accepts any finite number, and the blur radius
+    was converted to an `int` before it was limited, which is undefined
+    for a value such as `1e300`. It is now clamped to the blur's
+    64-pixel maximum first.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
