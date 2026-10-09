@@ -360,6 +360,11 @@ Significant changes in each release:
   explicitly. A new `linux-i386` CI workflow builds and smoke-tests
   Northstar in a 32-bit Debian 13 container on every push, using
   `scripts/ci-linux-i386.sh`.
+* Icon-font ligatures that start with "s" (search, settings, star,
+  share, ...) render as icons again instead of as letters. ns-pango is
+  updated to a revision that no longer hands HarfBuzz made-up glyph ids,
+  whose high bits HarfBuzz's coverage cache dropped, so shaping a space
+  in an icon font marked glyph 32 as uncovered for the life of the face.
 
 1.0.12:
 =======
