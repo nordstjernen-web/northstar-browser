@@ -37,7 +37,7 @@ See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 the main thread and the page engine on one dedicated thread with its own
 main loop, so a slow page never freezes the window; the shell posts
 requests to that thread and gets rendered frames back, all inside the
-same process. The engine is a compact body of C — about 177,000 lines of
+same process. The engine is a compact body of C — about 191,000 lines of
 original C, excluding the vendored WAMR, Wuffs and audio decoders —
 small enough for one person to read and audit end-to-end. See
 [docs/architecture.md](docs/architecture.md) for how it fits together.
@@ -58,17 +58,22 @@ libavif when available, and SVG in the engine).
 ## Browser features
 
 - **HTML** parsed to a DOM by lexbor; **CSS** by the engine's own
-  cascade — flex, grid, transforms, gradients, `@keyframes`, scroll snap,
-  and typed `calc()` math over lengths, angles, times and resolutions.
-- **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
-  APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
-  (`crypto.subtle` over OpenSSL).
+  cascade — flex, grid and subgrid, transforms, gradients, `@keyframes`,
+  scroll snap, container queries, cascade layers, `:has()`, nesting,
+  `@property`, and typed `calc()` math over lengths, angles, times and
+  resolutions.
+- **JavaScript** on the quickjs-ng interpreter (or Fabrice Bellard's
+  original QuickJS) — DOM, Shadow DOM, Mutation/Intersection/Resize/
+  Performance observers, `Intl`, Canvas 2D (`Path2D`, `ImageBitmap`,
+  `DOMMatrix`, `OffscreenCanvas`), WebCrypto (`crypto.subtle` over
+  OpenSSL).
 - **Custom elements** — autonomous and customized built-in elements.
 - **Workers** — dedicated workers with structured-clone messaging,
   message channels and broadcast channels.
 - **Storage** — IndexedDB over SQLite, `localStorage`/`sessionStorage`
   and the Cache API (`caches`, request/response pairs per the Service
-  Workers specification), each partitioned by site.
+  Workers specification, kept in IndexedDB), each partitioned by
+  origin.
 - **Live connections** — WebSockets (with libcurl 8.11 or newer, or one
   built with WebSocket support) and server-sent events.
 - **Navigation API** — `window.navigation` for single-page routing.
@@ -76,12 +81,13 @@ libavif when available, and SVG in the engine).
   controlled-page fetch interception and offline pages served from the
   Cache API.
 - **WebExtensions** — installed local extensions with manifest content
-  scripts, safe packaged resources, local storage and runtime messaging.
+  scripts, safe packaged resources, `storage.local`, `i18n` and
+  declarativeNetRequest rule sets.
 - **Networking** over HTTP/2 with libcurl — HTTP/3 through Alt-Svc when
   the linked libcurl provides it — HTTPS-first navigation, HSTS,
   optional DNS-over-HTTPS, CSP, subresource-integrity (SRI) checks for
-  scripts, and cookies partitioned by site in one libcurl store that
-  `document.cookie` and network requests share.
+  scripts, and cookies partitioned by site — one libcurl cookie store per
+  site, shared by `document.cookie` and that site's network requests.
 - **Safe browsing** — before a top-level navigation is fetched, its host
   is checked against a local SHA-256 blocklist. The check runs entirely
   on-device. The bundled list carries only test entries; a real list goes
@@ -91,7 +97,10 @@ libavif when available, and SVG in the engine).
   SVG); audio (`<audio>`) decodes and plays in the browser process,
   alongside a Web Audio graph.
   `<video>` plays MPEG-1 (`video/mpeg`), decoded in-tree by the same
-  pl_mpeg that already handles MP2 audio. MPEG-1 is an ISO standard whose
+  pl_mpeg that already handles MP2 audio. Frames are decoded as the clip
+  plays, so memory holds one frame whatever its length; a program
+  stream's MP2 track plays alongside it, and `controls` draws a
+  play/pause button, seek bar, time and mute button. MPEG-1 is an ISO standard whose
   patents have expired, so it costs no dependency and no licence; it is
   also not a format the modern web serves, so this is video support for
   local and self-hosted clips rather than for streaming sites.
@@ -103,7 +112,8 @@ libavif when available, and SVG in the engine).
   ends.
 - **MathML** — a minimalist presentation-MathML renderer.
 - **Spell checking** — optional, via the Enchant library.
-- **WebAssembly** — the JavaScript API over a vendored WAMR interpreter.
+- **WebAssembly** — the JavaScript API over WAMR's fast interpreter,
+  vendored in-tree; no JIT and no ahead-of-time compilation.
 - **One process, no tabs** — each window shows one page (*New Window*
   opens another in the same process), and the page engine runs on its own
   thread inside the shell process; there are no renderer processes. A
@@ -186,20 +196,21 @@ loads.
 
 | Component | Role |
 |-----------|------|
-| [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (subset) | WebAssembly interpreter |
+| [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) 2.4.5 (subset) | WebAssembly fast interpreter |
 | [Wuffs](https://github.com/google/wuffs) v0.4 | Memory-safe image decoding — PNG/APNG, GIF, BMP, JPEG, WebP |
 | [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | In-process MPEG-1 video and MP2 audio decode |
 | [minimp3](https://github.com/lieff/minimp3) (CC0) | In-process MP3 audio decode |
 
 **Required system libraries:** GTK 4 (≥ 4.14; ≥ 4.22.1 on Windows),
-GLib (≥ 2.80), Cairo (≥ 1.18), HarfBuzz (≥ 8.3), FriBidi, fontconfig
+GLib (≥ 2.80), Cairo (≥ 1.18), HarfBuzz (≥ 8.3), FriBidi (≥ 1.0.6), fontconfig
 (≥ 2.15), FreeType, libcurl (≥ 8.5), OpenSSL (libcrypto), uchardet,
 libpsl, SQLite and zlib — Ubuntu 24.04, Debian 13 and Fedora 40 meet
 every floor; Ubuntu 22.04 and older cannot build it. The engine lays
 text out through ns-pango rather than the system Pango; GTK still links
 the system Pango for its own widgets, and the two coexist because every
-symbol in the fork is renamed. Linux builds also require libseccomp. SDL2 is
-required when in-process audio is enabled.
+symbol in the fork is renamed. Linux builds also require libseccomp.
+SDL2 provides audio output: it is picked up when present and required
+with `-Daudio=enabled`.
 
 **Optional** (auto-detected): libavif (AVIF images), opusfile /
 vorbisfile (in-process Ogg audio), Enchant (spell-checking) and libthai
@@ -214,6 +225,7 @@ Project home: <https://nordstjernen.org/northstar-browser/> · Copyright 2026 An
 
 ## Builds
 [![linux](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/linux.yml)
+[![linux-i386](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/linux-i386.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/linux-i386.yml)
 [![musl](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/musl.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/musl.yml)
 [![macos](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/macos.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/macos.yml)
 [![windows](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/northstar-browser/actions/workflows/windows.yml)
