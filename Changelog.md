@@ -14,6 +14,13 @@ Significant changes in each release:
   that AddressSanitizer caught on github.com. The engine now waits for
   those fetches on a private context that only the fetch itself can
   wake, and layout works on its own copy of the page URL.
+* Security: fixes from Nordstjernen's 2026-10-04 audit, ported where
+  the same code exists here. Each was reachable from an ordinary page.
+  - `font-family: random-item(…)` validated every option by
+    canonicalizing it again, with no limit on how deeply the functions
+    nested, so a value nested a few thousand levels deep cost quadratic
+    memory and could overflow the stack. A `random-item()` nested more
+    than 16 deep is now invalid.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
