@@ -4,6 +4,33 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* A positioned box with `z-index: auto` no longer hides the z-indexed
+  boxes inside it from clicks. Hit testing kept such a box's z-indexed
+  descendants in a scope of their own, so they lost to any later sibling
+  layer with a lower z-index: YouTube's consent dialog (z-index 2202,
+  inside an absolutely positioned app shell) lost every click to its
+  backdrop (z-index 2201) and could not be accepted or rejected. Those
+  descendants now compete in the enclosing stacking context, as in CSS.
+* Positioned descendants of a positioned box with `z-index: auto` are
+  painted in the enclosing stacking context, ordered by z-index and tree
+  order, as CSS specifies. They were painted inside that box as if it
+  were a layer of its own, so a `position: fixed; z-index: 2202` dialog
+  inside an absolutely positioned app shell drew below a
+  `z-index: 2201` backdrop elsewhere, and deep high-z descendants drew
+  below outer boxes with a lower z-index.
+* Rounded borders whose sides differ in color or width keep their
+  rounded corners. Only a uniform solid border followed `border-radius`;
+  any other was drawn as four straight lines, so the reCAPTCHA spinner
+  (a circle with two transparent sides) appeared as a square corner.
+* An SVG element whose `transform` cannot be inverted (for example a
+  hidden shape with `scale(0)`) is not rendered, per the SVG spec. It was
+  passed to cairo, which put the whole drawing context into a permanent
+  error state, so everything painted after it vanished: YouTube's player
+  volume icon carries such a path, and the watch page drew only the
+  player while its consent dialog was up.
+* Clicking a page after a script read `getComputedStyle()` no longer
+  crashes in SVG painting: inline SVG boxes kept a pointer to a style
+  table that the style flush had already replaced and freed.
 * `overflow: hidden` (or `clip`, `scroll`, `auto`) clips absolutely
   positioned descendants whose containing block is inside the clipping
   box. They were painted after the clip was lifted, so a positioned

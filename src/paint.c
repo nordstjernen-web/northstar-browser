@@ -1474,6 +1474,63 @@ paint_block(cairo_t *cr, const ns_box *b)
               border_x + b->border.left / 2.0, border_y,
               border_x + b->border.left / 2.0, border_y + border_h },
         };
+        if (!drew_uniform && !corner_radii_zero(radii)) {
+            /* Rounded corners with per-side colors: fill the ring between
+             * the outer and inner rounded rects, each side clipped to its
+             * wedge along the corner diagonals. */
+            double bw[4] = { b->border.top, b->border.right,
+                             b->border.bottom, b->border.left };
+            corner_radii inner = radii;
+            for (int c = 0; c < 4; c++) {
+                double hx = (c == NS_CORNER_TL || c == NS_CORNER_BL) ? bw[3] : bw[1];
+                double vy = (c == NS_CORNER_TL || c == NS_CORNER_TR) ? bw[0] : bw[2];
+                inner.x[c] = MAX(0, radii.x[c] - hx);
+                inner.y[c] = MAX(0, radii.y[c] - vy);
+            }
+            double x0 = border_x, y0 = border_y;
+            double x1 = border_x + border_w, y1 = border_y + border_h;
+            double depth = MIN(border_w, border_h) / 2.0;
+            /* Points on each corner's outer-to-inner diagonal, at `depth`. */
+            double dx[4], dy[4];
+            const double cxs[4] = { x0, x1, x1, x0 }, cys[4] = { y0, y0, y1, y1 };
+            const double sx[4] = { 1, -1, -1, 1 }, sy[4] = { 1, 1, -1, -1 };
+            for (int c = 0; c < 4; c++) {
+                double hx = (c == NS_CORNER_TL || c == NS_CORNER_BL) ? bw[3] : bw[1];
+                double vy = (c == NS_CORNER_TL || c == NS_CORNER_TR) ? bw[0] : bw[2];
+                double m = MAX(MAX(hx, vy), 1e-6);
+                dx[c] = cxs[c] + sx[c] * hx / m * depth;
+                dy[c] = cys[c] + sy[c] * vy / m * depth;
+            }
+            for (int i = 0; i < 4; i++) {
+                if (sides[i].w <= 0) continue;
+                const ns_css_value *bs = sides[i].style;
+                if (!bs || bs->kind != NS_CSS_V_KEYWORD || !bs->u.keyword ||
+                    strcmp(bs->u.keyword, "none") == 0 ||
+                    strcmp(bs->u.keyword, "hidden") == 0)
+                    continue;
+                rgba c = rgba_of(sides[i].col ? sides[i].col
+                                              : s->values[NS_CSS_COLOR],
+                                 0, 0, 0, 1);
+                if (c.a <= 0) continue;
+                int a = i, z = (i + 1) % 4;   /* side i runs corner a -> z */
+                cairo_save(cr);
+                cairo_move_to(cr, cxs[a], cys[a]);
+                cairo_line_to(cr, cxs[z], cys[z]);
+                cairo_line_to(cr, dx[z], dy[z]);
+                cairo_line_to(cr, dx[a], dy[a]);
+                cairo_close_path(cr);
+                cairo_clip(cr);
+                cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+                rounded_rect_path(cr, x0, y0, border_w, border_h, radii);
+                rounded_rect_path(cr, x0 + bw[3], y0 + bw[0],
+                                  border_w - bw[1] - bw[3],
+                                  border_h - bw[0] - bw[2], inner);
+                set_source_rgba(cr, c);
+                cairo_fill(cr);
+                cairo_restore(cr);
+            }
+            drew_uniform = TRUE;
+        }
         for (int i = 0; !drew_uniform && i < 4; i++) {
             if (sides[i].w <= 0) continue;
             const ns_css_value *bs = sides[i].style;
@@ -5559,73 +5616,91 @@ overflow_clip_contains(const ns_box *clip, const ns_box *d)
 typedef struct deferred_capture {
     const ns_box *box;
     double dev_x, dev_y;
+    guint seq;
 } deferred_capture;
 
-typedef struct deferred_entry {
-    const ns_box *box;
-    guint idx;
-} deferred_entry;
+static guint g_paint_capture_seq;
 
 static int
-deferred_entry_cmp(const void *va, const void *vb)
+deferred_capture_cmp(const deferred_capture *a, const deferred_capture *b)
 {
-    const deferred_entry *a = va;
-    const deferred_entry *b = vb;
-    if (!a->box || !b->box)
-        return a->idx < b->idx ? -1 : a->idx > b->idx ? 1 : 0;
     int za = box_z_index(a->box), zb = box_z_index(b->box);
     if (za != zb) return za < zb ? -1 : 1;
     int c = dom_tree_order_cmp(a->box->dom, b->box->dom);
     if (c) return c;
-    return a->idx < b->idx ? -1 : a->idx > b->idx ? 1 : 0;
+    return a->seq < b->seq ? -1 : a->seq > b->seq ? 1 : 0;
+}
+
+static gint
+deferred_capture_sort(gconstpointer va, gconstpointer vb)
+{
+    return deferred_capture_cmp(*(const deferred_capture *const *)va,
+                                *(const deferred_capture *const *)vb);
+}
+
+static void
+deferred_queue_insert(GPtrArray *queue, guint from, deferred_capture *cap)
+{
+    guint lo = from, hi = queue->len;
+    while (lo < hi) {
+        guint mid = lo + (hi - lo) / 2;
+        if (deferred_capture_cmp(g_ptr_array_index(queue, mid), cap) <= 0)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    g_ptr_array_insert(queue, (gint)lo, cap);
 }
 
 static void
 paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
 {
     if (!list || list->len == 0) return;
-    deferred_entry entries_buf[32];
-    deferred_entry *entries = list->len <= G_N_ELEMENTS(entries_buf)
-        ? entries_buf : g_new(deferred_entry, list->len);
-    for (guint i = 0; i < list->len; i++) {
-        const deferred_capture *cap = g_ptr_array_index(list, i);
-        entries[i].box = cap->box;
-        entries[i].idx = i;
-    }
-    qsort(entries, list->len, sizeof(deferred_entry), deferred_entry_cmp);
+    GPtrArray *queue = g_ptr_array_new_with_free_func(g_free);
+    for (guint i = 0; i < list->len; i++)
+        g_ptr_array_add(queue, g_memdup2(g_ptr_array_index(list, i),
+                                         sizeof(deferred_capture)));
+    g_ptr_array_sort(queue, deferred_capture_sort);
     const ns_box *saved_flush = g_paint_flush_box;
-    for (guint i = 0; i < list->len; i++) {
-        const deferred_capture *cap = NULL;
-        for (guint j = 0; j < list->len; j++) {
-            const deferred_capture *c2 = g_ptr_array_index(list, j);
-            if (c2->box == entries[i].box) { cap = c2; break; }
-        }
+    for (guint i = 0; i < queue->len; i++) {
+        const deferred_capture *cap = g_ptr_array_index(queue, i);
         double cur_x = 0, cur_y = 0;
         cairo_user_to_device(cr, &cur_x, &cur_y);
-        double dx = cap ? cap->dev_x - cur_x : 0;
-        double dy = cap ? cap->dev_y - cur_y : 0;
+        double dx = cap->dev_x - cur_x;
+        double dy = cap->dev_y - cur_y;
         if (isnan(dx) || isnan(dy)) dx = dy = 0;
         cairo_save(cr);
         if (dx != 0 || dy != 0) cairo_translate(cr, dx, dy);
-        g_paint_flush_box = entries[i].box;
-        if (g_dbg_paint_x >= 0 && entries[i].box->dom) {
+        g_paint_flush_box = cap->box;
+        if (g_dbg_paint_x >= 0 && cap->box->dom) {
             double gx0, gy0, gx1, gy1;
             cairo_clip_extents(cr, &gx0, &gy0, &gx1, &gy1);
             g_printerr("[flush-one] <%s#%s y=%.0f h=%.0f> d=%.0f,%.0f "
                        "clip=%.0f,%.0f..%.0f,%.0f\n",
-                       entries[i].box->dom->name ? entries[i].box->dom->name
-                                                 : "?",
-                       ns_element_get_attr(entries[i].box->dom, "id")
-                           ? ns_element_get_attr(entries[i].box->dom, "id")
+                       cap->box->dom->name ? cap->box->dom->name : "?",
+                       ns_element_get_attr(cap->box->dom, "id")
+                           ? ns_element_get_attr(cap->box->dom, "id")
                            : "",
-                       entries[i].box->y, entries[i].box->content_height,
+                       cap->box->y, cap->box->content_height,
                        dx, dy, gx0, gy0, gx1, gy1);
         }
-        paint_walk(cr, entries[i].box, highlight);
+        GPtrArray *saved_list = g_paint_deferred_list;
+        g_paint_deferred_list = NULL;
+        g_paint_defer_depth++;
+        paint_walk(cr, cap->box, highlight);
+        GPtrArray *fresh = g_paint_deferred_list;
+        g_paint_deferred_list = saved_list;
+        g_paint_defer_depth--;
         cairo_restore(cr);
+        if (fresh) {
+            while (fresh->len > 0)
+                deferred_queue_insert(queue, i + 1,
+                                      g_ptr_array_steal_index(fresh, 0));
+            g_ptr_array_free(fresh, TRUE);
+        }
     }
     g_paint_flush_box = saved_flush;
-    if (entries != entries_buf) g_free(entries);
+    g_ptr_array_free(queue, TRUE);
 }
 
 static double g_paint_anchor_dx, g_paint_anchor_dy;
@@ -6515,6 +6590,16 @@ box_keeps_negative_descendants(const ns_box *b)
     return ns_css_keyword_is(s->values[NS_CSS_POSITION], "sticky");
 }
 
+static gboolean
+box_is_stacking_context(const ns_box *b)
+{
+    const ns_css_value *v = b->style ? b->style->values[NS_CSS_POSITION] : NULL;
+    if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+        strcmp(v->u.keyword, "fixed") == 0)
+        return TRUE;
+    return box_keeps_negative_descendants(b);
+}
+
 static void
 collect_negative_z(const ns_box *b, GPtrArray *out)
 {
@@ -6568,6 +6653,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             g_paint_deferred_list = g_ptr_array_new_with_free_func(g_free);
         deferred_capture *cap = g_new0(deferred_capture, 1);
         cap->box = b;
+        cap->seq = g_paint_capture_seq++;
         cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
         g_ptr_array_add(g_paint_deferred_list, cap);
         if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
@@ -6871,7 +6957,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     gboolean own_layer_scope = b->parent == NULL || grouped || has_transform ||
                                clip_overflow || has_path_clip ||
-                               b == g_paint_flush_box;
+                               (b == g_paint_flush_box &&
+                                box_is_stacking_context(b));
     GPtrArray *saved_layer_list = NULL;
     GPtrArray *hoisted = NULL;
     if (own_layer_scope) {

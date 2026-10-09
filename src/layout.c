@@ -669,6 +669,7 @@ ns_box_free(ns_box *box)
             c = next;
         }
         if (cur->paint_layout) ns_paint_drop_box_cache(cur);
+        if (cur->svg_styles) g_hash_table_unref(cur->svg_styles);
         fragment_context_free(cur->fragment_context);
         if (cur->links) g_array_free(cur->links, TRUE);
         if (cur->attrs) g_array_free(cur->attrs, TRUE);
@@ -4931,7 +4932,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         ns_box *box = box_new(NS_BOX_SVG);
         box->dom = n;
         box->style = s;
-        box->svg_styles = styles;
+        box->svg_styles = styles ? g_hash_table_ref(styles) : NULL;
         ns_box_media *m = ns_box_media_ensure(box);
 
         ns_svg_size size;
@@ -15484,9 +15485,11 @@ typedef struct {
     double x, y;
     guint order;
     int   z;
+    const ns_box *hit;
 } hit_deferred;
 
 static __thread GArray       *g_hit_deferred;
+static __thread GArray       *g_hit_hoist;
 static __thread int           g_hit_defer_depth;
 static __thread const ns_box *g_hit_flush_box;
 static __thread double        g_hit_local_x, g_hit_local_y;
@@ -15695,6 +15698,20 @@ box_svg_yields_hit(const ns_box *b)
            b->border.bottom <= 0 && b->border.left <= 0;
 }
 
+static gboolean
+box_hit_layer_is_stacking_context(const ns_box *b)
+{
+    const ns_css_value *p = b->style ? b->style->values[NS_CSS_POSITION] : NULL;
+    if (p && p->kind == NS_CSS_V_KEYWORD && p->u.keyword &&
+        (!strcmp(p->u.keyword, "fixed") || !strcmp(p->u.keyword, "sticky")))
+        return TRUE;
+    const ns_css_value *z = b->style ? b->style->values[NS_CSS_Z_INDEX] : NULL;
+    if (z && z->kind == NS_CSS_V_LENGTH) return TRUE;
+    const ns_css_value *o = b->style ? b->style->values[NS_CSS_OPACITY] : NULL;
+    if (o && o->kind == NS_CSS_V_LENGTH && o->u.length.v < 1.0) return TRUE;
+    return box_has_hit_transform(b) || box_clips_children(b);
+}
+
 static int
 hit_deferred_cmp(const void *a, const void *b)
 {
@@ -15709,17 +15726,23 @@ static const ns_box *
 hit_flush_deferred(GArray *list)
 {
     if (!list || list->len == 0) return NULL;
-    g_array_sort(list, hit_deferred_cmp);
-    const ns_box *best = NULL;
     const ns_box *saved_flush = g_hit_flush_box;
+    GArray *saved_hoist = g_hit_hoist;
+    g_hit_hoist = list;
     for (guint i = 0; i < list->len; i++) {
-        const hit_deferred *d = &g_array_index(list, hit_deferred, i);
-        g_hit_flush_box = d->box;
-        const ns_box *m = box_hit_test_tree(d->box, d->x, d->y);
-        if (m) best = m;
+        hit_deferred d = g_array_index(list, hit_deferred, i);
+        g_hit_flush_box = d.box;
+        const ns_box *m = box_hit_test_tree(d.box, d.x, d.y);
+        g_array_index(list, hit_deferred, i).hit = m;
     }
+    g_hit_hoist = saved_hoist;
     g_hit_flush_box = saved_flush;
-    return best;
+    g_array_sort(list, hit_deferred_cmp);
+    for (guint i = list->len; i > 0; i--) {
+        const ns_box *m = g_array_index(list, hit_deferred, i - 1).hit;
+        if (m) return m;
+    }
+    return NULL;
 }
 
 static const ns_box *
@@ -15731,7 +15754,7 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         box_defers_hit_layer(root, &defer_z)) {
         if (!g_hit_deferred)
             g_hit_deferred = g_array_new(FALSE, FALSE, sizeof(hit_deferred));
-        hit_deferred d = { root, x, y, g_hit_deferred->len, defer_z };
+        hit_deferred d = { root, x, y, g_hit_deferred->len, defer_z, NULL };
         g_array_append_val(g_hit_deferred, d);
         return NULL;
     }
@@ -15753,6 +15776,9 @@ box_hit_test_tree(const ns_box *root, double x, double y)
     double cy = y + root->scroll_y;
     gboolean own_scope = root->parent == NULL || root == g_hit_flush_box ||
                          clipped || box_has_hit_transform(root);
+    GArray *hoist = root == g_hit_flush_box && root->parent &&
+                    !box_hit_layer_is_stacking_context(root)
+                    ? g_hit_hoist : NULL;
     GArray *saved_deferred = NULL;
     if (own_scope) {
         saved_deferred = g_hit_deferred;
@@ -15788,8 +15814,12 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         GArray *mine = g_hit_deferred;
         g_hit_deferred = saved_deferred;
         g_hit_defer_depth--;
-        const ns_box *m = hit_flush_deferred(mine);
-        if (m) best = m;
+        if (hoist && mine) {
+            g_array_append_vals(hoist, mine->data, mine->len);
+        } else {
+            const ns_box *m = hit_flush_deferred(mine);
+            if (m) best = m;
+        }
         if (mine) g_array_free(mine, TRUE);
     }
     if (best) return best;
