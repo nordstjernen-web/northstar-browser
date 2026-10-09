@@ -188,7 +188,7 @@
 <rect class="mod" x="850" y="470" width="306" height="44" rx="8"/>
 <rect class="bar a-thr" x="850" y="470" width="5" height="44" rx="2"/>
 <text class="file" x="864" y="490" text-anchor="start">image.c · video.c</text>
-<text class="desc" x="864" y="507" text-anchor="start">image and MPEG-1 decode tasks</text>
+<text class="desc" x="864" y="507" text-anchor="start">image decode tasks, MPEG-1 opened</text>
 <rect class="mod" x="850" y="522" width="306" height="44" rx="8"/>
 <rect class="bar a-thr" x="850" y="522" width="5" height="44" rx="2"/>
 <text class="file" x="864" y="542" text-anchor="start">js.c</text>

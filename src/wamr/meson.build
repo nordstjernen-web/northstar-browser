@@ -1,4 +1,4 @@
-# WAMR (wasm-micro-runtime) — vendored subset, classic interpreter with
+# WAMR (wasm-micro-runtime) — vendored subset, fast interpreter with
 # reference-types + bulk-memory, exposed as the `libwamr` declared dependency.
 
 wamr_system = host_machine.system()

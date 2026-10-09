@@ -40,7 +40,9 @@ macOS and Windows it is unused and the syscall filter is a no-op.
 
 The text stack has version floors set by ns-pango: GLib ≥ 2.80,
 HarfBuzz ≥ 8.3, fontconfig ≥ 2.15, Cairo ≥ 1.18 and FriBidi ≥ 1.0.6.
-GTK must be ≥ 4.14 and libcurl ≥ 8.5. These are what Ubuntu 24.04 ships;
+GTK must be ≥ 4.14 (≥ 4.22.1 on Windows; elsewhere the build warns below
+4.22, which it prefers for the newer GSK renderers) and libcurl ≥ 8.5.
+These are what Ubuntu 24.04 ships;
 Debian 13 and Fedora 40 meet them too. Older releases — Ubuntu 22.04 and
 20.04, Debian 12 — cannot build Northstar from their own packages: their
 GTK 4 is too old or absent, alongside the text-stack libraries.
@@ -55,8 +57,9 @@ unavailable unless that libcurl was built with WebSocket support.
 **Optional, auto-detected:** `libavif-dev` (AVIF images — it pulls in a
 full AV1 decoder for a format that is rare on the web, so
 `-Davif=disabled` drops it), `libenchant-2-dev` (+ a dictionary such as
-`hunspell-en-us`) for on-screen spell-checking, `opusfile` / `vorbisfile`
-dev packages for native Ogg Opus/Vorbis decode in the in-process mixer,
+`hunspell-en-us`) for on-screen spell-checking, `libopusfile-dev` /
+`libvorbis-dev` (which carries `vorbisfile`) for native Ogg Opus/Vorbis
+decode in the in-process mixer,
 and `libthai-dev` for Thai word breaking. The build works without them.
 
 ## macOS dependencies
@@ -70,7 +73,8 @@ brew install meson ninja pkg-config cmake gtk4 curl openssl@3 uchardet libpsl \
 
 Export `PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig"`
 before configuring. The macOS build uses the same setup and compile commands
-shown below.
+shown below. The optional libraries are the `libavif`, `opusfile`,
+`libvorbis` and `enchant` formulae.
 
 With MacPorts (verified on macOS 27.0.1, Apple Silicon, Xcode 27 /
 Apple clang 21):
@@ -92,8 +96,36 @@ Install MSYS2 MINGW64, then install the packages listed by
 `.github/workflows/windows.yml`. Run Meson from the MINGW64 shell so its
 compiler and `pkg-config` resolve the MinGW libraries.
 `scripts/_msys_build.sh` does that from any shell: it sets up the MINGW64
-environment, configures `builddir` on first use and compiles. The binary
-is `builddir/src/gtk/northstar.exe`.
+environment, defaults `CC` to `clang`, configures `builddir` on first use
+and compiles. The binary is `builddir/src/gtk/northstar.exe`.
+
+```sh
+C:/msys64/usr/bin/bash.exe -lc "bash /c/path/to/northstar/scripts/_msys_build.sh"
+```
+
+A few traps:
+
+- A running `northstar.exe` locks the link target, and the link fails with
+  "Permission denied". Close it (`taskkill /IM northstar.exe /F`) before
+  rebuilding.
+- After a source file of a static library is renamed — the WAMR
+  interpreter moved from `wasm_interp_classic.c` to `wasm_interp_fast.c` —
+  an existing build directory can fail at `gcc-ar ... libwamr.a: No such
+  file or directory`. Delete `builddir/src/wamr/libwamr.a` and rebuild.
+- LTO with clang needs `llvm-ar` (`mingw-w64-x86_64-llvm-tools`);
+  `meson setup` stops without it unless configured with `-Db_lto=false`.
+- The Windows CI job builds with clang and `--werror`, the Linux job with
+  GCC and `--werror`. Clang 23, now in MSYS2, adds
+  `-Wunused-but-set-global`, so a global that is written but never read
+  fails CI.
+
+`scripts/pack-windows.sh` builds a release tree in `builddir-release` and
+bundles it with its DLLs and GTK runtime data as a portable zip in
+`dist/`. `scripts/pack-windows-installer.sh` wraps that bundle into a
+per-user NSIS `setup.exe` (no Administrator rights; `makensis` from
+`mingw-w64-x86_64-nsis`). `scripts/pack-msix.sh` stages it as an unsigned
+Microsoft Store MSIX; it needs `rsvg-convert` (`mingw-w64-x86_64-librsvg`)
+and `makeappx.exe` from the Windows SDK, or `makemsix`.
 
 ## Build
 
@@ -104,15 +136,16 @@ meson compile -C builddir
 ```
 
 `meson setup` resolves three upstream projects through
-`subprojects/*.wrap`, and exposes them as the `liblexbor` / `libquickjs` /
-`ns-pango` dependencies:
+`subprojects/*.wrap` — lexbor, the JavaScript engine (one of the two
+QuickJS rows below) and ns-pango — and exposes them as the `liblexbor` /
+`libquickjs` / `ns-pango` dependencies:
 
 | Dependency | Pinned to | Resolution |
 |------------|-----------|------------|
 | [lexbor](https://github.com/lexbor/lexbor) — HTML parser and WHATWG URL module | `v3.0.1` | A system lexbor ≥ 3.0.0 is used when `pkg-config` or CMake finds one; otherwise the wrap is cloned and its static library built through meson's CMake module. |
 | [quickjs-ng](https://github.com/quickjs-ng/quickjs) — JavaScript | `v0.17.0` | A system quickjs-ng first, of any version; the wrap as fallback. |
 | [QuickJS](https://github.com/bellard/quickjs) — JavaScript, with `-Djs_engine=quickjs` | the `2026-06-04` release commit | Always the subproject, built by the meson file in `subprojects/packagefiles/quickjs/`; upstream ships none. See [quickjs.md](quickjs.md). |
-| [ns-pango](https://github.com/nordstjernen-web/ns-pango) — text itemization, shaping, line breaking | a commit | Always the subproject. There is no system copy to find: the fork renames every symbol precisely so it can coexist with the system Pango that GTK loads. |
+| [ns-pango](https://github.com/nordstjernen-web/ns-pango) — text itemization, shaping, line breaking | commit `a28a7de` | Always the subproject. There is no system copy to find: the fork renames every symbol precisely so it can coexist with the system Pango that GTK loads. |
 
 `-Djs_engine=quickjs` builds on Fabrice Bellard's original QuickJS instead
 of quickjs-ng; [quickjs.md](quickjs.md) covers how it is built, the adapter
@@ -340,6 +373,8 @@ verified by running the browser.
 | `_msys_build.sh`, `_msys_eval.sh`, `_msys_act.sh`, `_msys_wpt.sh`, `run-windows.ps1`, `smoke-windows.ps1` | Build, drive and smoke-test the Windows binary. |
 | `pack-linux.sh`, `pack-deb.sh`, `pack-rpm.sh`, `pack-srpm.sh`, `pack-appimage.sh`, `pack-bsd.sh`, `pack-windows.sh`, `pack-windows-installer.sh`, `pack-msix.sh` | Release packaging. |
 | `nightly.sh`, `nightly-distro-build.sh` | Nightly build orchestration. |
+| `ci-linux-i386.sh` | The 32-bit x86 CI build and smoke test, run inside an `i386/debian:trixie` container. |
+| `render-screenshots.sh` | Render each URL listed in `data/screenshots/sites.txt` to a PNG beside it. |
 | `speedometer-bench.sh`, `speedometer4-bench.sh`, `sample-profile.sh` | Benchmarks and a sampling profiler. |
 | `gen-architecture.py`, `gen-badge.sh`, `gen-splash.py`, `gen-splash.sh`, `gen-windows-icon.py` | Regenerate the architecture diagram, the badge, the splash and the Windows icon. |
 | `embed-text.py`, `verify-polyfills.py`, `verify-polyfills.js` | Build helpers: embed the JS polyfills and hooks, check the polyfills. |

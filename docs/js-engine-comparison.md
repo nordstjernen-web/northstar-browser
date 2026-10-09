@@ -1,8 +1,10 @@
 # quickjs-ng vs QuickJS: measured comparison
 
 Northstar builds on either of two JavaScript engines (see
-[quickjs.md](quickjs.md)): **quickjs-ng 0.17.0**, the default, and Fabrice
-Bellard's original **QuickJS 2026-06-04** (`-Djs_engine=quickjs`). This
+[quickjs.md](quickjs.md)): **quickjs-ng 0.17.0**, the default
+(`subprojects/quickjs-ng.wrap`, tag `v0.17.0`), and Fabrice Bellard's
+original **QuickJS 2026-06-04** (`-Djs_engine=quickjs`,
+`subprojects/quickjs.wrap`, commit `3d5e064`). This
 report builds both from the same tree, runs them through the same tests
 and benchmarks, and compares the results.
 
@@ -59,7 +61,7 @@ the original-engine build exposes. See [Issues found](#issues-found).
 | Language-feature probes (68) | **63** | 57 | quickjs-ng |
 | Maximum recursion depth | 5,648 frames | **7,445 frames** | QuickJS |
 | Stability during this run | no failures | crashed reopening ES-module pages (fixed here) | quickjs-ng |
-| CI coverage | all four workflows | none | quickjs-ng |
+| CI coverage | every workflow | none | quickjs-ng |
 | Upstream release | **2026-09-18** | 2026-06-04 | quickjs-ng |
 | Adapter code in Northstar | **~210 lines** | ~560 lines | quickjs-ng |
 
@@ -102,8 +104,12 @@ the original-engine build exposes. See [Issues found](#issues-found).
 | Engine C sources compiled into the browser | 72,158 lines | 69,024 lines |
 | Adapter code compiled in (`src/quickjs_compat.*`) | ~210 lines | ~560 lines (the same ~190 shared lines plus ~375 for the original only) |
 | Local patches | 1 (Windows link) | 1 (sort comparator) + a meson build file |
-| Built in CI | all four workflows | none |
+| Built in CI | every workflow (four when measured, five since `linux-i386`) | none |
 | Upstream release | v0.17.0, 2026-09-18 | 2026-06-04 |
+
+The adapter line counts are those of `da7e522`. Withdrawing the 1.0.12
+backport removed the shims it had added, and `src/quickjs_compat.c` and
+`src/quickjs_compat.h` together went from 584 to 360 lines.
 
 The quickjs-ng build is slower mainly because its subproject also builds
 the `qjs`/`qjsc` command-line tools and `quickjs-libc`, which the browser

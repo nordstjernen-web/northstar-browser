@@ -398,7 +398,7 @@ never embed attacker-controlled bytes and no path-traversal is possible.
   set of parsers exposed to untrusted bytes is fixed at build time.
 - Web fonts, WOFF included, are parsed by FreeType; the engine then
   re-serialises a WOFF font's tables as a plain SFNT file (`src/font.c`).
-- WebAssembly modules are parsed and run by the vendored WAMR classic
+- WebAssembly modules are parsed and run by the vendored WAMR fast
   interpreter (`src/wamr/`), which is ordinary C parsing untrusted bytes.
 - Charset sniffing is delegated to uchardet, not hand-rolled.
 - The engine's own parsers bound attacker-controlled nesting and sizes.

@@ -57,7 +57,9 @@ Three runners live in `scripts/`:
   [wpt-fast](https://github.com/nordstjernen-web/wpt-fast) checkout
   (`--fast-root`, default `~/wpt-fast`) in parallel (`--jobs`, up to 8),
   writes a `wptreport.json` and prints per-standard scores through the
-  checkout's `./wpt-score`.
+  checkout's `./wpt-score`. The wpt-fast repository is no longer
+  published, so this runner needs an existing checkout of it; use
+  `wpt-run.sh` or `wpt-local.sh` otherwise.
 
 Only `testharness.js` tests run. Reftests and wdspec tests need
 screenshot comparison or WebDriver, which this edition does not have,
@@ -80,10 +82,14 @@ under *Measurement history*. They were taken against different
 checkouts — a full WPT checkout for the rows measured at `7b38d66`, and
 sparse checkouts served statically for the rest — so a denominator is
 comparable only with rows from the same run. Nothing after release 1.0.8
-has been re-measured: the work recorded in `Changelog.md` for 1.0.9 and
-1.0.10 (among it the colour serialisation, writing-mode flexbox and
-document-metadata fixes) is not reflected here, so treat each row as a
-floor.
+has been re-measured: the work recorded in `Changelog.md` for 1.0.9
+through 1.0.13 (among it the colour serialisation, writing-mode flexbox
+and document-metadata fixes, and in 1.0.13 grid row spans beyond 24 rows,
+grid rows sized from spanning items in order of increasing span, the
+`Node` receiver checks and `postMessage()` delivered as a task) is not
+reflected here, so treat each row as a floor. The standards-conformance
+backport released in 1.0.12 was withdrawn in 1.0.13 and none of these
+runs measured it.
 
 | Area | Subtests | Pass rate | Measured at |
 | --- | --- | --- | --- |

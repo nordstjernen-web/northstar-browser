@@ -160,10 +160,8 @@ links on Windows. `meson setup` uses a system quickjs-ng when it finds
 one, and otherwise fetches it and exposes it as the `libquickjs`
 dependency. The browser includes only the public `<quickjs.h>`. A
 few browser-side entry points that stock quickjs-ng does not expose —
-caller/function realm lookup, module private values, an
-import-attributes module loader, in-place ArrayBuffer repointing,
-UTF-16 string creation, native-function marking, and
-`JS_ThrowDOMException` — are provided as thin compatibility shims over
+caller/function realm lookup, in-place ArrayBuffer repointing,
+`JS_EvalThis2` and `JS_ThrowDOMException` — are provided as thin compatibility shims over
 the public API in `src/quickjs_compat.c` (`src/quickjs_compat.h`), so
 the tree carries no patched engine. The shims degrade gracefully
 (e.g. realm lookups resolve to the current realm), which suits this

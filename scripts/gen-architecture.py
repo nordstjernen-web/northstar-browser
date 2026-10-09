@@ -149,7 +149,7 @@ TX = 836
 group(TX, EY, 334, EH, "Other threads", "g-thr")
 threads = [
     ("net.c", "curl multi thread + fetch tasks"),
-    ("image.c · video.c", "image and MPEG-1 decode tasks"),
+    ("image.c · video.c", "image decode tasks, MPEG-1 opened"),
     ("js.c", "Web Workers · service workers, own runtimes"),
     ("ws.c · eventsource.c", "WebSocket · EventSource"),
     ("audio/audio.c", "mixer: minimp3 · pl_mpeg · Ogg → SDL2"),

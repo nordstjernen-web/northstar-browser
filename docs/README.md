@@ -29,6 +29,10 @@ libcurl, carrying no upstream browser engine.
   V8 JIT type confusion CVE-2026-85046 does not apply to Northstar: no V8,
   no JIT, no elements-kind maps, no write barriers.
 
+Image assets kept here: `architecture.svg` (the architecture diagram),
+`screenshot.png` and `best-viewed-in-northstar.gif`, both shown in the
+root [README](../README.md).
+
 ## Related documents at the repository root
 
 - **[../README.md](../README.md)** — product overview and feature list.

@@ -24,7 +24,7 @@ space.
     ├─ engine thread "ns-engine", own GMainContext         (enginethread.c)
     │     fetch → parse → style → layout → paint, page JS, timers
     ├─ curl multi thread + fetch tasks                      (net.c)
-    ├─ image / MPEG-1 decode tasks                          (image.c, video.c)
+    ├─ image decode tasks (MPEG-1 opened here)              (image.c, video.c)
     ├─ JS worker threads: Web Workers, service workers      (js.c)
     ├─ WebSocket and EventSource threads                    (ws.c, eventsource.c)
     ├─ audio mixer thread → SDL2                            (src/audio/audio.c)
@@ -106,13 +106,18 @@ space.
   `ended`, the promise `play()` returns, `loop`, `muted`, `volume` and
   `autoplay` (muted, video, or after a user gesture). Each element gets a
   player whose backend is the audio mixer for `<audio>` and the decoded
-  frame timeline for `<video>`. Commands go straight to the backend; the
+  frame timeline for `<video>` (plus the mixer for a video's sound
+  track). Commands go straight to the backend; the
   controller polls it every 50 ms while something loads or plays and
   turns what it reports into events, `timeupdate` every 250 ms. An
   element removed from the document pauses, a new `src` starts over,
-  and a page parked in the back/forward cache pauses everything.
+  and a page parked in the back/forward cache pauses everything. The
+  `controls` bar is laid out once by `ns_media_controls_layout`, which
+  both `paint_media_controls` (`paint.c`) and the hit test in
+  `libnorthstar.c` call, so the two cannot disagree.
 - **Audio mixer** (`src/audio/audio.c`) — one worker thread per process
-  fetches `<audio>` through `net.c`, decodes it into memory and mixes
+  fetches `<audio>` through `net.c` (or takes bytes already in hand: a
+  `blob:` URL, a `<video>`'s MP2 track), decodes it into memory and mixes
   every player into the SDL2 device; headless runs use a silent
   clock-driven output instead. Each page owns an `NsAudioContext`, and
   `ns_audio_context_status` reports a player's load state, error,
@@ -142,7 +147,7 @@ drivers both call.
 | 2. Safety gate | `safebrowsing.c`, `fetch_policy.c`, `csp.c`, `security.c` | Top-level host checked against the local SHA-256 blocklist. Every subresource request carries its destination and its document's policy, and `ns_fetch_policy_check` applies the `file:` rule, mixed-content blocking or upgrade, and Content-Security-Policy by destination before the request and at each redirect hop. Subresource Integrity (`ns_security_sri_check`) verified for scripts. |
 | 3. Parse | `html.c`, `encoding.c`, `html_lexbor.c`, `xml.c` | Charset detection (BOM, header, `<meta>` prescan, then uchardet), decoding through the WHATWG Encoding Standard decoders in `encoding.c`, and bytes → DOM via lexbor (WHATWG HTML). `xml.c` parses XHTML and other namespaced XML documents. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
-| 5. Style | `css.c`, `css_syntax.c`, `css_media.c`, `css_prop_syntax.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_media.c` the Media Queries Level 4 parser and evaluator, and `css_prop_syntax.c` the `<syntax>` grammar behind `@property` and `CSS.registerProperty`. `anim.c` runs transitions and `@keyframes` animations; `font.c` loads `@font-face` web fonts. |
+| 5. Style | `css.c`, `css_syntax.c`, `css_calc.c`, `css_media.c`, `css_prop_syntax.c`, `anim.c`, `font.c` | Stylesheet parse, selector matching, the cascade, computed values. `css_syntax.c` is the CSS Syntax tokenizer, `css_calc.c` simplifies `calc()` trees and serializes specified values, `css_media.c` the Media Queries Level 4 parser and evaluator, and `css_prop_syntax.c` the `<syntax>` grammar behind `@property` and `CSS.registerProperty`. `anim.c` runs transitions and `@keyframes` animations; `font.c` loads `@font-face` web fonts. |
 | 6. Layout | `layout.c`, `mathml.c` | Box tree and fragmentation: block/inline, flex, grid, tables, multicol, positioned boxes. Text is itemized, shaped and broken into lines by ns-pango. The box tree is rebuilt on every relayout, but a text run's measured height, max-content and min-content widths are kept across relayouts, keyed by its text, the font attributes of its inline runs, its style (whose mutation counter animations bump), the width and the viewport, so an unchanged paragraph is not broken into lines again. `mathml.c` lays out presentation MathML. |
 | 7. Paint | `paint.c`, `svg.c`, `image.c`, `texture.c`, `selection.c`, `spellcheck.c` | `ns_paint` walks the box tree in stacking order and draws straight into a Cairo context; there is no intermediate display list, and the retained box tree plays that part when only part of the viewport is repainted. Blurred box shadows are cached by size, corner radii, blur and colour, so a page of identical cards blurs one shadow. `svg.c` renders inline and image SVG, `image.c` decodes images on demand into the `texture.c` pixel abstraction, and paint draws the text selection (`selection.c`) and misspelling marks (`spellcheck.c`, over Enchant) over the text. |
 | 8. Present | `src/gtk/procview.c`, `headless.c`, `print.c` | The GUI draws the frame surface into the GTK widget; headless writes it to PNG or PDF or dumps a text/DOM/layout tree; printing paginates the same box tree onto sheets. |
@@ -179,7 +184,9 @@ run of table-internal siblings.
 | `ShadowRealm` | `js_realm.c` |
 | `crypto.subtle` (WebCrypto over OpenSSL) | `js_webcrypto.c`, `webcrypto.c` |
 | Offline Web Audio graph rendering | `webaudio.c` |
-| WebAssembly JS API (over vendored WAMR) | `wasm.c`, `src/wamr/` |
+| WebIDL receiver checks: node-interface members called on a non-node throw "Illegal invocation" | `js_receiver.c` |
+| `TextDecoder`, `TextEncoder` (over the `encoding.c` decoders) | `js_encoding.c` |
+| WebAssembly JS API (over vendored WAMR's fast interpreter; `-Dwasm`) | `wasm.c`, `src/wamr/` |
 | `WebSocket`, `EventSource` | `ws.c`, `eventsource.c` |
 | IndexedDB | `idb.c` |
 | `getUserMedia` video: V4L2 capture (Linux) and per-site permission | `camera.c` |
@@ -228,9 +235,10 @@ partitioning and permission model.
 both for images the page fetches (`engine.c` hands the bytes to
 `ns_image_decode_encoded` and inserts the result on the engine thread) and
 for images looked up on demand; `data:` images layout needs at once, and
-headless runs, decode in place. Multi-frame sources come first: an MPEG-1
-stream (`video.c`), an animated GIF or an APNG becomes a frame list.
-Everything else goes down a fixed chain:
+headless runs, decode in place. Moving sources come first: an MPEG-1
+stream becomes a streaming decoder (`video.c`, see [Video](#video)), and
+an animated GIF or an APNG becomes a frame list. Everything else goes
+down a fixed chain:
 
 1. **`image_ico.c`** — ICO and CUR, unwrapped and handed to Wuffs.
 2. **Wuffs** (`image_wuffs.c`) — PNG, GIF, BMP, JPEG and still WebP
@@ -246,35 +254,43 @@ than falling through to a plugin-loaded decoder.
 ## Video
 
 `<video>` plays MPEG-1 and nothing else. `video.c` recognises an MPEG-1
-Program Stream or elementary video stream by its start code and decodes
-every frame up front through the vendored pl_mpeg, which already supplies
-the MP2 audio decoder — so video costs no dependency the tree did not
-already carry, and MPEG-1's patents have expired.
+Program Stream or elementary video stream by its start code and opens one
+pl_mpeg decoder (`ns_video_stream`) over the downloaded bytes. pl_mpeg is
+vendored and already supplies the MP2 audio decoder — so video costs no
+dependency the tree did not already carry, and MPEG-1's patents have
+expired.
 
-Decoded frames become the same `ns_image_pixel_frame` list an animated
-GIF produces, so the image cache's fetch, frame timing, repaint
-scheduling and eviction serve video unchanged, and `paint_video` draws
-the current frame (or a dark placeholder for a source it cannot decode).
+The decoder is held by an image-cache entry like an animated GIF's frame
+list, so the image cache's fetch, frame timing, repaint scheduling and
+eviction serve video unchanged. Frames are decoded as the clip plays: on
+each tick `ns_video_stream_show` decodes forward to the frame for the
+current time, or seeks when time jumps back or more than two seconds
+ahead (`plm_seek_frame` for a program stream, rewind and decode for an
+elementary one), and keeps a single texture. Memory is one frame plus the
+clip's bytes whatever its length; a clip larger than
+`NS_VIDEO_MAX_DIMENSION` (4096) on either side is rejected. `paint_video`
+draws the current frame (or a dark placeholder for a source it cannot
+decode) and, for `controls`, the bar on top.
 
 The media controller (`js_media.c`) drives that timeline rather than
 sitting beside it. `ns_image_anim_duration`, `ns_image_anim_position`,
 `ns_image_anim_set_paused`, `ns_image_anim_seek`,
 `ns_image_anim_set_loop` and `ns_image_anim_ended` are the whole of the
-playback surface, found by looking the element's source up in the image
-cache. Because that cache is keyed by URL, two `<video>` elements with the
-same source share one timeline. A decoded clip waits paused on its first
-frame; the controller starts it when `autoplay` is set or the page calls
-`play()`, and it plays once unless `loop` is set, then fires `ended`. Its
-audio track is not decoded, so video autoplay is always the muted
-autoplay browsers permit, and there is no controls UI. A `<source>` whose
-`type` the build cannot play is skipped, in layout and in the
-controller alike.
+picture's playback surface, found by looking the element's source up in
+the image cache. Because that cache is keyed by URL, two `<video>`
+elements with the same source share one timeline. A decoded clip waits
+paused on its first frame; the controller starts it when `autoplay` is
+set or the page calls `play()`, and it plays once unless `loop` is set,
+then fires `ended`.
 
-Decoding up front bounds a clip rather than streaming it: a clip larger
-than `NS_VIDEO_MAX_DIMENSION` (4096) on either side is rejected, and
-decoding stops at `NS_VIDEO_MAX_FRAMES` (4096) frames or
-`NS_VIDEO_MAX_TOTAL_BYTES` (256 MB) of decoded pixels, whichever comes
-first, so a longer clip plays its prefix.
+A program stream with an MP2 track also opens that track in the page's
+audio context from the same bytes, so nothing downloads twice. `play()`,
+`pause()`, seeking, `volume`, `muted` and `loop` drive both; the picture
+waits until the sound is decoded, then is re-seeked to the mixer's
+position whenever the two drift more than 0.1 s apart. A video with sound
+autoplays only when muted or after a user gesture, as `<audio>` does; a
+silent video still autoplays. A `<source>` whose `type` the build cannot
+play is skipped, in layout and in the controller alike.
 
 MPEG-1 is not a format the modern web serves. This is video for local and
 self-hosted clips; streaming sites need adaptive streaming over Media
