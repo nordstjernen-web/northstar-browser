@@ -64,6 +64,14 @@ Significant changes in each release:
     was converted to an `int` before it was limited, which is undefined
     for a value such as `1e300`. It is now clamped to the blur's
     64-pixel maximum first.
+  - SVG: an arc whose start point had overflowed to infinity (relative
+    path commands add finite coordinates up past the largest double)
+    turned its segment count into NaN before converting it to an
+    `int`, and an image with `width="1e308in"` or a `viewBox` whose
+    aspect ratio overflows sized its raster from an infinite or NaN
+    dimension. Both conversions are undefined behaviour; the segment
+    count is now clamped in floating point, and a non-finite intrinsic
+    size falls back to the default raster size.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
