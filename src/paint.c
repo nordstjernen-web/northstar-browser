@@ -4587,6 +4587,153 @@ paint_image(cairo_t *cr, const ns_box *b)
 }
 
 static void
+paint_media_time(char *buf, gsize len, double seconds)
+{
+    if (!(seconds >= 0.0) || isinf(seconds)) {
+        g_strlcpy(buf, "--:--", len);
+        return;
+    }
+    int t = (int)(seconds + 0.5);
+    if (t >= 3600)
+        g_snprintf(buf, len, "%d:%02d:%02d", t / 3600, (t / 60) % 60, t % 60);
+    else
+        g_snprintf(buf, len, "%d:%02d", t / 60, t % 60);
+}
+
+static double
+paint_media_duration(const ns_box *b, const ns_media_controls_state *st)
+{
+    if (st->duration > 0.0 && !isinf(st->duration)) return st->duration;
+    const char *hint = ns_element_get_attr(b->dom, "data-durationhint");
+    if (!hint || !*hint) return NAN;
+    char *end = NULL;
+    double d = g_ascii_strtod(hint, &end);
+    return end != hint && d > 0.0 ? d : NAN;
+}
+
+static void
+paint_media_play_icon(cairo_t *cr, double cx, double cy, double r,
+                      gboolean paused)
+{
+    if (paused) {
+        cairo_move_to(cr, cx - r * 0.55, cy - r * 0.75);
+        cairo_line_to(cr, cx + r * 0.80, cy);
+        cairo_line_to(cr, cx - r * 0.55, cy + r * 0.75);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+        return;
+    }
+    cairo_rectangle(cr, cx - r * 0.65, cy - r * 0.70, r * 0.45, r * 1.40);
+    cairo_rectangle(cr, cx + r * 0.20, cy - r * 0.70, r * 0.45, r * 1.40);
+    cairo_fill(cr);
+}
+
+static void
+paint_media_mute_icon(cairo_t *cr, double cx, double cy, double r,
+                      gboolean muted)
+{
+    cairo_move_to(cr, cx - r * 0.85, cy - r * 0.30);
+    cairo_line_to(cr, cx - r * 0.45, cy - r * 0.30);
+    cairo_line_to(cr, cx + r * 0.05, cy - r * 0.75);
+    cairo_line_to(cr, cx + r * 0.05, cy + r * 0.75);
+    cairo_line_to(cr, cx - r * 0.45, cy + r * 0.30);
+    cairo_line_to(cr, cx - r * 0.85, cy + r * 0.30);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+    cairo_set_line_width(cr, 1.5);
+    if (muted) {
+        cairo_move_to(cr, cx + r * 0.35, cy - r * 0.35);
+        cairo_line_to(cr, cx + r * 0.95, cy + r * 0.35);
+        cairo_move_to(cr, cx + r * 0.95, cy - r * 0.35);
+        cairo_line_to(cr, cx + r * 0.35, cy + r * 0.35);
+        cairo_stroke(cr);
+        return;
+    }
+    cairo_arc(cr, cx + r * 0.05, cy, r * 0.55, -G_PI / 4, G_PI / 4);
+    cairo_stroke(cr);
+    cairo_arc(cr, cx + r * 0.05, cy, r * 0.90, -G_PI / 4, G_PI / 4);
+    cairo_stroke(cr);
+}
+
+static void
+paint_media_controls(cairo_t *cr, const ns_box *b, gboolean overlay)
+{
+    if (!b->dom) return;
+    double cx = b->x + b->margin.left + b->border.left + b->padding.left;
+    double cy = b->y + b->margin.top + b->border.top + b->padding.top;
+    ns_media_controls_rect r;
+    if (!ns_media_controls_layout(b->dom, cx, cy, b->content_width,
+                                  b->content_height, &r))
+        return;
+    ns_media_controls_state st;
+    ns_media_controls_get(g_paint_js, b->dom, &st);
+    double duration = paint_media_duration(b, &st);
+    double fg_r = overlay ? 1.0 : 0.20, fg_g = overlay ? 1.0 : 0.23,
+           fg_b = overlay ? 1.0 : 0.26;
+
+    cairo_save(cr);
+    if (overlay) {
+        cairo_rectangle(cr, r.x, r.y, r.w, r.h);
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.55);
+        cairo_fill(cr);
+    } else {
+        corner_radii radii = {{4, 4, 4, 4}, {4, 4, 4, 4}};
+        rounded_rect_path(cr, r.x, r.y, r.w, r.h, radii);
+        cairo_set_source_rgb(cr, 0.96, 0.97, 0.98);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgb(cr, 0.55, 0.58, 0.62);
+        cairo_set_line_width(cr, 1.0);
+        cairo_stroke(cr);
+    }
+
+    double mid = r.y + r.h / 2.0;
+    double icon = MIN(r.h * 0.30, 9.0);
+    cairo_set_source_rgb(cr, fg_r, fg_g, fg_b);
+    paint_media_play_icon(cr, r.play_x + r.play_w / 2.0, mid, icon, st.paused);
+
+    double frac = duration > 0.0 ? CLAMP(st.position / duration, 0.0, 1.0)
+                                 : 0.0;
+    double knob = r.seek_x0 + (r.seek_x1 - r.seek_x0) * frac;
+    cairo_set_line_width(cr, 3.0);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, 0.35);
+    cairo_move_to(cr, r.seek_x0, mid);
+    cairo_line_to(cr, r.seek_x1, mid);
+    cairo_stroke(cr);
+    cairo_set_source_rgb(cr, fg_r, fg_g, fg_b);
+    if (knob > r.seek_x0) {
+        cairo_move_to(cr, r.seek_x0, mid);
+        cairo_line_to(cr, knob, mid);
+        cairo_stroke(cr);
+    }
+    cairo_arc(cr, knob, mid, 5.0, 0, 2 * G_PI);
+    cairo_fill(cr);
+
+    if (r.time_w > 0.0) {
+        char cur[24], total[24], text[56];
+        paint_media_time(cur, sizeof cur, st.position);
+        paint_media_time(total, sizeof total, duration);
+        g_snprintf(text, sizeof text, "%s / %s", cur, total);
+        NsPangoLayout *layout = paint_create_layout();
+        NsPangoFontDescription *fd =
+            ns_pango_font_description_from_string("sans 9");
+        ns_pango_layout_set_font_description(layout, fd);
+        ns_pango_layout_set_text(layout, text, -1);
+        int tw = 0, th = 0;
+        ns_pango_layout_get_pixel_size(layout, &tw, &th);
+        cairo_move_to(cr, r.time_x + (r.time_w - tw) / 2.0, mid - th / 2.0);
+        ns_pango_cairo_show_layout(cr, layout);
+        ns_pango_font_description_free(fd);
+        g_object_unref(layout);
+    }
+
+    cairo_set_source_rgba(cr, fg_r, fg_g, fg_b, st.audible ? 1.0 : 0.35);
+    paint_media_mute_icon(cr, r.mute_x + r.mute_w / 2.0, mid, icon,
+                          st.muted || !st.audible);
+    cairo_restore(cr);
+}
+
+static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
     const ns_image *decoded = b->media ? b->media->video : NULL;
@@ -4594,74 +4741,11 @@ paint_video(cairo_t *cr, const ns_box *b)
         cairo_save(cr);
         paint_texture(cr, b, decoded->texture);
         cairo_restore(cr);
+        paint_media_controls(cr, b, TRUE);
         return;
     }
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
-        double x = b->x, y = b->y, w = b->content_width, h = b->content_height;
-        if (!(w > 0) || !(h > 0)) return;
-        cairo_save(cr);
-        corner_radii radii = {{4, 4, 4, 4}, {4, 4, 4, 4}};
-        rounded_rect_path(cr, x, y, w, h, radii);
-        cairo_set_source_rgb(cr, 0.96, 0.97, 0.98);
-        cairo_fill_preserve(cr);
-        cairo_set_source_rgb(cr, 0.55, 0.58, 0.62);
-        cairo_set_line_width(cr, 1.0);
-        cairo_stroke(cr);
-
-        double cy = y + h / 2.0;
-        double play_x = x + 13.0;
-        double play_r = h * 0.28;
-        if (play_r > 9) play_r = 9;
-        if (play_r < 5) play_r = 5;
-        cairo_arc(cr, play_x, cy, play_r, 0, 2 * G_PI);
-        cairo_set_source_rgb(cr, 0.20, 0.23, 0.26);
-        cairo_fill(cr);
-        cairo_set_source_rgb(cr, 1, 1, 1);
-        cairo_move_to(cr, play_x - play_r * 0.28, cy - play_r * 0.45);
-        cairo_line_to(cr, play_x + play_r * 0.45, cy);
-        cairo_line_to(cr, play_x - play_r * 0.28, cy + play_r * 0.45);
-        cairo_close_path(cr);
-        cairo_fill(cr);
-
-        const char *dur = b->dom ? ns_element_get_attr(b->dom, "data-durationhint") : NULL;
-        char dtext[32] = "";
-        if (dur && *dur) {
-            char *end = NULL;
-            double sec_d = g_ascii_strtod(dur, &end);
-            if (end != dur && sec_d >= 0) {
-                int sec = (int)(sec_d + 0.5);
-                g_snprintf(dtext, sizeof dtext, "%d:%02d", sec / 60, sec % 60);
-            }
-        }
-        double text_w = 0;
-        if (dtext[0]) {
-            NsPangoLayout *layout = paint_create_layout();
-            NsPangoFontDescription *fd = ns_pango_font_description_from_string("sans 9");
-            ns_pango_layout_set_font_description(layout, fd);
-            ns_pango_layout_set_text(layout, dtext, -1);
-            int tw = 0, th = 0;
-            ns_pango_layout_get_pixel_size(layout, &tw, &th);
-            text_w = tw + 10;
-            cairo_move_to(cr, x + w - tw - 8, y + (h - th) / 2.0);
-            cairo_set_source_rgb(cr, 0.18, 0.20, 0.23);
-            ns_pango_cairo_show_layout(cr, layout);
-            ns_pango_font_description_free(fd);
-            g_object_unref(layout);
-        }
-
-        double tx0 = x + 31.0;
-        double tx1 = x + w - (dtext[0] ? text_w + 8 : 12);
-        if (tx1 > tx0 + 12) {
-            cairo_set_source_rgb(cr, 0.72, 0.74, 0.77);
-            cairo_set_line_width(cr, 3.0);
-            cairo_move_to(cr, tx0, cy);
-            cairo_line_to(cr, tx1, cy);
-            cairo_stroke(cr);
-            cairo_arc(cr, tx0, cy, 3.5, 0, 2 * G_PI);
-            cairo_set_source_rgb(cr, 0.20, 0.23, 0.26);
-            cairo_fill(cr);
-        }
-        cairo_restore(cr);
+        paint_media_controls(cr, b, FALSE);
         return;
     }
     ns_image *bgimg = b->media ? b->media->bg_image : NULL;
@@ -4689,6 +4773,7 @@ paint_video(cairo_t *cr, const ns_box *b)
             cairo_restore(cr);
         }
     }
+    paint_media_controls(cr, b, TRUE);
 }
 
 static void

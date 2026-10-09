@@ -10,6 +10,10 @@ Significant changes in each release:
   and the picture follows the sound's clock (measured within 15 ms). Like
   `<audio>`, a video with sound autoplays only when muted or after a user
   gesture.
+* `<video controls>` and `<audio controls>` show working playback
+  controls: play/pause, a seek bar that seeks on click or drag, the
+  current time and duration, and a mute button. `<audio controls>` drew
+  an inert strip and `<video controls>` drew nothing.
 * `<video>` decodes as it plays instead of decoding the whole clip up
   front. A clip was cut off at 256 MB of decoded frames (11 s at 640x360,
   21 s at 480x270); memory now holds one frame whatever the length, and
