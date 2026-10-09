@@ -4,6 +4,11 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Incremental demuxers for fragmented MP4 (ISO BMFF: init segment, then
+  `moof`/`mdat` fragments) and WebM (Matroska EBML: tracks, clusters,
+  SimpleBlocks and BlockGroups). Both accept bytes in arbitrary chunks and
+  yield samples with decode and presentation times, keyframe flags and
+  the codec configuration (`av1C`, `vpcC`, `esds`, `dOps`/OpusHead).
 * Video and audio decoders for the formats streaming sites serve: AV1
   through libdav1d and VP9 through libvpx (both optional, `-Dav1` and
   `-Dvp9`, on when the library is present), Opus through libopus when
