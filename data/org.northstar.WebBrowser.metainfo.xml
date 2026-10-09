@@ -59,6 +59,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.13" date="2026-10-09">
+      <description>
+        <p>Media, WebAssembly and layout release.</p>
+        <ul>
+          <li>MPEG-1 video decodes as it plays, plays its sound and shows working playback controls.</li>
+          <li>WebAssembly runs on a faster interpreter, still without a JIT.</li>
+          <li>A source-wide security audit fixed several memory-safety issues.</li>
+          <li>Grid, inline and positioned layout, hit-testing and frame messaging are more standards-conformant.</li>
+          <li>Closing the window no longer crashes, and 32-bit Linux builds are supported.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.12" date="2026-10-02">
       <description>
         <p>Frames, messaging and stability release.</p>
