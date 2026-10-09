@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Security: a page could free the address the engine was still reading.
+  Laying out a page fetches its stylesheets and images synchronously,
+  and the engine waited for them by spinning its own main context, so
+  page script queued there (deferred module scripts, microtasks,
+  `AbortSignal.timeout()` callbacks) ran in the middle of layout. A
+  `history.replaceState()` from that script freed the page URL that the
+  stylesheet walk passed to every later request, a heap use-after-free
+  that AddressSanitizer caught on github.com. The engine now waits for
+  those fetches on a private context that only the fetch itself can
+  wake, and layout works on its own copy of the page URL.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1

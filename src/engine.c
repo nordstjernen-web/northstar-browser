@@ -80,19 +80,36 @@ on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     g_main_loop_quit(st->loop);
 }
 
+static GMainLoop *
+engine_blocking_wait_begin(void)
+{
+    GMainContext *isolated = g_main_context_new();
+    g_main_context_push_thread_default(isolated);
+    g_engine_blocking_depth++;
+    GMainLoop *loop = g_main_loop_new(isolated, FALSE);
+    g_main_context_unref(isolated);
+    return loop;
+}
+
+static void
+engine_blocking_wait_end(GMainLoop *loop)
+{
+    g_engine_blocking_depth--;
+    g_main_context_pop_thread_default(g_main_loop_get_context(loop));
+    g_main_loop_unref(loop);
+}
+
 static ns_response *
 ns_engine_fetch_blocking_for(const char *url, const char *top_url,
                              ns_fetch_destination dest, GError **error)
 {
     fetch_state st = {0};
-    st.loop = g_main_loop_new(ns_engine_context(), FALSE);
+    st.loop = engine_blocking_wait_begin();
     ns_net_request_async(url, top_url, "GET", NULL, 0, NULL,
                          ns_net_accept_headers_for(dest), dest, NULL,
                          NULL, on_fetch_done, &st);
-    g_engine_blocking_depth++;
     g_main_loop_run(st.loop);
-    g_engine_blocking_depth--;
-    g_main_loop_unref(st.loop);
+    engine_blocking_wait_end(st.loop);
     if (error) *error = st.error;
     else g_clear_error(&st.error);
     return st.resp;
@@ -111,13 +128,11 @@ ns_engine_post_blocking(const char *url, const char *top_url,
                         const char *content_type, GError **error)
 {
     fetch_state st = {0};
-    st.loop = g_main_loop_new(ns_engine_context(), FALSE);
+    st.loop = engine_blocking_wait_begin();
     ns_net_post_async(url, top_url, body, body_len, content_type,
                       NULL, on_fetch_done, &st);
-    g_engine_blocking_depth++;
     g_main_loop_run(st.loop);
-    g_engine_blocking_depth--;
-    g_main_loop_unref(st.loop);
+    engine_blocking_wait_end(st.loop);
     if (error) *error = st.error;
     else g_clear_error(&st.error);
     return st.resp;
@@ -725,9 +740,10 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
 }
 
 GHashTable *
-ns_engine_compute_cascade(ns_node *doc, const char *base_url,
+ns_engine_compute_cascade(ns_node *doc, const char *page_url,
                           GHashTable *css_cache, ns_anim *anim)
 {
+    g_autofree char *base_url = g_strdup(page_url);
     ns_css_set_frame_viewport_cb(frame_viewport_measured);
     g_autofree char *document_base = engine_document_base_url(doc, base_url);
     ns_css_relayout_enter();
@@ -753,7 +769,7 @@ ns_engine_compute_cascade(ns_node *doc, const char *base_url,
 }
 
 GHashTable *
-ns_engine_relayout(ns_node *doc, const char *base_url,
+ns_engine_relayout(ns_node *doc, const char *page_url,
                    int viewport_width, double viewport_height,
                    ns_image_cache *images, ns_anim *anim,
                    ns_js *js, GHashTable *css_cache,
@@ -761,6 +777,7 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
                    gsize caret_byte,
                    gsize sel_anchor_byte, ns_box **out_layout)
 {
+    g_autofree char *base_url = g_strdup(page_url);
     ns_css_set_frame_viewport_cb(frame_viewport_measured);
     g_autofree char *document_base = engine_document_base_url(doc, base_url);
     ns_css_relayout_enter();
@@ -1193,7 +1210,7 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
     }
 
     imgs_fetch_state st = {0};
-    st.loop = g_main_loop_new(ns_engine_context(), FALSE);
+    st.loop = engine_blocking_wait_begin();
     st.pending = (int)n;
     st.cache = cache;
 
@@ -1210,10 +1227,8 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
             ns_net_accept_headers_for(NS_FETCH_DEST_IMAGE), w->dest,
             w->policy, NULL, on_image_fetch_done, item);
     }
-    g_engine_blocking_depth++;
     g_main_loop_run(st.loop);
-    g_engine_blocking_depth--;
-    g_main_loop_unref(st.loop);
+    engine_blocking_wait_end(st.loop);
     g_hash_table_destroy(wanted);
 }
 
