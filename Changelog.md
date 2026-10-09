@@ -102,6 +102,11 @@ Significant changes in each release:
     The wrapper now reads its own copies. An `Attr` attached to a second
     element from an `attributeChangedCallback` is detached from the first
     one, instead of being listed twice and hanging the page's teardown.
+  - `history.go()` converted its argument with a plain C cast, undefined
+    for values such as `1e10` or `Infinity`, and added it to the history
+    position in `int`, so `history.go(2147483647)` overflowed before the
+    range check. It now converts with ToInt32 and checks the target in
+    64 bits.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
