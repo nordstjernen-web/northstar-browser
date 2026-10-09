@@ -118,6 +118,16 @@ Significant changes in each release:
     reset the template's `innerHTML` freed those rows, which were then
     used as the insertion point. The argument is now converted first,
     and a throwing `valueOf()` propagates.
+  - `replaceChildren()`, `textContent`/`innerHTML` replacement and
+    clearing walked the old children through a `next` pointer saved
+    before `disconnectedCallback` ran page script. A callback that moved
+    a sibling left it pointing at a parent that no longer listed it, and
+    could make a node being inserted an ancestor of the parent. The loops
+    now take the first child afresh each time, and `replaceChildren()`
+    skips a node that has become the parent or one of its ancestors.
+    Setting a `<template>`'s `innerHTML` orphans the old content instead
+    of freeing nodes page script may still hold, and SVG
+    `beginElement()` passes a copy of its `to` value.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
