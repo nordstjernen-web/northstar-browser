@@ -85,6 +85,11 @@ Significant changes in each release:
     of thousands of repeated prefixes cost quadratic memory and could
     overflow the stack. The prefixes are now skipped in a loop and the
     remaining URL is opened once.
+  - `DecompressionStream` inflated each chunk into one buffer outside
+    the JavaScript heap with no limit, so a small, highly compressible
+    gzip body made the browser allocate gigabytes, and past 4 GiB it
+    aborted. A single chunk or flush that would produce more than
+    256 MiB now fails the stream with a `RangeError`.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
