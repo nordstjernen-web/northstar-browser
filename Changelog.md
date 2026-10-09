@@ -4,6 +4,21 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Fixed an intermittent crash while pages load. `getComputedStyle()`
+  and similar style flushes replaced the style table without relaying
+  out, and two such flushes between relayouts could free styles the
+  current layout still painted with; the engine crashed in painting and
+  the watchdog reloaded the page.
+* The window's scroll range follows the page when its size changes after
+  loading. It kept the height the page had when it opened, so pages that
+  build themselves with JavaScript (YouTube's default watch layout)
+  could not be scrolled until a resize, zoom or `scrollTo()` happened to
+  update it.
+* The layout oscillation dampener only engages for layouts that really
+  alternate (A, B, A). It also counted relayouts that produced the same
+  layout as before, so a page making many layout-neutral mutations while
+  loading (YouTube) engaged it, and every later content change waited
+  0.4-1 s to appear.
 * A positioned box with `z-index: auto` no longer hides the z-indexed
   boxes inside it from clicks. Hit testing kept such a box's z-indexed
   descendants in a scope of their own, so they lost to any later sibling

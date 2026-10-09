@@ -1710,9 +1710,11 @@ on_result(gpointer data)
                 arm_anim(v);
             else
                 disarm_anim(v);
-            if (res->ph > 0 && res->ph != v->page_h) {
-                v->page_h = res->ph;
+            if ((res->ph > 0 && res->ph != v->page_h) ||
+                (res->pw > 0 && res->pw != v->page_w)) {
+                if (res->ph > 0) v->page_h = res->ph;
                 if (res->pw > 0) v->page_w = res->pw;
+                configure_adjustments(v);
                 gtk_widget_queue_draw(v->area);
             }
             if (res->requested_scroll_y >= 0 || res->requested_scroll_x >= 0) {

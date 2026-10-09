@@ -45,6 +45,7 @@ struct ns_browser {
     ns_node        *doc;
     ns_box         *layout;
     GHashTable     *styles;
+    GHashTable     *layout_styles;
     ns_js          *js;
     ns_anim        *anim;
     ns_image_cache *images;
@@ -277,6 +278,10 @@ browser_relayout(ns_browser *b)
         b->sb_node = NULL;
         b->sb_dragging = FALSE;
     }
+    if (b->layout_styles) {
+        g_hash_table_destroy(b->layout_styles);
+        b->layout_styles = NULL;
+    }
     if (b->js && b->styles) ns_js_set_style_table(b->js, NULL);
     if (b->styles) { g_hash_table_destroy(b->styles); b->styles = NULL; }
     browser_prune_cached_nodes(b);
@@ -316,12 +321,13 @@ browser_relayout(ns_browser *b)
     b->relayout_cost_us = now - relayout_t0;
     b->last_layout_us = now;
     guint64 sig = layout_signature(b->layout);
-    if (sig == b->layout_sig[0] || sig == b->layout_sig[1]) {
+    gboolean alternating = sig != b->layout_sig[0] && sig == b->layout_sig[1];
+    if (alternating) {
         if (rapid && b->relayout_cost_us >= NS_LAYOUT_EXPENSIVE_US)
             b->layout_osc = NS_LAYOUT_OSC_THRESHOLD;
         else if (rapid && b->layout_osc < G_MAXINT)
             b->layout_osc++;
-    } else {
+    } else if (sig != b->layout_sig[0]) {
         browser_damp_reset(b);
     }
     b->layout_sig[1] = b->layout_sig[0];
@@ -510,7 +516,10 @@ browser_flush_style(gpointer user_data)
     }
     if (b->styles) {
         ns_js_set_style_table(b->js, NULL);
-        g_hash_table_destroy(b->styles);
+        if (!b->layout_styles)
+            b->layout_styles = b->styles;
+        else
+            g_hash_table_destroy(b->styles);
         b->styles = NULL;
     }
     ns_css_set_viewport((double)b->vw, b->vh);
@@ -3545,6 +3554,7 @@ ns_browser_close(ns_browser *browser)
     }
     if (browser->anim) ns_anim_free(browser->anim);
     if (browser->layout) { ns_paint_3d_invalidate(); ns_box_free(browser->layout); }
+    if (browser->layout_styles) g_hash_table_destroy(browser->layout_styles);
     if (browser->styles) g_hash_table_destroy(browser->styles);
     if (browser->css_cache) g_hash_table_destroy(browser->css_cache);
     if (browser->js) ns_js_free(browser->js);
