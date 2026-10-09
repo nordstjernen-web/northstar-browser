@@ -57,6 +57,11 @@ typedef struct {
     int     reached_end;
     long    reload_size;
     Uint32  reload_ticks;
+    int     streaming;
+    int     stream_ended;
+    double  stream_base;
+    size_t  capacity;
+    SDL_AudioStream *converter;
 } ns_audio_player;
 
 struct NsAudioContext {
@@ -173,6 +178,7 @@ player_release(ns_audio_player *p)
 {
     if (!p || !p->used) return;
     free(p->pcm);
+    if (p->converter) SDL_FreeAudioStream(p->converter);
     memset(p, 0, sizeof *p);
 }
 
@@ -189,6 +195,13 @@ audio_cb(void *userdata, Uint8 *stream, int len)
         ns_audio_player *p = &g_players[i];
         if (!p->used || !p->playing || !p->pcm) continue;
         for (int f = 0; f < nframes; f++) {
+            if (p->streaming && p->cursor >= p->frames) {
+                if (p->stream_ended) {
+                    p->playing = 0;
+                    p->reached_end = 1;
+                }
+                break;
+            }
             if (p->cursor >= p->frames) {
                 if (p->loop && p->frames > 0) {
                     p->cursor = 0;
@@ -840,9 +853,9 @@ static void
 cmd_play(NsAudioContext *context, const char *token)
 {
     ns_audio_player *p = player_find(context, token);
-    if (!p || !p->pcm) return;
+    if (!p || (!p->pcm && !p->streaming)) return;
     audio_lock();
-    if (p->cursor >= p->frames) p->cursor = 0;
+    if (p->cursor >= p->frames && !p->streaming) p->cursor = 0;
     p->reached_end = 0;
     p->playing = 1;
     audio_unlock();
@@ -853,7 +866,7 @@ static void
 cmd_pause(NsAudioContext *context, const char *token)
 {
     ns_audio_player *p = player_find(context, token);
-    if (!p || !p->pcm) return;
+    if (!p || (!p->pcm && !p->streaming)) return;
     audio_lock();
     p->playing = 0;
     audio_unlock();
@@ -864,7 +877,7 @@ static void
 cmd_seek(NsAudioContext *context, const char *token, double seconds)
 {
     ns_audio_player *p = player_find(context, token);
-    if (!p || !p->pcm) return;
+    if (!p || !p->pcm || p->streaming) return;
     if (!(seconds >= 0)) seconds = 0;
     double max_seconds = (double)p->frames / NS_AUDIO_DEVICE_RATE;
     if (seconds > max_seconds) seconds = max_seconds;
@@ -1167,14 +1180,130 @@ ns_audio_context_status(NsAudioContext *context, const char *token,
     audio_lock();
     ns_audio_player *p = player_find(context, token);
     if (p) {
-        out->state = p->pcm ? NS_AUDIO_PLAYER_READY : NS_AUDIO_PLAYER_LOADING;
-        out->duration = (double)p->frames / NS_AUDIO_DEVICE_RATE;
-        out->position = (double)p->cursor / NS_AUDIO_DEVICE_RATE;
+        out->state = p->pcm || p->streaming ? NS_AUDIO_PLAYER_READY
+                                           : NS_AUDIO_PLAYER_LOADING;
+        out->duration = p->stream_base + (double)p->frames / NS_AUDIO_DEVICE_RATE;
+        out->position = p->stream_base + (double)p->cursor / NS_AUDIO_DEVICE_RATE;
         out->playing = p->playing ? TRUE : FALSE;
         out->ended = p->reached_end ? TRUE : FALSE;
     }
     audio_unlock();
     return p != NULL;
+}
+
+#define NS_AUDIO_STREAM_KEEP_FRAMES ((size_t)NS_AUDIO_DEVICE_RATE * 4)
+
+gboolean
+ns_audio_context_open_stream(NsAudioContext *context, const char *token,
+                             int rate, int channels)
+{
+    if (!context || !token || rate <= 0 || channels < 1 || channels > 2 ||
+        g_atomic_int_get(&context->destroyed))
+        return FALSE;
+    if (!audio_start()) return FALSE;
+    SDL_AudioStream *converter = SDL_NewAudioStream(
+        AUDIO_F32SYS, (Uint8)channels, rate,
+        AUDIO_F32SYS, 2, NS_AUDIO_DEVICE_RATE);
+    if (!converter) return FALSE;
+    audio_lock();
+    ns_audio_player *p = player_alloc(context, token);
+    if (!p) {
+        audio_unlock();
+        SDL_FreeAudioStream(converter);
+        return FALSE;
+    }
+    free(p->pcm);
+    if (p->converter) SDL_FreeAudioStream(p->converter);
+    p->pcm = NULL;
+    p->frames = 0;
+    p->capacity = 0;
+    p->cursor = 0;
+    p->streaming = 1;
+    p->stream_ended = 0;
+    p->stream_base = 0.0;
+    p->reached_end = 0;
+    p->converter = converter;
+    audio_unlock();
+    return TRUE;
+}
+
+static void
+stream_drop_played(ns_audio_player *p)
+{
+    if (p->cursor <= NS_AUDIO_STREAM_KEEP_FRAMES) return;
+    size_t drop = p->cursor - NS_AUDIO_STREAM_KEEP_FRAMES / 2;
+    memmove(p->pcm, p->pcm + drop * 2, (p->frames - drop) * 2 * sizeof(float));
+    p->frames -= drop;
+    p->cursor -= drop;
+    p->stream_base += (double)drop / NS_AUDIO_DEVICE_RATE;
+}
+
+gboolean
+ns_audio_context_stream_push(NsAudioContext *context, const char *token,
+                             const float *samples, int frames, int channels)
+{
+    if (!context || !token || !samples || frames <= 0 || channels < 1) return FALSE;
+    audio_lock();
+    ns_audio_player *p = player_find(context, token);
+    if (!p || !p->streaming || !p->converter) {
+        audio_unlock();
+        return FALSE;
+    }
+    int bytes = frames * channels * (int)sizeof(float);
+    gboolean ok = SDL_AudioStreamPut(p->converter, samples, bytes) == 0;
+    int avail = ok ? SDL_AudioStreamAvailable(p->converter) : 0;
+    size_t new_frames = avail > 0 ? (size_t)avail / (2 * sizeof(float)) : 0;
+    if (new_frames > 0) {
+        stream_drop_played(p);
+        if (p->frames + new_frames > NS_AUDIO_MAX_FLOATS / 2) {
+            audio_unlock();
+            return FALSE;
+        }
+        if (p->frames + new_frames > p->capacity) {
+            size_t capacity = MAX(p->capacity * 2, p->frames + new_frames);
+            float *grown = realloc(p->pcm, capacity * 2 * sizeof(float));
+            if (!grown) {
+                audio_unlock();
+                return FALSE;
+            }
+            p->pcm = grown;
+            p->capacity = capacity;
+        }
+        int got = SDL_AudioStreamGet(p->converter, p->pcm + p->frames * 2,
+                                     (int)(new_frames * 2 * sizeof(float)));
+        if (got > 0) p->frames += (size_t)got / (2 * sizeof(float));
+    }
+    audio_unlock();
+    return ok;
+}
+
+void
+ns_audio_context_stream_restart(NsAudioContext *context, const char *token,
+                                double seconds)
+{
+    if (!context || !token) return;
+    audio_lock();
+    ns_audio_player *p = player_find(context, token);
+    if (p && p->streaming) {
+        if (p->converter) SDL_AudioStreamClear(p->converter);
+        p->frames = 0;
+        p->cursor = 0;
+        p->stream_base = seconds > 0 ? seconds : 0.0;
+        p->stream_ended = 0;
+        p->reached_end = 0;
+    }
+    audio_unlock();
+}
+
+void
+ns_audio_context_stream_end(NsAudioContext *context, const char *token,
+                            gboolean ended)
+{
+    if (!context || !token) return;
+    audio_lock();
+    ns_audio_player *p = player_find(context, token);
+    if (p && p->streaming) p->stream_ended = ended ? 1 : 0;
+    audio_unlock();
 }
 
 void

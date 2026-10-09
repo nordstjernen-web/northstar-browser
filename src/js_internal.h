@@ -75,6 +75,9 @@ struct ns_js {
     guint         next_audio_token;
     NsAudioContext *audio_context;
     GHashTable   *media_players;
+    GHashTable   *mse_objects;
+    GHashTable   *mse_urls;
+    guint         next_mse_id;
     GPtrArray    *media_tasks;
     GPtrArray    *media_tasks_flushing;
     guint         media_poll_source;
@@ -363,6 +366,10 @@ typedef struct ns_draw_path_ud {
 
 double ns_arg_d(JSContext *ctx, JSValueConst v);
 void ns_bind_fn(JSContext *ctx, JSValueConst obj, const char *name, JSCFunction *fn, int argc);
+struct ns_mse_source;
+struct ns_mse_source *ns_js_mse_source_for_url(ns_js *js, const char *url);
+void ns_js_mse_teardown(ns_js *js);
+void ns_js_mse_install(JSContext *ctx, JSValueConst global);
 const ns_box *ns_box_find_by_dom(const ns_box *root, const ns_node *target);
 uint32_t ns_js_array_length(JSContext *ctx, JSValueConst arr);
 gboolean ns_webaudio_render_offline(JSContext *ctx, JSValueConst destination,
@@ -380,6 +387,7 @@ JSValue ns_promise_reject_dom(JSContext *ctx, const char *name,
 JSValue ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
                                const char *message);
 JSValue ns_media_time_ranges_for(JSContext *ctx, double dur);
+JSValue ns_media_time_ranges_from(JSContext *ctx, const double *edges, guint n_ranges);
 
 gboolean ns_node_is_media_element(const ns_node *n);
 char    *ns_media_resolve_src(JSContext *ctx, ns_node *node);

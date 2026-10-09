@@ -213,6 +213,11 @@ have_vp9 = libvpx.found()
 if have_vp9
   add_project_arguments('-DNS_HAVE_VP9', language: 'c')
 endif
+libopenh264 = dependency('openh264', version: '>= 2.0.0', required: get_option('h264'))
+have_h264 = libopenh264.found()
+if have_h264
+  add_project_arguments('-DNS_HAVE_H264', language: 'c')
+endif
 libopus = dependency('opus', required: false)
 if libopus.found()
   add_project_arguments('-DNS_HAVE_OPUS', language: 'c')
@@ -421,6 +426,7 @@ install_data(
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AV1 video (dav1d)': have_av1}, section: 'Features')
 summary({'VP9 video (libvpx)': have_vp9}, section: 'Features')
+summary({'H.264 video (OpenH264)': have_h264}, section: 'Features')
 summary({'Opus in WebM (libopus)': libopus.found()}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
 summary({'JavaScript engine': js_engine + ' ' + libquickjs.version()}, section: 'Features')

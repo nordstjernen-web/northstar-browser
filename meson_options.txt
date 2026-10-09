@@ -6,6 +6,8 @@ option('av1', type: 'feature', value: 'auto',
        description: 'Decode AV1 <video> through libdav1d (on by default when dav1d is present): the codec YouTube streams to browsers that support it.')
 option('vp9', type: 'feature', value: 'auto',
        description: 'Decode VP9 <video> through libvpx (on by default when libvpx is present).')
+option('h264', type: 'feature', value: 'auto',
+       description: 'Decode H.264 (AVC) <video> through OpenH264 (on by default when openh264 is present): the codec of HLS streams such as PeerTube and Twitch. Only Cisco-built OpenH264 binaries are covered by the H.264 patent license Cisco pays for; distribution builds from source are not.')
 option('avif', type: 'feature', value: 'auto',
        description: 'Decode AVIF images through libavif (on by default when libavif is present). AVIF is a rare format on the web and libavif pulls in a full AV1 decoder; disable to drop it.')
 option('audio', type: 'feature', value: 'auto',

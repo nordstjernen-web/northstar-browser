@@ -5,9 +5,12 @@
 
 #include "video.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "mse.h"
+#include "videodec.h"
 #include "pl_mpeg.h"
 
 enum {
@@ -15,6 +18,7 @@ enum {
 };
 
 static const double NS_VIDEO_FORWARD_DECODE_S = 2.0;
+static const int NS_VIDEO_OPEN_ENDED_MS = 24 * 3600 * 1000;
 
 struct ns_video_stream {
     GBytes      *bytes;
@@ -27,7 +31,17 @@ struct ns_video_stream {
     gboolean     has_audio;
     ns_texture  *texture;
     double       shown_time;
+    ns_mse_source    *mse;
+    ns_video_decoder *decoder;
+    double          decoded_pts;
+    gboolean        decoded_valid;
+    GArray         *early;
 };
+
+typedef struct {
+    double      pts;
+    ns_texture *texture;
+} mse_early_picture;
 
 static gboolean
 bytes_are_program_stream(const guchar *data, gsize len)
@@ -174,14 +188,130 @@ ns_video_stream_new(const guchar *data, gsize len)
     return s;
 }
 
+static void
+early_picture_clear(gpointer data)
+{
+    mse_early_picture *picture = data;
+    ns_texture_unref(picture->texture);
+}
+
+ns_video_stream *
+ns_video_stream_new_mse(ns_mse_source *source)
+{
+    if (!source) return NULL;
+    ns_video_stream *s = g_new0(ns_video_stream, 1);
+    s->mse = ns_mse_source_ref(source);
+    s->shown_time = -1.0;
+    s->early = g_array_new(FALSE, FALSE, sizeof(mse_early_picture));
+    g_array_set_clear_func(s->early, early_picture_clear);
+    return s;
+}
+
+static gboolean
+mse_present(ns_video_stream *s, ns_texture *texture, double pts)
+{
+    if (!texture) return FALSE;
+    ns_texture_unref(s->texture);
+    s->texture = texture;
+    s->shown_time = pts;
+    s->width = ns_texture_get_width(texture);
+    s->height = ns_texture_get_height(texture);
+    return TRUE;
+}
+
+static ns_texture *
+mse_take_early(ns_video_stream *s, double pts)
+{
+    ns_texture *found = NULL;
+    for (guint i = 0; i < s->early->len;) {
+        mse_early_picture *picture = &g_array_index(s->early, mse_early_picture, i);
+        if (picture->pts > pts + 1e-6) {
+            i++;
+            continue;
+        }
+        if (!found && fabs(picture->pts - pts) < 1e-6) {
+            found = picture->texture;
+            picture->texture = NULL;
+        }
+        g_array_remove_index(s->early, i);
+    }
+    return found;
+}
+
+static ns_texture *
+mse_decode_frame(ns_video_stream *s, const ns_mse_frame *frame, gboolean want)
+{
+    gint64 stamp = (gint64)llround(frame->pts * 1e6);
+    ns_texture *texture = ns_video_decoder_decode(s->decoder, frame->data,
+                                                  frame->config, stamp, want);
+    s->decoded_pts = frame->pts;
+    s->decoded_valid = TRUE;
+    return texture;
+}
+
+static gssize
+mse_decoded_index(ns_video_stream *s, ns_mse_buffer *buffer)
+{
+    if (!s->decoded_valid) return -1;
+    gssize last = ns_mse_buffer_frame_at(buffer, s->decoded_pts);
+    const ns_mse_frame *at = last >= 0 ? ns_mse_buffer_frame(buffer, (guint)last) : NULL;
+    return at && fabs(at->pts - s->decoded_pts) < 1e-6 ? last : -1;
+}
+
+static gboolean
+mse_show(ns_video_stream *s, double t)
+{
+    ns_mse_buffer *buffer = ns_mse_source_track_buffer(s->mse, NS_MSE_TRACK_VIDEO);
+    const ns_mp4_track *track = ns_mse_buffer_track(buffer);
+    if (!track) return FALSE;
+    if (!s->decoder) {
+        s->decoder = ns_video_decoder_new(track->codec);
+        s->decoded_valid = FALSE;
+        if (!s->decoder) return FALSE;
+    }
+    gssize target = ns_mse_buffer_frame_at(buffer, t);
+    if (target < 0) return FALSE;
+    const ns_mse_frame *goal = ns_mse_buffer_frame(buffer, (guint)target);
+    if (s->texture && fabs(goal->pts - s->shown_time) < 1e-6) return FALSE;
+    ns_texture *texture = mse_take_early(s, goal->pts);
+    if (texture) return mse_present(s, texture, goal->pts);
+    gssize start = -1;
+    gssize last = mse_decoded_index(s, buffer);
+    if (last >= 0 && last < target && goal->pts > s->shown_time &&
+        goal->pts - s->shown_time < NS_VIDEO_FORWARD_DECODE_S)
+        start = last + 1;
+    if (start < 0) {
+        start = ns_mse_buffer_keyframe_at_or_before(buffer, target);
+        if (start < 0) return FALSE;
+        ns_video_decoder_flush(s->decoder);
+        g_array_set_size(s->early, 0);
+    }
+    for (gssize i = start; i <= target; i++) {
+        const ns_mse_frame *frame = ns_mse_buffer_frame(buffer, (guint)i);
+        gboolean early = i < target && frame->pts > goal->pts;
+        ns_texture *decoded = mse_decode_frame(s, frame, i == target || early);
+        if (early && decoded) {
+            mse_early_picture picture = { frame->pts, decoded };
+            g_array_append_val(s->early, picture);
+        } else if (decoded) {
+            if (texture) ns_texture_unref(texture);
+            texture = decoded;
+        }
+    }
+    return mse_present(s, texture, goal->pts);
+}
+
 void
 ns_video_stream_free(ns_video_stream *s)
 {
     if (!s) return;
+    ns_video_decoder_free(s->decoder);
+    if (s->early) g_array_free(s->early, TRUE);
+    ns_mse_source_unref(s->mse);
     if (s->program) plm_destroy(s->program);
     if (s->elementary) plm_video_destroy(s->elementary);
     ns_texture_unref(s->texture);
-    g_bytes_unref(s->bytes);
+    if (s->bytes) g_bytes_unref(s->bytes);
     g_free(s);
 }
 
@@ -200,6 +330,12 @@ ns_video_stream_height(const ns_video_stream *s)
 int
 ns_video_stream_duration_ms(const ns_video_stream *s)
 {
+    if (s && s->mse) {
+        double d = ns_mse_source_duration(s->mse);
+        if (!(d > 0) || isinf(d) || d * 1000.0 > NS_VIDEO_OPEN_ENDED_MS)
+            return NS_VIDEO_OPEN_ENDED_MS;
+        return (int)(d * 1000.0 + 0.5);
+    }
     return s ? s->duration_ms : 0;
 }
 
@@ -212,14 +348,21 @@ ns_video_stream_has_audio(const ns_video_stream *s)
 GBytes *
 ns_video_stream_bytes(const ns_video_stream *s)
 {
-    return s ? g_bytes_ref(s->bytes) : NULL;
+    return s && s->bytes ? g_bytes_ref(s->bytes) : NULL;
 }
 
 gsize
 ns_video_stream_memory(const ns_video_stream *s)
 {
     if (!s) return 0;
-    return g_bytes_get_size(s->bytes) + (gsize)s->width * (gsize)s->height * 4;
+    gsize encoded = s->bytes ? g_bytes_get_size(s->bytes) : 0;
+    return encoded + (gsize)s->width * (gsize)s->height * 4;
+}
+
+gboolean
+ns_video_stream_is_mse(const ns_video_stream *s)
+{
+    return s && s->mse;
 }
 
 ns_texture *
@@ -233,6 +376,7 @@ ns_video_stream_show(ns_video_stream *s, int phase_ms)
 {
     if (!s) return FALSE;
     double t = phase_ms / 1000.0;
+    if (s->mse) return mse_show(s, t);
     if (t >= s->shown_time && t < s->shown_time + s->frame_s) return FALSE;
     gboolean forward = t > s->shown_time &&
                        t - s->shown_time < NS_VIDEO_FORWARD_DECODE_S;

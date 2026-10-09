@@ -865,8 +865,12 @@ static gboolean
 ns_image_apply_phase(ns_image *img, int phase)
 {
     if (img->video) {
+        if (ns_video_stream_is_mse(img->video))
+            img->anim_total_ms = ns_video_stream_duration_ms(img->video);
         if (!ns_video_stream_show(img->video, phase)) return FALSE;
         img->texture = ns_video_stream_texture(img->video);
+        img->natural_width = ns_video_stream_width(img->video);
+        img->natural_height = ns_video_stream_height(img->video);
         return TRUE;
     }
     int idx = 0;
@@ -992,6 +996,40 @@ ns_image_cache_insert_decoding(ns_image_cache *cache, const char *url,
     g_free(decoding);
     g_hash_table_insert(cache->by_url, g_strdup(url), img);
     ns_image_cache_account(cache, img);
+    return img;
+}
+
+ns_image *
+ns_image_cache_insert_stream(ns_image_cache *cache, const char *url,
+                             ns_video_stream *stream)
+{
+    if (!cache || !url || !stream) {
+        ns_video_stream_free(stream);
+        return NULL;
+    }
+    ns_image *img = g_hash_table_lookup(cache->by_url, url);
+    if (img) {
+        if (img->anim_frames) g_array_free(img->anim_frames, TRUE);
+        else if (img->video) ns_video_stream_free(img->video);
+        else ns_texture_unref(img->texture);
+        img->anim_frames = NULL;
+        img->failed = FALSE;
+        cache->total_bytes -= img->bytes;
+        img->bytes = 0;
+    } else {
+        img = g_new0(ns_image, 1);
+        img->url = g_strdup(url);
+        g_hash_table_insert(cache->by_url, g_strdup(url), img);
+    }
+    img->video = stream;
+    img->texture = ns_video_stream_texture(stream);
+    img->anim_total_ms = ns_video_stream_duration_ms(stream);
+    img->anim_start_us = g_get_monotonic_time();
+    img->anim_video = TRUE;
+    img->anim_paused = TRUE;
+    img->anim_paused_phase_ms = 0;
+    img->anim_loop = FALSE;
+    img->loaded = TRUE;
     return img;
 }
 

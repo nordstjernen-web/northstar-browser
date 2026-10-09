@@ -42631,6 +42631,40 @@ ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
     return JS_NewFloat64(ctx, magic == 0 ? 0.0 : dur);
 }
 
+static JSValue
+ns_time_ranges_list_edge(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv, int magic,
+                         JSValue *func_data)
+{
+    (void)this_val;
+    int32_t len = 0;
+    JS_ToInt32(ctx, &len, func_data[1]);
+    int32_t idx = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
+    if (idx < 0 || idx >= len)
+        return JS_ThrowRangeError(ctx, "index out of TimeRanges bounds");
+    return JS_GetPropertyUint32(ctx, func_data[0], (uint32_t)(idx * 2 + magic));
+}
+
+JSValue
+ns_media_time_ranges_from(JSContext *ctx, const double *edges, guint n_ranges)
+{
+    JSValue obj = JS_NewObject(ctx);
+    ns_obj_adopt_global_proto(ctx, obj, "TimeRanges");
+    JS_SetPropertyStr(ctx, obj, "length", JS_NewInt32(ctx, (int)n_ranges));
+    JSValue list = JS_NewArray(ctx);
+    for (guint i = 0; i < n_ranges * 2; i++)
+        JS_SetPropertyUint32(ctx, list, i, JS_NewFloat64(ctx, edges[i]));
+    JSValue data[2] = { list, JS_NewInt32(ctx, (int)n_ranges) };
+    JS_SetPropertyStr(ctx, obj, "start",
+        JS_NewCFunctionData(ctx, ns_time_ranges_list_edge, 1, 0, 2, data));
+    JS_SetPropertyStr(ctx, obj, "end",
+        JS_NewCFunctionData(ctx, ns_time_ranges_list_edge, 1, 1, 2, data));
+    JS_FreeValue(ctx, data[0]);
+    JS_FreeValue(ctx, data[1]);
+    return obj;
+}
+
 void
 ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj, const char *iface)
 {
@@ -49527,6 +49561,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__ndMediaSourceTypeSupported",
                ns_media_source_type_supported, 1);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
+    ns_js_mse_install(ctx, global);
     ns_bind_fn(ctx, global, "__ndChildFrame",        ns_window_child_frame,            1);
 
     ns_bind_ctor(ctx, global, "Event",        ns_event_ctor,        2);

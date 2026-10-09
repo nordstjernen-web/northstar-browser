@@ -4,6 +4,55 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* `<video>` and `<audio>` play Media Source Extensions streams, as
+  YouTube and other streaming sites send them: `MediaSource`,
+  `SourceBuffer` (`appendBuffer`, `remove`, `abort`, `timestampOffset`,
+  sequence mode, append windows, `buffered`) and
+  `MediaSource.isTypeSupported` for AV1/VP9 video and AAC/Opus audio in
+  fragmented MP4 or WebM. Buffered ranges, `readyState`, `waiting`,
+  `canplay` and `playing` follow what has been appended, and appending
+  past a 300 MB (video) / 48 MB (audio) quota throws
+  `QuotaExceededError` so pages evict old data. Sound streams into the
+  audio mixer as it decodes, and the picture follows its clock.
+* A playing `<video>` or `<audio>` holds at its start, waiting, until the
+  document has fired its `load` event, instead of starting while the
+  page is still loading and laying itself out.
+* H.264 (AVC) video decoder over Cisco's OpenH264, an optional
+  dependency behind the new `-Dh264` feature (on when `openh264` is
+  present). `src/h264.c` rewrites length-prefixed MP4 samples to Annex B
+  and feeds the `avcC` parameter sets before the first frame and whenever
+  they change. Each picture comes back right after its own access unit,
+  in decode order: OpenH264's display-order reordering keys on the
+  wrapping picture order count and stalls on x264 streams with B-frames.
+  Only OpenH264 binaries built by Cisco are covered by the H.264 patent
+  license Cisco pays for; distribution builds from source are not.
+* Media Source Extensions play H.264 when OpenH264 is built in:
+  `isTypeSupported()` accepts `avc1`/`avc3` Baseline, Main and High
+  (8-bit 4:2:0) in MP4, which is what hls.js asks before playing
+  PeerTube. Each coded frame keeps the codec configuration it arrived
+  with, so the decoder gets the right SPS/PPS after a quality switch or a
+  seek back into an earlier rendition. With B-frames the frame for a
+  time is found by presentation time among the frames stored in decode
+  order, pictures decoded before their turn are kept until shown, and an
+  append that continues a coded frame group no longer deletes the
+  group's reordered frames it overlaps.
+* A SourceBuffer whose initialization segment carries both an audio and
+  a video track, as hls.js creates for muxed HLS renditions (PeerTube,
+  Twitch), plays both. Only the first decodable track was kept: PeerTube
+  played without sound, and Twitch, whose segments list the audio track
+  first, without picture. The buffer's `buffered` ranges are the
+  intersection of its two tracks.
+* `MediaSource.setLiveSeekableRange()` and `clearLiveSeekableRange()`.
+  The media element's `seekable` for a MediaSource follows Media Source
+  Extensions: 0 to the duration for a finite one, and for a live
+  (infinite) duration the live seekable range joined with the buffered
+  ranges. Twitch's player calls it after its first append and reported
+  a MediaSource error ("not a function") on every live stream.
+* After a seek into a part of a Media Source that is not buffered yet,
+  the sound starts at the seek target instead of at the next buffered
+  audio frame, which could lie anywhere later in the stream; the
+  picture follows the sound's clock, so playback jumped back to an old
+  buffered range.
 * Incremental demuxers for fragmented MP4 (ISO BMFF: init segment, then
   `moof`/`mdat` fragments) and WebM (Matroska EBML: tracks, clusters,
   SimpleBlocks and BlockGroups). Both accept bytes in arbitrary chunks and

@@ -83,6 +83,10 @@ ns_image       *ns_image_cache_insert_loaded(ns_image_cache *cache,
                                              int             width,
                                              int             height);
 
+ns_image       *ns_image_cache_insert_stream(ns_image_cache  *cache,
+                                             const char      *url,
+                                             ns_video_stream *stream);
+
 ns_image       *ns_image_cache_insert_encoded(ns_image_cache *cache,
                                               const char     *url,
                                               const guchar   *data,
