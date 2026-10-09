@@ -292,6 +292,18 @@ ns_mse_source_add_buffer(ns_mse_source *source, const char *type)
     return buffer;
 }
 
+ns_mse_buffer *
+ns_mse_source_add_file_buffer(ns_mse_source *source, gboolean webm)
+{
+    if (!source) return NULL;
+    ns_mse_buffer *buffer = buffer_new(source);
+    if (webm) buffer->webm = ns_webm_demuxer_new();
+    else buffer->demuxer = ns_mp4_demuxer_new();
+    g_ptr_array_add(source->buffers, buffer);
+    source->generation++;
+    return buffer;
+}
+
 void
 ns_mse_source_remove_buffer(ns_mse_source *source, ns_mse_buffer *buffer)
 {
@@ -444,14 +456,11 @@ batch_new(void)
     return batch;
 }
 
-ns_mse_append_result
-ns_mse_buffer_append(ns_mse_buffer *buffer, const guint8 *data, gsize len,
-                     double *timestamp_offset, gboolean sequence_mode,
-                     double window_start, double window_end)
+static ns_mse_append_result
+buffer_take_samples(ns_mse_buffer *buffer, double *timestamp_offset,
+                    gboolean sequence_mode, double window_start,
+                    double window_end)
 {
-    if (!buffer) return NS_MSE_APPEND_PARSE_ERROR;
-    if (!demux_append(buffer, data, len))
-        return NS_MSE_APPEND_PARSE_ERROR;
     buffer_choose_track(buffer);
     ns_mse_buffer *targets[2] = { buffer, buffer->companion };
     GArray *batches[2] = { batch_new(), batch_new() };
@@ -501,6 +510,54 @@ ns_mse_buffer_append(ns_mse_buffer *buffer, const guint8 *data, gsize len,
     if (targets[1]) buffer_commit(targets[1], batches[1]);
     else g_array_free(batches[1], TRUE);
     return NS_MSE_APPEND_OK;
+}
+
+ns_mse_append_result
+ns_mse_buffer_append(ns_mse_buffer *buffer, const guint8 *data, gsize len,
+                     double *timestamp_offset, gboolean sequence_mode,
+                     double window_start, double window_end)
+{
+    if (!buffer) return NS_MSE_APPEND_PARSE_ERROR;
+    if (!demux_append(buffer, data, len))
+        return NS_MSE_APPEND_PARSE_ERROR;
+    return buffer_take_samples(buffer, timestamp_offset, sequence_mode,
+                               window_start, window_end);
+}
+
+ns_mse_append_result
+ns_mse_buffer_append_indexed(ns_mse_buffer *buffer, guint64 position,
+                             const guint8 *data, gsize len,
+                             guint64 *next_position)
+{
+    *next_position = NS_MP4_INDEX_END;
+    if (!buffer || !ns_mp4_demuxer_has_sample_index(buffer->demuxer))
+        return NS_MSE_APPEND_PARSE_ERROR;
+    *next_position = ns_mp4_demuxer_index_extract(buffer->demuxer, position,
+                                                  data, len);
+    return buffer_take_samples(buffer, NULL, FALSE, -INFINITY, INFINITY);
+}
+
+void
+ns_mse_buffer_flush(ns_mse_buffer *buffer)
+{
+    if (!buffer || !buffer->webm) return;
+    ns_webm_demuxer_flush(buffer->webm);
+    buffer_take_samples(buffer, NULL, FALSE, -INFINITY, INFINITY);
+}
+
+double
+ns_mse_buffer_file_duration(const ns_mse_buffer *buffer)
+{
+    if (!buffer) return 0.0;
+    if (buffer->webm) return ns_webm_demuxer_duration_seconds(buffer->webm);
+    return ns_mp4_demuxer_index_duration(buffer->demuxer);
+}
+
+guint64
+ns_mse_buffer_file_seek(const ns_mse_buffer *buffer, double seconds)
+{
+    return buffer ? ns_mp4_demuxer_index_seek(buffer->demuxer, seconds)
+                  : NS_MP4_INDEX_END;
 }
 
 void

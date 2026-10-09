@@ -7,6 +7,8 @@
 
 #include <string.h>
 
+#include "mse.h"
+
 typedef enum {
     NEEDS_NOTHING,
     NEEDS_MIXER,
@@ -151,6 +153,18 @@ codecs_parameter(char **params)
     return NULL;
 }
 
+static ns_media_answer
+progressive_type_support(const char *type, const char *mime, char **params)
+{
+    if (strcmp(mime, "video/mp4") != 0 && strcmp(mime, "video/webm") != 0)
+        return NS_MEDIA_CANNOT;
+    char *codecs = codecs_parameter(params);
+    ns_media_answer answer = !codecs || !*g_strstrip(codecs) ? NS_MEDIA_MAYBE
+        : ns_mse_type_supported(type) ? NS_MEDIA_PROBABLY : NS_MEDIA_CANNOT;
+    g_free(codecs);
+    return answer;
+}
+
 ns_media_answer
 ns_media_type_support(const char *type, ns_media_element element,
                       ns_media_source source)
@@ -159,7 +173,14 @@ ns_media_type_support(const char *type, ns_media_element element,
     char *lower = g_ascii_strdown(type, -1);
     char **params = g_strsplit(lower, ";", -1);
     g_free(lower);
-    const ns_media_type_row *row = find_row(g_strstrip(params[0]), element);
+    const char *mime = g_strstrip(params[0]);
+    if (element == NS_MEDIA_ELEMENT_VIDEO && source == NS_MEDIA_SOURCE_FILE &&
+        !find_row(mime, element)) {
+        ns_media_answer answer = progressive_type_support(type, mime, params);
+        g_strfreev(params);
+        return answer;
+    }
+    const ns_media_type_row *row = find_row(mime, element);
     if (!row || !requirement_met(row->requires) ||
         (source == NS_MEDIA_SOURCE_MSE && !row->mse)) {
         g_strfreev(params);

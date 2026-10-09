@@ -1,4 +1,4 @@
-/* Northstar — incremental fragmented-MP4 (ISO BMFF) demuxing for Media Source Extensions.
+/* Northstar — MP4 (ISO BMFF) demuxing: fragmented streams for Media Source Extensions, sample tables for whole files.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -50,6 +50,16 @@ const ns_mp4_track *ns_mp4_demuxer_track_by_id(const ns_mp4_demuxer *d,
 gboolean        ns_mp4_demuxer_pop_sample(ns_mp4_demuxer *d,
                                           ns_mp4_sample *out);
 void            ns_mp4_demuxer_reset_parser(ns_mp4_demuxer *d);
+
+#define NS_MP4_INDEX_END G_MAXUINT64
+
+gboolean        ns_mp4_demuxer_has_sample_index(const ns_mp4_demuxer *d);
+double          ns_mp4_demuxer_index_duration(const ns_mp4_demuxer *d);
+guint64         ns_mp4_demuxer_index_seek(const ns_mp4_demuxer *d,
+                                          double seconds);
+guint64         ns_mp4_demuxer_index_extract(ns_mp4_demuxer *d,
+                                             guint64 position,
+                                             const guint8 *data, gsize len);
 
 void            ns_mp4_sample_clear(ns_mp4_sample *sample);
 double          ns_mp4_time_to_seconds(gint64 time, guint32 timescale);

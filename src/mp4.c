@@ -1,4 +1,4 @@
-/* Northstar — incremental fragmented-MP4 (ISO BMFF) demuxing for Media Source Extensions.
+/* Northstar — MP4 (ISO BMFF) demuxing: fragmented streams for Media Source Extensions, sample tables for whole files.
  * Copyright 2026 Gabriel Ferreira
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -17,6 +17,7 @@ enum {
     NS_MP4_MAX_TRACKS = 64,
     NS_MP4_MAX_PENDING_SAMPLES = 1 << 18,
     NS_MP4_MAX_DESCRIPTOR_DEPTH = 8,
+    NS_MP4_MAX_INDEXED_SAMPLES = 1 << 21,
 };
 
 static const guint64 NS_MP4_MAX_STREAM_POSITION = G_GUINT64_CONSTANT(1) << 62;
@@ -57,7 +58,29 @@ typedef struct {
     guint32      default_sample_flags;
     gboolean     has_next_decode_time;
     gint64       next_decode_time;
+    GArray      *samples;
 } demux_track;
+
+typedef struct {
+    guint64  position;
+    gint64   dts;
+    gint64   pts;
+    guint32  size;
+    guint32  duration;
+    guint32  track_id;
+    gboolean keyframe;
+} indexed_sample;
+
+typedef struct {
+    child_box stsz;
+    child_box stz2;
+    child_box stco;
+    child_box co64;
+    child_box stsc;
+    child_box stts;
+    child_box ctts;
+    child_box stss;
+} sample_tables;
 
 typedef struct {
     guint32 track_id;
@@ -103,6 +126,7 @@ struct ns_mp4_demuxer {
     GArray     *pending;
     guint       pending_head;
     GQueue     *ready;
+    GArray     *index;
 };
 
 static void
@@ -263,6 +287,7 @@ demux_track_free(gpointer data)
     if (!track) return;
     if (track->public.codec_config) g_bytes_unref(track->public.codec_config);
     if (track->public.config_obus) g_bytes_unref(track->public.config_obus);
+    if (track->samples) g_array_unref(track->samples);
     g_free(track);
 }
 
@@ -493,14 +518,212 @@ parse_container_for(const child_box *parent, guint32 wanted, child_box *found)
     return FALSE;
 }
 
+static gboolean
+table_open(const child_box *box, gsize skip, gsize entry_size, byte_cursor *c,
+           guint32 *count)
+{
+    cursor_init(c, box->payload, box->payload_length);
+    cursor_skip(c, skip);
+    *count = cursor_u32(c);
+    return !c->overrun && *count <= cursor_remaining(c) / entry_size;
+}
+
+static void
+collect_sample_tables(const child_box *stbl, sample_tables *tables)
+{
+    memset(tables, 0, sizeof *tables);
+    byte_cursor c;
+    cursor_init(&c, stbl->payload, stbl->payload_length);
+    child_box child;
+    while (cursor_next_box(&c, &child) > 0) {
+        switch (child.type) {
+        case NS_MP4_FOURCC('s', 't', 's', 'z'): tables->stsz = child; break;
+        case NS_MP4_FOURCC('s', 't', 'z', '2'): tables->stz2 = child; break;
+        case NS_MP4_FOURCC('s', 't', 'c', 'o'): tables->stco = child; break;
+        case NS_MP4_FOURCC('c', 'o', '6', '4'): tables->co64 = child; break;
+        case NS_MP4_FOURCC('s', 't', 's', 'c'): tables->stsc = child; break;
+        case NS_MP4_FOURCC('s', 't', 't', 's'): tables->stts = child; break;
+        case NS_MP4_FOURCC('c', 't', 't', 's'): tables->ctts = child; break;
+        case NS_MP4_FOURCC('s', 't', 's', 's'): tables->stss = child; break;
+        default: break;
+        }
+    }
+}
+
+typedef struct {
+    byte_cursor cursor;
+    guint32     constant;
+    guint32     count;
+    guint8      field_bits;
+    guint32     read;
+    guint8      pending_nibble;
+} size_reader;
+
+static gboolean
+size_reader_open(const sample_tables *tables, size_reader *r)
+{
+    memset(r, 0, sizeof *r);
+    if (tables->stsz.payload) {
+        cursor_init(&r->cursor, tables->stsz.payload, tables->stsz.payload_length);
+        cursor_skip(&r->cursor, 4);
+        r->constant = cursor_u32(&r->cursor);
+        r->count = cursor_u32(&r->cursor);
+        r->field_bits = 32;
+        if (r->cursor.overrun) return FALSE;
+        return r->constant != 0 || r->count <= cursor_remaining(&r->cursor) / 4;
+    }
+    if (!tables->stz2.payload) return FALSE;
+    cursor_init(&r->cursor, tables->stz2.payload, tables->stz2.payload_length);
+    cursor_skip(&r->cursor, 7);
+    r->field_bits = cursor_u8(&r->cursor);
+    r->count = cursor_u32(&r->cursor);
+    if (r->cursor.overrun) return FALSE;
+    if (r->field_bits != 4 && r->field_bits != 8 && r->field_bits != 16)
+        return FALSE;
+    return (guint64)r->count * r->field_bits <=
+           (guint64)cursor_remaining(&r->cursor) * 8;
+}
+
+static guint32
+size_reader_next(size_reader *r)
+{
+    guint32 index = r->read++;
+    if (r->constant) return r->constant;
+    switch (r->field_bits) {
+    case 4:
+        if (index % 2 == 0) {
+            r->pending_nibble = cursor_u8(&r->cursor);
+            return r->pending_nibble >> 4;
+        }
+        return r->pending_nibble & 0x0F;
+    case 8:  return cursor_u8(&r->cursor);
+    case 16: return cursor_u16(&r->cursor);
+    default: return cursor_u32(&r->cursor);
+    }
+}
+
+typedef struct {
+    byte_cursor cursor;
+    guint32     entries;
+    guint32     run_left;
+    guint32     value;
+} run_reader;
+
+static gboolean
+run_reader_open(const child_box *box, run_reader *r)
+{
+    memset(r, 0, sizeof *r);
+    if (!box->payload) return TRUE;
+    return table_open(box, 4, 8, &r->cursor, &r->entries);
+}
+
+static guint32
+run_reader_next(run_reader *r)
+{
+    while (r->run_left == 0 && r->entries > 0) {
+        r->run_left = cursor_u32(&r->cursor);
+        r->value = cursor_u32(&r->cursor);
+        r->entries--;
+    }
+    if (r->run_left > 0) r->run_left--;
+    return r->value;
+}
+
+static GArray *
+build_sample_index(const sample_tables *tables)
+{
+    size_reader sizes;
+    if (!size_reader_open(tables, &sizes) || sizes.count == 0 ||
+        sizes.count > NS_MP4_MAX_INDEXED_SAMPLES)
+        return NULL;
+    gboolean wide = tables->co64.payload != NULL;
+    const child_box *offsets_box = wide ? &tables->co64 : &tables->stco;
+    byte_cursor offsets;
+    guint32 chunk_count = 0;
+    if (!offsets_box->payload ||
+        !table_open(offsets_box, 4, wide ? 8 : 4, &offsets, &chunk_count))
+        return NULL;
+    byte_cursor stsc;
+    guint32 stsc_entries = 0;
+    if (!tables->stsc.payload ||
+        !table_open(&tables->stsc, 4, 12, &stsc, &stsc_entries) ||
+        stsc_entries == 0)
+        return NULL;
+    run_reader durations;
+    run_reader offsets_in_time;
+    if (!tables->stts.payload || !run_reader_open(&tables->stts, &durations) ||
+        !run_reader_open(&tables->ctts, &offsets_in_time))
+        return NULL;
+    byte_cursor sync;
+    guint32 sync_left = 0;
+    gboolean all_sync = tables->stss.payload == NULL;
+    if (!all_sync && !table_open(&tables->stss, 4, 4, &sync, &sync_left))
+        return NULL;
+    guint32 next_sync = sync_left > 0 ? cursor_u32(&sync) : 0;
+
+    GArray *samples = g_array_sized_new(FALSE, FALSE, sizeof(indexed_sample),
+                                        sizes.count);
+    guint32 entry_first_chunk = cursor_u32(&stsc);
+    guint32 entry_samples = cursor_u32(&stsc);
+    cursor_skip(&stsc, 4);
+    stsc_entries--;
+    guint32 following_first_chunk = stsc_entries > 0 ? cursor_u32(&stsc) : 0;
+    gint64 dts = 0;
+    guint32 sample_number = 0;
+    for (guint32 chunk = 1; chunk <= chunk_count && sample_number < sizes.count;
+         chunk++) {
+        while (stsc_entries > 0 && chunk >= following_first_chunk) {
+            entry_first_chunk = following_first_chunk;
+            entry_samples = cursor_u32(&stsc);
+            cursor_skip(&stsc, 4);
+            stsc_entries--;
+            following_first_chunk = stsc_entries > 0 ? cursor_u32(&stsc) : 0;
+        }
+        guint64 position = wide ? cursor_u64(&offsets) : cursor_u32(&offsets);
+        if (offsets.overrun || stsc.overrun || chunk < entry_first_chunk) break;
+        for (guint32 i = 0; i < entry_samples && sample_number < sizes.count; i++) {
+            sample_number++;
+            indexed_sample sample;
+            sample.track_id = 0;
+            sample.position = position;
+            sample.size = size_reader_next(&sizes);
+            sample.duration = run_reader_next(&durations);
+            sample.dts = dts;
+            sample.pts = dts + (gint32)run_reader_next(&offsets_in_time);
+            sample.keyframe = all_sync;
+            while (!all_sync && sync_left > 0 && next_sync < sample_number) {
+                sync_left--;
+                next_sync = sync_left > 0 ? cursor_u32(&sync) : 0;
+            }
+            if (!all_sync && sync_left > 0 && next_sync == sample_number)
+                sample.keyframe = TRUE;
+            if (sizes.cursor.overrun || position >= NS_MP4_MAX_STREAM_POSITION ||
+                dts > NS_MP4_MAX_TIMESTAMP)
+                break;
+            g_array_append_val(samples, sample);
+            position += sample.size;
+            dts += sample.duration;
+        }
+    }
+    if (samples->len == 0) {
+        g_array_unref(samples);
+        return NULL;
+    }
+    return samples;
+}
+
 static void
 parse_minf(demux_track *track, guint32 handler, const child_box *minf)
 {
     child_box stbl;
+    if (!parse_container_for(minf, NS_MP4_FOURCC('s', 't', 'b', 'l'), &stbl))
+        return;
     child_box stsd;
-    if (parse_container_for(minf, NS_MP4_FOURCC('s', 't', 'b', 'l'), &stbl) &&
-        parse_container_for(&stbl, NS_MP4_FOURCC('s', 't', 's', 'd'), &stsd))
+    if (parse_container_for(&stbl, NS_MP4_FOURCC('s', 't', 's', 'd'), &stsd))
         parse_stsd(track, handler, &stsd);
+    sample_tables tables;
+    collect_sample_tables(&stbl, &tables);
+    track->samples = build_sample_index(&tables);
 }
 
 static gboolean
@@ -662,6 +885,40 @@ parse_mvex(GArray *extends, const child_box *mvex)
     return status == 0;
 }
 
+static int
+indexed_sample_cmp(gconstpointer a, gconstpointer b)
+{
+    const indexed_sample *sa = a, *sb = b;
+    if (sa->position != sb->position) return sa->position < sb->position ? -1 : 1;
+    if (sa->track_id != sb->track_id) return sa->track_id < sb->track_id ? -1 : 1;
+    return sa->dts < sb->dts ? -1 : sa->dts > sb->dts;
+}
+
+static GArray *
+merge_sample_indexes(GPtrArray *tracks)
+{
+    guint total = 0;
+    for (guint i = 0; i < tracks->len; i++) {
+        demux_track *track = g_ptr_array_index(tracks, i);
+        if (!track->samples) continue;
+        if (track->samples->len > NS_MP4_MAX_INDEXED_SAMPLES - total) return NULL;
+        total += track->samples->len;
+    }
+    if (total == 0) return NULL;
+    GArray *index = g_array_sized_new(FALSE, FALSE, sizeof(indexed_sample), total);
+    for (guint i = 0; i < tracks->len; i++) {
+        demux_track *track = g_ptr_array_index(tracks, i);
+        if (!track->samples) continue;
+        for (guint j = 0; j < track->samples->len; j++)
+            g_array_index(track->samples, indexed_sample, j).track_id =
+                track->public.id;
+        g_array_append_vals(index, track->samples->data, track->samples->len);
+        g_clear_pointer(&track->samples, g_array_unref);
+    }
+    g_array_sort(index, indexed_sample_cmp);
+    return index;
+}
+
 static gboolean
 parse_moov(ns_mp4_demuxer *d, const guint8 *payload, gsize length)
 {
@@ -706,6 +963,8 @@ parse_moov(ns_mp4_demuxer *d, const guint8 *payload, gsize length)
             track->default_sample_size = entry->default_size;
             track->default_sample_flags = entry->default_flags;
         }
+        if (d->index) g_array_unref(d->index);
+        d->index = merge_sample_indexes(tracks);
         if (d->tracks) g_ptr_array_unref(d->tracks);
         d->tracks = tracks;
         d->movie_timescale = movie_timescale;
@@ -1128,6 +1387,7 @@ ns_mp4_demuxer_free(ns_mp4_demuxer *d)
     g_ptr_array_unref(d->tracks);
     g_array_unref(d->pending);
     g_queue_free_full(d->ready, ready_sample_free);
+    if (d->index) g_array_unref(d->index);
     g_free(d);
 }
 
@@ -1207,6 +1467,96 @@ ns_mp4_demuxer_reset_parser(ns_mp4_demuxer *d)
         track->has_next_decode_time = FALSE;
         track->next_decode_time = 0;
     }
+}
+
+gboolean
+ns_mp4_demuxer_has_sample_index(const ns_mp4_demuxer *d)
+{
+    return d && d->has_init && d->index;
+}
+
+static double
+indexed_seconds(const ns_mp4_demuxer *d, const indexed_sample *sample,
+                gint64 time)
+{
+    const demux_track *track = find_track(d->tracks, sample->track_id);
+    if (!track) return 0.0;
+    gint64 edit = MAX(track->public.edit_media_time, 0);
+    return ns_mp4_time_to_seconds(time - edit, track->public.timescale);
+}
+
+double
+ns_mp4_demuxer_index_duration(const ns_mp4_demuxer *d)
+{
+    if (!ns_mp4_demuxer_has_sample_index(d)) return 0.0;
+    double duration = 0.0;
+    for (guint i = 0; i < d->index->len; i++) {
+        const indexed_sample *sample = &g_array_index(d->index, indexed_sample, i);
+        duration = MAX(duration, indexed_seconds(d, sample,
+                                                 sample->pts + sample->duration));
+    }
+    return duration;
+}
+
+guint64
+ns_mp4_demuxer_index_seek(const ns_mp4_demuxer *d, double seconds)
+{
+    if (!ns_mp4_demuxer_has_sample_index(d)) return NS_MP4_INDEX_END;
+    guint n = d->tracks->len;
+    guint64 *start = g_new(guint64, n);
+    double *start_time = g_new(double, n);
+    for (guint t = 0; t < n; t++) {
+        start[t] = NS_MP4_INDEX_END;
+        start_time[t] = -G_MAXDOUBLE;
+    }
+    for (guint i = 0; i < d->index->len; i++) {
+        const indexed_sample *sample = &g_array_index(d->index, indexed_sample, i);
+        guint t = 0;
+        while (t < n && ((demux_track *)g_ptr_array_index(d->tracks, t))
+                            ->public.id != sample->track_id)
+            t++;
+        if (t == n) continue;
+        double time = indexed_seconds(d, sample, sample->pts);
+        if (start[t] == NS_MP4_INDEX_END ||
+            (sample->keyframe && time <= seconds && time > start_time[t])) {
+            start[t] = sample->position;
+            start_time[t] = time;
+        }
+    }
+    guint64 position = NS_MP4_INDEX_END;
+    for (guint t = 0; t < n; t++) position = MIN(position, start[t]);
+    g_free(start);
+    g_free(start_time);
+    return position;
+}
+
+guint64
+ns_mp4_demuxer_index_extract(ns_mp4_demuxer *d, guint64 position,
+                             const guint8 *data, gsize len)
+{
+    if (!ns_mp4_demuxer_has_sample_index(d) || !data) return NS_MP4_INDEX_END;
+    guint lo = 0, hi = d->index->len;
+    while (lo < hi) {
+        guint mid = lo + (hi - lo) / 2;
+        if (g_array_index(d->index, indexed_sample, mid).position < position)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    for (guint i = lo; i < d->index->len; i++) {
+        const indexed_sample *indexed = &g_array_index(d->index, indexed_sample, i);
+        guint64 offset = indexed->position - position;
+        if (offset > len || indexed->size > len - offset) return indexed->position;
+        ns_mp4_sample *sample = g_new0(ns_mp4_sample, 1);
+        sample->track_id = indexed->track_id;
+        sample->dts = indexed->dts;
+        sample->pts = indexed->pts;
+        sample->duration = indexed->duration;
+        sample->keyframe = indexed->keyframe;
+        sample->data = g_bytes_new(data + offset, indexed->size);
+        g_queue_push_tail(d->ready, sample);
+    }
+    return NS_MP4_INDEX_END;
 }
 
 void

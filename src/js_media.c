@@ -15,6 +15,7 @@
 #include "media_types.h"
 #include "mse.h"
 #include "net.h"
+#include "progressive.h"
 #include "video.h"
 
 #define NS_MEDIA_POLL_MS 50
@@ -72,6 +73,7 @@ typedef struct {
     JSValue    pin;
     gint64     last_timeupdate_us;
     ns_mse_source    *mse;
+    ns_progressive   *progressive;
     ns_audio_decoder *decoder;
     double     mse_audio_next;
     gboolean   mse_waiting;
@@ -396,6 +398,7 @@ media_close_backend(ns_media_player *p)
         ns_mse_source_unref(p->mse);
         p->mse = NULL;
     }
+    g_clear_pointer(&p->progressive, ns_progressive_free);
     ns_audio_decoder_free(p->decoder);
     p->decoder = NULL;
     p->mse_waiting = FALSE;
@@ -410,6 +413,20 @@ media_mse_attach(ns_media_player *p, ns_mse_source *source)
     if (p->video && p->js->image_cache)
         ns_image_cache_insert_stream(p->js->image_cache, p->src,
                                      ns_video_stream_new_mse(source));
+}
+
+static gboolean
+media_start_progressive(ns_media_player *p)
+{
+    ns_js *js = p->js;
+    if (!p->video || !js->image_cache) return FALSE;
+    ns_image *known = ns_image_cache_peek(js->image_cache, p->src);
+    if (known && known->video && !ns_video_stream_is_mse(known->video))
+        return FALSE;
+    p->progressive = ns_progressive_new(p->src, js->current_url,
+                                        ns_js_fetch_policy(js, p->el));
+    media_mse_attach(p, ns_progressive_source(p->progressive));
+    return TRUE;
 }
 
 static void
@@ -537,8 +554,8 @@ media_load(ns_media_player *p)
         return;
     }
     ns_mse_source *source = ns_js_mse_source_for_url(p->js, p->src);
-    if (source) {
-        media_mse_attach(p, source);
+    if (source || media_start_progressive(p)) {
+        if (source) media_mse_attach(p, source);
         media_poll_ensure(p->js);
         return;
     }
@@ -929,6 +946,28 @@ media_mse_poll(ns_media_player *p)
     }
 }
 
+static gboolean
+media_progressive_poll(ns_media_player *p)
+{
+    ns_progressive_state state = ns_progressive_get_state(p->progressive);
+    if (state == NS_PROGRESSIVE_PROBING || state == NS_PROGRESSIVE_READY) {
+        ns_progressive_update(p->progressive, media_current_time(p), !p->paused);
+        return TRUE;
+    }
+    GBytes *body = ns_progressive_take_body(p->progressive);
+    media_close_backend(p);
+    gsize len = 0;
+    const guchar *data = body ? g_bytes_get_data(body, &len) : NULL;
+    ns_video_stream *stream = data ? ns_video_stream_new(data, len) : NULL;
+    if (body) g_bytes_unref(body);
+    if (stream)
+        ns_image_cache_insert_stream(p->js->image_cache, p->src, stream);
+    else
+        media_fail_source(p, MEDIA_ERR_SRC_NOT_SUPPORTED,
+                          "MEDIA_ELEMENT_ERROR: Format error");
+    return FALSE;
+}
+
 static void
 media_video_follow_audio(ns_media_player *p, ns_image *frames, gint64 now)
 {
@@ -964,6 +1003,8 @@ media_poll_player(ns_media_player *p, gint64 now)
         p->held_for_load = FALSE;
         if (!p->paused) media_backend_play(p);
     }
+    if (p->progressive && !media_progressive_poll(p))
+        return p->network_state != NETWORK_NO_SOURCE;
     if (p->mse) {
         media_mse_poll(p);
         if (!p->mse) return FALSE;
@@ -1253,11 +1294,11 @@ ns_media_blob_updated(ns_js *js, const char *url)
     while (g_hash_table_iter_next(&it, NULL, &value)) {
         ns_media_player *p = value;
         if (!p->fetching || !p->src || strcmp(p->src, url) != 0) continue;
-        /* A Media Source Extensions stream feeds its own streaming player:
-         * the blob behind its URL is the polyfill's copy of the appended
-         * bytes, not a file to decode again. Reopening the player from it
-         * dropped the stream's sound for good. */
-        if (p->mse) continue;
+        /* A Media Source Extensions stream (or a progressive download) feeds
+         * its own streaming player: the blob behind its URL is the polyfill's
+         * copy of the appended bytes, not a file to decode again. Reopening
+         * the player from it dropped the stream's sound for good. */
+        if (p->mse || p->progressive) continue;
         GBytes *bytes = ns_net_resolve_blob(url, NULL);
         if (!bytes) continue;
         ns_audio_context_open_bytes(js->audio_context, p->token, bytes, TRUE);

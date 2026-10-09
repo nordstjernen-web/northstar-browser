@@ -69,6 +69,7 @@ northstar_engine_sources = files(
   'video.c',
   'av1.c',
   'mse.c',
+  'progressive.c',
   'mp4.c',
   'webm.c',
   'yuv.c',

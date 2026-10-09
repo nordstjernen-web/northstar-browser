@@ -50,6 +50,8 @@ gboolean       ns_mse_source_ended(const ns_mse_source *source);
 void           ns_mse_source_set_ended(ns_mse_source *source, gboolean ended);
 guint          ns_mse_source_generation(const ns_mse_source *source);
 ns_mse_buffer *ns_mse_source_add_buffer(ns_mse_source *source, const char *type);
+ns_mse_buffer *ns_mse_source_add_file_buffer(ns_mse_source *source,
+                                             gboolean webm);
 void           ns_mse_source_remove_buffer(ns_mse_source *source,
                                            ns_mse_buffer *buffer);
 ns_mse_buffer *ns_mse_source_track_buffer(ns_mse_source *source,
@@ -63,6 +65,14 @@ ns_mse_append_result ns_mse_buffer_append(ns_mse_buffer *buffer,
                                           gboolean sequence_mode,
                                           double window_start,
                                           double window_end);
+ns_mse_append_result ns_mse_buffer_append_indexed(ns_mse_buffer *buffer,
+                                                  guint64 position,
+                                                  const guint8 *data, gsize len,
+                                                  guint64 *next_position);
+void           ns_mse_buffer_flush(ns_mse_buffer *buffer);
+double         ns_mse_buffer_file_duration(const ns_mse_buffer *buffer);
+guint64        ns_mse_buffer_file_seek(const ns_mse_buffer *buffer,
+                                       double seconds);
 void           ns_mse_buffer_remove(ns_mse_buffer *buffer, double start,
                                     double end);
 void           ns_mse_buffer_abort(ns_mse_buffer *buffer);

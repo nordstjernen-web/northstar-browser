@@ -4,6 +4,19 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* `<video>` plays ordinary MP4 (H.264, AV1, VP9 with AAC or Opus) and
+  WebM files, not only MPEG-1, and `canPlayType("video/mp4")` and
+  `"video/webm"` answer "maybe" (or "probably" for codecs Northstar
+  decodes). The file is fetched with HTTP range requests: the `moov`
+  is found wherever it sits (BitChute's files keep it at the end), its
+  sample tables are indexed, and the samples for the next half minute
+  are fed through the Media Source buffers, so decoding, sound,
+  `buffered`, `readyState`, `seekable` and seeking work as they do for
+  streaming sites; memory holds about a minute of the file whatever
+  its length. A seek restarts the download at the keyframe before the
+  target. WebM and fragmented MP4 files are read from the start, and a
+  server that ignores ranges sends the whole file at once. Video.js
+  on BitChute had refused the source as unsupported.
 * `<video>` and `<audio>` play Media Source Extensions streams, as
   YouTube and other streaming sites send them: `MediaSource`,
   `SourceBuffer` (`appendBuffer`, `remove`, `abort`, `timestampOffset`,
