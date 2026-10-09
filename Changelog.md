@@ -95,6 +95,13 @@ Significant changes in each release:
     run a page-defined setter, and a setter that called
     `history.replaceState()` freed that URL before it was read. The
     event now gets a copy.
+  - Building an `Attr` wrapper ran page script (a getter on
+    `window.Attr`, setters on `Attr.prototype`) and then went on reading
+    the attribute it was wrapping, so a script that removed the
+    attribute meanwhile had its freed value copied into a new Text node.
+    The wrapper now reads its own copies. An `Attr` attached to a second
+    element from an `attributeChangedCallback` is detached from the first
+    one, instead of being listed twice and hanging the page's teardown.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
