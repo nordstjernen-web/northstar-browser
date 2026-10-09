@@ -42,6 +42,9 @@ gboolean ns_paint_inline_xy_to_byte(const ns_box *b,
                                     gsize *out_byte);
 gboolean ns_paint_inline_word_range(const ns_box *b, gsize byte,
                                     gsize *out_start, gsize *out_end);
+gboolean ns_paint_inline_strut_line(const ns_box *b, const ns_style *s,
+                                    NsPangoLayout *layout, double *out_offset,
+                                    double *out_height, double *out_baseline);
 double ns_paint_inline_y_offset_for_layout(const ns_box *b,
                                            NsPangoLayout *layout);
 

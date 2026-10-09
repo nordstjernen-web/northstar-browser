@@ -4,6 +4,43 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* `overflow: hidden` (or `clip`, `scroll`, `auto`) clips absolutely
+  positioned descendants whose containing block is inside the clipping
+  box. They were painted after the clip was lifted, so a positioned
+  child escaped any clipping parent: YouTube's collapsed volume slider
+  drew its knob over the time display. Descendants positioned against a
+  box outside the clipping element still escape it, as in CSS.
+* An auto-width block with `overflow: hidden` inside an explicitly
+  zero-width parent clips its content to nothing. The painter skipped
+  clipping for any zero-width box without its own explicit `width`, so a
+  collapsed slider's contents spilled over its neighbours.
+* A percentage `top` or `bottom` on a relatively positioned box resolves
+  against a containing block whose height comes from flex stretching,
+  even through `height: 100%` children of the stretched item. It
+  resolved to 0, so YouTube's autoplay toggle (`top: 50%;
+  transform: translateY(-50%)`) sat half its height above its pill.
+* A line holding inline-blocks or inline images is sized and aligned
+  with the CSS strut: its box reaches the larger of the strut's and the
+  inline-blocks' ascents above the baseline and descents below it,
+  instead of centring the line in `line-height`. Small inline-blocks
+  sit on the baseline in tall lines (they were painted at the top of
+  the line), and text stays on the same baseline as a taller
+  inline-block beside it (it was centred a few pixels below). Painting
+  and hit testing now place inline-blocks where layout does.
+* An inline `<img>`, `<svg>` or `<video>` with padding, borders or
+  margins counts them in the width of the line, so a shrink-to-fit
+  parent (inline-block, flex item, float) wraps the whole box. Only the
+  content width was measured, so YouTube's 24px speaker icon with 12px
+  padding sat in a 24px button and stuck out of its pill.
+* An absolutely positioned box resolves its percentage `min-height`
+  against the height of its containing block even when that block's
+  height is `auto`. Twitch's player (`top: 0; min-height: 100%` inside
+  an aspect-ratio box) was laid out 0 px tall, so a playing live stream
+  showed only the channel's offline picture behind it.
+* A grid that places its items column by column (`grid-auto-flow: column`)
+  and sizes itself to its content is as wide as all its columns plus the
+  gaps between them, where it used to be as wide as its widest item: the
+  tabs of a Twitch channel no longer pile up on top of each other.
 * Security: a page could free the address the engine was still reading.
   Laying out a page fetches its stylesheets and images synchronously,
   and the engine waited for them by spinning its own main context, so

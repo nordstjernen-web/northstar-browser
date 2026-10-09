@@ -2307,10 +2307,51 @@ inline_has_form_controls(const ns_box *b)
     return FALSE;
 }
 
+gboolean
+ns_paint_inline_strut_line(const ns_box *b, const ns_style *s,
+                           NsPangoLayout *layout, double *out_offset,
+                           double *out_height, double *out_baseline)
+{
+    if (!b || !layout || !b->inline_atomics || b->inline_atomics->len == 0)
+        return FALSE;
+    if (inline_has_form_controls(b)) return FALSE;
+    if (ns_pango_layout_get_line_count(layout) != 1) return FALSE;
+    NsPangoContext *ctx = ns_pango_layout_get_context(layout);
+    const NsPangoFontDescription *fd = ns_pango_layout_get_font_description(layout);
+    if (!fd) fd = ns_pango_context_get_font_description(ctx);
+    NsPangoFontMetrics *fm = ns_pango_context_get_metrics(ctx, fd, NULL);
+    if (!fm) return FALSE;
+    double asc = ns_pango_font_metrics_get_ascent(fm) / (double)NS_PANGO_SCALE;
+    double desc = ns_pango_font_metrics_get_descent(fm) / (double)NS_PANGO_SCALE;
+    ns_pango_font_metrics_unref(fm);
+    double lh = ns_paint_css_line_height_px(s);
+    double half_leading = lh > 0 ? (lh - asc - desc) / 2.0 : 0;
+    /* The strut: the root inline box's font metrics plus half-leading. */
+    double strut_asc = asc + half_leading;
+    double strut_desc = desc + half_leading;
+    int ph;
+    ns_pango_layout_get_pixel_size(layout, NULL, &ph);
+    double pango_asc = ns_pango_layout_get_baseline(layout) / (double)NS_PANGO_SCALE;
+    double pango_desc = ph - pango_asc;
+    /* Pango's line extents exceed the font's only where an atomic inline
+     * reaches further; those atomics extend the line box past the strut. */
+    double line_asc = pango_asc > asc + 0.5 ? MAX(strut_asc, pango_asc) : strut_asc;
+    double line_desc = pango_desc > desc + 0.5 ? MAX(strut_desc, pango_desc)
+                                               : strut_desc;
+    *out_offset = line_asc - pango_asc;
+    *out_height = line_asc + line_desc;
+    *out_baseline = line_asc;
+    return TRUE;
+}
+
 double
 ns_paint_inline_y_offset_for_layout(const ns_box *b, NsPangoLayout *layout)
 {
     if (!b || !layout) return 0;
+    double strut_offset, strut_h, strut_base;
+    if (ns_paint_inline_strut_line(b, inherited_style(b), layout, &strut_offset,
+                                   &strut_h, &strut_base))
+        return strut_offset;
     int ph;
     ns_pango_layout_get_pixel_size(layout, NULL, &ph);
     double y_offset = (b->content_height - (double)ph) * 0.5;
@@ -3491,7 +3532,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
             double sx = text_x + (double)pos.x / NS_PANGO_SCALE + a->relative_x;
-            double sy = b->y + (double)pos.y / NS_PANGO_SCALE + a->relative_y;
+            double sy = y_origin + (double)pos.y / NS_PANGO_SCALE + a->relative_y;
             a->owner_offset_x = sx - b->x;
             a->owner_offset_y = sy - b->y;
             cairo_save(cr);
@@ -3607,6 +3648,7 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
         double text_x = 0;
         double ti = ns_text_indent_px(s, root->content_width);
         if (ti < 0) text_x = ti;
+        double y_offset = ns_paint_inline_y_offset_for_layout(root, layout);
         for (guint i = 0; i < root->inline_atomics->len; i++) {
             ns_inline_atomic *atomic =
                 &g_array_index(root->inline_atomics, ns_inline_atomic, i);
@@ -3614,7 +3656,7 @@ ns_paint_sync_inline_atomic_offsets(ns_box *root)
             ns_pango_layout_index_to_pos(layout, (int)atomic->byte_off, &pos);
             atomic->owner_offset_x = text_x + (double)pos.x / NS_PANGO_SCALE +
                                      atomic->relative_x;
-            atomic->owner_offset_y = (double)pos.y / NS_PANGO_SCALE +
+            atomic->owner_offset_y = y_offset + (double)pos.y / NS_PANGO_SCALE +
                                      atomic->relative_y;
         }
         g_object_unref(layout);
@@ -5487,6 +5529,33 @@ dom_tree_order_cmp(const ns_node *a, const ns_node *b)
     return 1;
 }
 
+static gboolean
+box_contains_fixed(const ns_box *b)
+{
+    const ns_style *s = b ? b->style : NULL;
+    return s && (s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
+                 s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]);
+}
+
+/* Whether the overflow clip of `clip` applies to the deferred positioned
+ * descendant `d`: it does unless d's containing block lies outside clip. */
+static gboolean
+overflow_clip_contains(const ns_box *clip, const ns_box *d)
+{
+    const ns_style *s = d->style;
+    const ns_css_value *v = s ? s->values[NS_CSS_POSITION] : NULL;
+    const char *kw = v && v->kind == NS_CSS_V_KEYWORD ? v->u.keyword : NULL;
+    gboolean fixed = kw && strcmp(kw, "fixed") == 0;
+    if (!fixed && !(kw && strcmp(kw, "absolute") == 0)) return TRUE;
+    for (const ns_box *p = d->parent; p; p = p->parent) {
+        if (p == clip)
+            return box_contains_fixed(p) || (!fixed && box_is_positioned(p));
+        if (box_contains_fixed(p) || (!fixed && box_is_positioned(p)))
+            return TRUE;
+    }
+    return FALSE;
+}
+
 typedef struct deferred_capture {
     const ns_box *box;
     double dev_x, dev_y;
@@ -6762,6 +6831,15 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
              (bs->values[NS_CSS_WIDTH] &&
               (bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_LENGTH ||
                bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_CALC)));
+        if (!explicit_w && b->kind == NS_BOX_BLOCK && b->parent &&
+            b->parent->style && (!bs || !bs->values[NS_CSS_WIDTH] ||
+                                 bs->values[NS_CSS_WIDTH]->kind == NS_CSS_V_KEYWORD)) {
+            /* An auto-width block fills its parent, so a zero width
+             * inherited from an explicitly sized parent is real. */
+            const ns_css_value *pwv = b->parent->style->values[NS_CSS_WIDTH];
+            explicit_w = pwv && (pwv->kind == NS_CSS_V_LENGTH ||
+                                 pwv->kind == NS_CSS_V_CALC);
+        }
         if ((pw > 0 || explicit_w) && (ph > 0 || explicit_h)) {
             cairo_save(cr);
             corner_radii ov_radii = box_border_radii(b, pw, ph);
@@ -6965,6 +7043,28 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                 }
                 cairo_restore(cr);
             }
+        }
+    }
+    if (clip_overflow && deferred_mine) {
+        GPtrArray *inside = NULL;
+        for (guint i = 0; i < deferred_mine->len;) {
+            deferred_capture *cap = g_ptr_array_index(deferred_mine, i);
+            if (overflow_clip_contains(b, cap->box)) {
+                if (!inside) inside = g_ptr_array_new_with_free_func(g_free);
+                g_ptr_array_add(inside, g_ptr_array_steal_index(deferred_mine, i));
+            } else {
+                i++;
+            }
+        }
+        if (inside) {
+            if (has_transform || has_sticky) g_paint_no_cull++;
+            paint_flush_deferred(cr, inside, highlight);
+            if (has_transform || has_sticky) g_paint_no_cull--;
+            g_ptr_array_free(inside, TRUE);
+        }
+        if (deferred_mine->len == 0) {
+            g_ptr_array_free(deferred_mine, TRUE);
+            deferred_mine = NULL;
         }
     }
     if (clip_overflow) cairo_restore(cr);
