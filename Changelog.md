@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Video and audio decoders for the formats streaming sites serve: AV1
+  through libdav1d and VP9 through libvpx (both optional, `-Dav1` and
+  `-Dvp9`, on when the library is present), Opus through libopus when
+  present, and AAC-LC through a new in-tree decoder written from ISO/IEC
+  14496-3. Decoded pictures (8 to 16 bit, 4:2:0/4:2:2/4:4:4, BT.601 or
+  BT.709, limited or full range) convert to BGRA textures in `src/yuv.c`.
+  `src/videodec.c` and `src/audiodec.c` pick the decoder from the codec
+  string.
 * Script that changes an attribute layout cannot see no longer lays the
   page out again: SVG content attributes repaint their `<svg>`, `dir`
   only relayouts when the text's base direction changes, an `<a>`'s href

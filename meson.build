@@ -203,6 +203,20 @@ if have_freetype
 endif
 
 
+libdav1d = dependency('dav1d', version: '>= 1.0.0', required: get_option('av1'))
+have_av1 = libdav1d.found()
+if have_av1
+  add_project_arguments('-DNS_HAVE_AV1', language: 'c')
+endif
+libvpx = dependency('vpx', version: '>= 1.8.0', required: get_option('vp9'))
+have_vp9 = libvpx.found()
+if have_vp9
+  add_project_arguments('-DNS_HAVE_VP9', language: 'c')
+endif
+libopus = dependency('opus', required: false)
+if libopus.found()
+  add_project_arguments('-DNS_HAVE_OPUS', language: 'c')
+endif
 libavif = dependency('libavif', required: get_option('avif'))
 have_avif = libavif.found()
 if have_avif
@@ -405,6 +419,9 @@ install_data(
 )
 
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
+summary({'AV1 video (dav1d)': have_av1}, section: 'Features')
+summary({'VP9 video (libvpx)': have_vp9}, section: 'Features')
+summary({'Opus in WebM (libopus)': libopus.found()}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
 summary({'JavaScript engine': js_engine + ' ' + libquickjs.version()}, section: 'Features')
 
