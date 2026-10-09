@@ -79,6 +79,12 @@ Significant changes in each release:
     height, so printing such a page spun until memory ran out. The walk
     now stops when a step no longer moves and is capped at about a
     million spans.
+  - Opening a `northstar-unsafe-continue:` link, the safe-browsing
+    interstitial's way through, stripped the prefix and called itself
+    again, copying the rest of the URL at every level, so a link made
+    of thousands of repeated prefixes cost quadratic memory and could
+    overflow the stack. The prefixes are now skipped in a loop and the
+    remaining URL is opened once.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
