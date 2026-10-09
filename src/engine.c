@@ -654,7 +654,10 @@ static void
 collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc, int depth)
 {
-    if (!n || depth >= 512 || ns_node_is_element_named(n, "noscript")) return;
+    if (!n || depth >= 512 ||
+        (n->kind != NS_NODE_ELEMENT && n->kind != NS_NODE_DOCUMENT) ||
+        ns_node_is_element_named(n, "noscript"))
+        return;
     if (ns_node_is_element_named(n, "iframe") ||
         ns_node_is_element_named(n, "frame") ||
         ns_node_is_element_named(n, "object")) {
@@ -799,6 +802,18 @@ ns_engine_compute_cascade(ns_node *doc, const char *page_url,
     g_ptr_array_free(page_sheets, TRUE);
     g_ptr_array_free(sheet_docs, TRUE);
     ns_css_relayout_leave();
+    return styles;
+}
+
+GHashTable *
+ns_engine_compute_cascade_delta(ns_node *doc, const char *page_url,
+                                GHashTable *css_cache, ns_anim *anim,
+                                GPtrArray *changes)
+{
+    ns_css_compute_want_delta(changes);
+    GHashTable *styles = ns_engine_compute_cascade(doc, page_url, css_cache,
+                                                   anim);
+    ns_css_compute_want_delta(NULL);
     return styles;
 }
 

@@ -51,6 +51,18 @@ typedef struct ns_render_profile {
 } ns_render_profile;
 
 gboolean ns_render_page_uses_hover(void);
+/* Whether the last relayout's styles depended on container queries. */
+gboolean ns_render_page_uses_containers(void);
+/* The container sizes the last relayout of doc measured, for a cascade
+ * that keeps that layout. */
+GHashTable *ns_render_container_map(const ns_node *doc);
+/* The viewport width the cascade of doc uses (a wider meta viewport wins). */
+double ns_render_viewport_width(ns_node *doc, double viewport_width);
+/* Hands over a cascade just computed for doc, so a relayout that follows at
+ * once, with nothing changed in between, uses it instead of cascading
+ * again; NULL withdraws an offer. Takes ownership of styles. */
+void ns_render_offer_styles(const ns_node *doc, double viewport_width,
+                            GHashTable *containers, GHashTable *styles);
 gboolean ns_render_page_uses_active(void);
 
 const ns_css_page_rule *ns_render_page_rule(void);

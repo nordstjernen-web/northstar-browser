@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "css.h"
+#include "mat4.h"
 #include "dom.h"
 #include "image.h"
 
@@ -333,4 +334,167 @@ ns_paint_hazards_clear(ns_paint_hazards *hazards)
     if (!hazards) return;
     if (hazards->fixed_bands) g_array_free(hazards->fixed_bands, TRUE);
     memset(hazards, 0, sizeof *hazards);
+}
+
+static gboolean
+box_local_transform(const ns_box *b, ns_mat4 *m)
+{
+    ns_mat4_identity(m);
+    const ns_style *s = b->style;
+    if (!s || !(s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
+                s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]))
+        return FALSE;
+    ns_css_transform eff;
+    eff.n_ops = 0;
+    ns_css_style_effective_transform(s, NULL, &eff);
+    if (eff.n_ops == 0) return FALSE;
+    double bx, by, bw, bh;
+    box_border_rect(b, &bx, &by, &bw, &bh);
+    double ox = bx + bw / 2.0, oy = by + bh / 2.0, oz = 0;
+    const ns_css_value *origin = s->values[NS_CSS_TRANSFORM_ORIGIN];
+    if (origin && origin->kind == NS_CSS_V_TRANSFORM &&
+        origin->u.transform.n_ops > 0) {
+        const ns_css_transform_op *o = &origin->u.transform.ops[0];
+        ox = bx + (o->a_is_percent ? o->a / 100.0 * bw : o->a);
+        oy = by + (o->b_is_percent ? o->b / 100.0 * bh : o->b);
+        oz = o->c;
+    }
+    ns_mat4 tm;
+    ns_css_transform_to_mat4(&eff, bw, bh, &tm);
+    ns_mat4_translate(m, ox, oy, oz);
+    ns_mat4_multiply(m, &tm, m);
+    ns_mat4_translate(m, -ox, -oy, -oz);
+    return TRUE;
+}
+
+static void
+extent_add_corners(paint_extent *e, const ns_mat4 *m, double x0, double y0,
+                   double x1, double y1)
+{
+    double xs[4] = { x0, x1, x0, x1 };
+    double ys[4] = { y0, y0, y1, y1 };
+    for (int i = 0; i < 4; i++) {
+        double px, py, pz, pw;
+        ns_mat4_apply(m, xs[i], ys[i], 0, &px, &py, &pz, &pw);
+        if (fabs(pw) > 1e-9) { px /= pw; py /= pw; }
+        e->x0 = MIN(e->x0, px);
+        e->y0 = MIN(e->y0, py);
+        e->x1 = MAX(e->x1, px);
+        e->y1 = MAX(e->y1, py);
+    }
+}
+
+/* Where b's subtree paints, in the coordinates m maps its boxes from, with
+ * each 2D transform inside it applied. FALSE when something inside paints
+ * where boxes cannot tell (fixed, sticky, 3D, animated transforms). */
+static gboolean
+subtree_visual_extent(const ns_box *b, ns_anim *anim, const ns_mat4 *m,
+                      paint_extent *e, gboolean root)
+{
+    if (b->fragment_context) return FALSE;
+    ns_mat4 local = *m;
+    if (!root && b->style) {
+        if (ns_box_is_fixed(b) ||
+            style_keyword_is(b->style, NS_CSS_POSITION, "sticky") ||
+            style_keyword_is(b->style, NS_CSS_TRANSFORM_STYLE, "preserve-3d") ||
+            box_has_perspective(b) ||
+            (anim && b->dom && ns_anim_get_transform(anim, b->dom)))
+            return FALSE;
+        gboolean three_d = FALSE;
+        if (box_has_transform(b, NULL, &three_d)) {
+            if (three_d) return FALSE;
+            ns_mat4 t;
+            box_local_transform(b, &t);
+            ns_mat4_multiply(m, &t, &local);
+        }
+    }
+    double x, y, w, h;
+    box_border_rect(b, &x, &y, &w, &h);
+    double pad = style_shadow_overflow(b->style);
+    if (isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h))
+        extent_add_corners(e, &local, x - pad, y - pad, x + w + pad,
+                           y + h + pad);
+    if (b->paint_bottom > b->paint_top &&
+        fabs(b->paint_top) < NS_DAMAGE_PAINT_BOUND &&
+        fabs(b->paint_bottom) < NS_DAMAGE_PAINT_BOUND &&
+        isfinite(x) && isfinite(w))
+        extent_add_corners(e, &local, x - pad, b->paint_top - pad,
+                           x + w + pad, b->paint_bottom + pad);
+    if (b->scrolls) return TRUE;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        if (!subtree_visual_extent(c, anim, &local, e, FALSE)) return FALSE;
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_inline_atomic *a =
+            &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+        if (!a->box) continue;
+        double tx = b->x + a->owner_offset_x - a->box->x;
+        double ty = b->y + a->owner_offset_y - a->box->y;
+        if (!isfinite(tx) || !isfinite(ty)) return FALSE;
+        ns_mat4 shifted = local;
+        ns_mat4_translate(&shifted, tx, ty, 0);
+        if (!subtree_visual_extent(a->box, anim, &shifted, e, FALSE))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+/* Where b and everything inside it paint on the page, before and after a
+ * change that keeps the layout: its subtree's extent carried through the
+ * transforms and scroll offsets of b and its ancestors. FALSE when that
+ * cannot be told from the boxes. */
+gboolean
+ns_damage_box_visual_rect(const ns_box *b, ns_anim *anim, ns_damage_rect *out)
+{
+    if (!b || !out) return FALSE;
+    ns_mat4 id;
+    ns_mat4_identity(&id);
+    paint_extent e = { G_MAXDOUBLE, G_MAXDOUBLE, -G_MAXDOUBLE, -G_MAXDOUBLE, 0 };
+    if (!subtree_visual_extent(b, anim, &id, &e, TRUE)) return FALSE;
+    if (!(e.x1 > e.x0 && e.y1 > e.y0)) {
+        memset(out, 0, sizeof *out);
+        return TRUE;
+    }
+    ns_mat4 total;
+    ns_mat4_identity(&total);
+    gboolean fixed = FALSE;
+    for (const ns_box *p = b; p; p = p->parent) {
+        if (p->fragment_context) return FALSE;
+        if (p->style) {
+            if (style_keyword_is(p->style, NS_CSS_POSITION, "sticky") ||
+                style_keyword_is(p->style, NS_CSS_TRANSFORM_STYLE, "preserve-3d") ||
+                box_has_perspective(p))
+                return FALSE;
+            if (anim && p->dom && ns_anim_get_transform(anim, p->dom))
+                return FALSE;
+        }
+        /* An ancestor scrolls its content, then transforms all it paints. */
+        if (p != b && (p->scroll_x != 0 || p->scroll_y != 0)) {
+            if (!isfinite(p->scroll_x) || !isfinite(p->scroll_y)) return FALSE;
+            ns_mat4 m;
+            ns_mat4_identity(&m);
+            ns_mat4_translate(&m, -p->scroll_x, -p->scroll_y, 0);
+            ns_mat4_multiply(&m, &total, &total);
+        }
+        gboolean three_d = FALSE;
+        if (p->style && box_has_transform(p, NULL, &three_d)) {
+            if (three_d) return FALSE;
+            ns_mat4 m;
+            box_local_transform(p, &m);
+            ns_mat4_multiply(&m, &total, &total);
+        }
+        if (ns_box_is_fixed(p)) fixed = TRUE;
+    }
+    double pad = NS_DAMAGE_INFLATE;
+    paint_extent r = { G_MAXDOUBLE, G_MAXDOUBLE, -G_MAXDOUBLE, -G_MAXDOUBLE, 0 };
+    extent_add_corners(&r, &total, e.x0 - pad, e.y0 - pad, e.x1 + pad,
+                       e.y1 + pad);
+    if (!isfinite(r.x0) || !isfinite(r.y0) || !isfinite(r.x1) ||
+        !isfinite(r.y1))
+        return FALSE;
+    out->x = floor(r.x0);
+    out->y = floor(r.y0);
+    out->w = ceil(r.x1) - out->x;
+    out->h = ceil(r.y1) - out->y;
+    out->fixed = fixed;
+    return TRUE;
 }

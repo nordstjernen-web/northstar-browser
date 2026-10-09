@@ -1083,6 +1083,17 @@ button_has_replaced_child(const ns_node *n)
     return button_has_replaced_child_depth(n, 0);
 }
 
+gboolean
+ns_layout_reads_label_attr(const ns_node *n, const char *name)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name || !name ||
+        (g_ascii_strcasecmp(name, "aria-label") != 0 &&
+         g_ascii_strcasecmp(name, "title") != 0))
+        return FALSE;
+    return g_ascii_strcasecmp(n->name, "button") == 0 &&
+           !button_has_replaced_child(n);
+}
+
 static gboolean
 style_has_atomic_inline_box(const ns_style *s)
 {
@@ -14985,6 +14996,270 @@ compute_paint_bounds(ns_box *b)
     }
     b->paint_top = top;
     b->paint_bottom = bottom;
+}
+
+typedef struct {
+    GHashTable *old_to_new;
+    GHashTable *moved;
+    GHashTable *styles;
+} restyle_ctx;
+
+static gboolean
+restyle_inset_set(const ns_css_value *v)
+{
+    return v && !length_is_auto(v) &&
+           (v->kind == NS_CSS_V_LENGTH || v->kind == NS_CSS_V_CALC);
+}
+
+/* How far an absolutely positioned box moves when one inset changes while
+ * its opposite stays auto, so its size and everything else hold. */
+static gboolean
+restyle_inset_shift(const ns_style *os, const ns_style *ns, ns_css_prop start,
+                    ns_css_prop end, double basis, double *delta)
+{
+    const ns_css_value *sa = os->values[start], *sb = ns->values[start];
+    const ns_css_value *ea = os->values[end], *eb = ns->values[end];
+    gboolean start_same = sa == sb || ns_css_value_equal(sa, sb);
+    gboolean end_same = ea == eb || ns_css_value_equal(ea, eb);
+    *delta = 0;
+    if (start_same && end_same) return TRUE;
+    if (!start_same && end_same && !restyle_inset_set(ea) &&
+        restyle_inset_set(sa) && restyle_inset_set(sb)) {
+        *delta = length_resolve(sb, basis, 0) - length_resolve(sa, basis, 0);
+        return TRUE;
+    }
+    if (start_same && !end_same && !restyle_inset_set(sa) &&
+        restyle_inset_set(ea) && restyle_inset_set(eb)) {
+        *delta = length_resolve(ea, basis, 0) - length_resolve(eb, basis, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+restyle_move(const ns_box *b, const ns_style *os, const ns_style *ns,
+             double *dx, double *dy)
+{
+    const ns_box *cb = b->parent;
+    if (!cb || style_is_grid_container(cb->style) || !b->dom ||
+        b->style != os)
+        return FALSE;
+    double cb_w = cb->content_width + cb->padding.left + cb->padding.right;
+    double cb_h = cb->content_height + cb->padding.top + cb->padding.bottom;
+    return restyle_inset_shift(os, ns, NS_CSS_LEFT, NS_CSS_RIGHT, cb_w, dx) &&
+           restyle_inset_shift(os, ns, NS_CSS_TOP, NS_CSS_BOTTOM, cb_h, dy);
+}
+
+static gboolean
+layout_num_differs(double a, double b)
+{
+    if (isnan(a) || isnan(b)) return isnan(a) != isnan(b);
+    return fabs(a - b) > 0.01;
+}
+
+static void
+layout_diff_path(GString *out, const ns_box *b)
+{
+    GPtrArray *chain = g_ptr_array_new();
+    for (const ns_box *p = b; p; p = p->parent) g_ptr_array_add(chain, (gpointer)p);
+    for (guint i = chain->len; i > 0; i--) {
+        const ns_box *p = g_ptr_array_index(chain, i - 1);
+        const char *cls = p->dom ? ns_element_get_attr(p->dom, "class") : NULL;
+        g_string_append_printf(out, "/%s%s%.30s",
+                               p->dom && p->dom->name ? p->dom->name
+                                                      : ns_box_kind_name(p->kind),
+                               cls ? "." : "", cls ? cls : "");
+    }
+    g_ptr_array_free(chain, TRUE);
+}
+
+static gboolean
+layout_diff_walk(const ns_box *a, const ns_box *b, GString *out, int depth)
+{
+    if (depth > NS_LAYOUT_MAX_DEPTH) return TRUE;
+    const char *what = NULL;
+    double va = 0, vb = 0;
+#define DIFF_NUM(f) \
+    else if (layout_num_differs(a->f, b->f)) { what = #f; va = a->f; vb = b->f; }
+    if (a->kind != b->kind) what = "kind";
+    else if (a->dom != b->dom) what = "dom";
+    else if (a->style != b->style &&
+             (!a->style || !b->style || !ns_css_style_equal(a->style, b->style)))
+        what = "style";
+    else if (g_strcmp0(a->text, b->text) != 0) what = "text";
+    DIFF_NUM(x) DIFF_NUM(y) DIFF_NUM(content_width) DIFF_NUM(content_height)
+    DIFF_NUM(first_baseline)
+    DIFF_NUM(margin.top) DIFF_NUM(margin.right) DIFF_NUM(margin.bottom)
+    DIFF_NUM(margin.left) DIFF_NUM(padding.top) DIFF_NUM(padding.right)
+    DIFF_NUM(padding.bottom) DIFF_NUM(padding.left) DIFF_NUM(border.top)
+    DIFF_NUM(border.right) DIFF_NUM(border.bottom) DIFF_NUM(border.left)
+    DIFF_NUM(scroll_max_x) DIFF_NUM(scroll_max_y)
+    DIFF_NUM(paint_top) DIFF_NUM(paint_bottom)
+#undef DIFF_NUM
+    guint na = a->inline_atomics ? a->inline_atomics->len : 0;
+    guint nb = b->inline_atomics ? b->inline_atomics->len : 0;
+    if (!what && na != nb) what = "inline atomics";
+    if (what) {
+        layout_diff_path(out, a);
+        g_string_append_printf(out, ": %s differs (%g vs %g)", what, va, vb);
+        return FALSE;
+    }
+    const ns_box *ca = a->first_child, *cb = b->first_child;
+    for (; ca && cb; ca = ca->next_sibling, cb = cb->next_sibling)
+        if (!layout_diff_walk(ca, cb, out, depth + 1)) return FALSE;
+    if (ca || cb) {
+        layout_diff_path(out, a);
+        g_string_append(out, ": child count differs");
+        return FALSE;
+    }
+    for (guint i = 0; i < na; i++) {
+        const ns_inline_atomic *ia = &g_array_index(a->inline_atomics, ns_inline_atomic, i);
+        const ns_inline_atomic *ib = &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+        if (layout_num_differs(ia->owner_offset_x, ib->owner_offset_x) ||
+            layout_num_differs(ia->owner_offset_y, ib->owner_offset_y)) {
+            layout_diff_path(out, a);
+            g_string_append(out, ": inline atomic offset differs");
+            return FALSE;
+        }
+        if (ia->box && ib->box && !layout_diff_walk(ia->box, ib->box, out, depth + 1))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+char *
+ns_layout_diff(const ns_box *a, const ns_box *b)
+{
+    if (!a || !b) return (a || b) ? g_strdup("one layout missing") : NULL;
+    GString *out = g_string_new(NULL);
+    if (layout_diff_walk(a, b, out, 0)) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+struct ns_layout_restyle_plan {
+    restyle_ctx  rc;
+    ns_box      *root;
+    GPtrArray   *patch;
+    GPtrArray   *changed;
+};
+
+/* The check pass of a restyle: FALSE when a box baked in at build time the
+ * values of an old style that change (an inline run's text attributes), or
+ * a moved box cannot simply be shifted; otherwise the boxes to patch go to
+ * plan in tree order. */
+static gboolean
+restyle_scan(ns_box *b, ns_layout_restyle_plan *plan, int depth)
+{
+    if (!b || depth > NS_LAYOUT_MAX_DEPTH) return FALSE;
+    const restyle_ctx *rc = &plan->rc;
+    gboolean patch = FALSE;
+    if (b->style) {
+        const ns_style *os = b->style;
+        const ns_style *ns = g_hash_table_lookup(rc->old_to_new, os);
+        if (ns) {
+            gboolean same = ns_css_style_equal(os, ns);
+            if ((b->kind == NS_BOX_INLINE || b->kind == NS_BOX_TEXT) && !same)
+                return FALSE;
+            if (g_hash_table_contains(rc->moved, os)) {
+                double dx = 0, dy = 0;
+                if (!restyle_move(b, os, ns, &dx, &dy)) return FALSE;
+            }
+            if (!same) g_ptr_array_add(plan->changed, b);
+            patch = TRUE;
+        }
+    }
+    for (guint i = 0; b->attrs && i < b->attrs->len; i++) {
+        ns_inline_attr *a = &g_array_index(b->attrs, ns_inline_attr, i);
+        const ns_style *ns = a->style
+            ? g_hash_table_lookup(rc->old_to_new, a->style) : NULL;
+        if (!ns) continue;
+        if (!ns_css_style_equal(a->style, ns)) return FALSE;
+        patch = TRUE;
+    }
+    if (b->svg_styles && b->svg_styles != rc->styles) patch = TRUE;
+    if (patch) g_ptr_array_add(plan->patch, b);
+    for (ns_box *c = b->first_child; c; c = c->next_sibling)
+        if (!restyle_scan(c, plan, depth + 1)) return FALSE;
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab && !restyle_scan(ab, plan, depth + 1)) return FALSE;
+    }
+    return TRUE;
+}
+
+ns_layout_restyle_plan *
+ns_layout_restyle_plan_new(ns_box *root, GHashTable *styles,
+                           GHashTable *old_to_new, GHashTable *moved)
+{
+    if (!root || !styles || !old_to_new || !moved) return NULL;
+    ns_layout_restyle_plan *plan = g_new0(ns_layout_restyle_plan, 1);
+    plan->rc.old_to_new = old_to_new;
+    plan->rc.moved = moved;
+    plan->rc.styles = styles;
+    plan->root = root;
+    plan->patch = g_ptr_array_new();
+    plan->changed = g_ptr_array_new();
+    if (!restyle_scan(root, plan, 0)) {
+        ns_layout_restyle_plan_free(plan);
+        return NULL;
+    }
+    return plan;
+}
+
+const GPtrArray *
+ns_layout_restyle_plan_changed(const ns_layout_restyle_plan *plan)
+{
+    return plan ? plan->changed : NULL;
+}
+
+void
+ns_layout_restyle_plan_free(ns_layout_restyle_plan *plan)
+{
+    if (!plan) return;
+    g_ptr_array_free(plan->patch, TRUE);
+    g_ptr_array_free(plan->changed, TRUE);
+    g_free(plan);
+}
+
+void
+ns_layout_restyle_apply(ns_layout_restyle_plan *plan)
+{
+    if (!plan) return;
+    const restyle_ctx *rc = &plan->rc;
+    gboolean bounds = FALSE;
+    for (guint i = 0; i < plan->patch->len; i++) {
+        ns_box *b = g_ptr_array_index(plan->patch, i);
+        const ns_style *os = b->style;
+        const ns_style *ns = os ? g_hash_table_lookup(rc->old_to_new, os)
+                                : NULL;
+        if (ns) {
+            if (g_hash_table_contains(rc->moved, os)) {
+                double dx = 0, dy = 0;
+                restyle_move(b, os, ns, &dx, &dy);
+                if (dx != 0 || dy != 0) shift_box_tree(b, dx, dy);
+                if (dy != 0) bounds = TRUE;
+            }
+            gboolean unbounded = box_paint_unbounded(b);
+            b->style = ns;
+            if (box_paint_unbounded(b) != unbounded) bounds = TRUE;
+        }
+        for (guint j = 0; b->attrs && j < b->attrs->len; j++) {
+            ns_inline_attr *a = &g_array_index(b->attrs, ns_inline_attr, j);
+            const ns_style *as = a->style
+                ? g_hash_table_lookup(rc->old_to_new, a->style) : NULL;
+            if (as) a->style = as;
+        }
+        if (b->svg_styles && b->svg_styles != rc->styles) {
+            g_hash_table_unref(b->svg_styles);
+            b->svg_styles = g_hash_table_ref(rc->styles);
+        }
+    }
+    /* Paint bounds are vertical: they move only with a box moved down or
+     * up, or a style that makes a box paint anywhere. */
+    if (bounds) compute_paint_bounds(plan->root);
 }
 
 static ns_box *

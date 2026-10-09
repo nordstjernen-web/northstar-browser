@@ -10531,6 +10531,18 @@ anim_longhand_props(gboolean is_animation, gsize *n)
     return is_animation ? anim : trans;
 }
 
+gboolean
+ns_css_style_has_anim(const ns_style *s)
+{
+    if (!s) return FALSE;
+    if (s->values[NS_CSS_ANIMATION_NAME]) return TRUE;
+    gsize count;
+    const ns_css_prop *lh = anim_longhand_props(FALSE, &count);
+    for (gsize i = 0; i < count; i++)
+        if (s->values[lh[i]]) return TRUE;
+    return FALSE;
+}
+
 void
 ns_css_anim_effective(const ns_style *s, gboolean is_animation, ns_css_anim_list *out)
 {
@@ -27124,6 +27136,114 @@ ns_css_incremental_exclude(const void *node, gboolean exclude)
     else g_hash_table_remove(g_incr_exclude, node);
 }
 
+static gboolean
+style_transform_present(const ns_css_value *v)
+{
+    return v && !(v->kind == NS_CSS_V_TRANSFORM && v->u.transform.n_ops == 0);
+}
+
+static gboolean
+style_color_visible(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_COLOR && v->u.color.a > 0;
+}
+
+/* Whether two computed styles of an element's box differ only in values
+ * that paint and hit testing read from the box's style at use time, so
+ * layout made with one holds for the other. Only whether a transform,
+ * shadow or background is there at all feeds layout (containing blocks,
+ * control chrome); pseudo-elements must match exactly. */
+static gboolean
+style_is_absolute(const ns_style *s)
+{
+    const ns_css_value *v = s->values[NS_CSS_POSITION];
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           strcmp(v->u.keyword, "absolute") == 0;
+}
+
+static gboolean
+style_layout_equal_(const ns_style *a, const ns_style *b, gboolean exact,
+                    gboolean *moved)
+{
+    if (a == b) return TRUE;
+    if (!a || !b) return FALSE;
+    if (memcmp(&a->display, &b->display, sizeof a->display) != 0 ||
+        a->specified_inline != b->specified_inline ||
+        a->currentcolor_bits != b->currentcolor_bits)
+        return FALSE;
+    for (int p = 0; p < NS_CSS_PROP_COUNT; p++) {
+        const ns_css_value *va = a->values[p], *vb = b->values[p];
+        if (va == vb || ns_css_value_equal(va, vb)) continue;
+        if (exact) return FALSE;
+        switch (p) {
+        case NS_CSS_TRANSFORM:
+        case NS_CSS_TRANSLATE:
+        case NS_CSS_ROTATE:
+        case NS_CSS_SCALE:
+            if (style_transform_present(va) != style_transform_present(vb))
+                return FALSE;
+            continue;
+        case NS_CSS_BOX_SHADOW:
+            if ((va && va->kind == NS_CSS_V_SHADOW && va->u.shadow.n > 0) !=
+                (vb && vb->kind == NS_CSS_V_SHADOW && vb->u.shadow.n > 0))
+                return FALSE;
+            continue;
+        case NS_CSS_BACKGROUND_COLOR:
+            if (style_color_visible(va) != style_color_visible(vb))
+                return FALSE;
+            continue;
+        case NS_CSS_TOP:
+        case NS_CSS_RIGHT:
+        case NS_CSS_BOTTOM:
+        case NS_CSS_LEFT:
+            if (!moved || !style_is_absolute(a) || !style_is_absolute(b))
+                return FALSE;
+            *moved = TRUE;
+            continue;
+        case NS_CSS_TRANSFORM_ORIGIN:
+        case NS_CSS_OPACITY:
+        case NS_CSS_FILTER:
+        case NS_CSS_OUTLINE_COLOR:
+        case NS_CSS_BACKGROUND_POSITION_X:
+        case NS_CSS_BACKGROUND_POSITION_Y:
+        case NS_CSS_BORDER_TOP_COLOR:
+        case NS_CSS_BORDER_RIGHT_COLOR:
+        case NS_CSS_BORDER_BOTTOM_COLOR:
+        case NS_CSS_BORDER_LEFT_COLOR:
+        case NS_CSS_CURSOR:
+        case NS_CSS_TRANSITION:
+        case NS_CSS_TRANSITION_PROPERTY:
+        case NS_CSS_TRANSITION_DURATION:
+        case NS_CSS_TRANSITION_DELAY:
+        case NS_CSS_TRANSITION_TIMING_FUNCTION:
+            continue;
+        default:
+            return FALSE;
+        }
+    }
+    const ns_style *const pa[] = {
+        a->before, a->after, a->first_letter, a->first_line, a->placeholder,
+        a->selection, a->marker, a->backdrop, a->file_selector_button,
+    };
+    const ns_style *const pb[] = {
+        b->before, b->after, b->first_letter, b->first_line, b->placeholder,
+        b->selection, b->marker, b->backdrop, b->file_selector_button,
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(pa); i++)
+        if (!style_layout_equal_(pa[i], pb[i], TRUE, NULL)) return FALSE;
+    return TRUE;
+}
+
+
+int
+ns_css_style_layout_change(const ns_style *a, const ns_style *b)
+{
+    gboolean moved = FALSE;
+    if (!style_layout_equal_(a, b, FALSE, &moved))
+        return NS_CSS_LAYOUT_CHANGED;
+    return moved ? NS_CSS_LAYOUT_MOVED : NS_CSS_LAYOUT_EQUAL;
+}
+
 gboolean
 ns_css_prop_affects_layout(int prop)
 {
@@ -30806,12 +30926,77 @@ cascade_sheet_applies(gsize sheet_index)
 
 static GHashTable    *g_incr_prev_styles;
 static GHashTable    *g_incr_before_styles;
+/* After a pass that reported only what changed: the styles those elements
+ * had before it; every other element kept the style it has now. */
+static GHashTable    *g_incr_before_delta;
+static guint          g_incr_serial;
+static guint64        g_incr_struct_hash;
+static GPtrArray     *g_delta_request;
+static GPtrArray     *g_delta_out;
 
 const ns_style *
 ns_css_style_before_change(const void *node)
 {
-    if (!node || !g_incr_before_styles) return NULL;
+    if (!node) return NULL;
+    if (g_incr_before_delta) {
+        const ns_style *old = g_hash_table_lookup(g_incr_before_delta, node);
+        if (old) return old;
+        return g_incr_prev_styles ? g_hash_table_lookup(g_incr_prev_styles, node)
+                                  : NULL;
+    }
+    if (!g_incr_before_styles) return NULL;
     return g_hash_table_lookup(g_incr_before_styles, node);
+}
+
+void
+ns_css_style_change_free(gpointer data)
+{
+    ns_css_style_change *c = data;
+    if (!c) return;
+    ns_style_free(c->style);
+    g_free(c);
+}
+
+guint
+ns_css_incremental_serial(void)
+{
+    return g_incr_serial;
+}
+
+void
+ns_css_compute_want_delta(GPtrArray *changes)
+{
+    g_delta_request = changes;
+}
+
+/* The shape of the element tree the cascade walks: which element is whose
+ * child, across nested documents. */
+static guint64
+incr_struct_hash(const ns_node *root)
+{
+    guint64 h = 1469598103934665603ULL;
+    const ns_node *n = root;
+    int depth = 0;
+    while (n) {
+        if (n->kind == NS_NODE_ELEMENT || n->kind == NS_NODE_DOCUMENT) {
+            guint64 v = (guint64)(guintptr)n * 31u ^ (guint64)(guintptr)n->parent;
+            h ^= v;
+            h *= 1099511628211ULL;
+        }
+        if ((n->kind == NS_NODE_ELEMENT || n->kind == NS_NODE_DOCUMENT) &&
+            n->first_child && depth < NS_CSS_MAX_CASCADE_DEPTH) {
+            n = n->first_child;
+            depth++;
+            continue;
+        }
+        while (n != root && !n->next_sibling) {
+            n = n->parent;
+            depth--;
+        }
+        if (n == root) break;
+        n = n->next_sibling;
+    }
+    return h;
 }
 static ns_node       *g_incr_prev_doc;
 static guint64        g_incr_prev_sig;
@@ -30871,6 +31056,8 @@ static gboolean       g_state_has_focus_within;
 static gboolean       g_state_has_hover;
 static gboolean       g_state_has_active;
 
+static void style_memo_forget(const ns_node *node);
+
 void
 ns_css_forget_node(const ns_node *node)
 {
@@ -30895,6 +31082,10 @@ ns_css_forget_node(const ns_node *node)
     if (g_incr_desc_inv) g_hash_table_remove(g_incr_desc_inv, node);
     if (g_incr_has_walked) g_hash_table_remove(g_incr_has_walked, node);
     if (g_incr_path) g_hash_table_remove(g_incr_path, node);
+    /* Styles remembered for the node: what it had before the last pass,
+     * and the cascade input that gave its style. */
+    if (g_incr_before_delta) g_hash_table_remove(g_incr_before_delta, node);
+    style_memo_forget(node);
 }
 
 static gboolean incr_node_matches_keys(const ns_node *n, GHashTable *keyset);
@@ -32449,6 +32640,36 @@ ns_css_attr_may_affect_style(const ns_node *target, const char *name)
     return affects;
 }
 
+/* An attribute whose change reaches rendering only through the cascade,
+ * so a restyle can stand in for a relayout when the computed styles come
+ * out equal for layout. Layout and form controls read the rest directly. */
+gboolean
+ns_css_attr_only_restyles(const ns_node *target, const char *name)
+{
+    if (!name || !*name) return FALSE;
+    if (g_ascii_strcasecmp(name, "style") == 0) return TRUE;
+    if (g_ascii_strcasecmp(name, "class") == 0)
+        return !(target && target->name &&
+                 (g_ascii_strcasecmp(target->name, "input") == 0 ||
+                  g_ascii_strcasecmp(target->name, "button") == 0 ||
+                  g_ascii_strcasecmp(target->name, "select") == 0 ||
+                  g_ascii_strcasecmp(target->name, "textarea") == 0));
+    if (is_presentational_attr_name(name)) return FALSE;
+    static const char *const read_by_layout[] = {
+        "id", "hidden", "lang", "xml:lang", "dir", "width", "height", "src",
+        "srcset", "sizes", "href", "type", "value", "checked", "selected",
+        "open", "disabled", "readonly", "required", "placeholder",
+        "multiple", "size", "rows", "cols", "rowspan", "colspan", "span",
+        "start", "reversed", "wrap", "contenteditable", "inert", "popover",
+        "popovertarget", "slot", "name", "form", "list", "min", "max",
+        "step", "media", "label", "align", "poster",
+        "controls", "usemap", "coords", "shape", "target",
+    };
+    for (guint i = 0; i < G_N_ELEMENTS(read_by_layout); i++)
+        if (g_ascii_strcasecmp(name, read_by_layout[i]) == 0) return FALSE;
+    return !g_str_has_prefix(name, "data-");
+}
+
 static gboolean
 incr_add_positive_subject_deps(GHashTable *keys, GPtrArray *attrs,
                                const ns_css_selector *sel, int depth);
@@ -33209,6 +33430,12 @@ incr_style_same(const ns_style *a, const ns_style *b)
     return incr_var_maps_same(a->vars, b->vars);
 }
 
+gboolean
+ns_css_style_equal(const ns_style *a, const ns_style *b)
+{
+    return incr_style_same(a, b) && incr_pseudo_styles_same(a, b);
+}
+
 static void
 incr_path_add_ancestors(GHashTable *keys)
 {
@@ -33315,6 +33542,93 @@ incr_bulk_reuse(ns_node *root, const ns_css_stylesheet *ua,
     }
 }
 
+/* What an element's style was computed from, kept with the style when the
+ * cascade recomputes an element it computed before: the same matched
+ * declarations under the same parent (and layout parent and root line
+ * height) give the same style, so the next recompute can keep the style
+ * without cascading it again. Valid while the incremental passes run over
+ * the same sheets; the style is held so it cannot be replaced by another at
+ * its address. */
+typedef struct {
+    guint8   *data;
+    guint32   len;
+    guint32   hash;
+    guint64   layout_parent_id;
+    double    root_line_px;
+    guint32   mutation_gen;
+    ns_style *style;
+} style_memo_entry;
+
+static GHashTable *g_style_memo;
+
+static void
+style_memo_entry_free(gpointer p)
+{
+    style_memo_entry *e = p;
+    if (!e) return;
+    g_free(e->data);
+    ns_style_free(e->style);
+    g_free(e);
+}
+
+static void
+style_memo_clear(void)
+{
+    if (g_style_memo) g_hash_table_remove_all(g_style_memo);
+}
+
+static void
+style_memo_forget(const ns_node *node)
+{
+    if (g_style_memo) g_hash_table_remove(g_style_memo, node);
+}
+
+/* The root line height an element's style was computed with: the root
+ * element's own computation sets it. */
+static double
+style_memo_root_line(const ns_style *parent_style)
+{
+    return parent_style ? g_root_line_px : 0.0;
+}
+
+static gboolean
+style_memo_hit(const ns_node *node, const ns_style *prev,
+              const share_key_t *key, const ns_style *parent_style,
+              const ns_style *layout_parent)
+{
+    style_memo_entry *e = g_style_memo ? g_hash_table_lookup(g_style_memo, node)
+                                     : NULL;
+    /* A style an animation wrote into since is no longer what the
+     * declarations give. */
+    return e && e->style == prev && e->mutation_gen == prev->mutation_gen &&
+           e->hash == key->hash &&
+           e->len == key->len &&
+           e->layout_parent_id == (layout_parent ? layout_parent->share_id : 0) &&
+           e->root_line_px == style_memo_root_line(parent_style) &&
+           memcmp(e->data, key->data, key->len) == 0;
+}
+
+static void
+style_memo_store(const ns_node *node, ns_style *style, const share_key_t *key,
+                const ns_style *parent_style, const ns_style *layout_parent)
+{
+    if (!g_style_memo)
+        g_style_memo = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                            NULL, style_memo_entry_free);
+    if (g_hash_table_size(g_style_memo) >= 8192)
+        g_hash_table_remove_all(g_style_memo);
+    style_memo_entry *e = g_new(style_memo_entry, 1);
+    e->data = g_memdup2(key->data, key->len);
+    e->len = key->len;
+    e->hash = key->hash;
+    e->layout_parent_id = layout_parent ? layout_parent->share_id : 0;
+    e->root_line_px = style_memo_root_line(parent_style);
+    e->mutation_gen = style->mutation_gen;
+    e->style = style;
+    style->ref++;
+    g_hash_table_replace(g_style_memo, (gpointer)node, e);
+}
+
 static void
 cascade_walk(ns_node *node,
              const ns_css_stylesheet *ua,
@@ -33364,7 +33678,14 @@ cascade_walk(ns_node *node,
             nd_self_prev = nd_prev;
             nd_prev = NULL;
         }
+        /* The style this element had, when it is computed again. */
+        ns_style *nd_old = nd_self_prev;
+        if (!nd_old && !nd_prev && g_incr_pass_active && g_incr_prev_styles)
+            nd_old = g_hash_table_lookup(g_incr_prev_styles, node);
+        gboolean share_put = FALSE;
         ns_style *s;
+        gboolean memo_store = FALSE;
+        share_key_t memo_key = { 0 };
         if (nd_prev) {
             s = nd_prev;
             s->ref++;
@@ -33596,7 +33917,24 @@ cascade_walk(ns_node *node,
                 ns_css_incremental_exclude(node, TRUE);
             }
         }
-        if (shared) {
+        gboolean memo_ok = nd_old && have_key &&
+                           !ns_node_is_element_named(node, "input");
+        gboolean memo_hit = memo_ok &&
+                            style_memo_hit(node, nd_old, &probe, parent_style,
+                                          layout_parent);
+        if (memo_ok && !memo_hit) {
+            memo_store = TRUE;
+            memo_key = probe;
+        }
+        if (memo_hit) {
+            ns_style_free(s);
+            s = nd_old;
+            s->ref++;
+            g_array_set_size(matches, 0);
+            g_array_set_size(var_matches, 0);
+            g_array_set_size(pending_matches, 0);
+            g_ptr_array_set_size(owned_values, 0);
+        } else if (shared) {
             ns_style_free(s);
             s = ns_style_clone_shared(shared);
             if (display_forced_none(node, s))
@@ -33657,22 +33995,41 @@ cascade_walk(ns_node *node,
                 }
                 g_ptr_array_free(pe_owned, TRUE);
             }
-            if (have_key && !nd_self_prev) {
-                share_key_t *k = g_new(share_key_t, 1);
-                k->len  = probe.len;
-                k->hash = probe.hash;
-                k->data = g_memdup2(probe.data, probe.len);
-                g_hash_table_insert(g_style_share, k, s);
-            }
+            share_put = have_key && !nd_self_prev;
         }
-        }
-        gboolean nd_self_same = nd_self_prev && incr_style_same(s, nd_self_prev);
-        if (nd_self_same && incr_pseudo_styles_same(s, nd_self_prev)) {
+        /* A recomputed style equal to the one the element had keeps that
+         * one, so its children see the same parent and nothing downstream
+         * counts it as changed. */
+        if (nd_old && s != nd_old && incr_style_same(s, nd_old) &&
+            incr_pseudo_styles_same(s, nd_old)) {
             ns_style_free(s);
-            s = nd_self_prev;
+            s = nd_old;
             s->ref++;
         }
-        g_hash_table_insert(out, node, s);
+        if (share_put) {
+            share_key_t *k = g_new(share_key_t, 1);
+            k->len  = probe.len;
+            k->hash = probe.hash;
+            k->data = g_memdup2(probe.data, probe.len);
+            g_hash_table_insert(g_style_share, k, s);
+        }
+        if (memo_store)
+            style_memo_store(node, s, &memo_key, parent_style,
+                            layout_parent);
+        }
+        gboolean nd_self_same = nd_self_prev && s == nd_self_prev;
+        if (g_delta_out) {
+            if (g_hash_table_lookup(g_incr_prev_styles, node) == s) {
+                ns_style_free(s);
+            } else {
+                ns_css_style_change *c = g_new(ns_css_style_change, 1);
+                c->node = node;
+                c->style = s;
+                g_ptr_array_add(g_delta_out, c);
+            }
+        } else {
+            g_hash_table_insert(out, node, s);
+        }
         child_parent_style = s;
         child_layout_parent = ns_display_is_contents(ns_css_display_of(s))
             ? layout_parent : s;
@@ -33724,7 +34081,9 @@ cascade_walk(ns_node *node,
         memset(g_ancestor_filter, 0, sizeof g_ancestor_filter);
     }
     if (filter_element) css_ancestor_filter_update(node, 1);
-    if (nd_bulk)
+    if (nd_bulk && g_delta_out) {
+        /* Nothing below changed and the tree has the shape it had. */
+    } else if (nd_bulk)
         incr_bulk_reuse(node, ua, author, n_author, child_layout_parent,
                         root_px, layer_ranks, out);
     else
@@ -34467,6 +34826,8 @@ ns_css_compute(ns_node *doc,
                                             NULL, (GDestroyNotify)ns_style_free);
 
     g_pragma_valid = FALSE;
+    GPtrArray *delta_request = g_delta_request;
+    g_delta_request = NULL;
 
     const ns_css_stylesheet *cached_ua = ua_sheet_for(doc);
 
@@ -34498,8 +34859,10 @@ ns_css_compute(ns_node *doc,
 
     double root_px = 0;
     g_root_line_px = 0;
-    if (g_decl_sheet_cache && g_hash_table_size(g_decl_sheet_cache) >= 8192)
+    if (g_decl_sheet_cache && g_hash_table_size(g_decl_sheet_cache) >= 8192) {
         g_hash_table_remove_all(g_decl_sheet_cache);
+        style_memo_clear();
+    }
     if (!g_cq_stack)
         g_cq_stack = g_array_new(FALSE, FALSE, sizeof(ns_cq_container));
     g_array_set_size(g_cq_stack, 0);
@@ -34560,6 +34923,11 @@ ns_css_compute(ns_node *doc,
         && g_incr_prev_vh == g_viewport_h;
     g_incr_reused = 0;
     g_incr_recomputed = 0;
+    if (!g_incr_pass_active) style_memo_clear();
+    g_delta_out = NULL;
+    if (delta_request && g_incr_pass_active && g_incr_prev_styles &&
+        incr_struct_hash(doc) == g_incr_struct_hash)
+        g_delta_out = delta_request;
     if (!g_incr_pass_active && !g_cq_map)
         g_container_units_seen = FALSE;
 
@@ -34582,7 +34950,25 @@ ns_css_compute(ns_node *doc,
     g_ancestor_filter_active = FALSE;
     g_ancestor_filter_subject = NULL;
 
-    if (incr_want) {
+    if (incr_want && g_delta_out) {
+        if (g_incr_before_styles) g_hash_table_destroy(g_incr_before_styles);
+        g_incr_before_styles = NULL;
+        if (g_incr_before_delta) g_hash_table_remove_all(g_incr_before_delta);
+        else g_incr_before_delta = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)ns_style_free);
+        for (guint i = 0; i < g_delta_out->len; i++) {
+            ns_css_style_change *c = g_ptr_array_index(g_delta_out, i);
+            ns_style *old = g_hash_table_lookup(g_incr_prev_styles, c->node);
+            if (old) {
+                old->ref++;
+                g_hash_table_replace(g_incr_before_delta, (gpointer)c->node,
+                                     old);
+            }
+            c->style->ref++;
+            g_hash_table_replace(g_incr_prev_styles, (gpointer)c->node,
+                                 c->style);
+        }
+    } else if (incr_want) {
         GHashTable *new_prev = g_hash_table_new_full(
             g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)ns_style_free);
         GHashTableIter pit; gpointer pk, pv;
@@ -34594,6 +34980,11 @@ ns_css_compute(ns_node *doc,
         if (g_incr_before_styles) g_hash_table_destroy(g_incr_before_styles);
         g_incr_before_styles = g_incr_prev_styles;
         g_incr_prev_styles = new_prev;
+        g_clear_pointer(&g_incr_before_delta, g_hash_table_destroy);
+        g_incr_struct_hash = incr_struct_hash(doc);
+    }
+    if (incr_want) {
+        g_incr_serial++;
         g_incr_prev_doc = doc;
         g_incr_prev_sig = sig;
         g_incr_prev_cq_sig = cq_sig;
@@ -34610,6 +35001,8 @@ ns_css_compute(ns_node *doc,
         g_hash_table_destroy(g_incr_prev_styles);
         g_incr_prev_styles = NULL;
         g_incr_prev_doc = NULL;
+        g_clear_pointer(&g_incr_before_delta, g_hash_table_destroy);
+        g_incr_serial++;
         if (g_incr_before_styles) g_hash_table_destroy(g_incr_before_styles);
         g_incr_before_styles = NULL;
     }
@@ -34639,6 +35032,11 @@ ns_css_compute(ns_node *doc,
         g_printerr("[profile]   css.idx=%.1fms css.cascade=%.1fms\n",
                    (t_idx - t0) / 1000.0,
                    (t_cascade - t_idx) / 1000.0);
+    if (g_delta_out) {
+        g_delta_out = NULL;
+        g_hash_table_destroy(out);
+        return NULL;
+    }
     return out;
 }
 

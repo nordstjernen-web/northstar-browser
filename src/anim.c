@@ -103,6 +103,9 @@ struct ns_anim {
     int         active_count;
     GArray     *events;
     gint64      now_us;
+    /* A transition or animation ended since the last
+     * ns_anim_take_restyle(). */
+    gboolean    ended;
 };
 
 static gint64
@@ -951,6 +954,8 @@ anim_observe_one(ns_anim *a, const ns_node *dom, const ns_style *style,
                  gint64 now_us, GHashTable *styles)
 {
     if (!a || !dom || !style) return;
+    if (!ns_css_style_has_anim(style) && !g_hash_table_contains(a->states, dom))
+        return;
     if (a->now_us == 0 || g_hash_table_size(a->active) == 0) a->now_us = now_us;
     now_us = a->now_us;
     ns_css_anim_list tv, av;
@@ -1031,6 +1036,29 @@ ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us)
     }
     g_array_free(items, TRUE);
     ns_anim_prune(a, styles);
+    ns_anim_apply(a, styles);
+}
+
+void
+ns_anim_observe_nodes(ns_anim *a, GHashTable *styles, GPtrArray *nodes,
+                      gint64 now_us)
+{
+    if (!a || !styles || !nodes) return;
+    GArray *items = g_array_sized_new(FALSE, FALSE, sizeof(ns_anim_observe_item),
+                                      nodes->len);
+    for (guint i = 0; i < nodes->len; i++) {
+        const ns_node *n = g_ptr_array_index(nodes, i);
+        const ns_style *st = g_hash_table_lookup(styles, n);
+        if (!st) continue;
+        ns_anim_observe_item item = { n, st, node_depth(n) };
+        g_array_append_val(items, item);
+    }
+    g_array_sort(items, observe_item_cmp);
+    for (guint i = 0; i < items->len; i++) {
+        const ns_anim_observe_item *item = &g_array_index(items, ns_anim_observe_item, i);
+        anim_observe_one(a, item->node, item->style, now_us, styles);
+    }
+    g_array_free(items, TRUE);
     ns_anim_apply(a, styles);
 }
 
@@ -1474,6 +1502,7 @@ ns_anim_tick(ns_anim *a, gint64 now_us)
                     ch->start_us = now_us;
                 }
                 if (advance_chan(a, s, ch, now_us)) any = TRUE;
+                if (!ch->active) a->ended = TRUE;
             }
         for (int w = 0; w < 2; w++) {
             GPtrArray *runs = state_runs(s, w);
@@ -1486,12 +1515,21 @@ ns_anim_tick(ns_anim *a, gint64 now_us)
                     r->start_us = now_us;
                 }
                 if (advance_run(a, r, now_us)) any = TRUE;
+                if (!r->active) a->ended = TRUE;
                 run_emit_progress(a, s, r, now_us);
             }
         }
         if (!state_is_active(s)) g_hash_table_iter_remove(&it);
     }
     return any;
+}
+
+gboolean
+ns_anim_take_restyle(ns_anim *a)
+{
+    if (!a || !a->ended) return FALSE;
+    a->ended = FALSE;
+    return TRUE;
 }
 
 gboolean

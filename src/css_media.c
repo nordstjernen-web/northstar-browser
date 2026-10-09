@@ -1080,10 +1080,30 @@ mq_query_list_matches(const char *query)
     return any;
 }
 
+/* Everything a media query list can depend on. */
+typedef struct {
+    double              vw, vh;
+    ns_css_media_device device;
+    gboolean            print;
+    int                 color_scheme;
+    int                 reduced_motion;
+} mq_env;
+
+typedef struct {
+    mq_env   env;
+    gboolean matched;
+} mq_cached;
+
+/* One query list a parse depended on and its answer then, or a use of the
+ * viewport size. A record's first entry (meta) keeps the environment it
+ * last held in. */
 typedef struct {
     char    *query;
     gboolean matched;
     double   viewport_w, viewport_h;
+    gboolean meta;
+    gboolean env_held;
+    mq_env   env;
 } mq_record;
 
 static GPtrArray *g_mq_recorder;
@@ -1096,14 +1116,52 @@ mq_record_free(gpointer data)
     g_free(r);
 }
 
-static gboolean
-mq_query_matches_unrecorded(const char *query)
+static GHashTable *g_mq_cache;
+
+static void
+mq_env_current(mq_env *env)
 {
-    if (!query) return TRUE;
+    memset(env, 0, sizeof *env);
+    env->vw = mq_vw();
+    env->vh = mq_vh();
+    memcpy(&env->device, &g_mq_device, sizeof env->device);
+    env->print = g_mq_print;
+    env->color_scheme = (int)ns_css_get_color_scheme();
+    env->reduced_motion = (int)ns_css_get_reduced_motion();
+}
+
+static gboolean
+mq_query_matches_parsed(const char *query)
+{
     if (!strstr(query, "/*")) return mq_query_list_matches(query);
     char *clean = mq_strip_comments(query);
     gboolean matches = mq_query_list_matches(clean);
     g_free(clean);
+    return matches;
+}
+
+/* Style sheets are checked against their media again on every cascade, so
+ * each query list's answer is kept for as long as what it reads stays. */
+static gboolean
+mq_query_matches_unrecorded(const char *query)
+{
+    if (!query) return TRUE;
+    mq_env env;
+    mq_env_current(&env);
+    if (!g_mq_cache)
+        g_mq_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                           g_free);
+    mq_cached *c = g_hash_table_lookup(g_mq_cache, query);
+    if (c && memcmp(&c->env, &env, sizeof env) == 0) return c->matched;
+    gboolean matches = mq_query_matches_parsed(query);
+    if (!c) {
+        if (g_hash_table_size(g_mq_cache) >= 4096)
+            g_hash_table_remove_all(g_mq_cache);
+        c = g_new(mq_cached, 1);
+        g_hash_table_insert(g_mq_cache, g_strdup(query), c);
+    }
+    memcpy(&c->env, &env, sizeof env);
+    c->matched = matches;
     return matches;
 }
 
@@ -1112,10 +1170,9 @@ ns_css_media_query_matches(const char *query)
 {
     gboolean matches = mq_query_matches_unrecorded(query);
     if (g_mq_recorder && query) {
-        mq_record *r = g_new(mq_record, 1);
+        mq_record *r = g_new0(mq_record, 1);
         r->query = g_strdup(query);
         r->matched = matches;
-        r->viewport_w = r->viewport_h = 0;
         g_ptr_array_add(g_mq_recorder, r);
     }
     return matches;
@@ -1124,7 +1181,11 @@ ns_css_media_query_matches(const char *query)
 GPtrArray *
 ns_css_media_record_new(void)
 {
-    return g_ptr_array_new_with_free_func(mq_record_free);
+    GPtrArray *record = g_ptr_array_new_with_free_func(mq_record_free);
+    mq_record *meta = g_new0(mq_record, 1);
+    meta->meta = TRUE;
+    g_ptr_array_add(record, meta);
+    return record;
 }
 
 GPtrArray *
@@ -1148,8 +1209,20 @@ ns_css_media_record_viewport_use(void)
 gboolean
 ns_css_media_record_holds(const GPtrArray *record)
 {
+    mq_record *meta = record && record->len > 0
+        ? g_ptr_array_index(record, 0) : NULL;
+    mq_env env;
+    memset(&env, 0, sizeof env);
+    if (meta && meta->meta) {
+        mq_env_current(&env);
+        if (meta->env_held && memcmp(&meta->env, &env, sizeof env) == 0)
+            return TRUE;
+    } else {
+        meta = NULL;
+    }
     for (guint i = 0; record && i < record->len; i++) {
         const mq_record *r = g_ptr_array_index(record, i);
+        if (r->meta) continue;
         if (!r->query) {
             if (r->viewport_w != ns_css_media_viewport_current_w() ||
                 r->viewport_h != ns_css_media_viewport_current_h())
@@ -1157,6 +1230,10 @@ ns_css_media_record_holds(const GPtrArray *record)
         } else if (mq_query_matches_unrecorded(r->query) != r->matched) {
             return FALSE;
         }
+    }
+    if (meta) {
+        memcpy(&meta->env, &env, sizeof env);
+        meta->env_held = TRUE;
     }
     return TRUE;
 }

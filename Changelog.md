@@ -4,6 +4,50 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* A change to a class, an inline style or an attribute that only
+  selectors read restyles the page without rebuilding and laying out the
+  box tree when the new computed styles differ only in what paint reads
+  from the box at use time (transforms, opacity, colours, shadows,
+  background position, filters) or move an absolutely positioned box by
+  one inset. Geometry reads and getComputedStyle after such a change no
+  longer force a relayout of the whole page: YouTube's progress bar,
+  which writes transforms and then reads the player's size twice per
+  frame while the controls show, cost two 20-30 ms relayouts per frame
+  and now mostly costs one 6 ms restyle. When a relayout is needed after
+  all, it reuses the cascade the restyle already computed, and the
+  animation observer skips styles without animations or transitions.
+  `NS_LAYOUT_VERIFY=1` lays the page out again after every such restyle
+  and reports the first difference.
+* A restyle keeps the layout when an inline box or text run gets a new
+  computed style with the same values; it used to relay out the whole
+  page. On YouTube the scrubber's pull indicator took such a style with
+  every progress update, so half the restyles became 15-20 ms relayouts.
+* A restyle that keeps the layout repaints only where the restyled boxes
+  painted before and paint after (through transforms and scroll offsets),
+  not the whole page. On YouTube a progress bar update repaints a
+  115x17 px strip in about 5 ms instead of the whole view in 21 ms.
+* An element whose style is recomputed only because a :has() rule might
+  match differently keeps its style when it matches the same declarations
+  under the same parent. YouTube's root element, with 1,700 custom
+  properties, was rebuilt on every restyle.
+* Media queries are evaluated again only when the viewport, the media
+  device, print, colour scheme or reduced motion change. Before, every
+  cascade reparsed the queries of every cached style sheet.
+* A restyle computes and compares only the elements whose style changed,
+  rather than building and comparing a table of every element's style.
+  On YouTube, a progress bar update costs a 1.4 ms restyle instead of
+  2 ms.
+* A change to aria-label or title restyles the page instead of laying it
+  out again, except on a <button> that layout may label with it. YouTube
+  rewrites the time display's aria-label every second, which relaid the
+  whole watch page each time.
+* A restyled element whose computed values did not change keeps its
+  style, and the restyle reuses the styles of elements below it whose
+  matched rules did not change. Hovering a video in YouTube's sidebar
+  restyled 1,250 elements in 22-27 ms; it now takes 8-12 ms.
+* An element that fades in with a CSS transition stays visible when the
+  transition ends. YouTube's player controls faded in on hover and then
+  vanished at once.
 * An animation tick stops running queued tasks once its 16 ms budget is
   spent; it checked the budget only after up to 64 tasks, so one frame on
   YouTube could wait more than a second for timers and forced relayouts.

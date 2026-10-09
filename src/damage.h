@@ -32,6 +32,13 @@ gboolean ns_damage_resolve(const ns_box *root, ns_js *js, ns_anim *anim,
 
 void ns_paint_hazards_scan(const ns_box *root, ns_anim *anim,
                            ns_paint_hazards *out);
+
+/* The page rectangle a box and its subtree paint, through its own and its
+ * ancestors' transforms and scroll offsets. FALSE when that cannot be told
+ * cheaply (sticky or animated boxes, 3D), and the page must be repainted
+ * whole. */
+gboolean ns_damage_box_visual_rect(const ns_box *b, ns_anim *anim,
+                                   ns_damage_rect *out);
 void ns_paint_hazards_clear(ns_paint_hazards *hazards);
 
 G_END_DECLS
