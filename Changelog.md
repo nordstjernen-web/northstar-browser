@@ -368,6 +368,14 @@ Significant changes in each release:
 * The Windows CI build compiles again with clang 23, whose new
   `-Wunused-but-set-global` warning stopped it on a watchdog flag that
   was set and never read. The flag is gone.
+* Grid rows are sized from single-row items first and then from
+  spanning items in order of increasing span, as CSS Grid's track sizing
+  algorithm requires. Items were taken in document order, so an item
+  spanning several auto rows that came before the items of those rows
+  spread its height over rows that were still empty. On Wikipedia's
+  Vector skin the Appearance column, which spans the title, toolbar and
+  article rows, added about 135px of blank space under the title and
+  again under the Article/Talk tabs.
 
 1.0.12:
 =======

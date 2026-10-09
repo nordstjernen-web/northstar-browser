@@ -11972,12 +11972,17 @@ layout_grid(ns_box *box, double cw,
         }
         if (fixed > row_height[r]) row_height[r] = fixed;
     }
+    int max_row_span = 1;
+    for (guint i = 0; i < row_spans->len; i++)
+        max_row_span = MAX(max_row_span, g_array_index(row_spans, int, i));
+    for (int span = 1; span <= MIN(max_row_span, n_rows); span++)
     for (guint i = 0; i < items->len; i++) {
         int row = g_array_index(placed_rows, int, i);
         int rs = g_array_index(row_spans, int, i);
         if (row < 0 || row >= n_rows) continue;
         if (rs < 1) rs = 1;
         if (row + rs > n_rows) rs = n_rows - row;
+        if (rs != span) continue;
         double item_outer = g_array_index(item_heights, double, i);
         double used = row_gap * (rs - 1);
         int growable = 0;
