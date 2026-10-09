@@ -2203,7 +2203,7 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
         if (im && im->texture) {
             tex = im->texture;
             source = im;
-            if (!im->anim_frames) im_cache = (ns_image *)im;
+            if (!ns_image_is_animation(im)) im_cache = (ns_image *)im;
         }
     }
     if (!tex) return NULL;

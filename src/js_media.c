@@ -16,6 +16,7 @@
 
 #define NS_MEDIA_POLL_MS 50
 #define NS_MEDIA_TIMEUPDATE_US (250 * 1000)
+#define NS_MEDIA_AV_DRIFT_S 0.1
 
 enum {
     NETWORK_EMPTY,
@@ -419,7 +420,44 @@ media_start_fetch(ns_media_player *p)
 static gboolean
 media_autoplay_allowed(const ns_media_player *p)
 {
-    return p->video || media_muted(p) || p->js->user_ever_activated;
+    return (p->video && !p->fetching) || media_muted(p) ||
+           p->js->user_ever_activated;
+}
+
+static void
+media_open_video_audio(ns_media_player *p, ns_image *frames)
+{
+    if (p->fetching || !ns_image_video_has_audio(frames)) return;
+    GBytes *bytes = ns_image_video_bytes(frames);
+    if (!bytes) return;
+    NsAudioContext *audio = media_audio_context(p->js);
+    ns_audio_context_open_bytes(audio, p->token, bytes, FALSE);
+    g_bytes_unref(bytes);
+    ns_audio_context_set_volume(audio, p->token, media_output_volume(p));
+    ns_audio_context_set_loop(audio, p->token, media_looping(p));
+    p->fetching = TRUE;
+}
+
+static void
+media_close_video_audio(ns_media_player *p)
+{
+    if (!p->fetching) return;
+    if (p->js->audio_context)
+        ns_audio_context_close(p->js->audio_context, p->token);
+    p->fetching = FALSE;
+}
+
+static gboolean
+media_video_audio_ready(ns_media_player *p, NsAudioStatus *status)
+{
+    if (!p->fetching || !p->js->audio_context) return FALSE;
+    if (!ns_audio_context_status(p->js->audio_context, p->token, status))
+        return FALSE;
+    if (status->state == NS_AUDIO_PLAYER_FAILED) {
+        media_close_video_audio(p);
+        return FALSE;
+    }
+    return status->state == NS_AUDIO_PLAYER_READY;
 }
 
 static void
@@ -483,6 +521,16 @@ media_backend_play(ns_media_player *p)
         if (!frames) return;
         gint64 now = g_get_monotonic_time();
         if (ns_image_anim_ended(frames, now)) ns_image_anim_seek(frames, 0, now);
+        if (p->fetching && p->js->audio_context) {
+            ns_audio_context_seek(p->js->audio_context, p->token,
+                                  ns_image_anim_position(frames, now));
+            ns_audio_context_play(p->js->audio_context, p->token);
+            NsAudioStatus status;
+            if (!media_video_audio_ready(p, &status) && p->fetching) {
+                media_poll_ensure(p->js);
+                return;
+            }
+        }
         ns_image_anim_set_paused(frames, FALSE, now);
         ns_js_request_repaint(p->js);
         return;
@@ -498,6 +546,8 @@ media_backend_pause(ns_media_player *p)
         ns_image *frames = media_video_frames(p);
         if (frames)
             ns_image_anim_set_paused(frames, TRUE, g_get_monotonic_time());
+        if (p->fetching && p->js->audio_context)
+            ns_audio_context_pause(p->js->audio_context, p->token);
         return;
     }
     if (p->fetching && p->js->audio_context)
@@ -513,6 +563,8 @@ media_backend_seek(ns_media_player *p, double t)
             ns_image_anim_seek(frames, t, g_get_monotonic_time());
             ns_js_request_repaint(p->js);
         }
+        if (p->fetching && p->js->audio_context)
+            ns_audio_context_seek(p->js->audio_context, p->token, t);
         return;
     }
     if (p->fetching && p->js->audio_context)
@@ -599,6 +651,7 @@ media_became_ready(ns_media_player *p, double duration, int width, int height)
             ns_image_anim_set_loop(frames, media_looping(p), now);
             ns_image_anim_set_paused(frames, TRUE, now);
             ns_image_anim_seek(frames, p->start_position, now);
+            media_open_video_audio(p, frames);
         }
     } else if (p->start_position > 0 && p->js->audio_context) {
         ns_audio_context_seek(p->js->audio_context, p->token,
@@ -619,6 +672,8 @@ media_became_ready(ns_media_player *p, double duration, int width, int height)
 static void
 media_reached_end(ns_media_player *p)
 {
+    if (p->video && p->fetching && p->js->audio_context)
+        ns_audio_context_pause(p->js->audio_context, p->token);
     p->position = isnan(p->duration) ? p->position : p->duration;
     p->ended = TRUE;
     media_queue_task(p, "timeupdate");
@@ -628,6 +683,30 @@ media_reached_end(ns_media_player *p)
         media_queue_task(p, "pause");
     }
     media_queue_task(p, "ended");
+}
+
+static void
+media_video_follow_audio(ns_media_player *p, ns_image *frames, gint64 now)
+{
+    NsAudioStatus status;
+    gboolean ready = media_video_audio_ready(p, &status);
+    if (!ready) {
+        if (!p->fetching && frames->anim_paused) {
+            ns_image_anim_set_paused(frames, FALSE, now);
+            ns_js_request_repaint(p->js);
+        }
+        return;
+    }
+    if (frames->anim_paused) {
+        ns_image_anim_seek(frames, status.position, now);
+        ns_image_anim_set_paused(frames, FALSE, now);
+        ns_js_request_repaint(p->js);
+        return;
+    }
+    if (status.playing &&
+        fabs(ns_image_anim_position(frames, now) - status.position) >
+            NS_MEDIA_AV_DRIFT_S)
+        ns_image_anim_seek(frames, status.position, now);
 }
 
 static gboolean
@@ -652,6 +731,7 @@ media_poll_player(ns_media_player *p, gint64 now)
         }
         ns_image *frames = media_video_frames(p);
         if (!p->paused && frames) {
+            media_video_follow_audio(p, frames, now);
             p->position = ns_image_anim_position(frames, now);
             if (ns_image_anim_ended(frames, now)) {
                 media_reached_end(p);
