@@ -525,12 +525,15 @@ session_scratch(ns_page_session *s, unsigned char **buf)
 }
 
 static int
-session_paint_band(ns_page_session *s, unsigned char *scratch, int y0, int y1,
-                   long sx, long sy, int vw, int vh, double scale)
+session_paint_band(ns_page_session *s, unsigned char *scratch, int x0, int x1,
+                   int y0, int y1, long sx, long sy, int vw, int vh,
+                   double scale)
 {
+    x0 = MAX(x0 - NS_DAMAGE_EDGE_PX, 0);
+    x1 = MIN(x1 + NS_DAMAGE_EDGE_PX, vw);
     y0 = MAX(y0 - NS_DAMAGE_EDGE_PX, -NS_DAMAGE_EDGE_PX);
     y1 = MIN(y1 + NS_DAMAGE_EDGE_PX, vh + NS_DAMAGE_EDGE_PX);
-    int band[4] = { 0, y0, vw, y1 - y0 };
+    int band[4] = { x0, y0, x1 - x0, y1 - y0 };
     return ns_browser_render_argb32_rects(s->cur, (int)sx, (int)sy, vw, vh,
                                           NS_DAMAGE_EDGE_PX, scale, scratch,
                                           vw * 4, band, 1);
@@ -542,7 +545,8 @@ session_verify_region(ns_page_session *s, long sx, long sy, int vw, int vh,
 {
     size_t size = (size_t)vw * 4u * (size_t)vh;
     if (!session_scratch(s, &s->verify_fb) ||
-        session_paint_band(s, s->verify_fb, 0, vh, sx, sy, vw, vh, scale) != 0)
+        session_paint_band(s, s->verify_fb, 0, vw, 0, vh, sx, sy, vw, vh,
+                           scale) != 0)
         return;
     const unsigned char *reference = session_view(s->verify_fb, vw);
     unsigned char *view = session_view(s->fb, vw);
@@ -583,7 +587,12 @@ session_paint_rows(ns_page_session *s, const cairo_rectangle_int_t *rects,
                    int n, int y0, int y1, long sx, long sy, int vw, int vh,
                    double scale)
 {
-    if (session_paint_band(s, s->scratch_fb, y0, y1, sx, sy, vw, vh,
+    int x0 = vw, x1 = 0;
+    for (int i = 0; i < n; i++) {
+        x0 = MIN(x0, rects[i].x);
+        x1 = MAX(x1, rects[i].x + rects[i].width);
+    }
+    if (session_paint_band(s, s->scratch_fb, x0, x1, y0, y1, sx, sy, vw, vh,
                            scale) != 0)
         return -1;
     size_t stride = (size_t)vw * 4u;
@@ -732,8 +741,8 @@ ns_page_session_render(ns_page_session *s, int width, int height,
             if (!scrolled)
                 session_frame_damage(out, region);
         } else {
-            painted = session_paint_band(s, s->fb, 0, vh, sx, sy, vw, vh,
-                                         scale);
+            painted = session_paint_band(s, s->fb, 0, vw, 0, vh, sx, sy,
+                                         vw, vh, scale);
         }
         ns_trace_complete("frame", region ? "paint (damage)" : "paint",
                           phase_start, NULL);

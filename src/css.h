@@ -931,6 +931,10 @@ gboolean   ns_css_selector_matches(const ns_css_selector *sel, const ns_node *el
 const char *ns_css_node_dir(const ns_node *el);
 
 gboolean   ns_css_media_query_matches(const char *query);
+GPtrArray *ns_css_media_record_new(void);
+GPtrArray *ns_css_media_record_swap(GPtrArray *recorder);
+gboolean   ns_css_media_record_holds(const GPtrArray *record);
+void       ns_css_media_record_viewport_use(void);
 
 double     ns_css_sizes_resolve(const char *sizes);
 
@@ -1047,6 +1051,7 @@ typedef struct ns_css_stylesheet {
     guint64    serial;
     char      *resolved_base;
     struct ns_css_rule_index *index;
+    struct ns_css_incr_sheet_keys *incr_keys;
 } ns_css_stylesheet;
 
 gboolean ns_css_stylesheet_has_container_rules(const ns_css_stylesheet *sh);
@@ -1273,6 +1278,7 @@ void ns_css_selector_cache_begin(void);
 void ns_css_selector_cache_end(void);
 
 void ns_css_mark_restyle_dirty(ns_node *parent);
+void ns_css_mark_children_restyle(ns_node *parent);
 void ns_css_mark_childlist_change(ns_node *parent, ns_node *added,
                                   ns_node *removed, ns_node *prev_sibling,
                                   ns_node *next_sibling);

@@ -7278,6 +7278,7 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         add_arr = g_ptr_array_new();
         g_ptr_array_add(add_arr, added);
     }
+    ns_css_mark_restyle_dirty(n);
     ns_mut_record_emit_child_list_arrays(js, n, add_arr, removed, NULL, NULL);
     if (add_arr) g_ptr_array_free(add_arr, FALSE);
     g_ptr_array_free(removed, FALSE);
@@ -7364,6 +7365,7 @@ ns_element_set_innerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
         }
     }
     if (free_s) JS_FreeCString(ctx, s);
+    ns_css_mark_restyle_dirty(n);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -23601,7 +23603,7 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
         g_hash_table_destroy(fresh);
     }
     if (removed_any && survivors) {
-        ns_css_mark_restyle_dirty(parent);
+        ns_css_mark_children_restyle(parent);
     } else {
         ns_node *lead_added = NULL;
         if (added)
@@ -28736,9 +28738,11 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
             g_ptr_array_add(added, c);
             c = next;
         }
-        if (_j && added->len > 0)
+        if (_j && added->len > 0) {
+            ns_css_mark_children_restyle(parent);
             ns_mut_record_emit_child_list_arrays(_j, parent, added, NULL,
                                                  batch_prev, batch_next);
+        }
         g_ptr_array_free(added, FALSE);
         if (_j) {
             _j->mutated = TRUE;
@@ -33579,6 +33583,7 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
                 ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         }
         if (s) JS_FreeCString(ctx, s);
+        ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
     }
@@ -33588,6 +33593,7 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
         if (s && *s)
             ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         if (s) JS_FreeCString(ctx, s);
+        ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
         if (_j) _j->mutated = TRUE;
     }
     return JS_UNDEFINED;
@@ -33854,6 +33860,7 @@ ns_js_set_input_used_value(ns_js *js, ns_node *n, const char *s)
     ns_element_set_attr(n, ns_input_value_is_dirty_mode(n) ? "data-nd-value"
                                                            : "value", s ? s : "");
     ns_element_remove_attr(n, "data-nd-user-edited");
+    ns_css_mark_restyle_dirty(n->parent ? n->parent : n);
     if (js) js->mutated = TRUE;
 }
 
@@ -36041,6 +36048,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         ns_select_set_selected_option(el, chosen);
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
+        ns_css_mark_restyle_dirty(el);
         { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
         return JS_UNDEFINED;
     }
@@ -36057,6 +36065,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
             ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
+        ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
     }
@@ -36067,6 +36076,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         if (!null_to_empty) JS_FreeCString(ctx, s);
         ns_text_selection_value_changed(ctx, this_val, old_value);
         JS_FreeValue(ctx, old_value);
+        ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
     }
@@ -36092,6 +36102,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
     if (selection_applies)
         ns_text_selection_value_changed(ctx, this_val, old_value);
     JS_FreeValue(ctx, old_value);
+    ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
@@ -36150,6 +36161,7 @@ ns_element_set_selectedIndex(JSContext *ctx, JSValueConst this_val,
     }
     ns_select_set_selected_option(el, chosen);
     ns_js *_j = js_from_ctx(ctx);
+    ns_css_mark_restyle_dirty(el);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -38346,6 +38358,7 @@ ns_details_close_others_in_group(ns_js *js, ns_node *opened, const char *name)
             ns_js_dispatch_toggle_event(js, c, "beforetoggle",
                                         "open", "closed", FALSE, NULL);
             ns_element_remove_attr(c, "open");
+            ns_css_mark_restyle_dirty(c);
             js->mutated = TRUE;
             ns_js_dispatch_toggle_event(js, c, "toggle",
                                         "open", "closed", FALSE, NULL);
@@ -40294,6 +40307,7 @@ ns_js_reset_form(JSContext *ctx, ns_node *form)
                                  doc ? doc : form);
     ns_js_reset_owned_outputs(_j, form, (ns_node *)(doc ? doc : form),
                               doc ? doc : form, 0);
+    ns_css_mark_restyle_dirty(form);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -40712,6 +40726,9 @@ ns_js_click_end(ns_js *js, const ns_node *node, const ns_js_click_state *state,
     if (state->control) {
         ns_checkable_post_click(js, (ns_node *)state->control, state->kind,
                                 state, prevented);
+        ns_css_mark_restyle_dirty(state->control->parent
+                                  ? state->control->parent
+                                  : (ns_node *)state->control);
         js->mutated = TRUE;
         return TRUE;
     }
@@ -40737,6 +40754,7 @@ ns_js_select_choose_option(ns_js *js, ns_node *option)
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
+    ns_css_mark_restyle_dirty(select);
     js->mutated = TRUE;
     return TRUE;
 }
@@ -40754,6 +40772,7 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
+    ns_css_mark_restyle_dirty(select);
     js->mutated = TRUE;
     return TRUE;
 }
@@ -41979,6 +41998,7 @@ ns_table_create_section(JSContext *ctx, JSValueConst this_val, const char *name,
     } else {
         ns_node_append_child(tbl, sec);
     }
+    ns_css_mark_restyle_dirty(tbl);
     if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
     return ns_make_element(ctx, sec);
 }
@@ -42013,6 +42033,7 @@ ns_table_createCaption(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, tbl, cap, tbl->first_child);
     else
         ns_node_append_child(tbl, cap);
+    ns_css_mark_restyle_dirty(tbl);
     if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
     return ns_make_element(ctx, cap);
 }
@@ -42027,6 +42048,7 @@ ns_table_delete_section(JSContext *ctx, JSValueConst this_val, const char *name)
     ns_js *_j = js_from_ctx(ctx);
     ns_node_remove(existing);
     ns_js_orphan_node(_j, existing);
+    ns_css_mark_restyle_dirty(tbl);
     if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
 }
 
@@ -42280,6 +42302,7 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, before->parent, opt, before);
     else
         ns_node_append_child(sel, opt);
+    ns_css_mark_restyle_dirty(sel);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -42294,6 +42317,7 @@ ns_element_setCustomValidity(JSContext *ctx, JSValueConst this_val,
     if (msg && *msg) ns_element_set_attr(el, NS_CUSTOM_VALIDITY_ATTR, msg);
     else            ns_element_remove_attr(el, NS_CUSTOM_VALIDITY_ATTR);
     ns_js *_j = js_from_ctx(ctx);
+    ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
     if (_j) _j->mutated = TRUE;
     if (msg) JS_FreeCString(ctx, msg);
     return JS_UNDEFINED;

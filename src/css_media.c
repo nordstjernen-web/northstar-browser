@@ -1080,8 +1080,24 @@ mq_query_list_matches(const char *query)
     return any;
 }
 
-gboolean
-ns_css_media_query_matches(const char *query)
+typedef struct {
+    char    *query;
+    gboolean matched;
+    double   viewport_w, viewport_h;
+} mq_record;
+
+static GPtrArray *g_mq_recorder;
+
+static void
+mq_record_free(gpointer data)
+{
+    mq_record *r = data;
+    g_free(r->query);
+    g_free(r);
+}
+
+static gboolean
+mq_query_matches_unrecorded(const char *query)
 {
     if (!query) return TRUE;
     if (!strstr(query, "/*")) return mq_query_list_matches(query);
@@ -1089,6 +1105,60 @@ ns_css_media_query_matches(const char *query)
     gboolean matches = mq_query_list_matches(clean);
     g_free(clean);
     return matches;
+}
+
+gboolean
+ns_css_media_query_matches(const char *query)
+{
+    gboolean matches = mq_query_matches_unrecorded(query);
+    if (g_mq_recorder && query) {
+        mq_record *r = g_new(mq_record, 1);
+        r->query = g_strdup(query);
+        r->matched = matches;
+        r->viewport_w = r->viewport_h = 0;
+        g_ptr_array_add(g_mq_recorder, r);
+    }
+    return matches;
+}
+
+GPtrArray *
+ns_css_media_record_new(void)
+{
+    return g_ptr_array_new_with_free_func(mq_record_free);
+}
+
+GPtrArray *
+ns_css_media_record_swap(GPtrArray *recorder)
+{
+    GPtrArray *previous = g_mq_recorder;
+    g_mq_recorder = recorder;
+    return previous;
+}
+
+void
+ns_css_media_record_viewport_use(void)
+{
+    if (!g_mq_recorder) return;
+    mq_record *r = g_new0(mq_record, 1);
+    r->viewport_w = ns_css_media_viewport_current_w();
+    r->viewport_h = ns_css_media_viewport_current_h();
+    g_ptr_array_add(g_mq_recorder, r);
+}
+
+gboolean
+ns_css_media_record_holds(const GPtrArray *record)
+{
+    for (guint i = 0; record && i < record->len; i++) {
+        const mq_record *r = g_ptr_array_index(record, i);
+        if (!r->query) {
+            if (r->viewport_w != ns_css_media_viewport_current_w() ||
+                r->viewport_h != ns_css_media_viewport_current_h())
+                return FALSE;
+        } else if (mq_query_matches_unrecorded(r->query) != r->matched) {
+            return FALSE;
+        }
+    }
+    return TRUE;
 }
 
 static void

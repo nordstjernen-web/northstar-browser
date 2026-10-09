@@ -4,6 +4,54 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Restyling after DOM changes touches only what can have changed. A
+  single `:has()` the restyle index could not key switched incremental
+  restyle off for the whole page, and most changes re-cascaded their
+  whole subtree. Attribute, class, child-list and hover/focus changes
+  now restyle the changed element, re-match descendants only through
+  invalidation sets built from the stylesheets, and stop at children
+  whose parent's computed style came out unchanged. On a YouTube watch
+  page the style cascade drops from 5.6 s to 2.0 s over the first 15
+  seconds (about 400 elements restyled per pass instead of 4,500), and
+  video ads stutter much less.
+* DOM and form-state changes made through `textContent`, `innerText`,
+  fragment insertion, `<select>` and `<option>` APIs, input values, form
+  reset, exclusive `<details>`, checkbox/radio activation,
+  `setCustomValidity` and the table section APIs mark the affected
+  elements for restyle; `:empty`, `:checked` and positional selectors
+  could go stale after them.
+* Full style passes are about 28% cheaper: rule-index candidates carry
+  what selector matching needs to reject them early, declarations whose
+  value uses `var()` are parsed once per substituted value per pass
+  instead of once per element, and shared style clones keep their inline
+  and `currentColor` bookkeeping, so unchanged elements stop looking
+  changed to incremental restyle.
+* Restyle invalidation for `:has()` and child-list changes is cheap: key
+  sets are checked by looking up the node's own tag, id and classes, the
+  ancestor walk for `:has()` anchors stops at ancestors already walked
+  since the last style pass, and a child-list change walks the ancestors
+  once instead of once per child. On a YouTube watch page this cut
+  main-thread CPU by about 30%.
+* Painting skips fully transparent subtrees and keeps opacity groups
+  element-sized: YouTube's ~20 invisible hover overlays each allocated
+  and composited a viewport-sized offscreen surface every frame. A full
+  repaint of a YouTube watch page drops from about 39 ms to 13 ms, and
+  damage repaints cover only the damaged columns instead of the whole
+  viewport width.
+* Parsed stylesheets are reused across window size changes unless one
+  of their own `@media` conditions changes result. They were cached per
+  exact viewport size, so every resize step, and the vertical scrollbar
+  appearing while a page loads, re-parsed all CSS and rebuilt every rule
+  index: about 0.7 s on a YouTube watch page, now about 0.1 s.
+* Incremental restyle reuses untouched subtrees wholesale: elements off
+  the path to any changed element skip per-element dirty checks, the
+  ancestor filter and invalidation-set matching. Small restyles are
+  about 25% cheaper.
+* The invalidation keys incremental restyle uses are computed once per
+  stylesheet and merged when the set of sheets changes, instead of being
+  rebuilt from every rule of every sheet each time a `<style>` element
+  is added. YouTube's full style passes during load cost about half as
+  much (412 ms to 227 ms).
 * The address bar and window title follow a page that changes its
   address with `history.pushState()` or its title from script. They were
   only read when a navigation finished, so single-page sites (YouTube)

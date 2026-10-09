@@ -5865,6 +5865,22 @@ box_border_rect(const ns_box *b, double *bx, double *by, double *bw, double *bh)
 }
 
 static gboolean
+box_ink_within_border_box(const ns_box *b)
+{
+    if (b->first_child) return FALSE;
+    const ns_style *s = b->style;
+    if (!s) return TRUE;
+    const ns_css_value *shadow = s->values[NS_CSS_BOX_SHADOW];
+    if (shadow && shadow->kind == NS_CSS_V_SHADOW && shadow->u.shadow.n > 0)
+        return FALSE;
+    const ns_css_value *filter = s->values[NS_CSS_FILTER];
+    if (filter && !ns_css_keyword_is(filter, "none")) return FALSE;
+    const ns_css_value *outline = s->values[NS_CSS_OUTLINE_STYLE];
+    if (outline && !ns_css_keyword_is(outline, "none")) return FALSE;
+    return TRUE;
+}
+
+static gboolean
 box_preserve3d(const ns_box *b)
 {
     if (!b->style || !b->style->values[NS_CSS_TRANSFORM_STYLE]) return FALSE;
@@ -6677,6 +6693,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cairo_clip_extents(cr, &dbg_e0, &dbg_e1, &dbg_e2, &dbg_e3);
     const ns_style *style = b->style;
     double op = box_opacity(b);
+    if (op <= 0.0) return;
     cairo_operator_t blend = blend_mode_operator(style);
     const ns_css_value *mask_v = style ? style->values[NS_CSS_MASK_IMAGE] : NULL;
     gboolean mask_grad = mask_v && mask_v->kind == NS_CSS_V_GRADIENT &&
@@ -6749,6 +6766,15 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
 
+    gboolean group_clipped = grouped && !has_transform &&
+                             box_ink_within_border_box(b);
+    if (group_clipped) {
+        double gx, gy, gw, gh;
+        box_border_rect(b, &gx, &gy, &gw, &gh);
+        cairo_save(cr);
+        cairo_rectangle(cr, gx, gy, gw, gh);
+        cairo_clip(cr);
+    }
     if (grouped) cairo_push_group(cr);
     if (has_transform) {
         cairo_save(cr);
@@ -7203,6 +7229,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
         if (blend != CAIRO_OPERATOR_OVER) cairo_set_operator(cr, saved_op);
     }
+    if (group_clipped) cairo_restore(cr);
 
     if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
     if (g_dbg_paint_x >= 0) {
