@@ -90,6 +90,11 @@ Significant changes in each release:
     gzip body made the browser allocate gigabytes, and past 4 GiB it
     aborted. A single chunk or flush that would produce more than
     256 MiB now fails the stream with a `RangeError`.
+  - Following a same-page `#fragment` link handed the page URL itself to
+    the `hashchange` event as `newURL`, but setting `oldURL` first could
+    run a page-defined setter, and a setter that called
+    `history.replaceState()` freed that URL before it was read. The
+    event now gets a copy.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
