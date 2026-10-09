@@ -33,6 +33,14 @@ Significant changes in each release:
     `b ~ b ~ …` compounds over as many sibling elements overflowed the
     stack and crashed. A selector chain more than 1024 compounds deep
     now fails to match.
+  - Flattening nested CSS rules substitutes `:is(<parent>)` for every `&`
+    in a child selector, so the selector text grew multiplicatively with
+    each level: `a{&&&&&&&&{&&&&&&&&{…}}}` ten levels deep, about a
+    hundred bytes of CSS, made the browser allocate until it aborted.
+    Flattening now has a budget of 16 MiB plus 16 bytes per byte of
+    stylesheet for the selector text it builds and copies, and drops the
+    remaining nested rules once that is spent; real stylesheets stay far
+    below it.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
