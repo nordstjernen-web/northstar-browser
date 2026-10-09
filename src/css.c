@@ -26345,6 +26345,10 @@ typedef enum css_chain_result {
     CSS_CHAIN_FAILS_COMPLETELY,
 } css_chain_result;
 
+#define NS_SEL_MATCH_MAX_CHAIN 1024
+
+static __thread int g_sel_chain_depth;
+
 static css_chain_result match_complex_chain(const ns_css_selector *sel,
                                             int idx, const ns_node *cur);
 
@@ -26352,9 +26356,14 @@ static css_chain_result
 match_compound_then_chain(const ns_css_selector *sel, int idx,
                           const ns_node *el)
 {
+    if (g_sel_chain_depth >= NS_SEL_MATCH_MAX_CHAIN)
+        return CSS_CHAIN_FAILS_COMPLETELY;
     if (!match_simple(g_ptr_array_index(sel->compounds, idx), el))
         return CSS_CHAIN_FAILS_LOCALLY;
-    return match_complex_chain(sel, idx, el);
+    g_sel_chain_depth++;
+    css_chain_result r = match_complex_chain(sel, idx, el);
+    g_sel_chain_depth--;
+    return r;
 }
 
 static css_chain_result

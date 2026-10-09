@@ -27,6 +27,12 @@ Significant changes in each release:
     declaration the same way, each round starting a fresh parse that no
     depth limit could see. A declaration more than 32 such rounds deep
     is now unsupported.
+  - Matching a complex selector recursed once per compound, and neither
+    the number of compounds nor a run of siblings has a limit, so
+    `element.matches()` with a selector of a few hundred thousand
+    `b ~ b ~ …` compounds over as many sibling elements overflowed the
+    stack and crashed. A selector chain more than 1024 compounds deep
+    now fails to match.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
