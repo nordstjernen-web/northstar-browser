@@ -1647,6 +1647,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             g_main_context_iteration(ns_engine_context(), FALSE);
             did_iter = TRUE;
             changed = TRUE;
+            if (g_get_monotonic_time() >= deadline) break;
         }
 
         if (!did_iter) break;

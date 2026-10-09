@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* An animation tick stops running queued tasks once its 16 ms budget is
+  spent; it checked the budget only after up to 64 tasks, so one frame on
+  YouTube could wait more than a second for timers and forced relayouts.
 * IndexedDB index lookups by a single key (`index.get`, `getKey`,
   `getAll`, `count`) and unique-index checks on `put`/`add` read only the
   matching rows, and uniqueness checks skip the stored values. Every
