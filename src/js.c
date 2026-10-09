@@ -3726,14 +3726,6 @@ ns_window_properties_document(ns_js *js)
     return js->main_document ? js->main_document : js->current_doc;
 }
 
-static ns_node *
-ns_window_named_lookup(ns_js *js, const char *name)
-{
-    const ns_node *doc = ns_window_properties_document(js);
-    if (!doc || !name || !*name) return NULL;
-    return ns_node_find_by_id((ns_node *)doc, name);
-}
-
 static gboolean ns_live_is_array_index(const char *name);
 static JSValue ns_element_get_contentWindow(JSContext *ctx,
                                             JSValueConst this_val);
@@ -3863,13 +3855,24 @@ ns_window_named_fill(JSPropertyDescriptor *desc, JSValue value, int flags)
     desc->setter = JS_UNDEFINED;
 }
 
+/* Each window's named-properties object resolves against that window's own
+ * document: an iframe realm's object carries its iframe as opaque. */
+static const ns_node *
+ns_window_named_document(ns_js *js, JSValueConst obj)
+{
+    ns_node *iframe = JS_GetOpaque(obj, ns_window_named_class_id);
+    if (!iframe) return ns_window_properties_document(js);
+    if (!js->frame_contexts || !g_hash_table_contains(js->frame_contexts, iframe))
+        return NULL;
+    return ns_iframe_document_node(iframe);
+}
+
 static int
 ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
                     JSValueConst obj, JSAtom prop)
 {
-    (void)obj;
     ns_js *js = js_from_ctx(ctx);
-    const ns_node *doc = js ? ns_window_properties_document(js) : NULL;
+    const ns_node *doc = js ? ns_window_named_document(js, obj) : NULL;
     if (!doc) return 0;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return 0;
@@ -3879,7 +3882,7 @@ ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
     const ns_node *frame = ns_window_child_frame_for(doc, name);
     JSValue value = frame ? ns_frame_window(ctx, frame) : JS_UNDEFINED;
     if (JS_IsUndefined(value) && !indexed) {
-        ns_node *el = ns_window_named_lookup(js, name);
+        ns_node *el = *name ? ns_node_find_by_id((ns_node *)doc, name) : NULL;
         if (el) value = ns_make_element(ctx, el);
     }
     JS_FreeCString(ctx, name);
@@ -26908,6 +26911,29 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
 }
 
 
+static const ns_node *
+ns_event_document_for_target(ns_js *js, const ns_node *target)
+{
+    for (const ns_node *node = target; node; node = node->parent)
+        if (node->kind == NS_NODE_DOCUMENT && !(node->flags & NS_NODE_FRAGMENT))
+            return node;
+    return js ? js->current_doc : NULL;
+}
+
+static JSValue
+ns_event_window_for_document(ns_js *js, const ns_node *doc)
+{
+    if (js && doc && doc != js->main_document && doc->parent &&
+        (ns_node_is_element_named(doc->parent, "iframe") ||
+         ns_node_is_element_named(doc->parent, "frame") ||
+         ns_node_is_element_named(doc->parent, "object"))) {
+        JSValue realm = ns_iframe_lookup_realm_window(js, doc->parent);
+        if (JS_IsObject(realm)) return realm;
+        JS_FreeValue(js->ctx, realm);
+    }
+    return JS_GetGlobalObject(js->ctx);
+}
+
 static gboolean
 ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
                                  const char *type, JSValue event)
@@ -26918,7 +26944,8 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
     JSContext *ctx = js->ctx;
     char prop_name[48];
     g_snprintf(prop_name, sizeof prop_name, "on%s", type);
-    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue global = ns_event_window_for_document(
+        js, ns_event_document_for_target(js, target));
     JSValue handler = JS_GetPropertyStr(ctx, global, prop_name);
     if (JS_IsFunction(ctx, handler)) {
         gboolean special = FALSE;
@@ -26963,29 +26990,6 @@ ns_invoke_window_listeners(ns_js *js, const ns_node *target, const char *type,
 {
     return ns_invoke_window_listeners_full(js, target, type, event,
                                            capture_phase, FALSE, fired);
-}
-
-static const ns_node *
-ns_event_document_for_target(ns_js *js, const ns_node *target)
-{
-    for (const ns_node *node = target; node; node = node->parent)
-        if (node->kind == NS_NODE_DOCUMENT && !(node->flags & NS_NODE_FRAGMENT))
-            return node;
-    return js ? js->current_doc : NULL;
-}
-
-static JSValue
-ns_event_window_for_document(ns_js *js, const ns_node *doc)
-{
-    if (js && doc && doc != js->main_document && doc->parent &&
-        (ns_node_is_element_named(doc->parent, "iframe") ||
-         ns_node_is_element_named(doc->parent, "frame") ||
-         ns_node_is_element_named(doc->parent, "object"))) {
-        JSValue realm = ns_iframe_lookup_realm_window(js, doc->parent);
-        if (JS_IsObject(realm)) return realm;
-        JS_FreeValue(js->ctx, realm);
-    }
-    return JS_GetGlobalObject(js->ctx);
 }
 
 static gboolean
@@ -42794,11 +42798,20 @@ static const char ns_iframe_scope_bootstrap[] =
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
     "  loc.toString = function(){ return url; };"
+    /* Methods taken from a frame and called on another window's history
+     * (how libraries get unpatched functions) act on that history. */
+    "  function realHist(name, self, args){"
+    "    var h = realWin.History && realWin.History.prototype;"
+    "    if (!h || typeof h[name] !== 'function') throw new TypeError('Illegal invocation');"
+    "    return h[name].apply(self, args);"
+    "  }"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
+    "    pushState: function(s,t,u){ if(this!==hist) return realHist('pushState',this,arguments); state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    replaceState: function(s,t,u){ if(this!==hist) return realHist('replaceState',this,arguments); state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    back: function(){ if(this!==hist) return realHist('back',this,arguments); firePop(); },"
+    "    forward: function(){ if(this!==hist) return realHist('forward',this,arguments); firePop(); },"
+    "    go: function(){ if(this!==hist) return realHist('go',this,arguments); firePop(); }"
     "  };"
     "  var ov = {"
     "    location: loc, history: hist, document: iframeDoc,"
@@ -42957,11 +42970,20 @@ static const char ns_iframe_global_bootstrap[] =
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
     "  loc.toString = function(){ return url; };"
+    /* Methods taken from a frame and called on another window's history
+     * (how libraries get unpatched functions) act on that history. */
+    "  function realHist(name, self, args){"
+    "    var h = realWin.History && realWin.History.prototype;"
+    "    if (!h || typeof h[name] !== 'function') throw new TypeError('Illegal invocation');"
+    "    return h[name].apply(self, args);"
+    "  }"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
+    "    pushState: function(s,t,u){ if(this!==hist) return realHist('pushState',this,arguments); state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    replaceState: function(s,t,u){ if(this!==hist) return realHist('replaceState',this,arguments); state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    back: function(){ if(this!==hist) return realHist('back',this,arguments); firePop(); },"
+    "    forward: function(){ if(this!==hist) return realHist('forward',this,arguments); firePop(); },"
+    "    go: function(){ if(this!==hist) return realHist('go',this,arguments); firePop(); }"
     "  };"
     "  function def(name, d){ d.configurable = true; try { Object.defineProperty(G, name, d); } catch(e){} }"
     "  def('window',     { value: win, writable: true });"
@@ -43061,7 +43083,8 @@ static const char ns_iframe_global_bootstrap[] =
     "      var pk = pnames[pi];"
     "      if (Object.prototype.hasOwnProperty.call(G, pk) && pk!=='performance') continue;"
     "      if (pk === '_listeners') continue;"
-    "      if (crossOrigin && (parentOnly[pk] || !platformNames ||"
+    "      if (crossOrigin && parentOnly[pk]) continue;"
+    "      if ((crossOrigin || platformNames) && (!platformNames ||"
     "          !Object.prototype.hasOwnProperty.call(platformNames, pk))) continue;"
     "      try {"
     "        var pd = Object.getOwnPropertyDescriptor(realWin, pk);"
@@ -43171,6 +43194,49 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     if (!ok) {
         JS_FreeValue(fctx, fg);
         return NULL;
+    }
+    if (iframe) {
+        /* Give the frame its own named-properties object (bound to its own
+         * document) instead of inheriting the parent window's. */
+        static const char rebase_src[] =
+            "(function(G, named){"
+            "  var wp = Object.getPrototypeOf(G);"
+            "  var fp = Object.create(named);"
+            "  Object.getOwnPropertyNames(wp).concat(Object.getOwnPropertySymbols(wp))"
+            "    .forEach(function(k){ try { Object.defineProperty(fp, k,"
+            "      Object.getOwnPropertyDescriptor(wp, k)); } catch (e) {} });"
+            "  Object.setPrototypeOf(G, fp);"
+            "})";
+        JSValue win_proto = JS_GetPrototype(fctx, fg);
+        JSValue parent_named = JS_IsObject(win_proto)
+            ? JS_GetPrototype(fctx, win_proto) : JS_UNDEFINED;
+        if (JS_IsObject(parent_named) &&
+            JS_GetClassID(parent_named) == ns_window_named_class_id) {
+            JSValue named = JS_NewObjectClass(fctx, ns_window_named_class_id);
+            JSValue fn = JS_Eval(fctx, rebase_src, strlen(rebase_src),
+                                 "<iframe-named>", JS_EVAL_TYPE_GLOBAL);
+            if (!JS_IsException(named) && JS_IsFunction(fctx, fn)) {
+                JS_SetOpaque(named, iframe);
+                JSValue base = JS_GetPrototype(fctx, parent_named);
+                JS_SetPrototype(fctx, named, base);
+                JS_FreeValue(fctx, base);
+                JSValueConst args[2] = { fg, named };
+                JSValue r = JS_Call(fctx, fn, JS_UNDEFINED, 2, args);
+                if (JS_IsException(r)) JS_FreeValue(fctx, JS_GetException(fctx));
+                JS_FreeValue(fctx, r);
+            } else if (JS_IsException(fn)) {
+                JS_FreeValue(fctx, JS_GetException(fctx));
+            }
+            JS_FreeValue(fctx, fn);
+            JS_FreeValue(fctx, named);
+        }
+        JS_FreeValue(fctx, parent_named);
+        JS_FreeValue(fctx, win_proto);
+        const char *fname = ns_element_get_attr(iframe, "name");
+        JS_DefinePropertyValueStr(fctx, fg, "name",
+                                  JS_NewString(fctx, fname ? fname : ""),
+                                  JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE |
+                                  JS_PROP_ENUMERABLE);
     }
     *out_window = fg;
     return fctx;
@@ -43288,10 +43354,14 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
 static gboolean
 ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe)
 {
-    unsigned sandbox = ns_iframe_effective_sandbox(iframe);
-    if ((sandbox & NS_SANDBOX_ACTIVE) &&
-        !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
-        return TRUE;
+    if (ns_element_get_attr(iframe, "data-nd-frame-loaded")) {
+        if (ns_element_get_attr(iframe, "data-nd-frame-opaque")) return TRUE;
+    } else {
+        unsigned sandbox = ns_iframe_effective_sandbox(iframe);
+        if ((sandbox & NS_SANDBOX_ACTIVE) &&
+            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
+            return TRUE;
+    }
     const char *frame_url = ns_element_get_attr(iframe, "data-nd-frame-url");
     if (!frame_url || !*frame_url) return FALSE;
     return !ns_js_urls_same_origin(frame_url, ns_js_node_doc_base(js, iframe));
@@ -56316,7 +56386,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
     if (srcdoc && *srcdoc) {
         decoded = g_strdup(srcdoc);
         abs_url = g_strdup(origin);
-    } else if (src && *src && !g_str_has_prefix(src, "about:")) {
+    } else if (src && *src && !g_str_has_prefix(src, "about:") &&
+               g_ascii_strncasecmp(src, "javascript:", 11) != 0) {
         abs_url = ns_url_resolve(origin, src);
         gboolean is_object = ns_node_is_element_named(iframe, "object");
         ns_csp_kind frame_kind = is_object ? NS_CSP_OBJECT : NS_CSP_FRAME;
@@ -56378,8 +56449,10 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                     js->log_cb(line, js->log_user_data);
                     g_free(line);
                 }
-            } else if (resp && resp->body &&
-                (resp->status == 200 || resp->status == 0) && !resp->error) {
+            } else if (resp && resp->body && !resp->error &&
+                       (resp->status == 200 || resp->status == 0 ||
+                        (!is_object && resp->status > 200 &&
+                         resp->status != 204 && resp->status != 205))) {
                 if (resp->body->len > 0 && resp->content_type &&
                     g_ascii_strncasecmp(resp->content_type, "image/", 6) == 0 &&
                     !ns_html_mime_is_xml(resp->content_type)) {
@@ -56541,6 +56614,11 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 
     if (content_root && content_doc) {
         ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
+        if ((sandbox & NS_SANDBOX_ACTIVE) &&
+            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
+            ns_element_set_attr(iframe, "data-nd-frame-opaque", "1");
+        else
+            ns_element_remove_attr(iframe, "data-nd-frame-opaque");
         ns_js_record_child_change(js, iframe, content_doc, NULL, NULL, NULL);
 
         const char *iorigin = abs_url && *abs_url ? abs_url : origin;

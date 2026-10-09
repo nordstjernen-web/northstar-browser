@@ -4,6 +4,43 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* A same-origin `<iframe>` no longer sees the parent page's own global
+  variables as its own. Its window was seeded with every property of the
+  parent window, including those the page's scripts had defined; it now
+  receives only the browser's built-in globals, as cross-origin frames
+  already did.
+* A frame's `window.name` is its `<iframe name>` attribute. Same-origin
+  frames reported the parent window's name, so scripts that find a
+  sibling frame through `parent.frames[name]` (reCAPTCHA's challenge
+  frame does this) found nothing.
+* Inside an `<iframe>`, a bare name resolves to an element with that id
+  in the frame's own document, not in the parent page's. Frames shared
+  the parent window's named-properties object, so on Google's "unusual
+  traffic" page (which has `<div id="recaptcha">`) the reCAPTCHA frames
+  saw that div as their `recaptcha` namespace, and the checkbox spun
+  forever.
+* `history.pushState()` and its siblings taken from an iframe and called
+  on another window's `history` act on that history, as in browsers. The
+  iframe's stand-in history ignored the receiver, so YouTube, which takes
+  these functions from a hidden iframe, changed pages without ever
+  changing the address.
+* An iframe shows the document a server sends with an HTTP error status
+  (404, 429, 500 ...), as browsers do; only `<object>` falls back to its
+  content on an error. Twitch's anti-bot challenge page arrives as a
+  429 in an iframe and was dropped as "load failed".
+* An iframe whose `src` is a `javascript:` URL keeps an empty
+  about:blank document instead of fetching "javascript:;" from the
+  network.
+* Changing an iframe's `sandbox` attribute takes effect at the frame's
+  next navigation, as the HTML standard specifies; the loaded document
+  keeps its origin. Twitch's ad verification adds `sandbox` after the
+  frame loaded and then writes into its `contentDocument`, which
+  Northstar had already made null.
+* `window.onload` and the other window event-handler properties fire
+  in iframes. The dispatcher read the handler from the top-level
+  window, so a frame's own `window.onload = ...` never ran (and the
+  top page's handler ran for the frame's events). BitChute's embedded
+  player starts from `window.onload` and stayed a black box.
 * Fixed an intermittent crash while pages load. `getComputedStyle()`
   and similar style flushes replaced the style table without relaying
   out, and two such flushes between relayouts could free styles the
