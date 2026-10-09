@@ -47,6 +47,12 @@ Significant changes in each release:
     track sizes from past the end of the stored track list. The count is
     now clamped to the tracks actually stored, both when the value is
     parsed and when layout expands it.
+  - The style engine keeps the hovered, pressed, focused and
+    focus-visible elements as plain pointers, and nothing cleared them
+    when the element was freed. A page that replaced a pressed element
+    while the mouse button was still down could have it freed, after
+    which the next restyle walked freed memory. Freeing a node now
+    clears every such pointer that refers to it.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1

@@ -30797,6 +30797,22 @@ static gboolean       g_state_has_focus_within;
 static gboolean       g_state_has_hover;
 static gboolean       g_state_has_active;
 
+void
+ns_css_forget_node(const ns_node *node)
+{
+    if (g_css_focus_node == node) g_css_focus_node = NULL;
+    if (g_css_focus_visible_node == node) g_css_focus_visible_node = NULL;
+    if (g_css_hover_node == node) g_css_hover_node = NULL;
+    if (g_css_active_node == node) g_css_active_node = NULL;
+    if (g_incr_prev_focus == node || g_incr_prev_hover == node ||
+        g_incr_prev_active == node) {
+        g_incr_prev_focus = NULL;
+        g_incr_prev_hover = NULL;
+        g_incr_prev_active = NULL;
+        g_incr_prev_doc = NULL;
+    }
+}
+
 static gboolean incr_node_matches_keys(const ns_node *n, GHashTable *keyset);
 static gboolean incr_node_matches_attr_preds(const ns_node *n,
                                              const GPtrArray *preds);
