@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Headless `--act=` gains pointer actions: `move X,Y` hovers (dispatching
+  pointerover/mouseover, pointermove/mousemove and setting `:hover`),
+  and `down X,Y` / `up` press and release, with `move`s between them for
+  a drag. A point may be given as `sel=CSS [dx=N] [dy=N]`, resolved to
+  the matching element's centre when the action runs, so scripted
+  interactions survive layout changes.
 * Media no longer starts by itself: a new `autoplay_enabled` setting,
   off by default, makes `play()` reject with `NotAllowedError` unless the
   user clicked or pressed a key in the last five seconds, and ignores the
