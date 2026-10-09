@@ -227,6 +227,7 @@ struct ns_js {
     gboolean      storage_events_draining;
     gint64        last_orphan_sweep_us;
     int           dispatch_depth;
+    int           listener_snapshots;
     int           callback_depth;
     int           synthetic_click_depth;
     GPtrArray    *mutation_observers;

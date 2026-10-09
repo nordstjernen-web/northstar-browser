@@ -107,6 +107,11 @@ Significant changes in each release:
     position in `int`, so `history.go(2147483647)` overflowed before the
     range check. It now converts with ToInt32 and checks the target in
     64 bits.
+  - `addEventListener()` reads `signal.aborted` of every listener already
+    registered, and a page getter there could remove that listener: it
+    was freed while the loop still compared its event type. Listeners
+    are now kept until the loop ends, and one removed by the getter is
+    skipped.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
