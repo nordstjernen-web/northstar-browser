@@ -8,12 +8,25 @@
 
 #include <glib.h>
 
+#include "texture.h"
+
 G_BEGIN_DECLS
+
+typedef struct ns_video_stream ns_video_stream;
 
 gboolean ns_video_bytes_are_mpeg1(const guchar *data, gsize len);
 
-GArray *ns_video_decode_mpeg1_to_pixels(const guchar *data, gsize len,
-                                        int *out_w, int *out_h);
+ns_video_stream *ns_video_stream_new(const guchar *data, gsize len);
+void             ns_video_stream_free(ns_video_stream *stream);
+
+int          ns_video_stream_width(const ns_video_stream *stream);
+int          ns_video_stream_height(const ns_video_stream *stream);
+int          ns_video_stream_duration_ms(const ns_video_stream *stream);
+gboolean     ns_video_stream_has_audio(const ns_video_stream *stream);
+GBytes      *ns_video_stream_bytes(const ns_video_stream *stream);
+gsize        ns_video_stream_memory(const ns_video_stream *stream);
+ns_texture  *ns_video_stream_texture(const ns_video_stream *stream);
+gboolean     ns_video_stream_show(ns_video_stream *stream, int phase_ms);
 
 G_END_DECLS
 

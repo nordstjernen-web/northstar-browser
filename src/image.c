@@ -105,6 +105,7 @@ ns_image_free(gpointer p)
     g_free(img->error);
     if (img->render_surface) cairo_surface_destroy(img->render_surface);
     if (img->anim_frames) g_array_free(img->anim_frames, TRUE);
+    else if (img->video) ns_video_stream_free(img->video);
     else ns_texture_unref(img->texture);
     g_free(img);
 }
@@ -113,6 +114,7 @@ static gint64
 ns_image_decoded_bytes(const ns_image *img)
 {
     if (!img) return 0;
+    if (img->video) return (gint64)ns_video_stream_memory(img->video);
     if (img->anim_frames && img->anim_frames->len > 0) {
         gint64 total = 0;
         for (guint i = 0; i < img->anim_frames->len; i++) {
@@ -160,6 +162,10 @@ ns_image_cache_purge(ns_image_cache *cache, ns_image *img)
     if (img->anim_frames) {
         g_array_free(img->anim_frames, TRUE);
         img->anim_frames = NULL;
+        img->texture = NULL;
+    } else if (img->video) {
+        ns_video_stream_free(img->video);
+        img->video = NULL;
         img->texture = NULL;
     } else {
         ns_texture_clear(&img->texture);
@@ -400,8 +406,6 @@ ns_image_anim_frames_from_pixels(GArray *pixel_frames,
 static GArray *
 ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h)
 {
-    if (ns_video_bytes_are_mpeg1(data, len))
-        return ns_video_decode_mpeg1_to_pixels(data, len, out_w, out_h);
     if ((len >= 6 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F') ||
         ns_image_png_is_animated(data, len))
         return ns_image_decode_wuffs_anim_to_pixels(data, len, out_w, out_h);
@@ -409,20 +413,36 @@ ns_image_pixel_frames_for(const guchar *data, gsize len, int *out_w, int *out_h)
 }
 
 typedef struct {
-    ns_texture *tex;
-    GArray     *frames;
-    int         w;
-    int         h;
-    gboolean    video;
+    ns_texture      *tex;
+    GArray          *frames;
+    ns_video_stream *video;
+    int              w;
+    int              h;
 } ns_img_decoded;
+
+static void
+ns_img_decoded_clear(ns_img_decoded *d)
+{
+    if (d->frames) {
+        g_array_set_clear_func(d->frames, ns_image_anim_frame_clear);
+        g_array_free(d->frames, TRUE);
+    }
+    ns_video_stream_free(d->video);
+    if (d->tex) ns_texture_unref(d->tex);
+}
 
 static ns_img_decoded
 ns_image_decode_body(const guchar *data, gsize len)
 {
-    ns_img_decoded d = { NULL, NULL, 0, 0, FALSE };
+    ns_img_decoded d = { NULL, NULL, NULL, 0, 0 };
     int w = 0, h = 0;
     GArray *frames = NULL;
-    d.video = ns_video_bytes_are_mpeg1(data, len);
+    if (ns_video_bytes_are_mpeg1(data, len)) {
+        d.video = ns_video_stream_new(data, len);
+        d.w = ns_video_stream_width(d.video);
+        d.h = ns_video_stream_height(d.video);
+        return d;
+    }
     GArray *pixel_frames = ns_image_pixel_frames_for(data, len, &w, &h);
     if (pixel_frames) {
         frames = ns_image_anim_frames_from_pixels(pixel_frames, &w, &h, NULL);
@@ -448,7 +468,19 @@ static void
 ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
                              const char *content_type, gsize body_len)
 {
-    if (d->frames) {
+    if (d->video) {
+        img->video = d->video;
+        img->texture = ns_video_stream_texture(d->video);
+        img->natural_width  = d->w;
+        img->natural_height = d->h;
+        img->anim_total_ms = ns_video_stream_duration_ms(d->video);
+        img->anim_start_us = g_get_monotonic_time();
+        img->anim_video = TRUE;
+        img->anim_loop = FALSE;
+        img->anim_paused = TRUE;
+        img->anim_paused_phase_ms = 0;
+        img->loaded = TRUE;
+    } else if (d->frames) {
         g_array_set_clear_func(d->frames, ns_image_anim_frame_clear);
         img->anim_frames = d->frames;
         ns_image_anim_frame *f0 =
@@ -461,9 +493,9 @@ ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
             total += g_array_index(d->frames, ns_image_anim_frame, i).delay_ms;
         img->anim_total_ms = (int)CLAMP(total, 1, G_MAXINT / 2);
         img->anim_start_us = g_get_monotonic_time();
-        img->anim_video = d->video;
-        img->anim_loop = !d->video;
-        img->anim_paused = d->video;
+        img->anim_video = FALSE;
+        img->anim_loop = TRUE;
+        img->anim_paused = FALSE;
         img->anim_paused_phase_ms = 0;
         img->loaded = TRUE;
     } else if (d->tex) {
@@ -519,18 +551,14 @@ on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
     ns_pending *pending = job->pending;
     if (pending->dead) {
         if (d) {
-            if (d->frames) {
-                g_array_set_clear_func(d->frames, ns_image_anim_frame_clear);
-                g_array_free(d->frames, TRUE);
-            }
-            if (d->tex) ns_texture_unref(d->tex);
+            ns_img_decoded_clear(d);
             g_free(d);
         }
         g_free(pending);
         ns_decode_job_free(job);
         return;
     }
-    ns_img_decoded result = { NULL, NULL, 0, 0, FALSE };
+    ns_img_decoded result = { NULL, NULL, NULL, 0, 0 };
     if (d) {
         result = *d;
         g_free(d);
@@ -747,8 +775,21 @@ ns_image_cache_peek(ns_image_cache *cache, const char *url)
 gboolean
 ns_image_is_animation(const ns_image *img)
 {
-    return img && img->loaded && img->anim_frames &&
-           img->anim_frames->len > 1 && img->anim_total_ms > 0;
+    return img && img->loaded && img->anim_total_ms > 0 &&
+           (img->video ||
+            (img->anim_frames && img->anim_frames->len > 1));
+}
+
+GBytes *
+ns_image_video_bytes(const ns_image *img)
+{
+    return img && img->loaded ? ns_video_stream_bytes(img->video) : NULL;
+}
+
+gboolean
+ns_image_video_has_audio(const ns_image *img)
+{
+    return img && img->loaded && ns_video_stream_has_audio(img->video);
 }
 
 double
@@ -823,6 +864,11 @@ ns_image_anim_seek(ns_image *img, double seconds, gint64 now_us)
 static gboolean
 ns_image_apply_phase(ns_image *img, int phase)
 {
+    if (img->video) {
+        if (!ns_video_stream_show(img->video, phase)) return FALSE;
+        img->texture = ns_video_stream_texture(img->video);
+        return TRUE;
+    }
     int idx = 0;
     gint64 acc = 0;
     for (guint i = 0; i < img->anim_frames->len; i++) {
@@ -922,12 +968,7 @@ void
 ns_image_decoding_free(ns_image_decoding *decoding)
 {
     if (!decoding) return;
-    if (decoding->decoded.frames) {
-        g_array_set_clear_func(decoding->decoded.frames,
-                               ns_image_anim_frame_clear);
-        g_array_free(decoding->decoded.frames, TRUE);
-    }
-    if (decoding->decoded.tex) ns_texture_unref(decoding->decoded.tex);
+    ns_img_decoded_clear(&decoding->decoded);
     g_free(decoding);
 }
 
@@ -940,7 +981,8 @@ ns_image_cache_insert_decoding(ns_image_cache *cache, const char *url,
         return NULL;
     }
     ns_image *existing = g_hash_table_lookup(cache->by_url, url);
-    if (existing || (!decoding->decoded.frames && !decoding->decoded.tex)) {
+    if (existing || (!decoding->decoded.frames && !decoding->decoded.tex &&
+                     !decoding->decoded.video)) {
         ns_image_decoding_free(decoding);
         return existing;
     }

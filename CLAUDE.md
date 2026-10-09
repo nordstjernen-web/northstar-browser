@@ -35,12 +35,18 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `musl.yml`
 - **Media.** `<video>` decodes MPEG-1 (`video/mpeg`) in the browser
   process through the vendored pl_mpeg, which already supplies the MP2
   audio decoder — the format costs no new dependency, and its patents have
-  expired. Frames are decoded up front and played back through the same
-  animation path as an animated GIF -- with `play()`, `pause()`,
-  `currentTime`, `duration` and `readyState` driving that timeline -- so a
-  clip is bounded by
-  `NS_VIDEO_MAX_TOTAL_BYTES` (256 MB of decoded frames) and
-  `NS_VIDEO_MAX_FRAMES`; longer video is truncated, not streamed. No other
+  expired. The image keeps the downloaded clip and one decoder
+  (`src/video.c`), and the same animation timeline as an animated GIF --
+  with `play()`, `pause()`, `currentTime`, `duration` and `readyState`
+  driving it -- decodes the frame for the current time on each tick,
+  seeking when time jumps, so memory holds one frame whatever the clip's
+  length. A program stream's MP2 track plays in the mixer from the same
+  bytes, and the picture follows the sound's clock. An audible video
+  autoplays only muted or after a user gesture, like `<audio>`. The
+  `controls` attribute paints a play/pause button, seek bar, time and
+  mute button (`paint_media_controls`), laid out and hit-tested by
+  `ns_media_controls_layout` in `src/js_media.c`; a press on it acts on
+  the element and a drag along the bar seeks. No other
   video codec is present, and MPEG-1 is not a format the web serves, so
   this does not play streaming sites. Audio plays in the browser process through
   the asynchronous mixer (`src/audio/audio.c`), which decodes

@@ -111,6 +111,7 @@ struct ns_browser {
     int             press_y;
     int             press_mods;
     gboolean        press_active;
+    const ns_node  *media_seek_node;
     char           *search_query;
     gboolean        search_case;
     const ns_box   *search_active;
@@ -167,6 +168,9 @@ browser_prune_cached_nodes(ns_browser *browser)
         browser->hover_node = NULL;
     if (browser->open_select && !browser_node_alive(browser, browser->open_select))
         browser->open_select = NULL;
+    if (browser->media_seek_node &&
+        !browser_node_alive(browser, browser->media_seek_node))
+        browser->media_seek_node = NULL;
 }
 
 static guint64
@@ -2060,6 +2064,51 @@ browser_sync_js_selection(ns_browser *browser)
     g_free(text);
 }
 
+static const ns_node *
+browser_media_control_at(ns_browser *browser, const ns_node *node,
+                         int x, int y, ns_media_control *control,
+                         double *fraction)
+{
+    for (const ns_node *el = node; el; el = el->parent) {
+        if (!ns_node_is_element_named(el, "video") &&
+            !ns_node_is_element_named(el, "audio"))
+            continue;
+        const ns_box *b = browser_box_for_node(browser->layout, el);
+        if (!b) return NULL;
+        ns_media_controls_rect r;
+        if (!ns_media_controls_layout(el,
+                b->x + b->margin.left + b->border.left + b->padding.left,
+                b->y + b->margin.top + b->border.top + b->padding.top,
+                b->content_width, b->content_height, &r))
+            return NULL;
+        *control = ns_media_controls_hit(&r, x, y);
+        if (*control == NS_MEDIA_CONTROL_NONE) return NULL;
+        double span = r.seek_x1 - r.seek_x0;
+        *fraction = span > 0.0 ? (x - r.seek_x0) / span : 0.0;
+        return el;
+    }
+    return NULL;
+}
+
+static gboolean
+browser_media_seek_drag(ns_browser *browser, int x)
+{
+    const ns_node *el = browser->media_seek_node;
+    if (!el) return FALSE;
+    const ns_box *b = browser_box_for_node(browser->layout, el);
+    ns_media_controls_rect r;
+    if (b && ns_media_controls_layout(el,
+            b->x + b->margin.left + b->border.left + b->padding.left,
+            b->y + b->margin.top + b->border.top + b->padding.top,
+            b->content_width, b->content_height, &r)) {
+        double span = r.seek_x1 - r.seek_x0;
+        double fraction = span > 0.0 ? (x - r.seek_x0) / span : 0.0;
+        ns_media_controls_activate(browser->js, el, NS_MEDIA_CONTROL_SEEK,
+                                   fraction);
+    }
+    return TRUE;
+}
+
 char *
 ns_browser_select(ns_browser *browser, int kind, int x, int y)
 {
@@ -2067,7 +2116,8 @@ ns_browser_select(ns_browser *browser, int kind, int x, int y)
     switch (kind) {
     case 0: ns_selection_anchor_at(&browser->selection, browser->layout,
                                    (double)x, (double)y); break;
-    case 1: ns_selection_extend_to(&browser->selection, browser->layout,
+    case 1: if (browser_media_seek_drag(browser, x)) return NULL;
+            ns_selection_extend_to(&browser->selection, browser->layout,
                                    (double)x, (double)y);
             browser->selection_dragged = TRUE; break;
     case 2: ns_selection_clear(&browser->selection); break;
@@ -2688,6 +2738,7 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
     browser->selection_dragged = FALSE;
 
     const ns_node *node = browser_hit_node(browser, x, y);
+    browser->media_seek_node = NULL;
     browser->press_node = node;
     browser->press_x = x;
     browser->press_y = y;
@@ -2714,6 +2765,24 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
                                    (double)x, (double)y,
                                    0, 1, sh, ct, al, me, NULL, NULL);
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    }
+
+    ns_media_control control = NS_MEDIA_CONTROL_NONE;
+    double fraction = 0.0;
+    const ns_node *media = browser->js
+        ? browser_media_control_at(browser, node, x, y, &control, &fraction)
+        : NULL;
+    if (media) {
+        browser->press_active = FALSE;
+        browser->press_node = NULL;
+        if (control == NS_MEDIA_CONTROL_SEEK) browser->media_seek_node = media;
+        ns_media_controls_activate(browser->js, media, control, fraction);
+        if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+        if (browser->dirty) {
+            browser_relayout(browser);
+            browser->dirty = FALSE;
+        }
+        return NULL;
     }
 
     gboolean in_datalist = FALSE;
@@ -2850,6 +2919,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     int mods = browser->press_mods;
     browser->press_node = NULL;
     browser->press_active = FALSE;
+    browser->media_seek_node = NULL;
 
     gboolean drag_selected = browser->selection_dragged &&
                              ns_selection_has_range(&browser->selection);

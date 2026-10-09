@@ -166,6 +166,40 @@ gboolean ns_js_wants_frame(const ns_js *js);
 ns_fetch_policy *ns_js_fetch_policy(ns_js *js, const ns_node *node);
 void     ns_media_scan(ns_js *js, ns_node *doc, const char *base_url);
 void     ns_js_suspend_media(ns_js *js);
+
+typedef enum {
+    NS_MEDIA_CONTROL_NONE,
+    NS_MEDIA_CONTROL_PLAY,
+    NS_MEDIA_CONTROL_SEEK,
+    NS_MEDIA_CONTROL_MUTE,
+} ns_media_control;
+
+typedef struct {
+    double x, y, w, h;
+    double play_x, play_w;
+    double seek_x0, seek_x1;
+    double time_x, time_w;
+    double mute_x, mute_w;
+} ns_media_controls_rect;
+
+typedef struct {
+    gboolean paused;
+    gboolean muted;
+    gboolean audible;
+    double   position;
+    double   duration;
+} ns_media_controls_state;
+
+gboolean ns_media_controls_layout(const ns_node *el, double x, double y,
+                                  double w, double h,
+                                  ns_media_controls_rect *out);
+ns_media_control ns_media_controls_hit(const ns_media_controls_rect *r,
+                                       double px, double py);
+void     ns_media_controls_get(ns_js *js, const ns_node *el,
+                               ns_media_controls_state *out);
+void     ns_media_controls_activate(ns_js *js, const ns_node *el,
+                                    ns_media_control control,
+                                    double fraction);
 void     ns_js_set_frame_time(ns_js *js, gint64 frame_time_us);
 
 void ns_js_dump_stats(ns_js *js, GString *out);

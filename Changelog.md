@@ -4,6 +4,24 @@ Significant changes in each release:
 
 1.0.13:
 =======
+* `<video>` plays the sound of an MPEG-1 program stream. The MP2 track
+  plays in the audio mixer from the bytes the video already downloaded,
+  `play()`, `pause()`, seeking, `volume`, `muted` and `loop` drive both,
+  and the picture follows the sound's clock (measured within 15 ms). Like
+  `<audio>`, a video with sound autoplays only when muted or after a user
+  gesture.
+* Closing the window no longer crashes. The address bar's suggestion
+  popover was unparented from the window's destroy handler, after GTK had
+  already finalized the address entry it belonged to; it is now
+  unparented when the entry itself is destroyed.
+* `<video controls>` and `<audio controls>` show working playback
+  controls: play/pause, a seek bar that seeks on click or drag, the
+  current time and duration, and a mute button. `<audio controls>` drew
+  an inert strip and `<video controls>` drew nothing.
+* `<video>` decodes as it plays instead of decoding the whole clip up
+  front. A clip was cut off at 256 MB of decoded frames (11 s at 640x360,
+  21 s at 480x270); memory now holds one frame whatever the length, and
+  the page no longer waits for the whole decode before the first frame.
 * Security: a source-wide audit fixed several memory-safety and
   denial-of-service bugs reachable from an ordinary web page.
   - WebAssembly: an exported function that returned an `externref` not

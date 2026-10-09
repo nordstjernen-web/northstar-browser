@@ -13,8 +13,9 @@
 
 G_BEGIN_DECLS
 
-typedef struct ns_image_cache ns_image_cache;
-typedef struct ns_image       ns_image;
+typedef struct ns_image_cache  ns_image_cache;
+typedef struct ns_image        ns_image;
+typedef struct ns_video_stream ns_video_stream;
 
 typedef struct ns_image_anim_frame {
     ns_texture *texture;
@@ -56,6 +57,7 @@ struct ns_image {
     int          anim_paused_phase_ms;
     gboolean     anim_loop;
     gboolean     anim_video;
+    ns_video_stream *video;
 };
 
 typedef void (*ns_image_ready_cb)(ns_image *img, gpointer user_data);
@@ -127,6 +129,8 @@ gboolean ns_image_cache_tick_collect(ns_image_cache *cache, gint64 now_us,
                                      GPtrArray *changed);
 
 gboolean ns_image_is_animation(const ns_image *img);
+GBytes  *ns_image_video_bytes(const ns_image *img);
+gboolean ns_image_video_has_audio(const ns_image *img);
 double   ns_image_anim_duration(const ns_image *img);
 double   ns_image_anim_position(const ns_image *img, gint64 now_us);
 void     ns_image_anim_set_paused(ns_image *img, gboolean paused,

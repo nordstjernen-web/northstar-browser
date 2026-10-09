@@ -1390,9 +1390,9 @@ suggest_popover_new(ProcWindow *pw)
 }
 
 static void
-on_window_destroy_unparent_suggest(GtkWidget *window, gpointer user_data)
+on_address_destroy_unparent_suggest(GtkWidget *address, gpointer user_data)
 {
-    (void)window;
+    (void)address;
     ProcWindow *pw = user_data;
     if (pw->suggest_popover) {
         gtk_widget_unparent(pw->suggest_popover);
@@ -1988,8 +1988,8 @@ proc_window_new(GtkApplication *app, const char *home_url,
     pw->suggest_popover = suggest_popover_new(pw);
     g_signal_connect(pw->address, "changed",
                      G_CALLBACK(on_address_changed), pw);
-    g_signal_connect(pw->window, "destroy",
-                     G_CALLBACK(on_window_destroy_unparent_suggest), pw);
+    g_signal_connect(pw->address, "destroy",
+                     G_CALLBACK(on_address_destroy_unparent_suggest), pw);
     GtkEventController *addr_keys = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(addr_keys, GTK_PHASE_CAPTURE);
     g_signal_connect(addr_keys, "key-pressed",
