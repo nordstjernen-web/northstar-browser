@@ -41,6 +41,12 @@ Significant changes in each release:
     stylesheet for the selector text it builds and copies, and drops the
     remaining nested rules once that is spent; real stylesheets stay far
     below it.
+  - `grid-template-columns` and `grid-template-rows` keep at most 24
+    tracks, but a `repeat(auto-fill, …)` or `repeat(auto-fit, …)` that
+    did not fit recorded its full track count, so grid layout read
+    track sizes from past the end of the stored track list. The count is
+    now clamped to the tracks actually stored, both when the value is
+    parsed and when layout expands it.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
