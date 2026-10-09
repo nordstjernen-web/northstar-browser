@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "bytecode_cache.h"
 #include "config.h"
 #include "css.h"
 #include "css_syntax.h"
@@ -361,8 +362,11 @@ static void
 on_preload_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 {
     (void)src;
-    (void)user_data;
     ns_response *resp = ns_net_fetch_finish(res, NULL);
+    if (resp && GPOINTER_TO_INT(user_data) == NS_FETCH_DEST_SCRIPT &&
+        resp->status == 200 && resp->body)
+        ns_bytecode_cache_precompile(resp->final_url, resp->body->data,
+                                     resp->body->len);
     if (resp) ns_response_free(resp);
 }
 
@@ -396,7 +400,8 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
         }
         ns_net_request_async(target->url, base_url, "GET", NULL, 0, NULL,
                              headers, target->dest, NULL, NULL,
-                             on_preload_fetched, NULL);
+                             on_preload_fetched,
+                             GINT_TO_POINTER(target->dest));
     }
     g_ptr_array_free(urls, TRUE);
     g_ptr_array_free(connects, TRUE);

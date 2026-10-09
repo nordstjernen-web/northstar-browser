@@ -2265,7 +2265,8 @@
             for (var i = 0; i < entries.length; i++) {
                 var ix = this._meta.indexes[entries[i].name];
                 if (!ix || !ix.unique) continue;
-                var rows = backend.indexRecords(this.transaction.db.name, this.name, ix.name);
+                var rows = backend.indexRecords(this.transaction.db.name, this.name,
+                                                ix.name, entries[i].key, true);
                 for (var j = 0; j < rows.length; j++)
                     if (rows[j].key === entries[i].key && rows[j].primaryKey !== primary)
                         throw ex('ConstraintError', 'Unique index constraint failed');
@@ -2411,8 +2412,12 @@
         }
         IDBIndex.prototype._records = function (query, direction) {
             var range = asRange(query);
+            var only = range && !range.lowerOpen && !range.upperOpen &&
+                       range._lowerEncoded !== null &&
+                       range._lowerEncoded === range._upperEncoded
+                ? range._lowerEncoded : undefined;
             var rows = backend.indexRecords(this.objectStore.transaction.db.name,
-                                            this.objectStore.name, this.name);
+                                            this.objectStore.name, this.name, only);
             var out = [];
             for (var i = 0; i < rows.length; i++)
                 if (!range || inRangeEncoded(rows[i].key, range)) out.push(rows[i]);

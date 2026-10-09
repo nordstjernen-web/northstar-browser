@@ -4,6 +4,28 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* IndexedDB index lookups by a single key (`index.get`, `getKey`,
+  `getAll`, `count`) and unique-index checks on `put`/`add` read only the
+  matching rows, and uniqueness checks skip the stored values. Every
+  index query read and deserialised the whole index, which was the
+  largest script-side cost on a YouTube watch page (14.6% of main-thread
+  time, now 0.9%).
+* The compiled-JavaScript cache keeps large scripts (up to 48 MB of
+  bytecode per entry) and bounds its disk use to 256 MB, dropping the
+  least recently used entries. YouTube's main bundle and player were
+  over the old 4 MB limit and were re-parsed on every visit; a reload
+  now evaluates them in about 0.45 s and 55 ms instead of 1.2 s and
+  250 ms.
+* Large external scripts compile on worker threads while the page loads:
+  when a preloaded script of 64 KB or more is not in the bytecode cache,
+  it is compiled in the background and the main thread picks up the
+  result instead of compiling it again. On a first visit to a YouTube
+  watch page, scripts block the HTML parser for about 1.1 s instead of
+  1.9-2.5 s.
+* The background bytecode precompiler gives QuickJS a NUL-terminated
+  copy of the script. QuickJS's tokenizer reads up to the terminating
+  NUL, so it read past the end of the buffer (found with
+  AddressSanitizer on Twitch).
 * Restyling after DOM changes touches only what can have changed. A
   single `:has()` the restyle index could not key switched incremental
   restyle off for the whole page, and most changes re-cascaded their

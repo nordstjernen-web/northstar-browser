@@ -981,22 +981,37 @@ ns_idb_backend_index_records(JSContext *ctx, JSValueConst this_val,
         ns_idb_free_cstrings(ctx, 3, dbn, store, index);
         return JS_EXCEPTION;
     }
+    const char *only_key = argc >= 4 && JS_IsString(argv[3])
+        ? JS_ToCString(ctx, argv[3]) : NULL;
+    gboolean keys_only = argc >= 5 && JS_ToBool(ctx, argv[4]);
     ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
-        ns_idb_free_cstrings(ctx, 2, store, index);
+        ns_idb_free_cstrings(ctx, 3, store, index, only_key);
         return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     JSValue arr = JS_NewArray(ctx);
     sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(h->db,
-        "SELECT ir.index_key,ir.primary_key,r.value "
-        "FROM index_records ir JOIN records r "
-        "ON r.store=ir.store AND r.key=ir.primary_key "
-        "WHERE ir.store=? AND ir.name=?",
-        -1, &st, NULL) == SQLITE_OK) {
+    const char *sql = keys_only
+        ? (only_key
+           ? "SELECT index_key,primary_key FROM index_records "
+             "WHERE store=? AND name=? AND index_key=?"
+           : "SELECT index_key,primary_key FROM index_records "
+             "WHERE store=? AND name=?")
+        : (only_key
+           ? "SELECT ir.index_key,ir.primary_key,r.value "
+             "FROM index_records ir JOIN records r "
+             "ON r.store=ir.store AND r.key=ir.primary_key "
+             "WHERE ir.store=? AND ir.name=? AND ir.index_key=?"
+           : "SELECT ir.index_key,ir.primary_key,r.value "
+             "FROM index_records ir JOIN records r "
+             "ON r.store=ir.store AND r.key=ir.primary_key "
+             "WHERE ir.store=? AND ir.name=?");
+    if (sqlite3_prepare_v2(h->db, sql, -1, &st, NULL) == SQLITE_OK) {
         sqlite3_bind_text(st, 1, store, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 2, index, -1, SQLITE_TRANSIENT);
+        if (only_key)
+            sqlite3_bind_text(st, 3, only_key, -1, SQLITE_TRANSIENT);
         uint32_t i = 0;
         while (sqlite3_step(st) == SQLITE_ROW) {
             const char *ik = (const char *)sqlite3_column_text(st, 0);
@@ -1006,15 +1021,16 @@ ns_idb_backend_index_records(JSContext *ctx, JSValueConst this_val,
                 JS_NewString(ctx, ik ? ik : ""));
             JS_SetPropertyStr(ctx, rec, "primaryKey",
                 JS_NewString(ctx, pk ? pk : ""));
-            JS_SetPropertyStr(ctx, rec, "value",
-                ns_idb_read_value(ctx, sqlite3_column_blob(st, 2),
-                                  sqlite3_column_bytes(st, 2)));
+            if (!keys_only)
+                JS_SetPropertyStr(ctx, rec, "value",
+                    ns_idb_read_value(ctx, sqlite3_column_blob(st, 2),
+                                      sqlite3_column_bytes(st, 2)));
             JS_SetPropertyUint32(ctx, arr, i++, rec);
         }
     }
     if (st) sqlite3_finalize(st);
     ns_idb_db_close(h);
-    ns_idb_free_cstrings(ctx, 2, store, index);
+    ns_idb_free_cstrings(ctx, 3, store, index, only_key);
     return arr;
 }
 
@@ -1185,7 +1201,7 @@ ns_idb_install(JSContext *ctx, JSValueConst global)
     ns_idb_bind(ctx, backend, "put", ns_idb_backend_put, 7);
     ns_idb_bind(ctx, backend, "get", ns_idb_backend_get, 3);
     ns_idb_bind(ctx, backend, "records", ns_idb_backend_records, 2);
-    ns_idb_bind(ctx, backend, "indexRecords", ns_idb_backend_index_records, 3);
+    ns_idb_bind(ctx, backend, "indexRecords", ns_idb_backend_index_records, 5);
     ns_idb_bind(ctx, backend, "deleteRecord", ns_idb_backend_delete_record, 3);
     ns_idb_bind(ctx, backend, "clear", ns_idb_backend_clear, 2);
     ns_idb_bind(ctx, backend, "deleteDatabase", ns_idb_backend_delete_database, 1);
