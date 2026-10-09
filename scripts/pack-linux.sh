@@ -10,6 +10,7 @@ trap 'rc=$?; printf "[pack-linux] FAILED (exit %s) at line %s: %s\n" \
 [ -n "${NS_DEBUG:-}" ] && set -x
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+bash "$ROOT/scripts/check-subprojects.sh"
 BUILDDIR=${BUILDDIR:-$ROOT/release-build}
 VERSION=${VERSION:-$(awk -F"'" \
     '/^[[:space:]]*version[[:space:]]*:/ { print $2; exit }' "$ROOT/meson.build")}

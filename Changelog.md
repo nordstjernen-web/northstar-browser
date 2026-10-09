@@ -4,6 +4,13 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Packaging refuses to build from a stale subproject checkout. Meson
+  never moves a git wrap's checkout after the `.wrap` pin changes, so
+  the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
+  while the wrap pinned v0.17.0. `scripts/check-subprojects.sh`
+  compares each checkout with its pin, and `pack-windows.sh`,
+  `pack-linux.sh`, `pack-appimage.sh` and `pack-srpm.sh` run it before
+  building.
 
 1.0.13:
 =======

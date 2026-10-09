@@ -8,6 +8,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+bash "$ROOT/scripts/check-subprojects.sh"
 BUILDDIR=${BUILDDIR:-$ROOT/builddir-release}
 OUT=${OUT:-$ROOT/dist/northstar-win64}
 VERSION=${VERSION:-$(awk -F"'" \

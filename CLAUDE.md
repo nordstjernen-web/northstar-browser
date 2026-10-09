@@ -337,6 +337,37 @@ sudo zypper install gcc gcc-c++ pkgconf meson ninja cmake gtk4-devel \
 `libseccomp` is required on Linux — `meson setup` fails without it.
 On macOS and Windows it is not used and the syscall filter is a no-op.
 
+### Subproject pins and release builds
+
+Meson clones a git wrap into `subprojects/<name>` once and **never moves
+it again**. When a `.wrap` revision is bumped, every existing checkout
+keeps building the old code without an error or warning that stops the
+build. That is how the 1.0.13 Windows installer and MSIX were first
+built with quickjs-ng 0.16.1 while `quickjs-ng.wrap` pinned v0.17.0
+(and lexbor sat at v3.0.0 against a v3.0.1 pin).
+
+- `scripts/check-subprojects.sh` compares every git-wrap checkout with
+  its pinned revision and exits non-zero on any mismatch.
+  `pack-windows.sh`, `pack-linux.sh`, `pack-appimage.sh` and
+  `pack-srpm.sh` run it first, so the installer, MSIX, zip, deb, rpm,
+  AppImage and SRPM builds refuse to package a stale tree. Never bypass
+  it, and run it by hand before any build you hand to the user.
+- To repair a stale checkout: delete `subprojects/<name>` and run
+  `meson subprojects download <name>` (from MINGW64 on Windows), which
+  also re-applies the wrap's `diff_files` patches. Only the patched files
+  should then show as modified. Then delete the packaging build directory
+  (`builddir-release`, `builddir-msix`) so nothing stale is reused.
+- After any commit that bumps a `.wrap` — yours or one you pulled —
+  refresh the checkout in every tree you build from, release worktrees
+  included, in the same session.
+- Confirm what a package actually contains: run its binary with
+  `--headless --dump=text about:northstar` and read the engine and
+  library versions.
+- A system copy still beats the subproject where the build allows one:
+  MSYS2 ships lexbor, so Windows builds link that (3.0.0, without the
+  bounds patch) whatever the checkout holds. The check covers the
+  checkouts; the `about:northstar` versions show what was linked.
+
 ### Fast iteration (recommended for AI/Claude loops)
 
 `ccache` is the single biggest build-time win and meson picks it up
