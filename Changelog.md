@@ -72,6 +72,13 @@ Significant changes in each release:
     dimension. Both conversions are undefined behaviour; the segment
     count is now clamped in floating point, and a non-finite intrinsic
     size falls back to the default raster size.
+  - Printing walked a multi-line text box in line-height steps, adding a
+    break span per line. A box placed a quintillion pixels down the page
+    never advanced, because adding one line height no longer changed the
+    position, and a very tall box asked for a span per line of its
+    height, so printing such a page spun until memory ran out. The walk
+    now stops when a step no longer moves and is capped at about a
+    million spans.
 * Packaging refuses to build from a stale subproject checkout. Meson
   never moves a git wrap's checkout after the `.wrap` pin changes, so
   the first 1.0.13 Windows packages were built with quickjs-ng 0.16.1
