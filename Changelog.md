@@ -4,6 +4,16 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Security: fixes from a source-wide review on 2026-10-10. Each was
+  reachable from an ordinary page.
+  - The cascade gathers matches for an element and each of its nine
+    pseudo-elements in one pass, ten destinations in all, but the
+    per-rule record of which destinations matched and at what
+    specificity held only nine. A page whose style sheets used every
+    pseudo-element, ending with `::file-selector-button`, wrote past the
+    end of that record into the next rule's, or past the end of the heap
+    block for the last rule, which AddressSanitizer reported as a heap
+    buffer overflow. The record now has a slot for every destination.
 * Security: a page could free the address the engine was still reading.
   Laying out a page fetches its stylesheets and images synchronously,
   and the engine waited for them by spinning its own main context, so

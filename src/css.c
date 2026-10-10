@@ -27568,11 +27568,11 @@ match_cmp(gconstpointer a_, gconstpointer b_)
 typedef struct css_rule_match_accum {
     guint epoch;
     int layer_order;
-    gboolean any[9];
-    int spec_a[9];
-    int spec_b[9];
-    int spec_c[9];
-    int scope_order[9];
+    gboolean any[NS_CSS_PE_FILE_SELECTOR_BUTTON + 1];
+    int spec_a[NS_CSS_PE_FILE_SELECTOR_BUTTON + 1];
+    int spec_b[NS_CSS_PE_FILE_SELECTOR_BUTTON + 1];
+    int spec_c[NS_CSS_PE_FILE_SELECTOR_BUTTON + 1];
+    int scope_order[NS_CSS_PE_FILE_SELECTOR_BUTTON + 1];
 } css_rule_match_accum;
 
 static __thread css_candidate *g_cand_pool = NULL;
@@ -32355,9 +32355,9 @@ cascade_walk(ns_node *node,
         guint pe_mask = ua ? ua->pseudo_mask : 0;
         for (gsize i = 0; i < n_author; i++)
             if (author[i]) pe_mask |= author[i]->pseudo_mask;
-        ns_pe_gather pe_g[9];
+        ns_pe_gather pe_g[NS_CSS_PE_FILE_SELECTOR_BUTTON];
         int n_pe = 0;
-        gather_dest dests[10];
+        gather_dest dests[NS_CSS_PE_FILE_SELECTOR_BUTTON + 1];
         dests[0].pe = NS_CSS_PE_NONE;
         dests[0].out = matches;
         dests[0].var_out = var_matches;
