@@ -40,6 +40,13 @@ Significant changes in each release:
     checks every header line and the method again. `X-Requested-With:
     XMLHttpRequest` is added only to same-origin requests, since sites
     read it as proof that a request came from their own script.
+  - A cross-origin frame could reach the page that embedded it through a
+    frame of its own. Nested frames load after their parent, when the
+    engine's current URL is the top page's again, and an `about:blank`
+    or `srcdoc` frame took that URL as its origin, so a `srcdoc` frame
+    inside a frame from another site was treated as same-origin with the
+    top page and could read its DOM. A frame's embedder is now the
+    document that contains its element.
 * A `gap`, `margin-block`, `margin-inline`, `padding-block`,
   `padding-inline`, `inset-block`, `inset-inline`,
   `border-block-*`/`border-inline-*` width, style or color, `overflow`

@@ -56035,8 +56035,8 @@ ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
     const char *src = attr ? ns_element_get_attr(iframe, attr) : NULL;
     if (!src || !*src || g_str_has_prefix(src, "about:"))
         return ns_node_is_element_named(iframe, "iframe");
-    const char *origin = (js->current_url && *js->current_url)
-                       ? js->current_url : "inline";
+    const char *embedder = ns_js_node_doc_base(js, iframe);
+    const char *origin = embedder && *embedder ? embedder : "inline";
     char *abs_url = ns_url_resolve(origin, src);
     if (!abs_url) return FALSE;
     const char *loaded_url = ns_element_get_attr(iframe, "data-nd-frame-url");
@@ -57123,8 +57123,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
     gboolean scripts_ok = !(sandbox & NS_SANDBOX_ACTIVE) ||
                           (sandbox & NS_SANDBOX_ALLOW_SCRIPTS);
 
-    const char *origin = (js->current_url && *js->current_url)
-                       ? js->current_url : "inline";
+    const char *embedder = ns_js_node_doc_base(js, iframe);
+    const char *origin = embedder && *embedder ? embedder : "inline";
     const char *src_attr = ns_frame_src_attr(iframe);
     const char *src    = src_attr ? ns_element_get_attr(iframe, src_attr) : NULL;
     const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
