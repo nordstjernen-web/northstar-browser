@@ -26,7 +26,6 @@ Northstar shares its hand-written engine with these browsers:
 | Edition | Purpose | License |
 |---|---|---|
 | **Northstar** (this tree) | The purist GPL browser: free software under copyleft, every line of it distributable under the GPL | GPL-3.0-or-later |
-| **northstar-wasm** (`nordstjernen-web/northstar-wasm`) | This engine compiled to WebAssembly with Emscripten | GPL-3.0-or-later |
 | **Nordstjernen** (`nordstjernen-web/nordstjernen-browser`) | The flagship: every feature and platform, developed with external contributors | NSL-1.0 OR GPL-3.0-or-later |
 | **Southstar** (`nordstjernen-web/southstar-browser`) | Nordstjernen's code base, being ported to Rust | NSL-1.0 OR GPL-3.0-or-later |
 
