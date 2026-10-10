@@ -24,7 +24,10 @@ space.
     ├─ engine thread "ns-engine", own GMainContext         (enginethread.c)
     │     fetch → parse → style → layout → paint, page JS, timers
     ├─ curl multi thread + fetch tasks                      (net.c)
+    ├─ background compile of large scripts (≤ 2)           (bytecode_cache.c)
     ├─ image decode tasks (MPEG-1 opened here)              (image.c, video.c)
+    ├─ one video decode thread per MSE stream               (videoworker.c)
+    │     └─ dav1d / libvpx / OpenH264 worker threads      (av1.c, vp9.c, h264.c)
     ├─ JS worker threads: Web Workers, service workers      (js.c)
     ├─ WebSocket and EventSource threads                    (ws.c, eventsource.c)
     ├─ audio mixer thread → SDL2                            (src/audio/audio.c)
@@ -118,7 +121,13 @@ space.
 - **Audio mixer** (`src/audio/audio.c`) — one worker thread per process
   fetches `<audio>` through `net.c` (or takes bytes already in hand: a
   `blob:` URL, a `<video>`'s MP2 track), decodes it into memory and mixes
-  every player into the SDL2 device; headless runs use a silent
+  every player into the SDL2 device. Media Source Extensions players are
+  streams instead: the media controller decodes AAC or Opus a couple of
+  seconds ahead and pushes PCM into a persistent SDL audio stream, whose
+  playback cursor sets the stream's clock (a straight line in wall time
+  anchored where the device asks for more data, so it advances evenly
+  however the device schedules its callbacks, and never steps back
+  between seeks); headless runs use a silent
   clock-driven output instead. Each page owns an `NsAudioContext`, and
   `ns_audio_context_status` reports a player's load state, error,
   duration, position and end synchronously. Without SDL2 the build uses
@@ -143,7 +152,7 @@ drivers both call.
 
 | Stage | File(s) | Job |
 |-------|---------|-----|
-| 1. Fetch | `net.c`, `cache.c`, `engine.c` | libcurl on a shared multi handle (HTTP/1.1, HTTP/2; HTTP/3 through Alt-Svc when libcurl supports it), TLS verification, redirect clamp, response-size cap, HSTS, Alt-Svc, per-site cookie jars and HTTP cache. `engine.c` scans a parsed document for its scripts and stylesheets and preloads them; a preload map, an in-flight coalescer and the HTTP cache then answer in that order, keyed on request identity rather than bare URL, so a subresource is fetched once. `netutil.c` holds Accept-Language, search-URL and proxy helpers. |
+| 1. Fetch | `net.c`, `cache.c`, `engine.c` | libcurl on a shared multi handle (HTTP/1.1, HTTP/2; HTTP/3 through Alt-Svc when libcurl supports it), TLS verification, redirect clamp, response-size cap, HSTS, Alt-Svc, per-site cookie jars and HTTP cache. `engine.c` scans a parsed document for its scripts and stylesheets and preloads them; a preload map, an in-flight coalescer and the HTTP cache then answer in that order, keyed on request identity rather than bare URL, so a subresource is fetched once. A preloaded script of 64 KB or more that is not in the bytecode cache is compiled on a background thread while the page parses (`bytecode_cache.c`, its own QuickJS runtime, at most two at a time); the cache keeps entries up to 48 MB within a 256 MB disk budget. `netutil.c` holds Accept-Language, search-URL and proxy helpers. |
 | 2. Safety gate | `safebrowsing.c`, `fetch_policy.c`, `csp.c`, `security.c` | Top-level host checked against the local SHA-256 blocklist. Every subresource request carries its destination and its document's policy, and `ns_fetch_policy_check` applies the `file:` rule, mixed-content blocking or upgrade, and Content-Security-Policy by destination before the request and at each redirect hop. Subresource Integrity (`ns_security_sri_check`) verified for scripts. |
 | 3. Parse | `html.c`, `encoding.c`, `html_lexbor.c`, `xml.c` | Charset detection (BOM, header, `<meta>` prescan, then uchardet), decoding through the WHATWG Encoding Standard decoders in `encoding.c`, and bytes → DOM via lexbor (WHATWG HTML). `xml.c` parses XHTML and other namespaced XML documents. |
 | 4. DOM | `dom.c` | The document tree and its mutation API, shared by layout and the JS bridge. |
@@ -253,12 +262,12 @@ than falling through to a plugin-loaded decoder.
 
 ## Video
 
-`<video>` plays MPEG-1 and nothing else. `video.c` recognises an MPEG-1
-Program Stream or elementary video stream by its start code and opens one
-pl_mpeg decoder (`ns_video_stream`) over the downloaded bytes. pl_mpeg is
-vendored and already supplies the MP2 audio decoder — so video costs no
-dependency the tree did not already carry, and MPEG-1's patents have
-expired.
+`<video>` plays two kinds of source.
+
+**MPEG-1 files.** `video.c` recognises an MPEG-1 Program Stream or
+elementary video stream by its start code and opens one pl_mpeg decoder
+(`ns_video_stream`) over the downloaded bytes. pl_mpeg is vendored and
+already supplies the MP2 audio decoder, and MPEG-1's patents have expired.
 
 The decoder is held by an image-cache entry like an animated GIF's frame
 list, so the image cache's fetch, frame timing, repaint scheduling and
@@ -272,29 +281,44 @@ clip's bytes whatever its length; a clip larger than
 draws the current frame (or a dark placeholder for a source it cannot
 decode) and, for `controls`, the bar on top.
 
-The media controller (`js_media.c`) drives that timeline rather than
-sitting beside it. `ns_image_anim_duration`, `ns_image_anim_position`,
+**Media Source Extensions streams**, as streaming sites send them:
+
+| Layer | File(s) | Job |
+|-------|---------|-----|
+| API | `data/js/polyfills.js`, `js_mse.c` | `MediaSource`, `SourceBuffer` (appendBuffer, remove, abort, timestampOffset, sequence mode, append windows, live seekable ranges) and `isTypeSupported`, forwarded to native buffers; `blob:` URLs from `createObjectURL` bind a media element to its source. |
+| Buffers | `mse.c` | One buffer per track: appended bytes are demuxed, frames kept in decode order with presentation times, buffered ranges with small gaps merged, `remove()` dropping dependent frames up to the next keyframe, quotas (300 MB video, 48 MB audio) and muxed audio+video buffers. |
+| Demux | `mp4.c`, `webm.c` | Incremental fragmented MP4 (moov/moof/mdat; av1C, vpcC, avcC, esds, dOps) and WebM/Matroska (SimpleBlock, BlockGroup, unknown sizes). |
+| Video decode | `videodec.c`, `av1.c`, `vp9.c`, `h264.c`, `yuv.c` | AV1 through libdav1d, VP9 through libvpx, H.264 through OpenH264 (each optional); `yuv.c` converts 8–16 bit 4:2:0/4:2:2/4:4:4 BT.601/709 pictures to BGRA. |
+| Decode thread | `videoworker.c`, `video.c` | One worker thread per stream decodes from the nearest keyframe. The engine thread queues about three seconds of coded frames, and the worker converts pictures ahead of the clock while fewer than 48 MB of them (4 to 12) wait to be shown; seeks restart it from a keyframe. dav1d and libvpx use up to four threads of their own. |
+| Presentation | `videolayer.c`, `paint.c`, `page_session.c`, `gtk/procview.c` | A stream's layer holds its current picture and a copy of the frame timeline. Where the video lands on the page unchanged (no transform, opacity group or filter), `paint_video` clears a transparent hole for it and records its rectangle; the view takes the picture for the timeline at each tick of its own frame clock and draws it under the page frame, so overlays such as player controls stay on top. Script, relayouts and paints on the engine thread then hold up neither the picture nor its pace, and a new picture repaints nothing on the engine thread. Elsewhere (in a group, headless, printing) the engine takes the picture on its animation tick and paints it. The picture never moves back except after a seek. |
+| Audio decode | `audiodec.c`, `src/audio/aac.c` | AAC-LC (in-tree, written from ISO/IEC 14496-3) and Opus (libopus, OpusHead pre-skip) to float PCM for the mixer's streaming player. |
+| Controller | `js_media.c` | `readyState` follows the data buffered ahead of the playhead (`waiting`, `canplay`, `playing`), playback stalls and resumes with the buffer, the audio track is decoded about two seconds ahead, and the picture follows the audio clock: a drift is slewed out by moving the frame timeline a quarter of it per poll, at most 2.5 ms (a 5% rate change); a picture more than 0.1 s ahead holds until the sound catches up, and only one more than half a second behind jumps forward. Playback holds until the document has loaded. |
+
+Both kinds become an image whose frame timeline the media controller
+drives: `ns_image_anim_duration`, `ns_image_anim_position`,
 `ns_image_anim_set_paused`, `ns_image_anim_seek`,
 `ns_image_anim_set_loop` and `ns_image_anim_ended` are the whole of the
 picture's playback surface, found by looking the element's source up in
 the image cache. Because that cache is keyed by URL, two `<video>`
 elements with the same source share one timeline. A decoded clip waits
-paused on its first frame; the controller starts it when `autoplay` is
-set or the page calls `play()`, and it plays once unless `loop` is set,
-then fires `ended`.
+paused on its first frame; the controller starts it when the page calls
+`play()` or `autoplay` is set and allowed, and it plays once unless
+`loop` is set, then fires `ended`.
 
 A program stream with an MP2 track also opens that track in the page's
 audio context from the same bytes, so nothing downloads twice. `play()`,
 `pause()`, seeking, `volume`, `muted` and `loop` drive both; the picture
 waits until the sound is decoded, then is re-seeked to the mixer's
-position whenever the two drift more than 0.1 s apart. A video with sound
-autoplays only when muted or after a user gesture, as `<audio>` does; a
-silent video still autoplays. A `<source>` whose `type` the build cannot
-play is skipped, in layout and in the controller alike.
+position whenever the two drift more than 0.1 s apart.
 
-MPEG-1 is not a format the modern web serves. This is video for local and
-self-hosted clips; streaming sites need adaptive streaming over Media
-Source Extensions and a modern codec, neither of which this edition has.
+Unless the `autoplay_enabled` setting is on, media starts only within a
+few seconds of a user gesture: `autoplay` is ignored and `play()` is
+rejected with `NotAllowedError` otherwise, muted or not. A `<source>`
+whose `type` the build cannot play is skipped, in layout and in the
+controller alike, and `canPlayType` (`media_types.c`) and
+`MediaSource.isTypeSupported` (`ns_mse_type_supported` in `mse.c`, then
+`media_types.c`) answer from the decoders actually built in. All decoding
+is software decoding on the CPU; there is no hardware video decoding.
 
 ## Printing
 

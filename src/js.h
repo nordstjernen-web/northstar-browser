@@ -108,6 +108,13 @@ void     ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc,
                                   const char *content_type);
 
 gboolean ns_js_consume_mutated(ns_js *js);
+gboolean ns_js_consume_layout_mutated(ns_js *js);
+/* The nodes whose content changed for layout since the last call when no
+ * change needed the whole page laid out again (the call above returns
+ * FALSE then), or NULL. */
+GPtrArray *ns_js_take_layout_targets(ns_js *js);
+/* What made the pending whole-page layout change, for traces. */
+const char *ns_js_layout_mutated_by(ns_js *js);
 
 char  *ns_js_eval_source(ns_js *js, const char *src, const char *origin);
 

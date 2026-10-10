@@ -6,12 +6,24 @@
 #include "bytecode_cache.h"
 
 #include "config.h"
+#include "quickjs_compat.h"
 
 #include <glib/gstdio.h>
 #include <string.h>
+#ifdef G_OS_WIN32
+#include <sys/utime.h>
+#else
+#include <utime.h>
+#endif
 
-#define NS_BYTECODE_CACHE_MEM_CAP_BYTES   (16u * 1024u * 1024u)
-#define NS_BYTECODE_CACHE_VALUE_CAP_BYTES (4u  * 1024u * 1024u)
+#define NS_BYTECODE_CACHE_MEM_CAP_BYTES   (64u * 1024u * 1024u)
+#define NS_BYTECODE_CACHE_VALUE_CAP_BYTES (48u * 1024u * 1024u)
+#define NS_BYTECODE_CACHE_DISK_CAP_BYTES  ((guint64)256u * 1024u * 1024u)
+#define NS_BYTECODE_CACHE_PRUNE_MIN_BYTES (1024u * 1024u)
+#define NS_BYTECODE_PRECOMPILE_MIN_BYTES  (64u * 1024u)
+#define NS_BYTECODE_PRECOMPILE_WAIT_US    (20 * G_USEC_PER_SEC)
+#define NS_BYTECODE_PRECOMPILE_STACK      (512u * 1024u)
+#define NS_BYTECODE_PRECOMPILE_MEMORY     ((size_t)1024 * 1024 * 1024)
 #define NS_BYTECODE_CACHE_FORMAT_VERSION  2026100301u
 
 #ifdef NS_QUICKJS_ORIGINAL
@@ -28,6 +40,9 @@ typedef struct ns_bytecode_cache_entry {
 
 static GHashTable *g_mem;
 static GMutex      g_lock;
+static GCond       g_pending_cond;
+static GHashTable *g_pending;
+static GThreadPool *g_precompile_pool;
 static guint64     g_mem_bytes;
 static char       *g_dir;
 
@@ -61,7 +76,12 @@ ns_bytecode_cache_init(void)
 void
 ns_bytecode_cache_shutdown(void)
 {
+    if (g_precompile_pool) {
+        g_thread_pool_free(g_precompile_pool, TRUE, TRUE);
+        g_precompile_pool = NULL;
+    }
     g_mutex_lock(&g_lock);
+    g_clear_pointer(&g_pending, g_hash_table_destroy);
     if (g_mem) {
         g_hash_table_destroy(g_mem);
         g_mem = NULL;
@@ -110,6 +130,7 @@ read_disk(const char *key, gsize *out_len)
     gchar *contents = NULL;
     gsize length = 0;
     gboolean ok = g_file_get_contents(path, &contents, &length, NULL);
+    if (ok) g_utime(path, NULL);
     g_free(path);
     if (!ok) return NULL;
     if (length < 4 + 4) { g_free(contents); return NULL; }
@@ -131,6 +152,65 @@ read_disk(const char *key, gsize *out_len)
     g_free(contents);
     if (out_len) *out_len = bc_len;
     return out;
+}
+
+typedef struct {
+    char   *path;
+    guint64 size;
+    gint64  mtime;
+} disk_file;
+
+static gint
+disk_file_older_first(gconstpointer a, gconstpointer b)
+{
+    const disk_file *x = a, *y = b;
+    return x->mtime < y->mtime ? -1 : x->mtime > y->mtime ? 1 : 0;
+}
+
+static void
+prune_disk(void)
+{
+    g_mutex_lock(&g_lock);
+    char *base = g_strdup(g_dir);
+    g_mutex_unlock(&g_lock);
+    if (!base) return;
+    GArray *files = g_array_new(FALSE, FALSE, sizeof(disk_file));
+    guint64 total = 0;
+    GDir *top = g_dir_open(base, 0, NULL);
+    const char *sub;
+    while (top && (sub = g_dir_read_name(top))) {
+        char *subdir = g_build_filename(base, sub, NULL);
+        GDir *d = g_dir_open(subdir, 0, NULL);
+        const char *name;
+        while (d && (name = g_dir_read_name(d))) {
+            disk_file f = { g_build_filename(subdir, name, NULL), 0, 0 };
+            GStatBuf st;
+            if (g_file_test(f.path, G_FILE_TEST_IS_REGULAR) &&
+                g_stat(f.path, &st) == 0) {
+                f.size = (guint64)st.st_size;
+                f.mtime = (gint64)st.st_mtime;
+                total += f.size;
+                g_array_append_val(files, f);
+            } else {
+                g_free(f.path);
+            }
+        }
+        if (d) g_dir_close(d);
+        g_free(subdir);
+    }
+    if (top) g_dir_close(top);
+    g_free(base);
+    if (total > NS_BYTECODE_CACHE_DISK_CAP_BYTES) {
+        g_array_sort(files, disk_file_older_first);
+        for (guint i = 0; i < files->len &&
+                          total > NS_BYTECODE_CACHE_DISK_CAP_BYTES; i++) {
+            disk_file *f = &g_array_index(files, disk_file, i);
+            if (g_unlink(f->path) == 0) total -= f->size;
+        }
+    }
+    for (guint i = 0; i < files->len; i++)
+        g_free(g_array_index(files, disk_file, i).path);
+    g_array_free(files, TRUE);
 }
 
 static void
@@ -156,6 +236,7 @@ write_disk(const char *key, const guint8 *bc, gsize bc_len)
         g_unlink(tmp);
     g_free(tmp);
     g_free(path);
+    if (bc_len >= NS_BYTECODE_CACHE_PRUNE_MIN_BYTES) prune_disk();
 }
 
 static void
@@ -195,6 +276,10 @@ ns_bytecode_cache_get(const char *src, gsize src_len, gsize *out_len)
         g_mutex_unlock(&g_lock);
         return NULL;
     }
+    gint64 wait_until = g_get_monotonic_time() + NS_BYTECODE_PRECOMPILE_WAIT_US;
+    while (g_pending && g_hash_table_contains(g_pending, key))
+        if (!g_cond_wait_until(&g_pending_cond, &g_lock, wait_until))
+            break;
     ns_bytecode_cache_entry *e = g_hash_table_lookup(g_mem, key);
     if (e) {
         e->used_us = g_get_monotonic_time();
@@ -255,4 +340,87 @@ ns_bytecode_cache_put(const char *src, gsize src_len,
     const ns_config *cfg = ns_config_get();
     if (!cfg || !cfg->private_mode)
         write_disk(key, bc, bc_len);
+}
+
+typedef struct {
+    char    key[65];
+    char   *url;
+    GBytes *source;
+} precompile_job;
+
+static void
+precompile_job_finish(precompile_job *job)
+{
+    g_mutex_lock(&g_lock);
+    if (g_pending) g_hash_table_remove(g_pending, job->key);
+    g_cond_broadcast(&g_pending_cond);
+    g_mutex_unlock(&g_lock);
+    g_bytes_unref(job->source);
+    g_free(job->url);
+    g_free(job);
+}
+
+static void
+precompile_run(gpointer data, gpointer user_data)
+{
+    (void)user_data;
+    precompile_job *job = data;
+    gsize len = 0;
+    const char *src = g_bytes_get_data(job->source, &len);
+    JSRuntime *rt = JS_NewRuntime();
+    JSContext *ctx = rt ? JS_NewContext(rt) : NULL;
+    if (ctx) {
+        JS_SetMaxStackSize(rt, NS_BYTECODE_PRECOMPILE_STACK);
+        JS_SetMemoryLimit(rt, NS_BYTECODE_PRECOMPILE_MEMORY);
+        JSValue fn = JS_Eval(ctx, src, len, job->url,
+                             JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+        if (JS_IsException(fn)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+        } else {
+            size_t bc_size = 0;
+            uint8_t *bc = JS_WriteObject(ctx, &bc_size, fn,
+                                         JS_WRITE_OBJ_BYTECODE);
+            if (bc && bc_size > 0)
+                ns_bytecode_cache_put(src, len, bc, bc_size);
+            if (bc) js_free(ctx, bc);
+        }
+        JS_FreeValue(ctx, fn);
+        JS_FreeContext(ctx);
+    }
+    if (rt) JS_FreeRuntime(rt);
+    precompile_job_finish(job);
+}
+
+void
+ns_bytecode_cache_precompile(const char *url, const guint8 *src, gsize len)
+{
+    if (!src || len < NS_BYTECODE_PRECOMPILE_MIN_BYTES) return;
+    precompile_job *job = g_new0(precompile_job, 1);
+    hash_source((const char *)src, len, job->key);
+    g_mutex_lock(&g_lock);
+    gboolean skip = !g_mem || g_hash_table_contains(g_mem, job->key) ||
+                    (g_pending && g_hash_table_contains(g_pending, job->key));
+    g_mutex_unlock(&g_lock);
+    char *path = skip ? NULL : disk_path_for(job->key);
+    if (path && g_file_test(path, G_FILE_TEST_EXISTS)) skip = TRUE;
+    g_free(path);
+    if (skip) {
+        g_free(job);
+        return;
+    }
+    g_mutex_lock(&g_lock);
+    if (!g_pending)
+        g_pending = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                          NULL);
+    g_hash_table_add(g_pending, g_strdup(job->key));
+    if (!g_precompile_pool)
+        g_precompile_pool = g_thread_pool_new(precompile_run, NULL, 2, FALSE,
+                                              NULL);
+    g_mutex_unlock(&g_lock);
+    job->url = g_strdup(url ? url : "");
+    char *terminated = g_malloc(len + 1);
+    memcpy(terminated, src, len);
+    terminated[len] = '\0';
+    job->source = g_bytes_new_take(terminated, len);
+    g_thread_pool_push(g_precompile_pool, job, NULL);
 }

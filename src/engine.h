@@ -39,7 +39,13 @@ void ns_engine_speculative_preload(ns_node *doc, const char *base_url,
 
 GHashTable *ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                                       GHashTable *css_cache, ns_anim *anim);
+/* As ns_engine_compute_cascade(), but NULL with changes filled when only
+ * the changed elements could be told (see ns_css_compute_want_delta()). */
+GHashTable *ns_engine_compute_cascade_delta(ns_node *doc, const char *base_url,
+                                            GHashTable *css_cache,
+                                            ns_anim *anim, GPtrArray *changes);
 
+const char *ns_engine_document_base_href(const ns_node *doc);
 GHashTable *ns_engine_relayout(ns_node *doc, const char *base_url,
                                int viewport_width, double viewport_height,
                                ns_image_cache *images, ns_anim *anim,

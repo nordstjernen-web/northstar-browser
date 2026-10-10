@@ -23,6 +23,10 @@ void ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                              const struct ns_selection *sel);
 void ns_paint_set_js(ns_js *js);
 void ns_paint_set_anim(struct ns_anim *anim);
+/* While set, playing MSE videos painted directly onto the target leave a
+ * transparent hole and append an ns_video_layer_rect (viewport device
+ * pixels) to the array, for the view to composite the picture under. */
+void ns_paint_set_video_layers(GArray *out);
 void ns_paint_set_caret_visible(gboolean visible);
 void ns_paint_set_device_viewport(double x0, double y0, double x1, double y1);
 void ns_paint_clear_device_viewport(void);
@@ -42,6 +46,9 @@ gboolean ns_paint_inline_xy_to_byte(const ns_box *b,
                                     gsize *out_byte);
 gboolean ns_paint_inline_word_range(const ns_box *b, gsize byte,
                                     gsize *out_start, gsize *out_end);
+gboolean ns_paint_inline_strut_line(const ns_box *b, const ns_style *s,
+                                    NsPangoLayout *layout, double *out_offset,
+                                    double *out_height, double *out_baseline);
 double ns_paint_inline_y_offset_for_layout(const ns_box *b,
                                            NsPangoLayout *layout);
 

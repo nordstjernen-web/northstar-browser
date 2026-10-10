@@ -4,6 +4,465 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Headless `--act=` gains pointer actions: `move X,Y` hovers (dispatching
+  pointerover/mouseover, pointermove/mousemove and setting `:hover`),
+  and `down X,Y` / `up` press and release, with `move`s between them for
+  a drag. A point may be given as `sel=CSS [dx=N] [dy=N]`, resolved to
+  the matching element's centre when the action runs, so scripted
+  interactions survive layout changes.
+* Media no longer starts by itself: a new `autoplay_enabled` setting,
+  off by default, makes `play()` reject with `NotAllowedError` unless the
+  user clicked or pressed a key in the last five seconds, and ignores the
+  `autoplay` attribute, as browsers' "block audio and video" option
+  does. Video then starts when the user asks, after the page has
+  settled, instead of competing with its layout.
+* getVideoPlaybackQuality() counts the frames a Media Source video
+  showed and the ones it decoded too late to show, and
+  MediaCapabilities.decodingInfo() reports a video configuration as smooth
+  only when its pixel rate fits what the decoder has sustained (1080p at
+  30 frames a second before it has measured anything). It also answers
+  for Media Source video, which it always called unsupported. Pages such
+  as YouTube lower the quality they stream when frames are dropped; they
+  were told none ever were.
+* `--trace` also records the media pipeline: video decoding and feeding,
+  the picture picked for each view frame, audio device fills and
+  feeding, and MSE appends.
+* Video decoding runs on a thread of its own. An MSE video stream hands
+  coded frames (references to the buffered samples) to a decode thread
+  that decodes and converts to BGRA up to four frames ahead; the
+  animation tick only picks the decoded frame for the playback clock and
+  keeps the queue topped up, restarting it from a keyframe on seeks and
+  after `remove()`. Main-thread time per video tick drops from 9-44 ms
+  (1080p H.264, AV1) to about 0.3 ms.
+* libdav1d and libvpx decode with up to four threads (one per core),
+  still one picture out per sample in. With the decode thread, 1080p AV1
+  plays all 150 of 150 frames of a 5 s test stream where it showed 95.
+* The view composites playing Media Source Extensions videos (and MP4 or
+  WebM files in `<video src>`) itself. The page frame keeps a transparent
+  hole where the picture goes, and at each tick of its own frame clock the
+  view picks the decoded frame for the playback clock and draws it under
+  the page, so overlays stay on top. YouTube's player rereads its size
+  twice per frame while its controls show, and each read relaid the whole
+  watch page (about 25 ms), so the engine thread managed 13 frames a
+  second and a 25 fps video slowed down whenever the mouse was over it;
+  it now plays at its full rate, and new pictures no longer repaint the
+  page. The decoder is handed about three seconds of coded frames and
+  keeps up to 48 MB of decoded pictures ready, so the picture also rides
+  out engine stalls of a few seconds, and it never steps back except on
+  a seek.
+* A video's picture follows its sound smoothly and never jumps back. The
+  stream clock follows the audio device's sample clock, anchored where
+  the device asks for more data, so it advances evenly however the device
+  schedules its callbacks (PulseAudio and PipeWire top up deep buffers in
+  bursts), and it never steps back between seeks. Drift is slewed out by
+  moving the frame timeline a little each poll (at most a 5% rate change);
+  a picture ahead of a starved sound holds instead of jumping back, and
+  only one more than half a second behind jumps forward. The picture used
+  to fall behind the sound and then jump 100 ms forward every 20 seconds
+  or so, or jump back whenever the sound ran ahead of it.
+* A video that switches sources no longer loses its sound, and no longer
+  freezes at the next pause and play, when the old source's close reaches
+  the audio thread after the new stream has opened. This is how YouTube
+  froze when the content came on after an ad.
+* A playing video no longer stops for 100-450 ms every second or so.
+  When the view had already shown the frame the engine was aiming at, the
+  engine took it for lost and restarted the decoder from the last keyframe,
+  up to 4 s back.
+* `<video>` plays ordinary MP4 (H.264, AV1, VP9 with AAC or Opus) and
+  WebM files, not only MPEG-1, and `canPlayType("video/mp4")` and
+  `"video/webm"` answer "maybe" (or "probably" for codecs Northstar
+  decodes). The file is fetched with HTTP range requests: the `moov`
+  is found wherever it sits (BitChute's files keep it at the end), its
+  sample tables are indexed, and the samples for the next half minute
+  are fed through the Media Source buffers, so decoding, sound,
+  `buffered`, `readyState`, `seekable` and seeking work as they do for
+  streaming sites; memory holds about a minute of the file whatever
+  its length. A seek restarts the download at the keyframe before the
+  target. WebM and fragmented MP4 files are read from the start, and a
+  server that ignores ranges sends the whole file at once. Video.js
+  on BitChute had refused the source as unsupported.
+* `<video>` and `<audio>` play Media Source Extensions streams, as
+  YouTube and other streaming sites send them: `MediaSource`,
+  `SourceBuffer` (`appendBuffer`, `remove`, `abort`, `timestampOffset`,
+  sequence mode, append windows, `buffered`) and
+  `MediaSource.isTypeSupported` for AV1/VP9 video and AAC/Opus audio in
+  fragmented MP4 or WebM. Buffered ranges, `readyState`, `waiting`,
+  `canplay` and `playing` follow what has been appended, and appending
+  past a 300 MB (video) / 48 MB (audio) quota throws
+  `QuotaExceededError` so pages evict old data. Sound streams into the
+  audio mixer as it decodes, and the picture follows its clock.
+* A playing `<video>` or `<audio>` holds at its start, waiting, until the
+  document has fired its `load` event, instead of starting while the
+  page is still loading and laying itself out.
+* H.264 (AVC) video decoder over Cisco's OpenH264, an optional
+  dependency behind the new `-Dh264` feature (on when `openh264` is
+  present). `src/h264.c` rewrites length-prefixed MP4 samples to Annex B
+  and feeds the `avcC` parameter sets before the first frame and whenever
+  they change. Each picture comes back right after its own access unit,
+  in decode order: OpenH264's display-order reordering keys on the
+  wrapping picture order count and stalls on x264 streams with B-frames.
+  Only OpenH264 binaries built by Cisco are covered by the H.264 patent
+  license Cisco pays for; distribution builds from source are not.
+* Media Source Extensions play H.264 when OpenH264 is built in:
+  `isTypeSupported()` accepts `avc1`/`avc3` Baseline, Main and High
+  (8-bit 4:2:0) in MP4, which is what hls.js asks before playing
+  PeerTube. Each coded frame keeps the codec configuration it arrived
+  with, so the decoder gets the right SPS/PPS after a quality switch or a
+  seek back into an earlier rendition. With B-frames the frame for a
+  time is found by presentation time among the frames stored in decode
+  order, pictures decoded before their turn are kept until shown, and an
+  append that continues a coded frame group no longer deletes the
+  group's reordered frames it overlaps.
+* A SourceBuffer whose initialization segment carries both an audio and
+  a video track, as hls.js creates for muxed HLS renditions (PeerTube,
+  Twitch), plays both. Only the first decodable track was kept: PeerTube
+  played without sound, and Twitch, whose segments list the audio track
+  first, without picture. The buffer's `buffered` ranges are the
+  intersection of its two tracks.
+* `MediaSource.setLiveSeekableRange()` and `clearLiveSeekableRange()`.
+  The media element's `seekable` for a MediaSource follows Media Source
+  Extensions: 0 to the duration for a finite one, and for a live
+  (infinite) duration the live seekable range joined with the buffered
+  ranges. Twitch's player calls it after its first append and reported
+  a MediaSource error ("not a function") on every live stream.
+* After a seek into a part of a Media Source that is not buffered yet,
+  the sound starts at the seek target instead of at the next buffered
+  audio frame, which could lie anywhere later in the stream; the
+  picture follows the sound's clock, so playback jumped back to an old
+  buffered range.
+* Incremental demuxers for fragmented MP4 (ISO BMFF: init segment, then
+  `moof`/`mdat` fragments) and WebM (Matroska EBML: tracks, clusters,
+  SimpleBlocks and BlockGroups). Both accept bytes in arbitrary chunks and
+  yield samples with decode and presentation times, keyframe flags and
+  the codec configuration (`av1C`, `vpcC`, `esds`, `dOps`/OpusHead).
+* Video and audio decoders for the formats streaming sites serve: AV1
+  through libdav1d and VP9 through libvpx (both optional, `-Dav1` and
+  `-Dvp9`, on when the library is present), Opus through libopus when
+  present, and AAC-LC through a new in-tree decoder written from ISO/IEC
+  14496-3. Decoded pictures (8 to 16 bit, 4:2:0/4:2:2/4:4:4, BT.601 or
+  BT.709, limited or full range) convert to BGRA textures in `src/yuv.c`.
+  `src/videodec.c` and `src/audiodec.c` pick the decoder from the codec
+  string.
+* Script that changes an attribute layout cannot see no longer lays the
+  page out again: SVG content attributes repaint their `<svg>`, `dir`
+  only relayouts when the text's base direction changes, an `<a>`'s href
+  only when it gains or loses one (clicks read the current href), a form
+  control's class only when it gains or loses one, and attributes of
+  undisplayed scripts and templates not at all. Changes made from timers,
+  messages and events now also restyle without a relayout when they can,
+  as changes from animation frames already did.
+* Each relayout spends less time around layout itself: it looks for
+  transitions and animations only on elements whose style has some, no
+  longer copies every `@keyframes` rule again, and finds the page's style
+  sheets with fewer string comparisons. The style pass after the cascade
+  takes about a third less time on YouTube.
+* Script that adds or removes nodes where layout does not go (inside an
+  element that is not displayed, in an `<svg>`'s content, in `<head>`, or
+  in a tree not yet in the document) restyles the page instead of laying
+  it out again, unless the change brings new style sheets, a new viewport
+  or a new `<base>`. Changes inside an `<svg>` repaint it. `--trace` now
+  names what asked for each relayout.
+* A running CSS animation or transition of opacity, transforms or colours
+  repaints only where its element painted before and after each frame,
+  instead of the whole page, including elements in inline-blocks. The
+  Twitch landing page, whose carousel keeps an animation running,
+  repainted the whole window some 50 times a second and now spends about
+  a fifth of the time painting.
+* `--trace` also records timers, events, animation frame callbacks,
+  microtasks and garbage collections, forced reflows with the API that
+  asked for them, and restyles.
+* A change to a class, an inline style or an attribute that only
+  selectors read restyles the page without rebuilding and laying out the
+  box tree when the new computed styles differ only in what paint reads
+  from the box at use time (transforms, opacity, colours, shadows,
+  background position, filters) or move an absolutely positioned box by
+  one inset. Geometry reads and getComputedStyle after such a change no
+  longer force a relayout of the whole page: YouTube's progress bar,
+  which writes transforms and then reads the player's size twice per
+  frame while the controls show, cost two 20-30 ms relayouts per frame
+  and now mostly costs one 6 ms restyle. When a relayout is needed after
+  all, it reuses the cascade the restyle already computed, and the
+  animation observer skips styles without animations or transitions.
+  `NS_LAYOUT_VERIFY=1` lays the page out again after every such restyle
+  and reports the first difference.
+* A restyle keeps the layout when an inline box or text run gets a new
+  computed style with the same values; it used to relay out the whole
+  page. On YouTube the scrubber's pull indicator took such a style with
+  every progress update, so half the restyles became 15-20 ms relayouts.
+* A restyle that keeps the layout repaints only where the restyled boxes
+  painted before and paint after (through transforms and scroll offsets),
+  not the whole page. On YouTube a progress bar update repaints a
+  115x17 px strip in about 5 ms instead of the whole view in 21 ms.
+* An element whose style is recomputed only because a :has() rule might
+  match differently keeps its style when it matches the same declarations
+  under the same parent. YouTube's root element, with 1,700 custom
+  properties, was rebuilt on every restyle.
+* Media queries are evaluated again only when the viewport, the media
+  device, print, colour scheme or reduced motion change. Before, every
+  cascade reparsed the queries of every cached style sheet.
+* A restyle computes and compares only the elements whose style changed,
+  rather than building and comparing a table of every element's style.
+  On YouTube, a progress bar update costs a 1.4 ms restyle instead of
+  2 ms.
+* A change to aria-label or title restyles the page instead of laying it
+  out again, except on a <button> that layout may label with it. YouTube
+  rewrites the time display's aria-label every second, which relaid the
+  whole watch page each time.
+* A restyled element whose computed values did not change keeps its
+  style, and the restyle reuses the styles of elements below it whose
+  matched rules did not change. Hovering a video in YouTube's sidebar
+  restyled 1,250 elements in 22-27 ms; it now takes 8-12 ms.
+* An element that fades in with a CSS transition stays visible when the
+  transition ends. YouTube's player controls faded in on hover and then
+  vanished at once.
+* An animation tick stops running queued tasks once its 16 ms budget is
+  spent; it checked the budget only after up to 64 tasks, so one frame on
+  YouTube could wait more than a second for timers and forced relayouts.
+* IndexedDB index lookups by a single key (`index.get`, `getKey`,
+  `getAll`, `count`) and unique-index checks on `put`/`add` read only the
+  matching rows, and uniqueness checks skip the stored values. Every
+  index query read and deserialised the whole index, which was the
+  largest script-side cost on a YouTube watch page (14.6% of main-thread
+  time, now 0.9%).
+* The compiled-JavaScript cache keeps large scripts (up to 48 MB of
+  bytecode per entry) and bounds its disk use to 256 MB, dropping the
+  least recently used entries. YouTube's main bundle and player were
+  over the old 4 MB limit and were re-parsed on every visit; a reload
+  now evaluates them in about 0.45 s and 55 ms instead of 1.2 s and
+  250 ms.
+* Large external scripts compile on worker threads while the page loads:
+  when a preloaded script of 64 KB or more is not in the bytecode cache,
+  it is compiled in the background and the main thread picks up the
+  result instead of compiling it again. On a first visit to a YouTube
+  watch page, scripts block the HTML parser for about 1.1 s instead of
+  1.9-2.5 s.
+* The background bytecode precompiler gives QuickJS a NUL-terminated
+  copy of the script. QuickJS's tokenizer reads up to the terminating
+  NUL, so it read past the end of the buffer (found with
+  AddressSanitizer on Twitch).
+* Restyling after DOM changes touches only what can have changed. A
+  single `:has()` the restyle index could not key switched incremental
+  restyle off for the whole page, and most changes re-cascaded their
+  whole subtree. Attribute, class, child-list and hover/focus changes
+  now restyle the changed element, re-match descendants only through
+  invalidation sets built from the stylesheets, and stop at children
+  whose parent's computed style came out unchanged. On a YouTube watch
+  page the style cascade drops from 5.6 s to 2.0 s over the first 15
+  seconds (about 400 elements restyled per pass instead of 4,500), and
+  video ads stutter much less.
+* DOM and form-state changes made through `textContent`, `innerText`,
+  fragment insertion, `<select>` and `<option>` APIs, input values, form
+  reset, exclusive `<details>`, checkbox/radio activation,
+  `setCustomValidity` and the table section APIs mark the affected
+  elements for restyle; `:empty`, `:checked` and positional selectors
+  could go stale after them.
+* Full style passes are about 28% cheaper: rule-index candidates carry
+  what selector matching needs to reject them early, declarations whose
+  value uses `var()` are parsed once per substituted value per pass
+  instead of once per element, and shared style clones keep their inline
+  and `currentColor` bookkeeping, so unchanged elements stop looking
+  changed to incremental restyle.
+* Restyle invalidation for `:has()` and child-list changes is cheap: key
+  sets are checked by looking up the node's own tag, id and classes, the
+  ancestor walk for `:has()` anchors stops at ancestors already walked
+  since the last style pass, and a child-list change walks the ancestors
+  once instead of once per child. On a YouTube watch page this cut
+  main-thread CPU by about 30%.
+* Painting skips fully transparent subtrees and keeps opacity groups
+  element-sized: YouTube's ~20 invisible hover overlays each allocated
+  and composited a viewport-sized offscreen surface every frame. A full
+  repaint of a YouTube watch page drops from about 39 ms to 13 ms, and
+  damage repaints cover only the damaged columns instead of the whole
+  viewport width.
+* Parsed stylesheets are reused across window size changes unless one
+  of their own `@media` conditions changes result. They were cached per
+  exact viewport size, so every resize step, and the vertical scrollbar
+  appearing while a page loads, re-parsed all CSS and rebuilt every rule
+  index: about 0.7 s on a YouTube watch page, now about 0.1 s.
+* Incremental restyle reuses untouched subtrees wholesale: elements off
+  the path to any changed element skip per-element dirty checks, the
+  ancestor filter and invalidation-set matching. Small restyles are
+  about 25% cheaper.
+* The invalidation keys incremental restyle uses are computed once per
+  stylesheet and merged when the set of sheets changes, instead of being
+  rebuilt from every rule of every sheet each time a `<style>` element
+  is added. YouTube's full style passes during load cost about half as
+  much (412 ms to 227 ms).
+* The address bar and window title follow a page that changes its
+  address with `history.pushState()` or its title from script. They were
+  only read when a navigation finished, so single-page sites (YouTube)
+  kept showing the first page's address.
+* Back, Forward and Reload follow the address a page moves to by itself
+  (history.pushState, replaceState, a new fragment): after clicking from
+  one YouTube video to another and following a link off the site, Back
+  returns to the second video and Reload stays on it, where they used to
+  load the address the page was first opened at.
+* Space no longer reloads the page. Toolbar buttons took the keyboard
+  focus when clicked, and a new window could start with it on one, so
+  Space pressed Reload instead of reaching the page (YouTube's
+  play/pause). Toolbar buttons no longer take focus on click, and a
+  finished page load hands the keyboard to the page unless the address
+  bar is being typed in.
+* A page lays itself out for the window's size when the window was
+  resized while the page loaded. It kept the size the window had when the
+  load began, leaving the rest of the window blank (the Twitch landing
+  page, maximised during its load, stayed 1014 pixels wide).
+* Interface-specific DOM members live on the prototypes of the interfaces
+  that define them (`href` and the URL parts on `HTMLAnchorElement` and
+  `HTMLAreaElement`, `src` on the media, image, script and frame
+  interfaces, `value`/`checked`/`form`/`disabled` on the form controls,
+  `length` and the data methods on `CharacterData`, and so on), and
+  `<video>`/`<audio>` inherit from `HTMLMediaElement`. They all sat on
+  one prototype shared by every node, so a `<div>`, an unknown element,
+  a text node and the document each reported `text`, `href`, `src`,
+  `type`, `checked` and hundreds more. Feature tests such as
+  `'text' in el` went wrong: YouTube's Polymer sanitizer replaced every
+  `text` binding with "zClosurez", leaving the consent dialog, video
+  title, description and related videos blank. `document.open()` works
+  again; the element `open` accessor had shadowed it.
+* `<noscript>` is never rendered when scripting is enabled, even when
+  an author rule gives it a display.
+* `<link rel=stylesheet>` elements in the parsed document fire `load`
+  and `error`, so the `media="print" onload="this.media='all'"`
+  asynchronous stylesheet pattern applies its stylesheet.
+* Headless settling no longer ends while a script is blocked fetching a
+  module or resource, which cut single-page apps off before their first
+  XHRs completed.
+* Scripts and speculative preloads resolve against the document's
+  `<base href>`. Parser-inserted `<script src>` used the document URL,
+  so sites built with Angular CLI (PeerTube) fetched their scripts from
+  the wrong path and never started.
+* A `blob:` URL has the origin of the page that created it, as the URL
+  standard defines, so a worker started from one sends that `Origin`
+  and passes CORS checks against it. Twitch's player worker failed its
+  cross-origin `fetch()` of the WebAssembly player
+  (`Access-Control-Allow-Origin: https://www.twitch.tv`) and never
+  asked for the stream's playlist.
+* Assigning any value to an error's `stack` stores it as an own data
+  property, as other engines do. quickjs-ng's `Error.prototype.stack`
+  setter throws "expects a string" for anything else, which broke
+  Twitch's Kasada script; Northstar replaces the setter in every new
+  context.
+* A request that carries a `Range` header bypasses the HTTP cache in
+  both directions. The cache is keyed by URL, so a stored 206 answered
+  later requests for other byte ranges of the same file with the wrong
+  bytes.
+* A same-origin `<iframe>` no longer sees the parent page's own global
+  variables as its own. Its window was seeded with every property of the
+  parent window, including those the page's scripts had defined; it now
+  receives only the browser's built-in globals, as cross-origin frames
+  already did.
+* A frame's `window.name` is its `<iframe name>` attribute. Same-origin
+  frames reported the parent window's name, so scripts that find a
+  sibling frame through `parent.frames[name]` (reCAPTCHA's challenge
+  frame does this) found nothing.
+* Inside an `<iframe>`, a bare name resolves to an element with that id
+  in the frame's own document, not in the parent page's. Frames shared
+  the parent window's named-properties object, so on Google's "unusual
+  traffic" page (which has `<div id="recaptcha">`) the reCAPTCHA frames
+  saw that div as their `recaptcha` namespace, and the checkbox spun
+  forever.
+* `history.pushState()` and its siblings taken from an iframe and called
+  on another window's `history` act on that history, as in browsers. The
+  iframe's stand-in history ignored the receiver, so YouTube, which takes
+  these functions from a hidden iframe, changed pages without ever
+  changing the address.
+* An iframe shows the document a server sends with an HTTP error status
+  (404, 429, 500 ...), as browsers do; only `<object>` falls back to its
+  content on an error. Twitch's anti-bot challenge page arrives as a
+  429 in an iframe and was dropped as "load failed".
+* An iframe whose `src` is a `javascript:` URL keeps an empty
+  about:blank document instead of fetching "javascript:;" from the
+  network.
+* Changing an iframe's `sandbox` attribute takes effect at the frame's
+  next navigation, as the HTML standard specifies; the loaded document
+  keeps its origin. Twitch's ad verification adds `sandbox` after the
+  frame loaded and then writes into its `contentDocument`, which
+  Northstar had already made null.
+* `window.onload` and the other window event-handler properties fire
+  in iframes. The dispatcher read the handler from the top-level
+  window, so a frame's own `window.onload = ...` never ran (and the
+  top page's handler ran for the frame's events). BitChute's embedded
+  player starts from `window.onload` and stayed a black box.
+* Fixed an intermittent crash while pages load. `getComputedStyle()`
+  and similar style flushes replaced the style table without relaying
+  out, and two such flushes between relayouts could free styles the
+  current layout still painted with; the engine crashed in painting and
+  the watchdog reloaded the page.
+* The window's scroll range follows the page when its size changes after
+  loading. It kept the height the page had when it opened, so pages that
+  build themselves with JavaScript (YouTube's default watch layout)
+  could not be scrolled until a resize, zoom or `scrollTo()` happened to
+  update it.
+* The layout oscillation dampener only engages for layouts that really
+  alternate (A, B, A). It also counted relayouts that produced the same
+  layout as before, so a page making many layout-neutral mutations while
+  loading (YouTube) engaged it, and every later content change waited
+  0.4-1 s to appear.
+* A positioned box with `z-index: auto` no longer hides the z-indexed
+  boxes inside it from clicks. Hit testing kept such a box's z-indexed
+  descendants in a scope of their own, so they lost to any later sibling
+  layer with a lower z-index: YouTube's consent dialog (z-index 2202,
+  inside an absolutely positioned app shell) lost every click to its
+  backdrop (z-index 2201) and could not be accepted or rejected. Those
+  descendants now compete in the enclosing stacking context, as in CSS.
+* Positioned descendants of a positioned box with `z-index: auto` are
+  painted in the enclosing stacking context, ordered by z-index and tree
+  order, as CSS specifies. They were painted inside that box as if it
+  were a layer of its own, so a `position: fixed; z-index: 2202` dialog
+  inside an absolutely positioned app shell drew below a
+  `z-index: 2201` backdrop elsewhere, and deep high-z descendants drew
+  below outer boxes with a lower z-index.
+* Rounded borders whose sides differ in color or width keep their
+  rounded corners. Only a uniform solid border followed `border-radius`;
+  any other was drawn as four straight lines, so the reCAPTCHA spinner
+  (a circle with two transparent sides) appeared as a square corner.
+* An SVG element whose `transform` cannot be inverted (for example a
+  hidden shape with `scale(0)`) is not rendered, per the SVG spec. It was
+  passed to cairo, which put the whole drawing context into a permanent
+  error state, so everything painted after it vanished: YouTube's player
+  volume icon carries such a path, and the watch page drew only the
+  player while its consent dialog was up.
+* Clicking a page after a script read `getComputedStyle()` no longer
+  crashes in SVG painting: inline SVG boxes kept a pointer to a style
+  table that the style flush had already replaced and freed.
+* `overflow: hidden` (or `clip`, `scroll`, `auto`) clips absolutely
+  positioned descendants whose containing block is inside the clipping
+  box. They were painted after the clip was lifted, so a positioned
+  child escaped any clipping parent: YouTube's collapsed volume slider
+  drew its knob over the time display. Descendants positioned against a
+  box outside the clipping element still escape it, as in CSS.
+* An auto-width block with `overflow: hidden` inside an explicitly
+  zero-width parent clips its content to nothing. The painter skipped
+  clipping for any zero-width box without its own explicit `width`, so a
+  collapsed slider's contents spilled over its neighbours.
+* A percentage `top` or `bottom` on a relatively positioned box resolves
+  against a containing block whose height comes from flex stretching,
+  even through `height: 100%` children of the stretched item. It
+  resolved to 0, so YouTube's autoplay toggle (`top: 50%;
+  transform: translateY(-50%)`) sat half its height above its pill.
+* A line holding inline-blocks or inline images is sized and aligned
+  with the CSS strut: its box reaches the larger of the strut's and the
+  inline-blocks' ascents above the baseline and descents below it,
+  instead of centring the line in `line-height`. Small inline-blocks
+  sit on the baseline in tall lines (they were painted at the top of
+  the line), and text stays on the same baseline as a taller
+  inline-block beside it (it was centred a few pixels below). Painting
+  and hit testing now place inline-blocks where layout does.
+* An inline `<img>`, `<svg>` or `<video>` with padding, borders or
+  margins counts them in the width of the line, so a shrink-to-fit
+  parent (inline-block, flex item, float) wraps the whole box. Only the
+  content width was measured, so YouTube's 24px speaker icon with 12px
+  padding sat in a 24px button and stuck out of its pill.
+* An absolutely positioned box resolves its percentage `min-height`
+  against the height of its containing block even when that block's
+  height is `auto`. Twitch's player (`top: 0; min-height: 100%` inside
+  an aspect-ratio box) was laid out 0 px tall, so a playing live stream
+  showed only the channel's offline picture behind it.
+* A grid that places its items column by column (`grid-auto-flow: column`)
+  and sizes itself to its content is as wide as all its columns plus the
+  gaps between them, where it used to be as wide as its widest item: the
+  tabs of a Twitch channel no longer pile up on top of each other.
 * Security: a page could free the address the engine was still reading.
   Laying out a page fetches its stylesheets and images synchronously,
   and the engine waited for them by spinning its own main context, so

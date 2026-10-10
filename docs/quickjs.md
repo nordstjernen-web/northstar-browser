@@ -55,7 +55,11 @@ if it no longer applies, and rerun the checks below.
 
 Engine code includes `"quickjs_compat.h"`, never `<quickjs.h>`. With
 quickjs-ng it only adds the few shims upstream lacks: realm lookup,
-ArrayBuffer repointing and class-ID allocation. With the original engine (`NS_QUICKJS_ORIGINAL`, set by
+ArrayBuffer repointing and class-ID allocation. It also wraps
+`JS_NewContext` for both engines to replace quickjs-ng's
+`Error.prototype.stack` setter, which rejects anything but a string, with
+one that stores any value as an own data property, as other browsers and
+the TC39 error-stack accessor proposal do. With the original engine (`NS_QUICKJS_ORIGINAL`, set by
 `meson.build`) it also supplies the quickjs-ng API the engine uses:
 
 - **Different signatures.** `JS_IsArray`, `JS_IsError` and `JS_IsBigInt`

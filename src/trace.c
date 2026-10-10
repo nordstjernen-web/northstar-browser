@@ -5,6 +5,7 @@
 
 #include "trace.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <glib/gstdio.h>
 
@@ -92,6 +93,13 @@ ns_trace_close(void)
 }
 
 void
+ns_trace_thread_name_once(const char *name)
+{
+    if (!ns_trace_enabled() || g_private_get(&g_trace_tid)) return;
+    ns_trace_thread_name(name);
+}
+
+void
 ns_trace_thread_name(const char *name)
 {
     if (!ns_trace_enabled() || !name) return;
@@ -101,6 +109,19 @@ ns_trace_thread_name(const char *name)
     g_string_append(e, "}}");
     trace_write(e);
     g_string_free(e, TRUE);
+}
+
+void
+ns_trace_completef(const char *category, const char *name, gint64 start_us,
+                   const char *fmt, ...)
+{
+    if (!ns_trace_enabled() || start_us <= 0) return;
+    va_list ap;
+    va_start(ap, fmt);
+    char *detail = g_strdup_vprintf(fmt, ap);
+    va_end(ap);
+    ns_trace_complete(category, name, start_us, detail);
+    g_free(detail);
 }
 
 void

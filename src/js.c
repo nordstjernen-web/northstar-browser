@@ -43,6 +43,7 @@
 #include "media_types.h"
 #include "trace.h"
 #include "video.h"
+#include "videoworker.h"
 #include "js_date.h"
 #include "js_intl.h"
 #include "js_realm.h"
@@ -188,7 +189,7 @@ ns_js_note_user_activation(ns_js *js)
     js->user_ever_activated = TRUE;
 }
 
-static gboolean
+gboolean
 ns_js_has_transient_activation(ns_js *js)
 {
     return js && js->user_activation_us != 0 &&
@@ -258,7 +259,16 @@ static void ns_sw_persist_registration(ns_worker_host *host);
 static JSValue ns_sw_unregister(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv);
 static void ns_js_flush_document_write(ns_js *js);
-static void ns_js_flush_layout(ns_js *js);
+static void ns_js_note_layout_target_from(ns_js *js, const ns_node *target,
+                                          const char *why);
+#define ns_js_note_layout_target(js, target) \
+    ns_js_note_layout_target_from((js), (target), G_STRFUNC)
+static void ns_js_note_layout_unscoped(ns_js *js, const char *why);
+static void layout_targets_ensure(void);
+static void ns_js_flush_layout_from(ns_js *js, const char *api);
+/* A layout flush, traced as a forced reflow under the name of the binding
+ * that asked for it. */
+#define ns_js_flush_layout(js) ns_js_flush_layout_from((js), G_STRFUNC)
 static void ns_js_flush_style(ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
@@ -1152,6 +1162,7 @@ ns_drain_microtasks(ns_js *js)
     int jobs = 0;
     gint64 slice_deadline =
         g_get_monotonic_time() + NS_MICROTASK_SLICE_US;
+    gint64 trace_start = ns_trace_now();
     js->callback_depth++;
     for (;;) {
         if (js->eval_deadline_us != 0 &&
@@ -1165,6 +1176,9 @@ ns_drain_microtasks(ns_js *js)
         jobs++;
     }
     js->callback_depth--;
+    if (jobs > 0)
+        ns_trace_completef("script", "microtasks", trace_start, "%d jobs",
+                           jobs);
     if (r < 0 && js->log_cb) {
         char *msg = NULL;
         if (ctx_out) {
@@ -1420,8 +1434,40 @@ ns_idle_deadline_time_remaining(JSContext *ctx, JSValueConst this_val,
     return JS_NewFloat64(ctx, tr);
 }
 
+static gboolean ns_timer_fire_impl(gpointer data);
+
+/* A timer's callback, traced with its kind, id and function name. */
 static gboolean
 ns_timer_fire(gpointer data)
+{
+    if (!ns_trace_enabled()) return ns_timer_fire_impl(data);
+    ns_timer *t = data;
+    const char *kind = t->is_idle ? "idle callback"
+                     : t->is_interval ? "setInterval" : "setTimeout";
+    char *fn = NULL;
+    if (!t->code && !JS_IsUndefined(t->cb) && t->js && t->js->ctx) {
+        JSContext *c = t->ctx ? t->ctx : t->js->ctx;
+        JSValue name = JS_GetPropertyStr(c, t->cb, "name");
+        const char *str = JS_IsString(name) ? JS_ToCString(c, name) : NULL;
+        if (str) {
+            fn = g_strdup(str);
+            JS_FreeCString(c, str);
+        }
+        JS_FreeValue(c, name);
+    }
+    char *detail = g_strdup_printf("%s %d (%d ms) %s", kind, t->id,
+                                   t->interval_ms,
+                                   fn && *fn ? fn : t->code ? "<code>" : "");
+    gint64 start = ns_trace_now();
+    gboolean keep = ns_timer_fire_impl(data);
+    ns_trace_complete("script", "timer", start, detail);
+    g_free(detail);
+    g_free(fn);
+    return keep;
+}
+
+static gboolean
+ns_timer_fire_impl(gpointer data)
 {
     ns_timer *t = data;
     ns_js *js = t->js;
@@ -3726,14 +3772,6 @@ ns_window_properties_document(ns_js *js)
     return js->main_document ? js->main_document : js->current_doc;
 }
 
-static ns_node *
-ns_window_named_lookup(ns_js *js, const char *name)
-{
-    const ns_node *doc = ns_window_properties_document(js);
-    if (!doc || !name || !*name) return NULL;
-    return ns_node_find_by_id((ns_node *)doc, name);
-}
-
 static gboolean ns_live_is_array_index(const char *name);
 static JSValue ns_element_get_contentWindow(JSContext *ctx,
                                             JSValueConst this_val);
@@ -3863,13 +3901,24 @@ ns_window_named_fill(JSPropertyDescriptor *desc, JSValue value, int flags)
     desc->setter = JS_UNDEFINED;
 }
 
+/* Each window's named-properties object resolves against that window's own
+ * document: an iframe realm's object carries its iframe as opaque. */
+static const ns_node *
+ns_window_named_document(ns_js *js, JSValueConst obj)
+{
+    ns_node *iframe = JS_GetOpaque(obj, ns_window_named_class_id);
+    if (!iframe) return ns_window_properties_document(js);
+    if (!js->frame_contexts || !g_hash_table_contains(js->frame_contexts, iframe))
+        return NULL;
+    return ns_iframe_document_node(iframe);
+}
+
 static int
 ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
                     JSValueConst obj, JSAtom prop)
 {
-    (void)obj;
     ns_js *js = js_from_ctx(ctx);
-    const ns_node *doc = js ? ns_window_properties_document(js) : NULL;
+    const ns_node *doc = js ? ns_window_named_document(js, obj) : NULL;
     if (!doc) return 0;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return 0;
@@ -3879,7 +3928,7 @@ ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
     const ns_node *frame = ns_window_child_frame_for(doc, name);
     JSValue value = frame ? ns_frame_window(ctx, frame) : JS_UNDEFINED;
     if (JS_IsUndefined(value) && !indexed) {
-        ns_node *el = ns_window_named_lookup(js, name);
+        ns_node *el = *name ? ns_node_find_by_id((ns_node *)doc, name) : NULL;
         if (el) value = ns_make_element(ctx, el);
     }
     JS_FreeCString(ctx, name);
@@ -4999,8 +5048,19 @@ ns_make_svg_animated_length(JSContext *ctx, const ns_node *n, const char *attr)
     return o;
 }
 
-static const struct ns_box *ns_box_for_this(JSContext *ctx,
-                                            JSValueConst this_val);
+static const struct ns_box *ns_box_for_this_from(JSContext *ctx,
+                                                 JSValueConst this_val,
+                                                 const char *api);
+#define ns_box_for_this(ctx, this_val) \
+    ns_box_for_this_from((ctx), (this_val), G_STRFUNC)
+static gboolean ns_inline_rect_for_this_from(JSContext *ctx,
+                                             JSValueConst this_val,
+                                             double *x, double *y,
+                                             double *w, double *h,
+                                             const char *api);
+#define ns_inline_rect_for_this(ctx, this_val, x, y, w, h) \
+    ns_inline_rect_for_this_from((ctx), (this_val), (x), (y), (w), (h), \
+                                 G_STRFUNC)
 static void ns_box_border_box(const struct ns_box *b,
                               double *x, double *y, double *w, double *h);
 static void ns_box_visual_border_box(const struct ns_box *b,
@@ -5454,43 +5514,12 @@ static const char *kBoolAttrs[] = {
 };
 
 static JSValue
-ns_element_async_method(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    if (argc < 1 || !JS_IsFunction(ctx, argv[0])) return JS_NewInt32(ctx, 0);
-    JSValue bind = JS_GetPropertyStr(ctx, argv[0], "bind");
-    JSValue cb = JS_UNDEFINED;
-    if (JS_IsFunction(ctx, bind)) {
-        JSValueConst args[1] = { this_val };
-        cb = JS_Call(ctx, bind, argv[0], 1, args);
-    }
-    JS_FreeValue(ctx, bind);
-    if (JS_IsException(cb)) return cb;
-    if (!JS_IsFunction(ctx, cb)) {
-        JS_FreeValue(ctx, cb);
-        cb = JS_DupValue(ctx, argv[0]);
-    }
-    JSValue delay = argc > 1 ? JS_DupValue(ctx, argv[1]) : JS_NewInt32(ctx, 0);
-    JSValueConst args[2] = { cb, delay };
-    JSValue ret = ns_js_setTimeout(ctx, JS_UNDEFINED, 2, args, 0);
-    JS_FreeValue(ctx, delay);
-    JS_FreeValue(ctx, cb);
-    return ret;
-}
-
-static JSValue
-ns_element_cancelAsync(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    return ns_js_clearTimer(ctx, this_val, argc, argv);
-}
-
-static JSValue
 ns_element_boolattr_getter(JSContext *ctx, JSValueConst this_val, int magic)
 {
+    (void)ctx;
     if (magic < 0 || magic >= (int)G_N_ELEMENTS(kBoolAttrs)) return JS_FALSE;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_FALSE;
-    if (strcmp(kBoolAttrs[magic], "async") == 0 && !ns_node_is_element_named(n, "script"))
-        return JS_NewCFunction(ctx, ns_element_async_method, "async", 2);
     return ns_element_get_attr(n, kBoolAttrs[magic]) ? JS_TRUE : JS_FALSE;
 }
 
@@ -5500,11 +5529,6 @@ ns_element_boolattr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst v
     if (magic < 0 || magic >= (int)G_N_ELEMENTS(kBoolAttrs)) return JS_UNDEFINED;
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n) return JS_UNDEFINED;
-    if (strcmp(kBoolAttrs[magic], "async") == 0 && !ns_node_is_element_named(n, "script")) {
-        JS_DefinePropertyValueStr(ctx, this_val, "async", JS_DupValue(ctx, val),
-                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-        return JS_UNDEFINED;
-    }
     ns_js *_j = js_from_ctx(ctx);
     gboolean to_set = JS_ToBool(ctx, val) ? TRUE : FALSE;
     gboolean was_open = ns_element_get_attr(n, kBoolAttrs[magic]) != NULL;
@@ -6281,7 +6305,7 @@ ns_element_append_data(JSContext *ctx, JSValueConst this_val,
     ns_node_replace_text_owned(n, merged);
     JS_FreeCString(ctx, s);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_layout_target(_j, n->parent); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -6305,7 +6329,7 @@ ns_element_delete_data(JSContext *ctx, JSValueConst this_val,
     char *old_copy = g_strdup(n->text ? n->text : "");
     ns_cdata_splice(n, (glong)off, cnt_units, NULL, 0);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_layout_target(_j, n->parent); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -6332,7 +6356,7 @@ ns_element_insert_data(JSContext *ctx, JSValueConst this_val,
     ns_cdata_splice(n, (glong)off, 0, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_layout_target(_j, n->parent); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -6361,7 +6385,7 @@ ns_element_replace_data(JSContext *ctx, JSValueConst this_val,
     ns_cdata_splice(n, (glong)off, cnt_units, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_layout_target(_j, n->parent); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -6400,7 +6424,7 @@ ns_element_split_text(JSContext *ctx, JSValueConst this_val,
     } else if (_j) {
         g_hash_table_add(_j->orphan_nodes, tail);
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return ns_make_element(ctx, tail);
 }
 
@@ -6463,7 +6487,7 @@ ns_text_replaceWholeText(JSContext *ctx, JSValueConst this_val,
         c = next;
     }
     if (js) {
-        js->mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
         ns_qcache_invalidate(js);
         if (parent) ns_css_mark_restyle_dirty(parent);
     }
@@ -6486,7 +6510,7 @@ ns_element_set_nodeValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
         if (!is_null) JS_FreeCString(ctx, s);
         ns_js *_j = js_from_ctx(ctx);
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_layout_target(_j, n->kind == NS_NODE_TEXT ? n->parent : NULL);
             ns_js_record_character_data(_j, n, old_copy);
         }
         g_free(old_copy);
@@ -7311,6 +7335,7 @@ ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
         add_arr = g_ptr_array_new();
         g_ptr_array_add(add_arr, added);
     }
+    ns_css_mark_restyle_dirty(n);
     ns_mut_record_emit_child_list_arrays(js, n, add_arr, removed, NULL, NULL);
     if (add_arr) g_ptr_array_free(add_arr, FALSE);
     g_ptr_array_free(removed, FALSE);
@@ -7356,7 +7381,7 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
     ns_element_replace_all_recorded(_j, n, added);
     if (free_s) JS_FreeCString(ctx, s);
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_layout_target(_j, n->kind == NS_NODE_TEXT ? n->parent : n);
         if (added) ns_js_script_needs_prepare(_j, n);
     }
     return JS_UNDEFINED;
@@ -7397,7 +7422,8 @@ ns_element_set_innerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
         }
     }
     if (free_s) JS_FreeCString(ctx, s);
-    if (_j) _j->mutated = TRUE;
+    ns_css_mark_restyle_dirty(n);
+    if (_j) ns_js_note_layout_target(_j, n);
     return JS_UNDEFINED;
 }
 
@@ -7494,7 +7520,7 @@ ns_element_set_outerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
     if (next && next->prev_sibling)
         ns_merge_with_next_text_node(_j, next->prev_sibling);
     ns_merge_with_next_text_node(_j, previous);
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -7555,7 +7581,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
             c = next;
         }
         ns_node_free(tfrag);
-        if (_j) _j->mutated = TRUE;
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         return JS_UNDEFINED;
     }
     const ns_node *root = ns_node_root(n);
@@ -7584,7 +7610,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
         ns_node_free(fragment);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_layout_target(_j, n);
         if (!ns_node_in_template_content(n)) {
             ns_ce_upgrade_subtree_all(_j, n);
             ns_js_run_inserted_scripts(_j, n);
@@ -7685,7 +7711,7 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
             ns_js_record_child_change_arrays(_j, parent, kids, removed,
                                              previous, next);
             g_ptr_array_free(removed, TRUE);
-            _j->mutated = TRUE;
+            ns_js_note_layout_unscoped(_j, G_STRFUNC);
             ns_ce_upgrade_subtree_all(_j, parent);
             ns_js_run_inserted_scripts(_j, parent);
         }
@@ -7840,7 +7866,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
                 added->len ? added : NULL, original->len ? original : NULL,
                 NULL, NULL);
         }
-        _j->mutated = TRUE;
+        ns_js_note_layout_target(_j, self);
     }
     ns_js_activate_inserted(_j, self, added);
     g_ptr_array_free(added, FALSE);
@@ -10369,6 +10395,48 @@ ns_media_config_supported(JSContext *ctx, JSValueConst config)
     return supported;
 }
 
+/* Whether a supported video configuration plays without dropping frames:
+ * its pixels a second within what the software decoders have sustained
+ * (with a margin), or within 1080p at 30 frames a second before they have
+ * decoded anything. */
+static gboolean
+ns_media_config_smooth(JSContext *ctx, JSValueConst config)
+{
+    if (!JS_IsObject(config)) return TRUE;
+    JSValue video = JS_GetPropertyStr(ctx, config, "video");
+    if (!JS_IsObject(video)) {
+        JS_FreeValue(ctx, video);
+        return TRUE;
+    }
+    double w = 0, h = 0, fps = 0;
+    JSValue v = JS_GetPropertyStr(ctx, video, "width");
+    JS_ToFloat64(ctx, &w, v);
+    JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, video, "height");
+    JS_ToFloat64(ctx, &h, v);
+    JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, video, "framerate");
+    if (JS_IsString(v)) {
+        const char *str = JS_ToCString(ctx, v);
+        if (str) {
+            char *end = NULL;
+            double num = g_ascii_strtod(str, &end);
+            double den = end && *end == '/' ? g_ascii_strtod(end + 1, NULL) : 1;
+            fps = den > 0 ? num / den : num;
+            JS_FreeCString(ctx, str);
+        }
+    } else {
+        JS_ToFloat64(ctx, &fps, v);
+    }
+    JS_FreeValue(ctx, v);
+    JS_FreeValue(ctx, video);
+    if (!(w > 0) || !(h > 0)) return TRUE;
+    if (!(fps > 0)) fps = 30;
+    double measured = ns_video_decode_pixel_rate();
+    double capacity = measured > 0 ? measured * 0.7 : 1920.0 * 1080.0 * 30.0;
+    return w * h * fps <= capacity;
+}
+
 static JSValue
 ns_media_capabilities_result(JSContext *ctx, int argc, JSValueConst *argv,
                              gboolean supported)
@@ -10378,7 +10446,9 @@ ns_media_capabilities_result(JSContext *ctx, int argc, JSValueConst *argv,
     if (JS_IsException(promise)) return promise;
     JSValue info = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, info, "supported",      JS_NewBool(ctx, supported));
-    JS_SetPropertyStr(ctx, info, "smooth",         JS_NewBool(ctx, supported));
+    JS_SetPropertyStr(ctx, info, "smooth",
+                      JS_NewBool(ctx, supported && argc >= 1 &&
+                                      ns_media_config_smooth(ctx, argv[0])));
     JS_SetPropertyStr(ctx, info, "powerEfficient", JS_FALSE);
     JS_SetPropertyStr(ctx, info, "supportedConfiguration",
                       argc >= 1 && JS_IsObject(argv[0])
@@ -12786,7 +12856,7 @@ ns_css_registerProperty(JSContext *ctx, JSValueConst this_val,
             "registerProperty: 'initialValue' does not match the syntax");
     }
     ns_js *js = js_from_ctx(ctx);
-    if (js) js->mutated = TRUE;
+    if (js) ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -14690,7 +14760,8 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 
     ns_js *js = js_from_ctx(ctx);
     if (js) {
-        if (ns_computed_prop_needs_layout(name)) ns_js_flush_layout(js);
+        if (ns_computed_prop_needs_layout(name))
+            ns_js_flush_layout_from(js, "getComputedStyle");
         else ns_js_flush_style(js);
     }
     const char *style = ns_element_get_attr(n, "style");
@@ -15420,7 +15491,7 @@ ns_anim_seek_native(JSContext *ctx, JSValueConst this_val,
     double ms = 0;
     if (!node || prop == -2 || JS_ToFloat64(ctx, &ms, argv[2]) != 0) return JS_FALSE;
     gboolean ok = ns_anim_seek(js->anim, node, prop, ms);
-    if (ok) js->mutated = TRUE;
+    if (ok) ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_NewBool(ctx, ok);
 }
 
@@ -15440,7 +15511,7 @@ ns_anim_control_native(JSContext *ctx, JSValueConst this_val,
     }
     gboolean ok = ns_anim_control(js->anim, node, prop, op);
     JS_FreeCString(ctx, op);
-    if (ok) js->mutated = TRUE;
+    if (ok) ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_NewBool(ctx, ok);
 }
 
@@ -15595,7 +15666,7 @@ ns_anim_animate_native(JSContext *ctx, JSValueConst this_val,
     g_free(css);
     g_free(pct);
     if (!ok) return JS_NULL;
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     JSValue o = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, o, "run", JS_NewInt32(ctx, -1 - prop));
     JS_SetPropertyStr(ctx, o, "generation", JS_NewInt32(ctx, (int)gen));
@@ -18900,7 +18971,7 @@ ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
     g_hash_table_replace(js->blob_urls, g_strdup(url),
                          ns_blob_entry_new_for_object(ctx, argv[1]));
     ns_media_blob_updated(js, url);
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     JS_FreeCString(ctx, url);
     return JS_TRUE;
 }
@@ -23634,7 +23705,7 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
         g_hash_table_destroy(fresh);
     }
     if (removed_any && survivors) {
-        ns_css_mark_restyle_dirty(parent);
+        ns_css_mark_children_restyle(parent);
     } else {
         ns_node *lead_added = NULL;
         if (added)
@@ -23721,6 +23792,179 @@ ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value)
                        NULL, NULL, NULL, NULL, old_value);
 }
 
+/* SVG elements that other SVG content may paint by reference. */
+static gboolean
+svg_is_resource(const ns_node *n)
+{
+    static const char *const kinds[] = {
+        "defs", "symbol", "linearGradient", "radialGradient", "pattern",
+        "clipPath", "mask", "marker", "filter",
+    };
+    if (!n->name) return FALSE;
+    for (guint i = 0; i < G_N_ELEMENTS(kinds); i++)
+        if (g_ascii_strcasecmp(n->name, kinds[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+/* The <svg> element that paints n, when n is SVG content below it (not
+ * inside a foreignObject): the SVG painter reads its attributes as it
+ * paints, so layout never sees them. *shared is set when content of other
+ * <svg> elements may paint it by reference. */
+static const ns_node *
+attr_svg_painter(const ns_node *n, gboolean *shared)
+{
+    *shared = svg_is_resource(n);
+    for (const ns_node *p = n->parent; p; p = p->parent) {
+        if (p->kind != NS_NODE_ELEMENT || !p->name) continue;
+        if (g_ascii_strcasecmp(p->name, "foreignObject") == 0) return NULL;
+        if (g_ascii_strcasecmp(p->name, "svg") == 0) return p;
+        if (svg_is_resource(p)) *shared = TRUE;
+    }
+    return NULL;
+}
+
+/* Layout and paint read the dir attribute directly: text inputs align by
+ * the nearest ltr or rtl, bidi isolation by the element's own value, and
+ * text shaping by the nearest non-empty value, with ltr and rtl setting the
+ * base direction and anything else leaving it to the text. */
+typedef enum { DIR_NEUTRAL, DIR_LTR, DIR_RTL } dir_base;
+
+static dir_base
+dir_base_of(const char *v)
+{
+    if (v && g_ascii_strcasecmp(v, "rtl") == 0) return DIR_RTL;
+    if (v && g_ascii_strcasecmp(v, "ltr") == 0) return DIR_LTR;
+    return DIR_NEUTRAL;
+}
+
+static dir_base
+dir_shaping_base(const ns_node *n, const char *own)
+{
+    if (own && *own) return dir_base_of(own);
+    for (const ns_node *p = n->parent; p; p = p->parent) {
+        if (p->kind != NS_NODE_ELEMENT) continue;
+        const char *v = ns_element_get_attr(p, "dir");
+        if (v && *v) return dir_base_of(v);
+    }
+    return DIR_NEUTRAL;
+}
+
+static gboolean
+dir_char_is_rtl(gunichar ch)
+{
+    return (ch >= 0x0590 && ch <= 0x08FF) || (ch >= 0xFB1D && ch <= 0xFDFF) ||
+           (ch >= 0xFE70 && ch <= 0xFEFF) || (ch >= 0x10800 && ch <= 0x10FFF) ||
+           (ch >= 0x1E800 && ch <= 0x1EFFF) || ch == 0x200F || ch == 0x202B ||
+           ch == 0x202E || ch == 0x2067;
+}
+
+/* Whether some text that takes its base direction from n could shape
+ * right to left on its own; budget bounds the walk. */
+static gboolean
+dir_text_may_be_rtl(const ns_node *n, int *budget)
+{
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (--*budget < 0) return TRUE;
+        if (c->kind == NS_NODE_TEXT && c->text) {
+            for (const char *p = c->text; *p; p = g_utf8_next_char(p))
+                if (dir_char_is_rtl(g_utf8_get_char(p))) return TRUE;
+        } else if (c->kind == NS_NODE_ELEMENT) {
+            const char *v = ns_element_get_attr(c, "dir");
+            if (!(v && *v) && dir_text_may_be_rtl(c, budget)) return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static gboolean
+dir_change_reaches_layout(ns_js *js, const ns_node *n, const char *old_value)
+{
+    const char *now = ns_element_get_attr(n, "dir");
+    if (dir_base_of(old_value) != dir_base_of(now)) return TRUE;
+    const ns_style *s = js->style_table
+                      ? g_hash_table_lookup(js->style_table, n) : NULL;
+    if (!s) return TRUE;
+    const char *ub = ns_style_keyword(s, NS_CSS_UNICODE_BIDI);
+    if (ub && strcmp(ub, "normal") != 0) return TRUE;
+    dir_base was = dir_shaping_base(n, old_value);
+    dir_base is = dir_shaping_base(n, now);
+    if (was == is) return FALSE;
+    if (was == DIR_RTL || is == DIR_RTL) return TRUE;
+    /* ltr against a base left to the text: the same unless the text or the
+     * direction property can make it right to left. */
+    const char *d = ns_style_keyword(s, NS_CSS_DIRECTION);
+    if (d && strcmp(d, "rtl") == 0) return TRUE;
+    int budget = 4096;
+    return dir_text_may_be_rtl(n, &budget);
+}
+
+/* Whether layout can see the change of name on n from old_value to its
+ * current value. */
+static gboolean
+attr_change_reaches_layout(ns_js *js, const ns_node *n, const char *name,
+                           const char *old_value)
+{
+    if (n->name && g_ascii_strcasecmp(n->name, "template") == 0)
+        return FALSE;
+    if (n->name && g_ascii_strcasecmp(n->name, "script") == 0) {
+        /* Unrendered unless a style sheet displays it. */
+        const ns_style *s = js->style_table
+                          ? g_hash_table_lookup(js->style_table, n) : NULL;
+        if (s && ns_display_is_none(ns_css_display_of(s))) return FALSE;
+    }
+    if (g_ascii_strcasecmp(name, "dir") == 0)
+        return dir_change_reaches_layout(js, n, old_value);
+    if (g_ascii_strcasecmp(name, "href") == 0 && n->name &&
+        g_ascii_strcasecmp(n->name, "a") == 0) {
+        /* Hit testing reads the link's current href; only whether there
+         * is one decides that a link is laid out. */
+        const char *now = ns_element_get_attr(n, "href");
+        return !(old_value && *old_value && now && *now);
+    }
+    if (g_ascii_strcasecmp(name, "class") == 0 && n->name &&
+        (g_ascii_strcasecmp(n->name, "input") == 0 ||
+         g_ascii_strcasecmp(n->name, "button") == 0 ||
+         g_ascii_strcasecmp(n->name, "select") == 0 ||
+         g_ascii_strcasecmp(n->name, "textarea") == 0))
+        /* Form control chrome looks only at whether a class is set. */
+        return (old_value != NULL) != (ns_element_get_attr(n, "class") != NULL);
+    return !ns_css_attr_only_restyles(n, name) ||
+           ns_layout_reads_label_attr(n, name);
+}
+
+static void
+ns_js_note_attr_style_change(ns_js *js, const ns_node *n, const char *name,
+                             const char *old_value)
+{
+    /* Not rendered: inserting it later lays it out with what it has then. */
+    if (!ns_js_node_in_page(js, n)) return;
+    gboolean shared = FALSE;
+    const ns_node *svg = attr_svg_painter(n, &shared);
+    if (svg) {
+        /* Repainted where its <svg> is, or everywhere when other <svg>
+         * elements may reference it; the cascade still sees it for
+         * selectors that match it. */
+        if (shared || g_ascii_strcasecmp(name, "id") == 0)
+            ns_js_request_repaint(js);
+        else
+            ns_js_request_repaint_node(js, svg);
+        if (ns_css_attr_may_affect_style(n, name)) js->mutated = TRUE;
+        return;
+    }
+    if (!ns_css_attr_may_affect_style(n, name)) return;
+    js->mutated = TRUE;
+    if (attr_change_reaches_layout(js, n, name, old_value)) {
+        if (!n->parent || js->layout_mutated) {
+            char *why = g_strdup_printf("attribute %s on %s", name,
+                                        n->name ? n->name : "?");
+            ns_js_note_layout_unscoped(js, g_intern_string(why));
+            g_free(why);
+        } else {
+            ns_js_note_layout_target(js, n->parent);
+        }
+    }
+}
+
 static void
 ns_js_set_attr_recorded_len(ns_js *js, ns_node *n, const char *name,
                             const char *value, gssize len)
@@ -23735,10 +23979,7 @@ ns_js_set_attr_recorded_len(ns_js *js, ns_node *n, const char *name,
     char *old_copy = old ? ns_value_dup_len(old, old_len) : NULL;
     ns_element_set_attr_len(n, name, new_value, (gssize)vlen);
     if (js) {
-        if (changed) {
-            if (ns_css_attr_may_affect_style(n, name))
-                js->mutated = TRUE;
-        }
+        if (changed) ns_js_note_attr_style_change(js, n, name, old_copy);
         ns_js_record_attr_change(js, n, name, old_copy);
         ns_ce_attr_changed(js, n, name, old_copy, new_value);
     }
@@ -23767,8 +24008,7 @@ ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n, const char *namespace_uri,
     char *record_copy = g_strdup(record_name);
     ns_element_set_attr_ns(n, namespace_uri, prefix, local_name, name, new_value);
     if (js) {
-        if (changed && ns_css_attr_may_affect_style(n, record_copy))
-            js->mutated = TRUE;
+        if (changed) ns_js_note_attr_style_change(js, n, record_copy, old_copy);
         ns_js_record_attr_change_ns(js, n, local_name, namespace_uri,
                                     old_copy);
         ns_ce_attr_changed(js, n, record_copy, old_copy, new_value);
@@ -23789,7 +24029,7 @@ ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name)
                             ns_attr_local_name(old_attr));
     ns_element_remove_attr(n, name);
     if (js) {
-        if (ns_css_attr_may_affect_style(n, name)) js->mutated = TRUE;
+        ns_js_note_attr_style_change(js, n, name, old_copy);
         ns_js_record_attr_change(js, n, name, old_copy);
         ns_ce_attr_changed(js, n, name, old_copy, NULL);
     }
@@ -23809,7 +24049,7 @@ ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n, const char *namespace_uri,
     ns_attr_detach_matching(js, n, namespace_uri, local_name);
     ns_element_remove_attr_ns(n, namespace_uri, local_name);
     if (js) {
-        if (ns_css_attr_may_affect_style(n, record_copy)) js->mutated = TRUE;
+        ns_js_note_attr_style_change(js, n, record_copy, old_copy);
         ns_js_record_attr_change_ns(js, n, local_name, namespace_uri,
                                     old_copy);
         ns_ce_attr_changed(js, n, record_copy, old_copy, NULL);
@@ -26908,6 +27148,29 @@ ns_invoke_listeners_at_full(ns_js *js, const ns_node *cur,
 }
 
 
+static const ns_node *
+ns_event_document_for_target(ns_js *js, const ns_node *target)
+{
+    for (const ns_node *node = target; node; node = node->parent)
+        if (node->kind == NS_NODE_DOCUMENT && !(node->flags & NS_NODE_FRAGMENT))
+            return node;
+    return js ? js->current_doc : NULL;
+}
+
+static JSValue
+ns_event_window_for_document(ns_js *js, const ns_node *doc)
+{
+    if (js && doc && doc != js->main_document && doc->parent &&
+        (ns_node_is_element_named(doc->parent, "iframe") ||
+         ns_node_is_element_named(doc->parent, "frame") ||
+         ns_node_is_element_named(doc->parent, "object"))) {
+        JSValue realm = ns_iframe_lookup_realm_window(js, doc->parent);
+        if (JS_IsObject(realm)) return realm;
+        JS_FreeValue(js->ctx, realm);
+    }
+    return JS_GetGlobalObject(js->ctx);
+}
+
 static gboolean
 ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
                                  const char *type, JSValue event)
@@ -26918,7 +27181,8 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
     JSContext *ctx = js->ctx;
     char prop_name[48];
     g_snprintf(prop_name, sizeof prop_name, "on%s", type);
-    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue global = ns_event_window_for_document(
+        js, ns_event_document_for_target(js, target));
     JSValue handler = JS_GetPropertyStr(ctx, global, prop_name);
     if (JS_IsFunction(ctx, handler)) {
         gboolean special = FALSE;
@@ -26963,29 +27227,6 @@ ns_invoke_window_listeners(ns_js *js, const ns_node *target, const char *type,
 {
     return ns_invoke_window_listeners_full(js, target, type, event,
                                            capture_phase, FALSE, fired);
-}
-
-static const ns_node *
-ns_event_document_for_target(ns_js *js, const ns_node *target)
-{
-    for (const ns_node *node = target; node; node = node->parent)
-        if (node->kind == NS_NODE_DOCUMENT && !(node->flags & NS_NODE_FRAGMENT))
-            return node;
-    return js ? js->current_doc : NULL;
-}
-
-static JSValue
-ns_event_window_for_document(ns_js *js, const ns_node *doc)
-{
-    if (js && doc && doc != js->main_document && doc->parent &&
-        (ns_node_is_element_named(doc->parent, "iframe") ||
-         ns_node_is_element_named(doc->parent, "frame") ||
-         ns_node_is_element_named(doc->parent, "object"))) {
-        JSValue realm = ns_iframe_lookup_realm_window(js, doc->parent);
-        if (JS_IsObject(realm)) return realm;
-        JS_FreeValue(js->ctx, realm);
-    }
-    return JS_GetGlobalObject(js->ctx);
 }
 
 static gboolean
@@ -27088,9 +27329,32 @@ ns_js_dispatch_window_only_event(ns_js *js, const ns_node *target_doc,
     ns_js_budget_pop(js, &bg);
 }
 
+static gboolean ns_js_dispatch_built_event_impl(ns_js *js,
+                                                const ns_node *target,
+                                                const char *type,
+                                                JSValue event,
+                                                gboolean *default_prevented);
+
 static gboolean
 ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
                            JSValue event, gboolean *default_prevented)
+{
+    gint64 start = ns_trace_now();
+    gboolean r = ns_js_dispatch_built_event_impl(js, target, type, event,
+                                                 default_prevented);
+    if (start)
+        ns_trace_completef("script", "event", start, "%s on %s",
+                           type ? type : "?",
+                           target && target->name ? target->name
+                           : target && target->kind == NS_NODE_DOCUMENT
+                               ? "#document" : "?");
+    return r;
+}
+
+static gboolean
+ns_js_dispatch_built_event_impl(ns_js *js, const ns_node *target,
+                                const char *type, JSValue event,
+                                gboolean *default_prevented)
 {
     JSContext *saved_ctx = js->ctx;
     ns_node *saved_doc = js->current_doc;
@@ -27565,10 +27829,24 @@ ns_js_run_animation_frame(ns_js *js)
     return ns_js_run_animation_frame_internal(js);
 }
 
+static gboolean ns_js_run_animation_frame_body(ns_js *js);
+
 static gboolean
 ns_js_run_animation_frame_internal(ns_js *js)
 {
     if (!js || js->halted || js->in_pump) return FALSE;
+    guint callbacks = js->raf_pending ? js->raf_pending->len : 0;
+    gint64 start = ns_trace_now();
+    gboolean r = ns_js_run_animation_frame_body(js);
+    if (start)
+        ns_trace_completef("script", "animation frame", start,
+                           "%u callbacks", callbacks);
+    return r;
+}
+
+static gboolean
+ns_js_run_animation_frame_body(ns_js *js)
+{
     ns_js_flush_scrollend(js);
     ns_js_flush_ready_images(js);
     ns_js_flush_autofocus(js);
@@ -27692,6 +27970,7 @@ gboolean
 ns_js_has_pending_work(const ns_js *js)
 {
     if (!js) return FALSE;
+    if (js->in_pump) return TRUE;
     if (js->microtask_source || JS_IsJobPending(js->rt)) return TRUE;
     if (js->message_task_source ||
         (js->message_tasks && !g_queue_is_empty(js->message_tasks)))
@@ -28490,7 +28769,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
                                                  batch_prev, NULL);
         }
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_layout_target(_j, parent);
             if (!inert_parent) {
                 for (guint i = 0; i < moved->len; i++) {
                     ns_node *moved_root = g_ptr_array_index(moved, i);
@@ -28510,7 +28789,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     }
     ns_node_append_child(parent, child);
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_layout_target(_j, parent);
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
         if (!inert_parent) {
@@ -28542,7 +28821,7 @@ ns_element_removeChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     ns_node_remove(child);
     if (_j2) {
         g_hash_table_add(_j2->orphan_nodes, child);
-        _j2->mutated = TRUE;
+        ns_js_note_layout_target(_j2, parent);
         ns_js_record_child_change(_j2, parent, NULL, child,
                                   saved_prev, saved_next);
     }
@@ -28715,7 +28994,7 @@ ns_element_moveBefore(JSContext *ctx, JSValueConst this_val,
         ns_node_append_child(parent, node);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
         ns_js_record_child_change(_j, parent, node, NULL,
                                   node->prev_sibling, node->next_sibling);
     }
@@ -28767,12 +29046,14 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
             g_ptr_array_add(added, c);
             c = next;
         }
-        if (_j && added->len > 0)
+        if (_j && added->len > 0) {
+            ns_css_mark_children_restyle(parent);
             ns_mut_record_emit_child_list_arrays(_j, parent, added, NULL,
                                                  batch_prev, batch_next);
+        }
         g_ptr_array_free(added, FALSE);
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_layout_target(_j, parent);
             if (!inert_parent) {
                 ns_ce_upgrade_subtree_all(_j, parent);
                 ns_js_run_inserted_scripts(_j, parent);
@@ -28791,7 +29072,7 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, parent, newc, ref);
     }
     if (_j) {
-        _j->mutated = TRUE;
+        ns_js_note_layout_target(_j, parent);
         ns_js_record_child_change(_j, parent, newc, NULL,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
@@ -28890,7 +29171,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
             ns_node *p = oldc->prev_sibling, *nx = oldc->next_sibling;
             ns_js_record_child_change(_j, parent, NULL, oldc, p, nx);
             ns_js_record_child_change(_j, parent, oldc, NULL, p, nx);
-            _j->mutated = TRUE;
+            ns_js_note_layout_target(_j, parent);
         }
         return JS_DupValue(ctx, argv[1]);
     }
@@ -28923,7 +29204,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
             c = next;
         }
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_layout_target(_j, parent);
             if (!inert_parent) {
                 ns_ce_upgrade_subtree_all(_j, parent);
                 ns_js_run_inserted_scripts(_j, parent);
@@ -28952,7 +29233,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         ns_ce_disconnect_subtree(_j, oldc);
         g_hash_table_add(_j->orphan_nodes, oldc);
-        _j->mutated = TRUE;
+        ns_js_note_layout_target(_j, parent);
         ns_js_record_child_change(_j, parent, newc, oldc,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
@@ -29090,7 +29371,7 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
         g_ptr_array_free(kids, TRUE);
         ns_node_free(fragment);
         if (_j) {
-            _j->mutated = TRUE;
+            ns_js_note_layout_unscoped(_j, G_STRFUNC);
             if (upgrade_root) {
                 ns_ce_upgrade_subtree_all(_j, upgrade_root);
                 ns_js_run_inserted_scripts(_j, upgrade_root);
@@ -29194,7 +29475,7 @@ ns_element_insertAdjacentElement(JSContext *ctx, JSValueConst this_val,
     if (_j && parent) {
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
-        _j->mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
         ns_ce_upgrade_subtree_all(_j, child);
         ns_js_run_inserted_scripts(_j, child);
     }
@@ -29226,7 +29507,7 @@ ns_element_insertAdjacentText(JSContext *ctx, JSValueConst this_val,
     if (_j && parent) {
         ns_js_record_child_change(_j, parent, node, NULL,
                                   node->prev_sibling, node->next_sibling);
-        _j->mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     return JS_UNDEFINED;
 }
@@ -29280,7 +29561,7 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, self->parent);
     ns_js_activate_inserted(_j, self->parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -29327,7 +29608,7 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, node, NULL,
                                       node->prev_sibling, node->next_sibling);
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, parent);
     ns_js_activate_inserted(_j, parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -29395,7 +29676,7 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
                                       saved_prev, saved_next);
         }
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, parent);
     ns_js_activate_inserted(_j, parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -29445,7 +29726,7 @@ ns_element_normalize(JSContext *ctx, JSValueConst this_val,
     if (!el) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     ns_node_normalize_walk(_j, el, 0);
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -29533,7 +29814,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
                     g_hash_table_add(_j->orphan_nodes, target);
                     ns_js_record_child_change(_j, old_parent, NULL, target,
                                               saved_prev, saved_next);
-                    _j->mutated = TRUE;
+                    ns_js_note_layout_target(_j, old_parent);
                 }
             }
         }
@@ -29551,7 +29832,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
         g_hash_table_add(_j->orphan_nodes, n);
         ns_js_record_child_change(_j, old_parent, NULL, n,
                                   saved_prev, saved_next);
-        _j->mutated = TRUE;
+        ns_js_note_layout_target(_j, old_parent);
     }
     return JS_UNDEFINED;
 }
@@ -29624,7 +29905,7 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, added, NULL,
                                       added->prev_sibling, added->next_sibling);
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, parent);
     ns_js_activate_inserted(_j, parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -29680,7 +29961,7 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, parent);
     ns_js_activate_inserted(_j, parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -30487,8 +30768,8 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         }
         ns_body_forward_content_handler(ctx, n, name, val);
         if (changed && _j) {
-            if (!img_src_paint_only && ns_css_attr_may_affect_style(n, name))
-                _j->mutated = TRUE;
+            if (!img_src_paint_only)
+                ns_js_note_attr_style_change(_j, n, name, old_copy);
             if (img_src_paint_only)
                 ns_js_request_repaint_node(_j, n);
         }
@@ -32054,11 +32335,11 @@ ns_box_border_box(const ns_box *b, double *x, double *y, double *w, double *h)
 }
 
 static const ns_box *
-ns_box_for_this(JSContext *ctx, JSValueConst this_val)
+ns_box_for_this_from(JSContext *ctx, JSValueConst this_val, const char *api)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js) return NULL;
-    ns_js_flush_layout(js);
+    ns_js_flush_layout_from(js, api);
     if (!js->layout_root) return NULL;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return NULL;
@@ -32066,12 +32347,13 @@ ns_box_for_this(JSContext *ctx, JSValueConst this_val)
 }
 
 static gboolean
-ns_inline_rect_for_this(JSContext *ctx, JSValueConst this_val,
-                        double *x, double *y, double *w, double *h)
+ns_inline_rect_for_this_from(JSContext *ctx, JSValueConst this_val,
+                             double *x, double *y, double *w, double *h,
+                             const char *api)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js) return FALSE;
-    ns_js_flush_layout(js);
+    ns_js_flush_layout_from(js, api);
     if (!js->layout_root) return FALSE;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
@@ -32798,8 +33080,13 @@ ns_element_get_clientHeight(JSContext *ctx, JSValueConst this_val)
     return JS_NewInt32(ctx, (int)(h + 0.5));
 }
 
-static void ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
-                                    double *out_x, double *out_y);
+static void ns_offset_parent_origin_from(JSContext *ctx,
+                                         JSValueConst this_val,
+                                         double *out_x, double *out_y,
+                                         const char *api);
+#define ns_offset_parent_origin(ctx, this_val, out_x, out_y) \
+    ns_offset_parent_origin_from((ctx), (this_val), (out_x), (out_y), \
+                                 G_STRFUNC)
 
 static JSValue
 ns_element_get_offsetTop(JSContext *ctx, JSValueConst this_val)
@@ -32881,15 +33168,15 @@ ns_offset_parent_is_static_root(ns_js *js, const ns_node *p)
 }
 
 static void
-ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
-                        double *out_x, double *out_y)
+ns_offset_parent_origin_from(JSContext *ctx, JSValueConst this_val,
+                             double *out_x, double *out_y, const char *api)
 {
     *out_x = 0;
     *out_y = 0;
     ns_js *js = js_from_ctx(ctx);
     const ns_node *n = ns_unwrap_element(this_val);
     if (!js || !n || n->kind != NS_NODE_ELEMENT) return;
-    ns_js_flush_layout(js);
+    ns_js_flush_layout_from(js, api);
     const ns_style *own = js->style_table
                         ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (own && ns_css_keyword_is(own->values[NS_CSS_POSITION], "fixed"))
@@ -33610,7 +33897,8 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
                 ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         }
         if (s) JS_FreeCString(ctx, s);
-        if (_j) _j->mutated = TRUE;
+        ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         return JS_UNDEFINED;
     }
     if (ns_node_is_element_named(el, "textarea")) {
@@ -33619,7 +33907,8 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
         if (s && *s)
             ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         if (s) JS_FreeCString(ctx, s);
-        if (_j) _j->mutated = TRUE;
+        ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     return JS_UNDEFINED;
 }
@@ -33685,7 +33974,7 @@ ns_element_set_selected(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (!ns_node_is_element_named(n, "option")) return JS_UNDEFINED;
     ns_option_set_selected(n, JS_ToBool(ctx, val) ? TRUE : FALSE);
     ns_js *_j = js_from_ctx(ctx);
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -33885,7 +34174,8 @@ ns_js_set_input_used_value(ns_js *js, ns_node *n, const char *s)
     ns_element_set_attr(n, ns_input_value_is_dirty_mode(n) ? "data-nd-value"
                                                            : "value", s ? s : "");
     ns_element_remove_attr(n, "data-nd-user-edited");
-    if (js) js->mutated = TRUE;
+    ns_css_mark_restyle_dirty(n->parent ? n->parent : n);
+    if (js) ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 static JSValue
@@ -35512,7 +35802,7 @@ ns_element_set_disabled(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (ns_node_is_element_named(el, "style")) {
         guint32 flags = disabled ? el->flags | NS_NODE_SHEET_DISABLED
                                  : el->flags & ~NS_NODE_SHEET_DISABLED;
-        if (flags != el->flags && _j) _j->mutated = TRUE;
+        if (flags != el->flags && _j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         el->flags = flags;
         return JS_UNDEFINED;
     }
@@ -35544,7 +35834,7 @@ ns_element_set_checked(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     } else {
         ns_element_set_attr(el, "data-nd-checked", "0");
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
     return JS_UNDEFINED;
 }
@@ -35563,7 +35853,7 @@ ns_js_set_indeterminate(ns_js *js, ns_node *el, gboolean indeterminate)
         el->flags |= NS_NODE_INPUT_INDETERMINATE;
     else
         el->flags &= ~NS_NODE_INPUT_INDETERMINATE;
-    if (js) js->mutated = TRUE;
+    if (js) ns_js_note_layout_unscoped(js, G_STRFUNC);
     ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
 }
 
@@ -36072,7 +36362,8 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         ns_select_set_selected_option(el, chosen);
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
-        { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+        ns_css_mark_restyle_dirty(el);
+        { ns_js *_j = js_from_ctx(ctx); if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC); }
         return JS_UNDEFINED;
     }
     if (el->name && strcmp(el->name, "output") == 0) {
@@ -36088,7 +36379,8 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
             ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
-        if (_j) _j->mutated = TRUE;
+        ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         return JS_UNDEFINED;
     }
     if (el->name && strcmp(el->name, "textarea") == 0) {
@@ -36098,7 +36390,8 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         if (!null_to_empty) JS_FreeCString(ctx, s);
         ns_text_selection_value_changed(ctx, this_val, old_value);
         JS_FreeValue(ctx, old_value);
-        if (_j) _j->mutated = TRUE;
+        ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         return JS_UNDEFINED;
     }
     if (el->name && strcmp(el->name, "input") == 0) {
@@ -36123,7 +36416,8 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
     if (selection_applies)
         ns_text_selection_value_changed(ctx, this_val, old_value);
     JS_FreeValue(ctx, old_value);
-    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
+    { ns_js *_j = js_from_ctx(ctx); if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC); }
     return JS_UNDEFINED;
 }
 
@@ -36181,7 +36475,8 @@ ns_element_set_selectedIndex(JSContext *ctx, JSValueConst this_val,
     }
     ns_select_set_selected_option(el, chosen);
     ns_js *_j = js_from_ctx(ctx);
-    if (_j) _j->mutated = TRUE;
+    ns_css_mark_restyle_dirty(el);
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -38024,7 +38319,7 @@ ns_js_set_focus(ns_js *js, const ns_node *el)
     js->focused_node = el;
     if (el) js->focus_nav_start = NULL;
     ns_js_update_focus_visible(js);
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 
     if (el) {
         const ns_node *related = old && ns_js_node_in_page(js, old) ? old : NULL;
@@ -38045,7 +38340,7 @@ ns_js_set_focused_node(ns_js *js, const ns_node *el)
     if (!js || js->focused_node == el) return;
     js->focused_node = el;
     ns_js_update_focus_visible(js);
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 void
@@ -38377,7 +38672,8 @@ ns_details_close_others_in_group(ns_js *js, ns_node *opened, const char *name)
             ns_js_dispatch_toggle_event(js, c, "beforetoggle",
                                         "open", "closed", FALSE, NULL);
             ns_element_remove_attr(c, "open");
-            js->mutated = TRUE;
+            ns_css_mark_restyle_dirty(c);
+            ns_js_note_layout_unscoped(js, G_STRFUNC);
             ns_js_dispatch_toggle_event(js, c, "toggle",
                                         "open", "closed", FALSE, NULL);
         }
@@ -38509,7 +38805,7 @@ ns_popover_set_showing(ns_js *js, ns_node *el, gboolean showing)
     if (showing) ns_element_set_attr(el, "data-nd-popover-open", "");
     else         ns_element_remove_attr(el, "data-nd-popover-open");
     ns_css_mark_attr_dirty(el, "data-nd-popover-open", showing ? NULL : "");
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
 }
 
@@ -39457,7 +39753,7 @@ ns_dialog_set_modal(ns_js *js, ns_node *dialog, gboolean modal)
     if (modal) ns_element_set_attr(dialog, "data-nd-modal", "");
     else       ns_element_remove_attr(dialog, "data-nd-modal");
     ns_css_mark_attr_dirty(dialog, "data-nd-modal", modal ? NULL : "");
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 void
@@ -39696,7 +39992,7 @@ ns_dialog_close_steps(ns_js *js, ns_node *dialog, const char *result,
         ns_node_is_shadow_including_inclusive_ancestor(dialog, js->focused_node))
         ns_js_set_focus(js, NULL);
     ns_queue_event_task(js, dialog, "close");
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 static void
@@ -39791,7 +40087,7 @@ ns_dialog_show_modal(ns_js *js, ns_node *dialog, ns_node *source)
     ns_popover_hide_until(js, ns_popover_topmost_ancestor(js, dialog, NULL),
                           FALSE, TRUE);
     ns_dialog_focusing_steps(js, dialog);
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -39820,7 +40116,7 @@ ns_element_show(JSContext *ctx, JSValueConst this_val,
     ns_popover_hide_until(js, ns_popover_topmost_ancestor(js, el, NULL),
                           FALSE, TRUE);
     ns_dialog_focusing_steps(js, el);
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -40325,7 +40621,8 @@ ns_js_reset_form(JSContext *ctx, ns_node *form)
                                  doc ? doc : form);
     ns_js_reset_owned_outputs(_j, form, (ns_node *)(doc ? doc : form),
                               doc ? doc : form, 0);
-    if (_j) _j->mutated = TRUE;
+    ns_css_mark_restyle_dirty(form);
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -40743,7 +41040,10 @@ ns_js_click_end(ns_js *js, const ns_node *node, const ns_js_click_state *state,
     if (state->control) {
         ns_checkable_post_click(js, (ns_node *)state->control, state->kind,
                                 state, prevented);
-        js->mutated = TRUE;
+        ns_css_mark_restyle_dirty(state->control->parent
+                                  ? state->control->parent
+                                  : (ns_node *)state->control);
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
         return TRUE;
     }
     if (prevented) return FALSE;
@@ -40768,7 +41068,8 @@ ns_js_select_choose_option(ns_js *js, ns_node *option)
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
-    js->mutated = TRUE;
+    ns_css_mark_restyle_dirty(select);
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     return TRUE;
 }
 
@@ -40785,7 +41086,8 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
     gboolean p = FALSE;
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
-    js->mutated = TRUE;
+    ns_css_mark_restyle_dirty(select);
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     return TRUE;
 }
 
@@ -41122,7 +41424,7 @@ ns_js_image_ready_idle(gpointer data)
                                  end_ms - start_ms, 0);
         }
         ns_js_fire_img_load_once(js, r->el, img->failed);
-        if (img->loaded) js->mutated = TRUE;
+        if (img->loaded) ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
     return G_SOURCE_REMOVE;
@@ -42010,7 +42312,8 @@ ns_table_create_section(JSContext *ctx, JSValueConst this_val, const char *name,
     } else {
         ns_node_append_child(tbl, sec);
     }
-    if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
+    ns_css_mark_restyle_dirty(tbl);
+    if (_j) { ns_js_note_layout_unscoped(_j, G_STRFUNC); ns_qcache_invalidate(_j); }
     return ns_make_element(ctx, sec);
 }
 
@@ -42044,7 +42347,8 @@ ns_table_createCaption(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, tbl, cap, tbl->first_child);
     else
         ns_node_append_child(tbl, cap);
-    if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
+    ns_css_mark_restyle_dirty(tbl);
+    if (_j) { ns_js_note_layout_unscoped(_j, G_STRFUNC); ns_qcache_invalidate(_j); }
     return ns_make_element(ctx, cap);
 }
 
@@ -42058,7 +42362,8 @@ ns_table_delete_section(JSContext *ctx, JSValueConst this_val, const char *name)
     ns_js *_j = js_from_ctx(ctx);
     ns_node_remove(existing);
     ns_js_orphan_node(_j, existing);
-    if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
+    ns_css_mark_restyle_dirty(tbl);
+    if (_j) { ns_js_note_layout_unscoped(_j, G_STRFUNC); ns_qcache_invalidate(_j); }
 }
 
 static JSValue
@@ -42181,7 +42486,7 @@ ns_table_insertRow(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         ns_js_record_child_change(_j, new_tr->parent, new_tr, NULL,
                                   new_tr->prev_sibling, new_tr->next_sibling);
-        _j->mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     return ns_make_element(ctx, new_tr);
 }
@@ -42206,7 +42511,7 @@ ns_table_deleteRow(JSContext *ctx, JSValueConst this_val,
         ns_js_orphan_node(_j, r);
         if (_j) {
             ns_js_record_child_change(_j, parent, NULL, r, prev, next);
-            _j->mutated = TRUE;
+            ns_js_note_layout_unscoped(_j, G_STRFUNC);
         }
     }
     g_ptr_array_free(rows, TRUE);
@@ -42241,7 +42546,7 @@ ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         ns_js_record_child_change(_j, cell->parent, cell, NULL,
                                   cell->prev_sibling, cell->next_sibling);
-        _j->mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     return ns_make_element(ctx, cell);
 }
@@ -42271,7 +42576,7 @@ ns_tr_deleteCell(JSContext *ctx, JSValueConst this_val,
         ns_js_orphan_node(_j, r);
         if (_j) {
             ns_js_record_child_change(_j, parent, NULL, r, prev, next);
-            _j->mutated = TRUE;
+            ns_js_note_layout_unscoped(_j, G_STRFUNC);
         }
     }
     g_ptr_array_free(cells, TRUE);
@@ -42311,7 +42616,8 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, before->parent, opt, before);
     else
         ns_node_append_child(sel, opt);
-    if (_j) _j->mutated = TRUE;
+    ns_css_mark_restyle_dirty(sel);
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -42325,7 +42631,8 @@ ns_element_setCustomValidity(JSContext *ctx, JSValueConst this_val,
     if (msg && *msg) ns_element_set_attr(el, NS_CUSTOM_VALIDITY_ATTR, msg);
     else            ns_element_remove_attr(el, NS_CUSTOM_VALIDITY_ATTR);
     ns_js *_j = js_from_ctx(ctx);
-    if (_j) _j->mutated = TRUE;
+    ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     if (msg) JS_FreeCString(ctx, msg);
     return JS_UNDEFINED;
 }
@@ -42367,6 +42674,40 @@ ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
     if (idx < 0 || idx >= len)
         return JS_ThrowRangeError(ctx, "index out of TimeRanges bounds");
     return JS_NewFloat64(ctx, magic == 0 ? 0.0 : dur);
+}
+
+static JSValue
+ns_time_ranges_list_edge(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv, int magic,
+                         JSValue *func_data)
+{
+    (void)this_val;
+    int32_t len = 0;
+    JS_ToInt32(ctx, &len, func_data[1]);
+    int32_t idx = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
+    if (idx < 0 || idx >= len)
+        return JS_ThrowRangeError(ctx, "index out of TimeRanges bounds");
+    return JS_GetPropertyUint32(ctx, func_data[0], (uint32_t)(idx * 2 + magic));
+}
+
+JSValue
+ns_media_time_ranges_from(JSContext *ctx, const double *edges, guint n_ranges)
+{
+    JSValue obj = JS_NewObject(ctx);
+    ns_obj_adopt_global_proto(ctx, obj, "TimeRanges");
+    JS_SetPropertyStr(ctx, obj, "length", JS_NewInt32(ctx, (int)n_ranges));
+    JSValue list = JS_NewArray(ctx);
+    for (guint i = 0; i < n_ranges * 2; i++)
+        JS_SetPropertyUint32(ctx, list, i, JS_NewFloat64(ctx, edges[i]));
+    JSValue data[2] = { list, JS_NewInt32(ctx, (int)n_ranges) };
+    JS_SetPropertyStr(ctx, obj, "start",
+        JS_NewCFunctionData(ctx, ns_time_ranges_list_edge, 1, 0, 2, data));
+    JS_SetPropertyStr(ctx, obj, "end",
+        JS_NewCFunctionData(ctx, ns_time_ranges_list_edge, 1, 1, 2, data));
+    JS_FreeValue(ctx, data[0]);
+    JS_FreeValue(ctx, data[1]);
+    return obj;
 }
 
 void
@@ -42474,13 +42815,21 @@ ns_media_get_video_playback_quality(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc;
     (void)argv;
+    guint presented = 0, dropped = 0;
+    gboolean counted = ns_media_frame_counts(ctx, this_val, &presented,
+                                             &dropped);
     double pos = ns_media_position(ctx, this_val);
     JSValue q = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, q, "creationTime",
                       JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
+    /* Media Source video counts what the decoder delivered: a frame
+     * decoded after its time was dropped. Pages lower the quality they
+     * stream when many are. */
     JS_SetPropertyStr(ctx, q, "totalVideoFrames",
-                      JS_NewInt32(ctx, (int)(pos * 30.0)));
-    JS_SetPropertyStr(ctx, q, "droppedVideoFrames", JS_NewInt32(ctx, 0));
+                      JS_NewInt32(ctx, counted ? (int)(presented + dropped)
+                                               : (int)(pos * 30.0)));
+    JS_SetPropertyStr(ctx, q, "droppedVideoFrames",
+                      JS_NewInt32(ctx, counted ? (int)dropped : 0));
     JS_SetPropertyStr(ctx, q, "corruptedVideoFrames", JS_NewInt32(ctx, 0));
     return q;
 }
@@ -42507,7 +42856,7 @@ ns_media_set_srcObject(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     }
     if (el) {
         ns_element_set_attr(el, NS_MEDIA_STREAM_ATTR, is_cam ? "camera" : "");
-        if (js) js->mutated = TRUE;
+        if (js) ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     if (el && js && is_cam)
         ns_js_dispatch_event(js, el, "loadedmetadata", NULL);
@@ -42794,11 +43143,20 @@ static const char ns_iframe_scope_bootstrap[] =
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
     "  loc.toString = function(){ return url; };"
+    /* Methods taken from a frame and called on another window's history
+     * (how libraries get unpatched functions) act on that history. */
+    "  function realHist(name, self, args){"
+    "    var h = realWin.History && realWin.History.prototype;"
+    "    if (!h || typeof h[name] !== 'function') throw new TypeError('Illegal invocation');"
+    "    return h[name].apply(self, args);"
+    "  }"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
+    "    pushState: function(s,t,u){ if(this!==hist) return realHist('pushState',this,arguments); state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    replaceState: function(s,t,u){ if(this!==hist) return realHist('replaceState',this,arguments); state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    back: function(){ if(this!==hist) return realHist('back',this,arguments); firePop(); },"
+    "    forward: function(){ if(this!==hist) return realHist('forward',this,arguments); firePop(); },"
+    "    go: function(){ if(this!==hist) return realHist('go',this,arguments); firePop(); }"
     "  };"
     "  var ov = {"
     "    location: loc, history: hist, document: iframeDoc,"
@@ -42957,11 +43315,20 @@ static const char ns_iframe_global_bootstrap[] =
     "  loc.replace = function(v){ this.href = v; };"
     "  loc.reload = function(){};"
     "  loc.toString = function(){ return url; };"
+    /* Methods taken from a frame and called on another window's history
+     * (how libraries get unpatched functions) act on that history. */
+    "  function realHist(name, self, args){"
+    "    var h = realWin.History && realWin.History.prototype;"
+    "    if (!h || typeof h[name] !== 'function') throw new TypeError('Illegal invocation');"
+    "    return h[name].apply(self, args);"
+    "  }"
     "  var hist = {"
     "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
-    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
-    "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
+    "    pushState: function(s,t,u){ if(this!==hist) return realHist('pushState',this,arguments); state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    replaceState: function(s,t,u){ if(this!==hist) return realHist('replaceState',this,arguments); state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    back: function(){ if(this!==hist) return realHist('back',this,arguments); firePop(); },"
+    "    forward: function(){ if(this!==hist) return realHist('forward',this,arguments); firePop(); },"
+    "    go: function(){ if(this!==hist) return realHist('go',this,arguments); firePop(); }"
     "  };"
     "  function def(name, d){ d.configurable = true; try { Object.defineProperty(G, name, d); } catch(e){} }"
     "  def('window',     { value: win, writable: true });"
@@ -43061,7 +43428,8 @@ static const char ns_iframe_global_bootstrap[] =
     "      var pk = pnames[pi];"
     "      if (Object.prototype.hasOwnProperty.call(G, pk) && pk!=='performance') continue;"
     "      if (pk === '_listeners') continue;"
-    "      if (crossOrigin && (parentOnly[pk] || !platformNames ||"
+    "      if (crossOrigin && parentOnly[pk]) continue;"
+    "      if ((crossOrigin || platformNames) && (!platformNames ||"
     "          !Object.prototype.hasOwnProperty.call(platformNames, pk))) continue;"
     "      try {"
     "        var pd = Object.getOwnPropertyDescriptor(realWin, pk);"
@@ -43171,6 +43539,49 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     if (!ok) {
         JS_FreeValue(fctx, fg);
         return NULL;
+    }
+    if (iframe) {
+        /* Give the frame its own named-properties object (bound to its own
+         * document) instead of inheriting the parent window's. */
+        static const char rebase_src[] =
+            "(function(G, named){"
+            "  var wp = Object.getPrototypeOf(G);"
+            "  var fp = Object.create(named);"
+            "  Object.getOwnPropertyNames(wp).concat(Object.getOwnPropertySymbols(wp))"
+            "    .forEach(function(k){ try { Object.defineProperty(fp, k,"
+            "      Object.getOwnPropertyDescriptor(wp, k)); } catch (e) {} });"
+            "  Object.setPrototypeOf(G, fp);"
+            "})";
+        JSValue win_proto = JS_GetPrototype(fctx, fg);
+        JSValue parent_named = JS_IsObject(win_proto)
+            ? JS_GetPrototype(fctx, win_proto) : JS_UNDEFINED;
+        if (JS_IsObject(parent_named) &&
+            JS_GetClassID(parent_named) == ns_window_named_class_id) {
+            JSValue named = JS_NewObjectClass(fctx, ns_window_named_class_id);
+            JSValue fn = JS_Eval(fctx, rebase_src, strlen(rebase_src),
+                                 "<iframe-named>", JS_EVAL_TYPE_GLOBAL);
+            if (!JS_IsException(named) && JS_IsFunction(fctx, fn)) {
+                JS_SetOpaque(named, iframe);
+                JSValue base = JS_GetPrototype(fctx, parent_named);
+                JS_SetPrototype(fctx, named, base);
+                JS_FreeValue(fctx, base);
+                JSValueConst args[2] = { fg, named };
+                JSValue r = JS_Call(fctx, fn, JS_UNDEFINED, 2, args);
+                if (JS_IsException(r)) JS_FreeValue(fctx, JS_GetException(fctx));
+                JS_FreeValue(fctx, r);
+            } else if (JS_IsException(fn)) {
+                JS_FreeValue(fctx, JS_GetException(fctx));
+            }
+            JS_FreeValue(fctx, fn);
+            JS_FreeValue(fctx, named);
+        }
+        JS_FreeValue(fctx, parent_named);
+        JS_FreeValue(fctx, win_proto);
+        const char *fname = ns_element_get_attr(iframe, "name");
+        JS_DefinePropertyValueStr(fctx, fg, "name",
+                                  JS_NewString(fctx, fname ? fname : ""),
+                                  JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE |
+                                  JS_PROP_ENUMERABLE);
     }
     *out_window = fg;
     return fctx;
@@ -43288,10 +43699,14 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
 static gboolean
 ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe)
 {
-    unsigned sandbox = ns_iframe_effective_sandbox(iframe);
-    if ((sandbox & NS_SANDBOX_ACTIVE) &&
-        !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
-        return TRUE;
+    if (ns_element_get_attr(iframe, "data-nd-frame-loaded")) {
+        if (ns_element_get_attr(iframe, "data-nd-frame-opaque")) return TRUE;
+    } else {
+        unsigned sandbox = ns_iframe_effective_sandbox(iframe);
+        if ((sandbox & NS_SANDBOX_ACTIVE) &&
+            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
+            return TRUE;
+    }
     const char *frame_url = ns_element_get_attr(iframe, "data-nd-frame-url");
     if (!frame_url || !*frame_url) return FALSE;
     return !ns_js_urls_same_origin(frame_url, ns_js_node_doc_base(js, iframe));
@@ -43507,10 +43922,6 @@ ns_element_getNumberOfChars(JSContext *ctx, JSValueConst this_val,
 }
 
 static const JSCFunctionListEntry ns_element_proto_funcs[] = {
-    JS_CFUNC_DEF("getNumberOfChars",         0, ns_element_getNumberOfChars),
-    JS_CFUNC_DEF("getSVGDocument",           0, ns_element_getSVGDocument),
-    JS_CGETSET_DEF("contentDocument",        ns_element_get_contentDocument,        ns_element_noop_set),
-    JS_CGETSET_DEF("contentWindow",          ns_element_get_contentWindow,          ns_element_noop_set),
     JS_CGETSET_DEF("tagName",                ns_element_get_tagName,                ns_element_noop_set),
     JS_CGETSET_DEF("localName",              ns_element_get_localName,              ns_element_noop_set),
     JS_CGETSET_DEF("prefix",                 ns_element_get_prefix,                 ns_element_noop_set),
@@ -43523,7 +43934,6 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("outerHTML",              ns_element_get_outerHTML,              ns_element_set_outerHTML),
     JS_CGETSET_DEF("style",                  ns_element_get_style,                  ns_element_set_style),
     JS_CGETSET_DEF("classList",              ns_element_get_classList,              ns_element_set_classList),
-    JS_CGETSET_DEF("relList",                ns_element_get_relList,                ns_element_set_relList),
     JS_CGETSET_DEF("itemScope",              ns_element_get_itemScope,              ns_element_set_itemScope),
     JS_CGETSET_DEF("itemId",                 ns_element_get_itemId,                 ns_element_set_itemId),
     JS_CGETSET_DEF("itemType",               ns_element_get_itemType,               ns_element_noop_set),
@@ -43578,100 +43988,12 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("syncInputValidity",       1, ns_event_noop),
     JS_CFUNC_DEF("_connect",                0, ns_event_noop),
     JS_CFUNC_DEF("_disconnect",             0, ns_event_noop),
-    JS_CGETSET_DEF("length",            ns_element_get_text_length, ns_element_noop_set),
-    JS_CFUNC_DEF("substringData", 2, ns_element_substring_data),
-    JS_CFUNC_DEF("appendData",    1, ns_element_append_data),
-    JS_CFUNC_DEF("deleteData",    2, ns_element_delete_data),
-    JS_CFUNC_DEF("insertData",    2, ns_element_insert_data),
-    JS_CFUNC_DEF("replaceData",   3, ns_element_replace_data),
-    JS_CFUNC_DEF("splitText",     1, ns_element_split_text),
-    JS_CFUNC_DEF("select",              0, ns_input_select),
-    JS_CFUNC_DEF("setSelectionRange",   3, ns_input_setSelectionRange),
-    JS_CFUNC_DEF("setRangeText",        1, ns_input_setRangeText),
-    JS_CFUNC_DEF("stepUp",              0, ns_input_stepUp),
-    JS_CFUNC_DEF("stepDown",            0, ns_input_stepDown),
-    JS_CFUNC_DEF("showPicker",          0, ns_element_show_picker),
-    JS_CFUNC_DEF("play",                0, ns_media_play),
-    JS_CFUNC_DEF("pause",               0, ns_media_pause),
-    JS_CFUNC_DEF("load",                0, ns_media_load),
-    JS_CFUNC_DEF("canPlayType",         1, ns_media_canPlayType),
-    JS_CFUNC_DEF("fastSeek",            1, ns_media_fast_seek),
-    JS_CFUNC_DEF("addTextTrack",        3, ns_event_noop),
-    JS_CFUNC_DEF("setMediaKeys",        1, ns_media_set_media_keys),
-    JS_CFUNC_DEF("getVideoPlaybackQuality", 0, ns_media_get_video_playback_quality),
-    JS_CFUNC_DEF("requestVideoFrameCallback", 1, ns_media_request_video_frame_callback),
-    JS_CFUNC_DEF("cancelVideoFrameCallback",  1, ns_window_cancelAnimationFrame),
-    JS_CGETSET_DEF("validity",          ns_element_get_validity,          ns_element_noop_set),
-    JS_CGETSET_DEF("validationMessage", ns_element_get_validation_message, ns_element_noop_set),
-    JS_CGETSET_DEF("willValidate",      ns_element_get_will_validate,     ns_element_noop_set),
-    JS_CGETSET_DEF("labels",            ns_element_get_labels,            ns_element_noop_set),
-    JS_CGETSET_DEF("files",             ns_input_get_files,               ns_element_noop_set),
-    JS_CGETSET_DEF("indeterminate",     ns_element_get_indeterminate,     ns_element_set_indeterminate),
-    JS_CGETSET_DEF("selectionStart",    ns_element_get_selection_start,   ns_element_set_selection_start),
-    JS_CGETSET_DEF("selectionEnd",      ns_element_get_selection_end,     ns_element_set_selection_end),
-    JS_CGETSET_DEF("selectionDirection", ns_element_get_selection_dir,    ns_element_set_selection_dir),
-    JS_CGETSET_DEF("textLength",        ns_text_control_get_text_length,  ns_element_noop_set),
-    JS_CGETSET_DEF("defaultValue",      ns_element_get_default_value,     ns_element_set_default_value),
-    JS_CGETSET_DEF("defaultChecked",    ns_element_get_default_checked,   ns_element_set_default_checked),
-    JS_CGETSET_DEF("defaultSelected",   ns_element_get_default_selected,  ns_element_set_default_selected),
-    JS_CGETSET_DEF("currentTime",       ns_media_get_current_time,        ns_media_set_current_time),
-    JS_CGETSET_DEF("duration",          ns_media_get_duration,            ns_element_noop_set),
-    JS_CGETSET_DEF("paused",            ns_media_get_paused,              ns_element_noop_set),
-    JS_CGETSET_DEF("ended",             ns_media_get_ended,               ns_element_noop_set),
-    JS_CGETSET_DEF("seeking",           ns_media_get_seeking,             ns_element_noop_set),
-    JS_CGETSET_DEF("volume",            ns_media_get_volume,              ns_media_set_volume),
-    JS_CGETSET_DEF("playbackRate",      ns_media_get_playbackRate,        ns_media_set_playbackRate),
-    JS_CGETSET_DEF("defaultPlaybackRate", ns_media_get_defaultPlaybackRate, ns_media_set_defaultPlaybackRate),
-    JS_CGETSET_DEF("error",             ns_media_get_error,               ns_element_noop_set),
-    JS_CGETSET_DEF("muted",             ns_media_get_muted,               ns_media_set_muted),
-    JS_CGETSET_DEF("readyState",        ns_media_get_readyState,          ns_element_noop_set),
-    JS_CGETSET_DEF("networkState",      ns_media_get_networkState,        ns_element_noop_set),
-    JS_CGETSET_DEF("seekable",          ns_media_get_seekable_ranges,     ns_element_noop_set),
-    JS_CGETSET_DEF("buffered",          ns_media_get_buffered_ranges,     ns_element_noop_set),
-    JS_CGETSET_DEF("played",            ns_media_get_played_ranges,       ns_element_noop_set),
-    JS_CGETSET_DEF("textTracks",        ns_element_get_empty_array_prop,  ns_element_noop_set),
-    JS_CGETSET_DEF("videoTracks",       ns_element_get_empty_array_prop,  ns_element_noop_set),
-    JS_CGETSET_DEF("audioTracks",       ns_element_get_empty_array_prop,  ns_element_noop_set),
-    JS_CGETSET_DEF("valueAsNumber",     ns_element_get_value_as_number,   ns_element_set_value_as_number),
-    JS_CGETSET_DEF("valueAsDate",       ns_element_get_value_as_date,     ns_element_set_value_as_date),
-    JS_CGETSET_DEF("position",          ns_element_get_progress_position, ns_element_noop_set),
-    JS_CGETSET_DEF("encoding",          ns_element_get_form_enctype,      ns_element_set_form_enctype),
     JS_CGETSET_DEF("isContentEditable", ns_element_get_isContentEditable,  ns_element_noop_set),
     JS_CGETSET_DEF("translate",         ns_element_get_translate,         ns_element_set_translate),
     JS_CGETSET_DEF("offsetParent",      ns_element_get_offsetParent,      ns_element_noop_set),
-    JS_CGETSET_DEF("videoWidth",        ns_media_get_video_width,         ns_element_noop_set),
-    JS_CGETSET_DEF("videoHeight",       ns_media_get_video_height,        ns_element_noop_set),
-    JS_CGETSET_DEF("srcObject",         ns_media_get_srcObject,           ns_media_set_srcObject),
     JS_CGETSET_DEF("clientInformation", ns_element_get_null,              ns_element_noop_set),
-    JS_CFUNC_DEF("decode",            0, ns_returns_resolved_undefined),
-    JS_CFUNC_DEF("toBlob",            1, ns_element_toBlob),
     JS_CFUNC_DEF("attachInternals",   0, ns_element_attachInternals),
     JS_CGETSET_DEF("_internals",      ns_element_get_internals, ns_element_noop_set),
-    JS_CGETSET_DEF("index",           ns_element_get_option_index,   ns_element_noop_set),
-    JS_CGETSET_DEF("rows",            ns_element_table_rows,         ns_element_set_rows),
-    JS_CGETSET_DEF("caption",         ns_element_table_caption,      ns_element_noop_set),
-    JS_CGETSET_DEF("tHead",           ns_element_table_thead,        ns_element_noop_set),
-    JS_CGETSET_DEF("tFoot",           ns_element_table_tfoot,        ns_element_noop_set),
-    JS_CGETSET_DEF("tBodies",         ns_element_table_tbodies,      ns_element_noop_set),
-    JS_CGETSET_DEF("cells",           ns_element_tr_cells,           ns_element_noop_set),
-    JS_CGETSET_DEF("rowIndex",        ns_element_get_zero_int,       ns_element_noop_set),
-    JS_CGETSET_DEF("sectionRowIndex", ns_element_get_zero_int,       ns_element_noop_set),
-    JS_CGETSET_DEF("cellIndex",       ns_element_get_zero_int,       ns_element_noop_set),
-    JS_CGETSET_MAGIC_DEF("colSpan",   ns_element_int_attr_getter,    ns_element_int_attr_setter, 6),
-    JS_CGETSET_MAGIC_DEF("rowSpan",   ns_element_int_attr_getter,    ns_element_int_attr_setter, 7),
-    JS_CGETSET_DEF("returnValue",     ns_dialog_get_returnValue,     ns_dialog_set_returnValue),
-    JS_CFUNC_DEF("createCaption",  0, ns_table_createCaption),
-    JS_CFUNC_DEF("createTHead",    0, ns_table_createTHead),
-    JS_CFUNC_DEF("createTFoot",    0, ns_table_createTFoot),
-    JS_CFUNC_DEF("createTBody",    0, ns_table_createTBody),
-    JS_CFUNC_DEF("deleteCaption",  0, ns_table_deleteCaption),
-    JS_CFUNC_DEF("deleteTHead",    0, ns_table_deleteTHead),
-    JS_CFUNC_DEF("deleteTFoot",    0, ns_table_deleteTFoot),
-    JS_CFUNC_DEF("insertRow",      1, ns_table_insertRow),
-    JS_CFUNC_DEF("deleteRow",      1, ns_table_deleteRow),
-    JS_CFUNC_DEF("insertCell",     1, ns_tr_insertCell),
-    JS_CFUNC_DEF("deleteCell",     1, ns_tr_deleteCell),
-    JS_CFUNC_DEF("add",            2, ns_select_add),
     JS_CFUNC_DEF("appendChild",             1, ns_element_appendChild),
     JS_CFUNC_DEF("removeChild",             1, ns_element_removeChild),
     JS_CFUNC_DEF("insertBefore",            2, ns_element_insertBefore),
@@ -43712,45 +44034,18 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("contains",                1, ns_element_contains),
     JS_CFUNC_DEF("hasChildNodes",           0, ns_element_hasChildNodes),
     JS_CFUNC_DEF("getBoundingClientRect",   0, ns_element_getBoundingClientRect),
-    JS_CFUNC_DEF("getBBox",                 0, ns_element_getBBox),
-    JS_CFUNC_DEF("getCTM",                  0, ns_element_getCTM),
-    JS_CFUNC_DEF("getScreenCTM",            0, ns_element_getScreenCTM),
-    JS_CFUNC_DEF("getTotalLength",          0, ns_element_getTotalLength),
-    JS_CFUNC_DEF("getPointAtLength",        1, ns_element_getPointAtLength),
-    JS_CFUNC_DEF("createSVGPoint",          0, ns_element_createSVGPoint),
-    JS_CFUNC_DEF("createSVGRect",           0, ns_element_createSVGRect),
-    JS_CFUNC_DEF("createSVGMatrix",         0, ns_element_createSVGMatrix),
-    JS_CFUNC_DEF("createSVGTransform",      0, ns_element_createSVGTransform),
-    JS_CGETSET_DEF("ownerSVGElement",       ns_element_get_ownerSVGElement, ns_element_noop_set),
     JS_CFUNC_DEF("focus",                   0, ns_element_focus),
     JS_CFUNC_DEF("blur",                    0, ns_element_blur),
     JS_CFUNC_DEF("click",                   0, ns_element_click),
-    JS_CFUNC_DEF("submit",                  0, ns_element_form_submit),
-    JS_CFUNC_DEF("requestSubmit",           0, ns_element_form_requestSubmit),
-    JS_CFUNC_DEF("reset",                   0, ns_element_form_reset),
-    JS_CFUNC_DEF("checkValidity",           0, ns_element_check_validity),
-    JS_CFUNC_DEF("reportValidity",          0, ns_element_check_validity),
-    JS_CFUNC_DEF("setCustomValidity",       1, ns_element_setCustomValidity),
-    JS_CFUNC_DEF("cancelAsync",             1, ns_element_cancelAsync),
     JS_CFUNC_DEF("announce",                1, ns_event_noop),
     JS_CFUNC_DEF("scrollIntoView",          0, ns_element_scrollIntoView),
     JS_CFUNC_DEF("checkVisibility",         0, ns_element_checkVisibility),
     JS_CFUNC_DEF("setPointerCapture",       1, ns_element_setPointerCapture),
     JS_CFUNC_DEF("releasePointerCapture",   1, ns_element_releasePointerCapture),
     JS_CFUNC_DEF("hasPointerCapture",       1, ns_element_hasPointerCapture),
-    JS_CFUNC_DEF("show",                    0, ns_element_show),
-    JS_CFUNC_DEF("showModal",               0, ns_element_showModal),
-    JS_CFUNC_DEF("close",                   0, ns_element_close),
-    JS_CFUNC_DEF("requestClose",            0, ns_element_requestClose),
     JS_CFUNC_DEF("dispatchEvent",           1, ns_element_dispatchEvent),
-    JS_CFUNC_DEF("assignedNodes",           0, ns_element_assignedNodes),
-    JS_CFUNC_DEF("assignedElements",        0, ns_element_assignedElements),
-    JS_CFUNC_DEF("getContext",              1, ns_element_getContext),
-    JS_CFUNC_DEF("toDataURL",               0, ns_element_toDataURL),
     JS_CGETSET_DEF("nodeType",      ns_element_get_nodeType, ns_element_noop_set),
     JS_CGETSET_DEF("nodeValue",     ns_element_get_nodeValue, ns_element_set_nodeValue),
-    JS_CGETSET_DEF("wholeText",     ns_element_get_wholeText, ns_element_noop_set),
-    JS_CFUNC_DEF("replaceWholeText", 1, ns_text_replaceWholeText),
     JS_CGETSET_DEF("nodeName",      ns_element_get_nodeName, ns_element_noop_set),
     JS_CGETSET_DEF("dataset",       ns_element_get_dataset,  ns_element_noop_set),
     JS_CGETSET_DEF("offsetTop",     ns_element_get_offsetTop,    ns_element_noop_set),
@@ -43766,135 +44061,12 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("scrollWidth",   ns_element_get_scrollWidth,  ns_element_noop_set),
     JS_CGETSET_DEF("scrollHeight",  ns_element_get_scrollHeight, ns_element_noop_set),
     JS_CGETSET_DEF("attributes",    ns_element_get_attributes, ns_element_noop_set),
-    JS_CGETSET_DEF("naturalWidth",  ns_element_img_natural_width, ns_element_noop_set),
-    JS_CGETSET_DEF("naturalHeight", ns_element_img_natural_height, ns_element_noop_set),
-    JS_CGETSET_DEF("complete",      ns_element_img_complete, ns_element_noop_set),
-    JS_CGETSET_DEF("currentSrc",    ns_element_img_current_src, ns_element_noop_set),
-    JS_CGETSET_DEF("content",       ns_element_template_content, ns_element_set_content),
     JS_CGETSET_DEF("hidden",        ns_element_get_hidden,     ns_element_set_hidden),
     JS_CGETSET_MAGIC_DEF("title",       ns_element_attr_getter, ns_element_attr_setter, 0),
-    JS_CGETSET_MAGIC_DEF("name",        ns_element_attr_getter, ns_element_attr_setter, 1),
-    JS_CGETSET_MAGIC_DEF("alt",         ns_element_attr_getter, ns_element_attr_setter, 2),
-    JS_CGETSET_MAGIC_DEF("src",         ns_element_attr_getter, ns_element_attr_setter, 3),
-    JS_CGETSET_MAGIC_DEF("href",        ns_element_anchor_part_get, ns_element_anchor_href_set, NS_ANCHOR_HREF),
-    JS_CGETSET_MAGIC_DEF("protocol",    ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_PROTOCOL),
-    JS_CGETSET_MAGIC_DEF("host",        ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_HOST),
-    JS_CGETSET_MAGIC_DEF("hostname",    ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_HOSTNAME),
-    JS_CGETSET_MAGIC_DEF("port",        ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_PORT),
-    JS_CGETSET_MAGIC_DEF("pathname",    ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_PATHNAME),
-    JS_CGETSET_MAGIC_DEF("search",      ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_SEARCH),
-    JS_CGETSET_MAGIC_DEF("hash",        ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_HASH),
-    JS_CGETSET_MAGIC_DEF("origin",      ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_ORIGIN),
-    JS_CGETSET_MAGIC_DEF("username",    ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_USERNAME),
-    JS_CGETSET_MAGIC_DEF("password",    ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_PASSWORD),
-    JS_CGETSET_DEF("type",              ns_element_get_type,    ns_element_set_type),
-    JS_CGETSET_MAGIC_DEF("placeholder", ns_element_attr_getter, ns_element_attr_setter, 6),
     JS_CGETSET_MAGIC_DEF("lang",        ns_element_attr_getter, ns_element_attr_setter, 7),
     JS_CGETSET_DEF("dir",               ns_element_get_dir,     ns_element_set_dir),
-    JS_CGETSET_MAGIC_DEF("action",      ns_element_attr_getter, ns_element_attr_setter,  9),
-    JS_CGETSET_MAGIC_DEF("method",      ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_METHOD),
-    JS_CGETSET_MAGIC_DEF("enctype",     ns_element_attr_getter, ns_element_attr_setter, 11),
-    JS_CGETSET_MAGIC_DEF("target",      ns_element_attr_getter, ns_element_attr_setter, 12),
-    JS_CGETSET_MAGIC_DEF("rel",         ns_element_attr_getter, ns_element_attr_setter, 13),
-    JS_CGETSET_MAGIC_DEF("accept",      ns_element_attr_getter, ns_element_attr_setter, 14),
-    JS_CGETSET_MAGIC_DEF("acceptCharset", ns_element_attr_getter, ns_element_attr_setter, 15),
-    JS_CGETSET_DEF("autocomplete", ns_element_get_autocomplete, ns_element_set_autocomplete),
-    JS_CGETSET_DEF("list",        ns_element_get_list_ref, ns_element_list_set),
-    JS_CGETSET_MAGIC_DEF("min",         ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_MIN),
-    JS_CGETSET_MAGIC_DEF("max",         ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_MAX),
-    JS_CGETSET_MAGIC_DEF("low",         ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_LOW),
-    JS_CGETSET_MAGIC_DEF("high",        ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_HIGH),
-    JS_CGETSET_MAGIC_DEF("optimum",     ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_OPTIMUM),
-    JS_CGETSET_MAGIC_DEF("step",        ns_element_attr_getter, ns_element_attr_setter, 20),
-    JS_CGETSET_MAGIC_DEF("pattern",     ns_element_attr_getter, ns_element_attr_setter, 21),
     JS_CGETSET_DEF("spellcheck",    ns_element_get_spellcheck, ns_element_set_spellcheck),
-    JS_CGETSET_MAGIC_DEF("crossOrigin",    ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_CROSSORIGIN),
-    JS_CGETSET_MAGIC_DEF("referrerPolicy", ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_REFERRERPOLICY),
-    JS_CGETSET_MAGIC_DEF("decoding",       ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_DECODING),
-    JS_CGETSET_MAGIC_DEF("loading",        ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_LOADING),
-    JS_CGETSET_MAGIC_DEF("fetchPriority",  ns_element_attr_getter, ns_element_attr_setter, 27),
-    JS_CGETSET_DEF("sizes",                ns_element_get_sizes_list, ns_element_attr_setter_sizes),
-    JS_CGETSET_DEF("sandbox",              ns_element_get_sandbox_list, ns_element_attr_setter_sandbox),
-    JS_CGETSET_MAGIC_DEF("srcset",         ns_element_attr_getter, ns_element_attr_setter, 29),
-    JS_CGETSET_MAGIC_DEF("useMap",         ns_element_attr_getter, ns_element_attr_setter, 30),
     JS_CGETSET_MAGIC_DEF("inputMode",      ns_element_attr_getter, ns_element_attr_setter, 31),
-    JS_CGETSET_MAGIC_DEF("size",           ns_element_int_attr_getter, ns_element_int_attr_setter, 2),
-    JS_CGETSET_MAGIC_DEF("cols",           ns_element_int_attr_getter, ns_element_int_attr_setter, 3),
-    JS_CGETSET_MAGIC_DEF("allowFullscreen", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 0),
-    JS_CGETSET_MAGIC_DEF("declare",        ns_element_bool_attr_getter, ns_element_bool_attr_setter, 1),
-    JS_CGETSET_MAGIC_DEF("defaultMuted",   ns_element_bool_attr_getter, ns_element_bool_attr_setter, 2),
-    JS_CGETSET_MAGIC_DEF("default",        ns_element_bool_attr_getter, ns_element_bool_attr_setter, 3),
-    JS_CGETSET_MAGIC_DEF("noHref",         ns_element_bool_attr_getter, ns_element_bool_attr_setter, 4),
-    JS_CGETSET_MAGIC_DEF("noShade",        ns_element_bool_attr_getter, ns_element_bool_attr_setter, 5),
-    JS_CGETSET_MAGIC_DEF("compact",        ns_element_bool_attr_getter, ns_element_bool_attr_setter, 6),
-    JS_CGETSET_MAGIC_DEF("noWrap",         ns_element_bool_attr_getter, ns_element_bool_attr_setter, 7),
-    JS_CGETSET_MAGIC_DEF("trueSpeed",      ns_element_bool_attr_getter, ns_element_bool_attr_setter, 8),
-    JS_CGETSET_MAGIC_DEF("noResize",       ns_element_bool_attr_getter, ns_element_bool_attr_setter, 9),
-    JS_CGETSET_MAGIC_DEF("face",           ns_element_attr_getter, ns_element_attr_setter, 130),
-    JS_CGETSET_MAGIC_DEF("text",           ns_element_attr_getter, ns_element_attr_setter, 131),
-    JS_CGETSET_MAGIC_DEF("hspace",         ns_element_int_attr_getter, ns_element_int_attr_setter, 11),
-    JS_CGETSET_MAGIC_DEF("vspace",         ns_element_int_attr_getter, ns_element_int_attr_setter, 12),
-    JS_CGETSET_MAGIC_DEF("scrollAmount",   ns_element_int_attr_getter, ns_element_int_attr_setter, 13),
-    JS_CGETSET_MAGIC_DEF("scrollDelay",    ns_element_int_attr_getter, ns_element_int_attr_setter, 14),
-    JS_CGETSET_MAGIC_DEF("maxLength",      ns_element_int_attr_getter, ns_element_int_attr_setter, 0),
-    JS_CGETSET_MAGIC_DEF("minLength",      ns_element_int_attr_getter, ns_element_int_attr_setter, 1),
-    JS_CGETSET_MAGIC_DEF("span",           ns_element_int_attr_getter, ns_element_int_attr_setter, 5),
-    JS_CGETSET_MAGIC_DEF("width",          ns_element_dimension_getter, ns_element_dimension_setter, 8),
-    JS_CGETSET_MAGIC_DEF("height",         ns_element_dimension_getter, ns_element_dimension_setter, 9),
-    JS_CFUNC_DEF("beginElement",   0, ns_svg_beginElement),
-    JS_CFUNC_DEF("setCurrentTime", 1, ns_svg_setCurrentTime),
-    JS_CGETSET_MAGIC_DEF("start",          ns_element_int_attr_getter, ns_element_int_attr_setter, 10),
-    JS_CGETSET_MAGIC_DEF("coords",         ns_element_attr_getter, ns_element_attr_setter, 37),
-    JS_CGETSET_MAGIC_DEF("shape",          ns_element_attr_getter, ns_element_attr_setter, 38),
-    JS_CGETSET_MAGIC_DEF("formAction",     ns_element_attr_getter, ns_element_attr_setter, 39),
-    JS_CGETSET_MAGIC_DEF("formMethod",     ns_element_attr_getter, ns_element_attr_setter, 40),
-    JS_CGETSET_MAGIC_DEF("formEnctype",    ns_element_attr_getter, ns_element_attr_setter, 41),
-    JS_CGETSET_MAGIC_DEF("formTarget",     ns_element_attr_getter, ns_element_attr_setter, 42),
-    JS_CGETSET_MAGIC_DEF("integrity",      ns_element_attr_getter, ns_element_attr_setter, 43),
-    JS_CGETSET_MAGIC_DEF("kind",           ns_element_attr_getter, ns_element_attr_setter, 44),
-    JS_CGETSET_MAGIC_DEF("hreflang",       ns_element_attr_getter, ns_element_attr_setter, 46),
-    JS_CGETSET_MAGIC_DEF("charset",        ns_element_attr_getter, ns_element_attr_setter, 47),
-    JS_CGETSET_MAGIC_DEF("ping",           ns_element_attr_getter, ns_element_attr_setter, 90),
-    JS_CGETSET_MAGIC_DEF("rev",            ns_element_attr_getter, ns_element_attr_setter, 91),
-    JS_CGETSET_MAGIC_DEF("as",             ns_element_attr_getter, ns_element_attr_setter, 92),
-    JS_CGETSET_MAGIC_DEF("align",          ns_element_attr_getter, ns_element_attr_setter, 93),
-    JS_CGETSET_MAGIC_DEF("vAlign",         ns_element_attr_getter, ns_element_attr_setter, 94),
-    JS_CGETSET_MAGIC_DEF("ch",             ns_element_attr_getter, ns_element_attr_setter, 95),
-    JS_CGETSET_MAGIC_DEF("chOff",          ns_element_attr_getter, ns_element_attr_setter, 96),
-    JS_CGETSET_MAGIC_DEF("bgColor",        ns_element_attr_getter, ns_element_attr_setter, 97),
-    JS_CGETSET_MAGIC_DEF("background",     ns_element_attr_getter, ns_element_attr_setter, 98),
-    JS_CGETSET_MAGIC_DEF("link",           ns_element_attr_getter, ns_element_attr_setter, 99),
-    JS_CGETSET_MAGIC_DEF("vLink",          ns_element_attr_getter, ns_element_attr_setter, 100),
-    JS_CGETSET_MAGIC_DEF("aLink",          ns_element_attr_getter, ns_element_attr_setter, 101),
-    JS_CGETSET_MAGIC_DEF("color",          ns_element_attr_getter, ns_element_attr_setter, 102),
-    JS_CGETSET_MAGIC_DEF("clear",          ns_element_attr_getter, ns_element_attr_setter, 103),
-    JS_CGETSET_MAGIC_DEF("summary",        ns_element_attr_getter, ns_element_attr_setter, 104),
-    JS_CGETSET_MAGIC_DEF("frame",          ns_element_attr_getter, ns_element_attr_setter, 105),
-    JS_CGETSET_MAGIC_DEF("rules",          ns_element_attr_getter, ns_element_attr_setter, 106),
-    JS_CGETSET_MAGIC_DEF("border",         ns_element_attr_getter, ns_element_attr_setter, 107),
-    JS_CGETSET_MAGIC_DEF("cellPadding",    ns_element_attr_getter, ns_element_attr_setter, 108),
-    JS_CGETSET_MAGIC_DEF("cellSpacing",    ns_element_attr_getter, ns_element_attr_setter, 109),
-    JS_CGETSET_MAGIC_DEF("axis",           ns_element_attr_getter, ns_element_attr_setter, 110),
-    JS_CGETSET_MAGIC_DEF("abbr",           ns_element_attr_getter, ns_element_attr_setter, 111),
-    JS_CGETSET_MAGIC_DEF("headers",        ns_element_attr_getter, ns_element_attr_setter, 112),
-    JS_CGETSET_MAGIC_DEF("scheme",         ns_element_attr_getter, ns_element_attr_setter, 113),
-    JS_CGETSET_MAGIC_DEF("standby",        ns_element_attr_getter, ns_element_attr_setter, 114),
-    JS_CGETSET_MAGIC_DEF("codeType",       ns_element_attr_getter, ns_element_attr_setter, 115),
-    JS_CGETSET_MAGIC_DEF("codeBase",       ns_element_attr_getter, ns_element_attr_setter, 116),
-    JS_CGETSET_MAGIC_DEF("code",           ns_element_attr_getter, ns_element_attr_setter, 117),
-    JS_CGETSET_MAGIC_DEF("archive",        ns_element_attr_getter, ns_element_attr_setter, 118),
-    JS_CGETSET_MAGIC_DEF("scrolling",      ns_element_attr_getter, ns_element_attr_setter, 119),
-    JS_CGETSET_MAGIC_DEF("frameBorder",    ns_element_attr_getter, ns_element_attr_setter, 120),
-    JS_CGETSET_MAGIC_DEF("marginWidth",    ns_element_attr_getter, ns_element_attr_setter, 121),
-    JS_CGETSET_MAGIC_DEF("marginHeight",   ns_element_attr_getter, ns_element_attr_setter, 122),
-    JS_CGETSET_MAGIC_DEF("longDesc",       ns_element_attr_getter, ns_element_attr_setter, 123),
-    JS_CGETSET_MAGIC_DEF("lowsrc",         ns_element_attr_getter, ns_element_attr_setter, 124),
-    JS_CGETSET_MAGIC_DEF("version",        ns_element_attr_getter, ns_element_attr_setter, 125),
-    JS_CGETSET_MAGIC_DEF("event",          ns_element_attr_getter, ns_element_attr_setter, 126),
-    JS_CGETSET_MAGIC_DEF("valueType",      ns_element_attr_getter, ns_element_attr_setter, 127),
-    JS_CGETSET_MAGIC_DEF("srclang",        ns_element_attr_getter, ns_element_attr_setter, 128),
-    JS_CGETSET_MAGIC_DEF("dirName",        ns_element_attr_getter, ns_element_attr_setter, 129),
-    JS_CGETSET_MAGIC_DEF("httpEquiv",      ns_element_attr_getter, ns_element_attr_setter, 49),
     JS_CGETSET_DEF("contentEditable", ns_element_get_contentEditable, ns_element_set_contentEditable),
     JS_CGETSET_MAGIC_DEF("slot",           ns_element_attr_getter, ns_element_attr_setter, 51),
     JS_CGETSET_MAGIC_DEF("role", ns_element_aria_string_getter, ns_element_aria_string_setter, 0),
@@ -43947,41 +44119,11 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("nonce",          ns_element_attr_getter, ns_element_attr_setter, 72),
     JS_CGETSET_MAGIC_DEF("accessKey",      ns_element_attr_getter, ns_element_attr_setter, 73),
     JS_CGETSET_DEF("accessKeyLabel",       ns_element_get_accessKeyLabel, ns_element_noop_set),
-    JS_CGETSET_MAGIC_DEF("dateTime",       ns_element_attr_getter, ns_element_attr_setter, 74),
-    JS_CGETSET_MAGIC_DEF("srcdoc",         ns_element_attr_getter, ns_element_attr_setter, 75),
-    JS_CGETSET_MAGIC_DEF("popoverTargetAction", ns_element_attr_getter, ns_element_attr_setter, 77),
     JS_CGETSET_DEF("autocapitalize", ns_element_get_autocapitalize, ns_element_set_autocapitalize),
     JS_CGETSET_MAGIC_DEF("enterKeyHint",   ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_ENTERKEYHINT),
-    JS_CGETSET_MAGIC_DEF("charSet",        ns_element_attr_getter, ns_element_attr_setter, 47),
-    JS_CGETSET_MAGIC_DEF("poster",         ns_element_attr_getter, ns_element_attr_setter, 83),
-    JS_CGETSET_MAGIC_DEF("preload",        ns_element_attr_getter, ns_element_attr_setter, 84),
-    JS_CGETSET_MAGIC_DEF("wrap",           ns_element_attr_getter, ns_element_attr_setter, 85),
-    JS_CGETSET_MAGIC_DEF("scope",          ns_element_attr_getter, ns_element_attr_setter, 86),
-    JS_CGETSET_MAGIC_DEF("cite",           ns_element_attr_getter, ns_element_attr_setter, 87),
-    JS_CGETSET_MAGIC_DEF("media",          ns_element_attr_getter, ns_element_attr_setter, 88),
-    JS_CGETSET_MAGIC_DEF("download",       ns_element_attr_getter, ns_element_attr_setter, 89),
-    JS_CGETSET_MAGIC_DEF("open",        ns_element_boolattr_getter, ns_element_boolattr_setter,  0),
-    JS_CGETSET_DEF("selected",          ns_element_get_selected,    ns_element_set_selected),
-    JS_CGETSET_MAGIC_DEF("multiple",    ns_element_boolattr_getter, ns_element_boolattr_setter,  2),
-    JS_CGETSET_MAGIC_DEF("readOnly",    ns_element_boolattr_getter, ns_element_boolattr_setter,  3),
     JS_CGETSET_MAGIC_DEF("autofocus",   ns_element_boolattr_getter, ns_element_boolattr_setter,  4),
-    JS_CGETSET_MAGIC_DEF("controls",    ns_element_boolattr_getter, ns_element_boolattr_setter,  5),
-    JS_CGETSET_MAGIC_DEF("loop",        ns_element_boolattr_getter, ns_element_boolattr_setter,  6),
-    JS_CGETSET_MAGIC_DEF("autoplay",    ns_element_boolattr_getter, ns_element_boolattr_setter,  8),
-    JS_CGETSET_MAGIC_DEF("defer",       ns_element_boolattr_getter, ns_element_boolattr_setter,  9),
-    JS_CGETSET_MAGIC_DEF("async",       ns_element_boolattr_getter, ns_element_boolattr_setter, 10),
-    JS_CGETSET_MAGIC_DEF("noValidate",  ns_element_boolattr_getter, ns_element_boolattr_setter, 11),
-    JS_CGETSET_MAGIC_DEF("isMap",       ns_element_boolattr_getter, ns_element_boolattr_setter, 12),
     JS_CGETSET_DEF("draggable",   ns_element_get_draggable, ns_element_set_draggable),
-    JS_CGETSET_MAGIC_DEF("reversed",    ns_element_boolattr_getter, ns_element_boolattr_setter, 14),
-    JS_CGETSET_MAGIC_DEF("playsInline", ns_element_boolattr_getter, ns_element_boolattr_setter, 15),
     JS_CGETSET_MAGIC_DEF("inert",       ns_element_boolattr_getter, ns_element_boolattr_setter, 17),
-    JS_CGETSET_MAGIC_DEF("noModule",    ns_element_boolattr_getter, ns_element_boolattr_setter, 18),
-    JS_CGETSET_MAGIC_DEF("formNoValidate", ns_element_boolattr_getter, ns_element_boolattr_setter, 19),
-    JS_CGETSET_MAGIC_DEF("required",    ns_element_boolattr_getter, ns_element_boolattr_setter, 20),
-    JS_CGETSET_DEF("htmlFor",                ns_element_get_htmlFor, ns_element_set_htmlFor),
-    JS_CGETSET_DEF("control",                ns_element_get_label_control, ns_element_noop_set),
-    JS_CGETSET_DEF("popoverTargetElement",   ns_element_get_popoverTargetElement, ns_element_set_popoverTargetElement),
     JS_CGETSET_DEF("tabIndex",               ns_element_get_tabIndex, ns_element_set_tabIndex),
     JS_CGETSET_DEF("isConnected",            ns_element_get_isConnected,    ns_element_noop_set),
     JS_CGETSET_DEF("baseURI",                ns_element_get_baseURI,        ns_element_noop_set),
@@ -43990,14 +44132,617 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("shadowRoot",             ns_element_get_shadowRoot,     ns_element_noop_set),
     JS_CGETSET_DEF("assignedSlot",           ns_element_get_assignedSlot,   ns_element_noop_set),
     JS_CFUNC_DEF("attachShadow",             1, ns_element_attachShadow),
-    JS_CGETSET_DEF("disabled",      ns_element_get_disabled,   ns_element_set_disabled),
-    JS_CGETSET_DEF("checked",       ns_element_get_checked,    ns_element_set_checked),
-    JS_CGETSET_DEF("label",         ns_element_get_label_prop, ns_element_set_label_prop),
-    JS_CGETSET_DEF("selectedIndex", ns_element_get_selectedIndex, ns_element_set_selectedIndex),
-    JS_CGETSET_DEF("options",       ns_element_get_options,       ns_element_noop_set),
-    JS_CGETSET_DEF("selectedOptions", ns_element_get_selectedOptions, ns_element_noop_set),
-    JS_CGETSET_DEF("elements",      ns_element_get_form_elements, ns_element_noop_set),
-    JS_CGETSET_DEF("form",          ns_element_get_form,          ns_element_noop_set),
+};
+
+#define NS_IFACES_MEDIA "HTMLMediaElement"
+#define NS_IFACES_HYPERLINK "HTMLAnchorElement HTMLAreaElement"
+#define NS_IFACES_TEXT_CONTROL "HTMLInputElement HTMLTextAreaElement"
+#define NS_IFACES_LISTED "HTMLButtonElement HTMLFieldSetElement " \
+    "HTMLInputElement HTMLObjectElement HTMLOutputElement " \
+    "HTMLSelectElement HTMLTextAreaElement"
+#define NS_IFACES_LABELABLE "HTMLButtonElement HTMLInputElement " \
+    "HTMLMeterElement HTMLOutputElement HTMLProgressElement " \
+    "HTMLSelectElement HTMLTextAreaElement"
+
+typedef struct {
+    const char           *interfaces;
+    JSCFunctionListEntry  member;
+} ns_interface_member;
+
+static const ns_interface_member ns_interface_members[] = {
+    { "SVGElement",
+      JS_CFUNC_DEF("getNumberOfChars", 0, ns_element_getNumberOfChars) },
+    { "HTMLEmbedElement HTMLIFrameElement HTMLObjectElement",
+      JS_CFUNC_DEF("getSVGDocument", 0, ns_element_getSVGDocument) },
+    { "HTMLFrameElement HTMLIFrameElement HTMLObjectElement",
+      JS_CGETSET_DEF("contentDocument", ns_element_get_contentDocument, ns_element_noop_set) },
+    { "HTMLFrameElement HTMLIFrameElement HTMLObjectElement",
+      JS_CGETSET_DEF("contentWindow", ns_element_get_contentWindow, ns_element_noop_set) },
+    { NS_IFACES_HYPERLINK " HTMLFormElement HTMLLinkElement SVGAElement",
+      JS_CGETSET_DEF("relList", ns_element_get_relList, ns_element_set_relList) },
+    { "CharacterData HTMLFormElement HTMLSelectElement",
+      JS_CGETSET_DEF("length", ns_element_get_text_length, ns_element_noop_set) },
+    { "CharacterData",
+      JS_CFUNC_DEF("substringData", 2, ns_element_substring_data) },
+    { "CharacterData",
+      JS_CFUNC_DEF("appendData", 1, ns_element_append_data) },
+    { "CharacterData",
+      JS_CFUNC_DEF("deleteData", 2, ns_element_delete_data) },
+    { "CharacterData",
+      JS_CFUNC_DEF("insertData", 2, ns_element_insert_data) },
+    { "CharacterData",
+      JS_CFUNC_DEF("replaceData", 3, ns_element_replace_data) },
+    { "Text",
+      JS_CFUNC_DEF("splitText", 1, ns_element_split_text) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CFUNC_DEF("select", 0, ns_input_select) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CFUNC_DEF("setSelectionRange", 3, ns_input_setSelectionRange) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CFUNC_DEF("setRangeText", 1, ns_input_setRangeText) },
+    { "HTMLInputElement",
+      JS_CFUNC_DEF("stepUp", 0, ns_input_stepUp) },
+    { "HTMLInputElement",
+      JS_CFUNC_DEF("stepDown", 0, ns_input_stepDown) },
+    { "HTMLInputElement HTMLSelectElement",
+      JS_CFUNC_DEF("showPicker", 0, ns_element_show_picker) },
+    { NS_IFACES_MEDIA,
+      JS_CFUNC_DEF("play", 0, ns_media_play) },
+    { NS_IFACES_MEDIA,
+      JS_CFUNC_DEF("pause", 0, ns_media_pause) },
+    { NS_IFACES_MEDIA,
+      JS_CFUNC_DEF("load", 0, ns_media_load) },
+    { NS_IFACES_MEDIA,
+      JS_CFUNC_DEF("canPlayType", 1, ns_media_canPlayType) },
+    { NS_IFACES_MEDIA,
+      JS_CFUNC_DEF("fastSeek", 1, ns_media_fast_seek) },
+    { NS_IFACES_MEDIA,
+      JS_CFUNC_DEF("addTextTrack", 3, ns_event_noop) },
+    { NS_IFACES_MEDIA,
+      JS_CFUNC_DEF("setMediaKeys", 1, ns_media_set_media_keys) },
+    { "HTMLVideoElement",
+      JS_CFUNC_DEF("getVideoPlaybackQuality", 0, ns_media_get_video_playback_quality) },
+    { "HTMLVideoElement",
+      JS_CFUNC_DEF("requestVideoFrameCallback", 1, ns_media_request_video_frame_callback) },
+    { "HTMLVideoElement",
+      JS_CFUNC_DEF("cancelVideoFrameCallback", 1, ns_window_cancelAnimationFrame) },
+    { NS_IFACES_LISTED,
+      JS_CGETSET_DEF("validity", ns_element_get_validity, ns_element_noop_set) },
+    { NS_IFACES_LISTED,
+      JS_CGETSET_DEF("validationMessage", ns_element_get_validation_message, ns_element_noop_set) },
+    { NS_IFACES_LISTED,
+      JS_CGETSET_DEF("willValidate", ns_element_get_will_validate, ns_element_noop_set) },
+    { NS_IFACES_LABELABLE,
+      JS_CGETSET_DEF("labels", ns_element_get_labels, ns_element_noop_set) },
+    { "HTMLInputElement",
+      JS_CGETSET_DEF("files", ns_input_get_files, ns_element_noop_set) },
+    { "HTMLInputElement",
+      JS_CGETSET_DEF("indeterminate", ns_element_get_indeterminate, ns_element_set_indeterminate) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CGETSET_DEF("selectionStart", ns_element_get_selection_start, ns_element_set_selection_start) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CGETSET_DEF("selectionEnd", ns_element_get_selection_end, ns_element_set_selection_end) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CGETSET_DEF("selectionDirection", ns_element_get_selection_dir, ns_element_set_selection_dir) },
+    { "HTMLTextAreaElement",
+      JS_CGETSET_DEF("textLength", ns_text_control_get_text_length, ns_element_noop_set) },
+    { "HTMLInputElement HTMLOutputElement HTMLTextAreaElement",
+      JS_CGETSET_DEF("defaultValue", ns_element_get_default_value, ns_element_set_default_value) },
+    { "HTMLInputElement",
+      JS_CGETSET_DEF("defaultChecked", ns_element_get_default_checked, ns_element_set_default_checked) },
+    { "HTMLOptionElement",
+      JS_CGETSET_DEF("defaultSelected", ns_element_get_default_selected, ns_element_set_default_selected) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("currentTime", ns_media_get_current_time, ns_media_set_current_time) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("duration", ns_media_get_duration, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("paused", ns_media_get_paused, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("ended", ns_media_get_ended, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("seeking", ns_media_get_seeking, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("volume", ns_media_get_volume, ns_media_set_volume) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("playbackRate", ns_media_get_playbackRate, ns_media_set_playbackRate) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("defaultPlaybackRate", ns_media_get_defaultPlaybackRate, ns_media_set_defaultPlaybackRate) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("error", ns_media_get_error, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("muted", ns_media_get_muted, ns_media_set_muted) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("readyState", ns_media_get_readyState, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("networkState", ns_media_get_networkState, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("seekable", ns_media_get_seekable_ranges, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("buffered", ns_media_get_buffered_ranges, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("played", ns_media_get_played_ranges, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("textTracks", ns_element_get_empty_array_prop, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("videoTracks", ns_element_get_empty_array_prop, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("audioTracks", ns_element_get_empty_array_prop, ns_element_noop_set) },
+    { "HTMLInputElement",
+      JS_CGETSET_DEF("valueAsNumber", ns_element_get_value_as_number, ns_element_set_value_as_number) },
+    { "HTMLInputElement",
+      JS_CGETSET_DEF("valueAsDate", ns_element_get_value_as_date, ns_element_set_value_as_date) },
+    { "HTMLProgressElement",
+      JS_CGETSET_DEF("position", ns_element_get_progress_position, ns_element_noop_set) },
+    { "HTMLFormElement",
+      JS_CGETSET_DEF("encoding", ns_element_get_form_enctype, ns_element_set_form_enctype) },
+    { "HTMLVideoElement",
+      JS_CGETSET_DEF("videoWidth", ns_media_get_video_width, ns_element_noop_set) },
+    { "HTMLVideoElement",
+      JS_CGETSET_DEF("videoHeight", ns_media_get_video_height, ns_element_noop_set) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_DEF("srcObject", ns_media_get_srcObject, ns_media_set_srcObject) },
+    { "HTMLImageElement",
+      JS_CFUNC_DEF("decode", 0, ns_returns_resolved_undefined) },
+    { "HTMLCanvasElement",
+      JS_CFUNC_DEF("toBlob", 1, ns_element_toBlob) },
+    { "HTMLOptionElement",
+      JS_CGETSET_DEF("index", ns_element_get_option_index, ns_element_noop_set) },
+    { "HTMLFrameSetElement HTMLTableElement "
+      "HTMLTableSectionElement HTMLTextAreaElement",
+      JS_CGETSET_DEF("rows", ns_element_table_rows, ns_element_set_rows) },
+    { "HTMLTableElement",
+      JS_CGETSET_DEF("caption", ns_element_table_caption, ns_element_noop_set) },
+    { "HTMLTableElement",
+      JS_CGETSET_DEF("tHead", ns_element_table_thead, ns_element_noop_set) },
+    { "HTMLTableElement",
+      JS_CGETSET_DEF("tFoot", ns_element_table_tfoot, ns_element_noop_set) },
+    { "HTMLTableElement",
+      JS_CGETSET_DEF("tBodies", ns_element_table_tbodies, ns_element_noop_set) },
+    { "HTMLTableRowElement",
+      JS_CGETSET_DEF("cells", ns_element_tr_cells, ns_element_noop_set) },
+    { "HTMLTableRowElement",
+      JS_CGETSET_DEF("rowIndex", ns_element_get_zero_int, ns_element_noop_set) },
+    { "HTMLTableRowElement",
+      JS_CGETSET_DEF("sectionRowIndex", ns_element_get_zero_int, ns_element_noop_set) },
+    { "HTMLTableCellElement",
+      JS_CGETSET_DEF("cellIndex", ns_element_get_zero_int, ns_element_noop_set) },
+    { "HTMLTableCellElement",
+      JS_CGETSET_MAGIC_DEF("colSpan", ns_element_int_attr_getter, ns_element_int_attr_setter, 6) },
+    { "HTMLTableCellElement",
+      JS_CGETSET_MAGIC_DEF("rowSpan", ns_element_int_attr_getter, ns_element_int_attr_setter, 7) },
+    { "HTMLDialogElement",
+      JS_CGETSET_DEF("returnValue", ns_dialog_get_returnValue, ns_dialog_set_returnValue) },
+    { "HTMLTableElement",
+      JS_CFUNC_DEF("createCaption", 0, ns_table_createCaption) },
+    { "HTMLTableElement",
+      JS_CFUNC_DEF("createTHead", 0, ns_table_createTHead) },
+    { "HTMLTableElement",
+      JS_CFUNC_DEF("createTFoot", 0, ns_table_createTFoot) },
+    { "HTMLTableElement",
+      JS_CFUNC_DEF("createTBody", 0, ns_table_createTBody) },
+    { "HTMLTableElement",
+      JS_CFUNC_DEF("deleteCaption", 0, ns_table_deleteCaption) },
+    { "HTMLTableElement",
+      JS_CFUNC_DEF("deleteTHead", 0, ns_table_deleteTHead) },
+    { "HTMLTableElement",
+      JS_CFUNC_DEF("deleteTFoot", 0, ns_table_deleteTFoot) },
+    { "HTMLTableElement HTMLTableSectionElement",
+      JS_CFUNC_DEF("insertRow", 1, ns_table_insertRow) },
+    { "HTMLTableElement HTMLTableSectionElement",
+      JS_CFUNC_DEF("deleteRow", 1, ns_table_deleteRow) },
+    { "HTMLTableRowElement",
+      JS_CFUNC_DEF("insertCell", 1, ns_tr_insertCell) },
+    { "HTMLTableRowElement",
+      JS_CFUNC_DEF("deleteCell", 1, ns_tr_deleteCell) },
+    { "HTMLSelectElement",
+      JS_CFUNC_DEF("add", 2, ns_select_add) },
+    { "SVGElement",
+      JS_CFUNC_DEF("getBBox", 0, ns_element_getBBox) },
+    { "SVGElement",
+      JS_CFUNC_DEF("getCTM", 0, ns_element_getCTM) },
+    { "SVGElement",
+      JS_CFUNC_DEF("getScreenCTM", 0, ns_element_getScreenCTM) },
+    { "SVGElement",
+      JS_CFUNC_DEF("getTotalLength", 0, ns_element_getTotalLength) },
+    { "SVGElement",
+      JS_CFUNC_DEF("getPointAtLength", 1, ns_element_getPointAtLength) },
+    { "SVGElement",
+      JS_CFUNC_DEF("createSVGPoint", 0, ns_element_createSVGPoint) },
+    { "SVGElement",
+      JS_CFUNC_DEF("createSVGRect", 0, ns_element_createSVGRect) },
+    { "SVGElement",
+      JS_CFUNC_DEF("createSVGMatrix", 0, ns_element_createSVGMatrix) },
+    { "SVGElement",
+      JS_CFUNC_DEF("createSVGTransform", 0, ns_element_createSVGTransform) },
+    { "SVGElement",
+      JS_CGETSET_DEF("ownerSVGElement", ns_element_get_ownerSVGElement, ns_element_noop_set) },
+    { "HTMLFormElement",
+      JS_CFUNC_DEF("submit", 0, ns_element_form_submit) },
+    { "HTMLFormElement",
+      JS_CFUNC_DEF("requestSubmit", 0, ns_element_form_requestSubmit) },
+    { "HTMLFormElement",
+      JS_CFUNC_DEF("reset", 0, ns_element_form_reset) },
+    { NS_IFACES_LISTED " HTMLFormElement",
+      JS_CFUNC_DEF("checkValidity", 0, ns_element_check_validity) },
+    { NS_IFACES_LISTED " HTMLFormElement",
+      JS_CFUNC_DEF("reportValidity", 0, ns_element_check_validity) },
+    { NS_IFACES_LISTED,
+      JS_CFUNC_DEF("setCustomValidity", 1, ns_element_setCustomValidity) },
+    { "HTMLDialogElement",
+      JS_CFUNC_DEF("show", 0, ns_element_show) },
+    { "HTMLDialogElement",
+      JS_CFUNC_DEF("showModal", 0, ns_element_showModal) },
+    { "HTMLDialogElement",
+      JS_CFUNC_DEF("close", 0, ns_element_close) },
+    { "HTMLDialogElement",
+      JS_CFUNC_DEF("requestClose", 0, ns_element_requestClose) },
+    { "HTMLSlotElement",
+      JS_CFUNC_DEF("assignedNodes", 0, ns_element_assignedNodes) },
+    { "HTMLSlotElement",
+      JS_CFUNC_DEF("assignedElements", 0, ns_element_assignedElements) },
+    { "HTMLCanvasElement",
+      JS_CFUNC_DEF("getContext", 1, ns_element_getContext) },
+    { "HTMLCanvasElement",
+      JS_CFUNC_DEF("toDataURL", 0, ns_element_toDataURL) },
+    { "Text",
+      JS_CGETSET_DEF("wholeText", ns_element_get_wholeText, ns_element_noop_set) },
+    { "Text",
+      JS_CFUNC_DEF("replaceWholeText", 1, ns_text_replaceWholeText) },
+    { "HTMLImageElement",
+      JS_CGETSET_DEF("naturalWidth", ns_element_img_natural_width, ns_element_noop_set) },
+    { "HTMLImageElement",
+      JS_CGETSET_DEF("naturalHeight", ns_element_img_natural_height, ns_element_noop_set) },
+    { "HTMLImageElement",
+      JS_CGETSET_DEF("complete", ns_element_img_complete, ns_element_noop_set) },
+    { NS_IFACES_MEDIA " HTMLImageElement",
+      JS_CGETSET_DEF("currentSrc", ns_element_img_current_src, ns_element_noop_set) },
+    { "HTMLMetaElement HTMLTemplateElement",
+      JS_CGETSET_DEF("content", ns_element_template_content, ns_element_set_content) },
+    { "HTMLAnchorElement HTMLButtonElement HTMLDetailsElement "
+      "HTMLEmbedElement HTMLFieldSetElement HTMLFormElement "
+      "HTMLFrameElement HTMLIFrameElement HTMLImageElement "
+      "HTMLInputElement HTMLMapElement HTMLMetaElement "
+      "HTMLObjectElement HTMLOutputElement HTMLParamElement "
+      "HTMLSelectElement HTMLSlotElement HTMLTextAreaElement",
+      JS_CGETSET_MAGIC_DEF("name", ns_element_attr_getter, ns_element_attr_setter, 1) },
+    { "HTMLAreaElement HTMLImageElement HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("alt", ns_element_attr_getter, ns_element_attr_setter, 2) },
+    { NS_IFACES_MEDIA " HTMLEmbedElement HTMLFrameElement HTMLIFrameElement "
+      "HTMLImageElement HTMLInputElement HTMLScriptElement "
+      "HTMLSourceElement HTMLTrackElement",
+      JS_CGETSET_MAGIC_DEF("src", ns_element_attr_getter, ns_element_attr_setter, 3) },
+    { NS_IFACES_HYPERLINK " HTMLBaseElement HTMLLinkElement SVGElement",
+      JS_CGETSET_MAGIC_DEF("href", ns_element_anchor_part_get, ns_element_anchor_href_set, NS_ANCHOR_HREF) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("protocol", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_PROTOCOL) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("host", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_HOST) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("hostname", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_HOSTNAME) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("port", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_PORT) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("pathname", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_PATHNAME) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("search", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_SEARCH) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("hash", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_HASH) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("origin", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_ORIGIN) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("username", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_USERNAME) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("password", ns_element_anchor_part_get, ns_element_url_part_set, NS_ANCHOR_PASSWORD) },
+    { "HTMLAnchorElement HTMLButtonElement HTMLEmbedElement "
+      "HTMLFieldSetElement HTMLInputElement HTMLLIElement "
+      "HTMLLinkElement HTMLOListElement HTMLObjectElement "
+      "HTMLOutputElement HTMLParamElement HTMLScriptElement "
+      "HTMLSelectElement HTMLSourceElement HTMLStyleElement "
+      "HTMLTextAreaElement HTMLUListElement SVGAElement",
+      JS_CGETSET_DEF("type", ns_element_get_type, ns_element_set_type) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CGETSET_MAGIC_DEF("placeholder", ns_element_attr_getter, ns_element_attr_setter, 6) },
+    { "HTMLFormElement",
+      JS_CGETSET_MAGIC_DEF("action", ns_element_attr_getter, ns_element_attr_setter, 9) },
+    { "HTMLFormElement",
+      JS_CGETSET_MAGIC_DEF("method", ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_METHOD) },
+    { "HTMLFormElement",
+      JS_CGETSET_MAGIC_DEF("enctype", ns_element_attr_getter, ns_element_attr_setter, 11) },
+    { NS_IFACES_HYPERLINK " HTMLBaseElement HTMLFormElement SVGAElement",
+      JS_CGETSET_MAGIC_DEF("target", ns_element_attr_getter, ns_element_attr_setter, 12) },
+    { NS_IFACES_HYPERLINK " HTMLFormElement HTMLLinkElement SVGAElement",
+      JS_CGETSET_MAGIC_DEF("rel", ns_element_attr_getter, ns_element_attr_setter, 13) },
+    { "HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("accept", ns_element_attr_getter, ns_element_attr_setter, 14) },
+    { "HTMLFormElement",
+      JS_CGETSET_MAGIC_DEF("acceptCharset", ns_element_attr_getter, ns_element_attr_setter, 15) },
+    { "HTMLFormElement HTMLInputElement HTMLSelectElement HTMLTextAreaElement",
+      JS_CGETSET_DEF("autocomplete", ns_element_get_autocomplete, ns_element_set_autocomplete) },
+    { "HTMLInputElement",
+      JS_CGETSET_DEF("list", ns_element_get_list_ref, ns_element_list_set) },
+    { "HTMLInputElement HTMLMeterElement",
+      JS_CGETSET_MAGIC_DEF("min", ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_MIN) },
+    { "HTMLInputElement HTMLMeterElement HTMLProgressElement",
+      JS_CGETSET_MAGIC_DEF("max", ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_MAX) },
+    { "HTMLMeterElement",
+      JS_CGETSET_MAGIC_DEF("low", ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_LOW) },
+    { "HTMLMeterElement",
+      JS_CGETSET_MAGIC_DEF("high", ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_HIGH) },
+    { "HTMLMeterElement",
+      JS_CGETSET_MAGIC_DEF("optimum", ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_OPTIMUM) },
+    { "HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("step", ns_element_attr_getter, ns_element_attr_setter, 20) },
+    { "HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("pattern", ns_element_attr_getter, ns_element_attr_setter, 21) },
+    { NS_IFACES_MEDIA " HTMLImageElement HTMLLinkElement HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("crossOrigin", ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_CROSSORIGIN) },
+    { NS_IFACES_HYPERLINK " HTMLIFrameElement HTMLImageElement HTMLLinkElement "
+      "HTMLScriptElement SVGAElement",
+      JS_CGETSET_MAGIC_DEF("referrerPolicy", ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_REFERRERPOLICY) },
+    { "HTMLImageElement",
+      JS_CGETSET_MAGIC_DEF("decoding", ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_DECODING) },
+    { "HTMLIFrameElement HTMLImageElement",
+      JS_CGETSET_MAGIC_DEF("loading", ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_LOADING) },
+    { "HTMLImageElement HTMLLinkElement HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("fetchPriority", ns_element_attr_getter, ns_element_attr_setter, 27) },
+    { "HTMLImageElement HTMLLinkElement HTMLSourceElement",
+      JS_CGETSET_DEF("sizes", ns_element_get_sizes_list, ns_element_attr_setter_sizes) },
+    { "HTMLIFrameElement",
+      JS_CGETSET_DEF("sandbox", ns_element_get_sandbox_list, ns_element_attr_setter_sandbox) },
+    { "HTMLImageElement HTMLSourceElement",
+      JS_CGETSET_MAGIC_DEF("srcset", ns_element_attr_getter, ns_element_attr_setter, 29) },
+    { "HTMLImageElement HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("useMap", ns_element_attr_getter, ns_element_attr_setter, 30) },
+    { "HTMLFontElement HTMLHRElement HTMLInputElement HTMLSelectElement",
+      JS_CGETSET_MAGIC_DEF("size", ns_element_int_attr_getter, ns_element_int_attr_setter, 2) },
+    { "HTMLFrameSetElement HTMLTextAreaElement",
+      JS_CGETSET_MAGIC_DEF("cols", ns_element_int_attr_getter, ns_element_int_attr_setter, 3) },
+    { "HTMLIFrameElement",
+      JS_CGETSET_MAGIC_DEF("allowFullscreen", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 0) },
+    { "HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("declare", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 1) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_MAGIC_DEF("defaultMuted", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 2) },
+    { "HTMLTrackElement",
+      JS_CGETSET_MAGIC_DEF("default", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 3) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("noHref", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 4) },
+    { "HTMLHRElement",
+      JS_CGETSET_MAGIC_DEF("noShade", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 5) },
+    { "HTMLDListElement HTMLDirectoryElement HTMLMenuElement "
+      "HTMLOListElement HTMLUListElement",
+      JS_CGETSET_MAGIC_DEF("compact", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 6) },
+    { "HTMLTableCellElement",
+      JS_CGETSET_MAGIC_DEF("noWrap", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 7) },
+    { "HTMLMarqueeElement",
+      JS_CGETSET_MAGIC_DEF("trueSpeed", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 8) },
+    { "HTMLFrameElement",
+      JS_CGETSET_MAGIC_DEF("noResize", ns_element_bool_attr_getter, ns_element_bool_attr_setter, 9) },
+    { "HTMLFontElement",
+      JS_CGETSET_MAGIC_DEF("face", ns_element_attr_getter, ns_element_attr_setter, 130) },
+    { "HTMLBodyElement",
+      JS_CGETSET_MAGIC_DEF("text", ns_element_attr_getter, ns_element_attr_setter, 131) },
+    { "HTMLImageElement HTMLMarqueeElement HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("hspace", ns_element_int_attr_getter, ns_element_int_attr_setter, 11) },
+    { "HTMLImageElement HTMLMarqueeElement HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("vspace", ns_element_int_attr_getter, ns_element_int_attr_setter, 12) },
+    { "HTMLMarqueeElement",
+      JS_CGETSET_MAGIC_DEF("scrollAmount", ns_element_int_attr_getter, ns_element_int_attr_setter, 13) },
+    { "HTMLMarqueeElement",
+      JS_CGETSET_MAGIC_DEF("scrollDelay", ns_element_int_attr_getter, ns_element_int_attr_setter, 14) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CGETSET_MAGIC_DEF("maxLength", ns_element_int_attr_getter, ns_element_int_attr_setter, 0) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CGETSET_MAGIC_DEF("minLength", ns_element_int_attr_getter, ns_element_int_attr_setter, 1) },
+    { "HTMLTableColElement",
+      JS_CGETSET_MAGIC_DEF("span", ns_element_int_attr_getter, ns_element_int_attr_setter, 5) },
+    { "HTMLCanvasElement HTMLEmbedElement HTMLHRElement "
+      "HTMLIFrameElement HTMLImageElement HTMLInputElement "
+      "HTMLMarqueeElement HTMLObjectElement HTMLPreElement "
+      "HTMLSourceElement HTMLTableCellElement HTMLTableColElement "
+      "HTMLTableElement HTMLVideoElement SVGElement",
+      JS_CGETSET_MAGIC_DEF("width", ns_element_dimension_getter, ns_element_dimension_setter, 8) },
+    { "HTMLCanvasElement HTMLEmbedElement HTMLIFrameElement "
+      "HTMLImageElement HTMLInputElement HTMLMarqueeElement "
+      "HTMLObjectElement HTMLSourceElement HTMLTableCellElement "
+      "HTMLVideoElement SVGElement",
+      JS_CGETSET_MAGIC_DEF("height", ns_element_dimension_getter, ns_element_dimension_setter, 9) },
+    { "SVGElement",
+      JS_CFUNC_DEF("beginElement", 0, ns_svg_beginElement) },
+    { "SVGElement",
+      JS_CFUNC_DEF("setCurrentTime", 1, ns_svg_setCurrentTime) },
+    { "HTMLOListElement",
+      JS_CGETSET_MAGIC_DEF("start", ns_element_int_attr_getter, ns_element_int_attr_setter, 10) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("coords", ns_element_attr_getter, ns_element_attr_setter, 37) },
+    { NS_IFACES_HYPERLINK,
+      JS_CGETSET_MAGIC_DEF("shape", ns_element_attr_getter, ns_element_attr_setter, 38) },
+    { "HTMLButtonElement HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("formAction", ns_element_attr_getter, ns_element_attr_setter, 39) },
+    { "HTMLButtonElement HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("formMethod", ns_element_attr_getter, ns_element_attr_setter, 40) },
+    { "HTMLButtonElement HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("formEnctype", ns_element_attr_getter, ns_element_attr_setter, 41) },
+    { "HTMLButtonElement HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("formTarget", ns_element_attr_getter, ns_element_attr_setter, 42) },
+    { "HTMLLinkElement HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("integrity", ns_element_attr_getter, ns_element_attr_setter, 43) },
+    { "HTMLTrackElement",
+      JS_CGETSET_MAGIC_DEF("kind", ns_element_attr_getter, ns_element_attr_setter, 44) },
+    { "HTMLAnchorElement HTMLLinkElement SVGAElement",
+      JS_CGETSET_MAGIC_DEF("hreflang", ns_element_attr_getter, ns_element_attr_setter, 46) },
+    { "HTMLAnchorElement HTMLLinkElement HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("charset", ns_element_attr_getter, ns_element_attr_setter, 47) },
+    { NS_IFACES_HYPERLINK " SVGAElement",
+      JS_CGETSET_MAGIC_DEF("ping", ns_element_attr_getter, ns_element_attr_setter, 90) },
+    { "HTMLAnchorElement HTMLLinkElement",
+      JS_CGETSET_MAGIC_DEF("rev", ns_element_attr_getter, ns_element_attr_setter, 91) },
+    { "HTMLLinkElement",
+      JS_CGETSET_MAGIC_DEF("as", ns_element_attr_getter, ns_element_attr_setter, 92) },
+    { "HTMLDivElement HTMLEmbedElement HTMLHRElement "
+      "HTMLHeadingElement HTMLIFrameElement HTMLImageElement "
+      "HTMLInputElement HTMLLegendElement HTMLObjectElement "
+      "HTMLParagraphElement HTMLTableCaptionElement "
+      "HTMLTableCellElement HTMLTableColElement HTMLTableElement "
+      "HTMLTableRowElement HTMLTableSectionElement",
+      JS_CGETSET_MAGIC_DEF("align", ns_element_attr_getter, ns_element_attr_setter, 93) },
+    { "HTMLTableCellElement HTMLTableColElement "
+      "HTMLTableRowElement HTMLTableSectionElement",
+      JS_CGETSET_MAGIC_DEF("vAlign", ns_element_attr_getter, ns_element_attr_setter, 94) },
+    { "HTMLTableCellElement HTMLTableColElement "
+      "HTMLTableRowElement HTMLTableSectionElement",
+      JS_CGETSET_MAGIC_DEF("ch", ns_element_attr_getter, ns_element_attr_setter, 95) },
+    { "HTMLTableCellElement HTMLTableColElement "
+      "HTMLTableRowElement HTMLTableSectionElement",
+      JS_CGETSET_MAGIC_DEF("chOff", ns_element_attr_getter, ns_element_attr_setter, 96) },
+    { "HTMLBodyElement HTMLTableCellElement HTMLTableElement "
+      "HTMLTableRowElement",
+      JS_CGETSET_MAGIC_DEF("bgColor", ns_element_attr_getter, ns_element_attr_setter, 97) },
+    { "HTMLBodyElement",
+      JS_CGETSET_MAGIC_DEF("background", ns_element_attr_getter, ns_element_attr_setter, 98) },
+    { "HTMLBodyElement",
+      JS_CGETSET_MAGIC_DEF("link", ns_element_attr_getter, ns_element_attr_setter, 99) },
+    { "HTMLBodyElement",
+      JS_CGETSET_MAGIC_DEF("vLink", ns_element_attr_getter, ns_element_attr_setter, 100) },
+    { "HTMLBodyElement",
+      JS_CGETSET_MAGIC_DEF("aLink", ns_element_attr_getter, ns_element_attr_setter, 101) },
+    { "HTMLFontElement",
+      JS_CGETSET_MAGIC_DEF("color", ns_element_attr_getter, ns_element_attr_setter, 102) },
+    { "HTMLBRElement",
+      JS_CGETSET_MAGIC_DEF("clear", ns_element_attr_getter, ns_element_attr_setter, 103) },
+    { "HTMLTableElement",
+      JS_CGETSET_MAGIC_DEF("summary", ns_element_attr_getter, ns_element_attr_setter, 104) },
+    { "HTMLTableElement",
+      JS_CGETSET_MAGIC_DEF("frame", ns_element_attr_getter, ns_element_attr_setter, 105) },
+    { "HTMLTableElement",
+      JS_CGETSET_MAGIC_DEF("rules", ns_element_attr_getter, ns_element_attr_setter, 106) },
+    { "HTMLImageElement HTMLObjectElement HTMLTableElement",
+      JS_CGETSET_MAGIC_DEF("border", ns_element_attr_getter, ns_element_attr_setter, 107) },
+    { "HTMLTableElement",
+      JS_CGETSET_MAGIC_DEF("cellPadding", ns_element_attr_getter, ns_element_attr_setter, 108) },
+    { "HTMLTableElement",
+      JS_CGETSET_MAGIC_DEF("cellSpacing", ns_element_attr_getter, ns_element_attr_setter, 109) },
+    { "HTMLTableCellElement",
+      JS_CGETSET_MAGIC_DEF("axis", ns_element_attr_getter, ns_element_attr_setter, 110) },
+    { "HTMLTableCellElement",
+      JS_CGETSET_MAGIC_DEF("abbr", ns_element_attr_getter, ns_element_attr_setter, 111) },
+    { "HTMLTableCellElement",
+      JS_CGETSET_MAGIC_DEF("headers", ns_element_attr_getter, ns_element_attr_setter, 112) },
+    { "HTMLMetaElement",
+      JS_CGETSET_MAGIC_DEF("scheme", ns_element_attr_getter, ns_element_attr_setter, 113) },
+    { "HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("standby", ns_element_attr_getter, ns_element_attr_setter, 114) },
+    { "HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("codeType", ns_element_attr_getter, ns_element_attr_setter, 115) },
+    { "HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("codeBase", ns_element_attr_getter, ns_element_attr_setter, 116) },
+    { "HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("code", ns_element_attr_getter, ns_element_attr_setter, 117) },
+    { "HTMLObjectElement",
+      JS_CGETSET_MAGIC_DEF("archive", ns_element_attr_getter, ns_element_attr_setter, 118) },
+    { "HTMLFrameElement HTMLIFrameElement",
+      JS_CGETSET_MAGIC_DEF("scrolling", ns_element_attr_getter, ns_element_attr_setter, 119) },
+    { "HTMLFrameElement HTMLIFrameElement",
+      JS_CGETSET_MAGIC_DEF("frameBorder", ns_element_attr_getter, ns_element_attr_setter, 120) },
+    { "HTMLFrameElement HTMLIFrameElement",
+      JS_CGETSET_MAGIC_DEF("marginWidth", ns_element_attr_getter, ns_element_attr_setter, 121) },
+    { "HTMLFrameElement HTMLIFrameElement",
+      JS_CGETSET_MAGIC_DEF("marginHeight", ns_element_attr_getter, ns_element_attr_setter, 122) },
+    { "HTMLFrameElement HTMLIFrameElement HTMLImageElement",
+      JS_CGETSET_MAGIC_DEF("longDesc", ns_element_attr_getter, ns_element_attr_setter, 123) },
+    { "HTMLImageElement",
+      JS_CGETSET_MAGIC_DEF("lowsrc", ns_element_attr_getter, ns_element_attr_setter, 124) },
+    { "HTMLHtmlElement",
+      JS_CGETSET_MAGIC_DEF("version", ns_element_attr_getter, ns_element_attr_setter, 125) },
+    { "HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("event", ns_element_attr_getter, ns_element_attr_setter, 126) },
+    { "HTMLParamElement",
+      JS_CGETSET_MAGIC_DEF("valueType", ns_element_attr_getter, ns_element_attr_setter, 127) },
+    { "HTMLTrackElement",
+      JS_CGETSET_MAGIC_DEF("srclang", ns_element_attr_getter, ns_element_attr_setter, 128) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CGETSET_MAGIC_DEF("dirName", ns_element_attr_getter, ns_element_attr_setter, 129) },
+    { "HTMLMetaElement",
+      JS_CGETSET_MAGIC_DEF("httpEquiv", ns_element_attr_getter, ns_element_attr_setter, 49) },
+    { "HTMLModElement HTMLTimeElement",
+      JS_CGETSET_MAGIC_DEF("dateTime", ns_element_attr_getter, ns_element_attr_setter, 74) },
+    { "HTMLIFrameElement",
+      JS_CGETSET_MAGIC_DEF("srcdoc", ns_element_attr_getter, ns_element_attr_setter, 75) },
+    { "HTMLButtonElement HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("popoverTargetAction", ns_element_attr_getter, ns_element_attr_setter, 77) },
+    { "HTMLAnchorElement HTMLLinkElement HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("charSet", ns_element_attr_getter, ns_element_attr_setter, 47) },
+    { "HTMLVideoElement",
+      JS_CGETSET_MAGIC_DEF("poster", ns_element_attr_getter, ns_element_attr_setter, 83) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_MAGIC_DEF("preload", ns_element_attr_getter, ns_element_attr_setter, 84) },
+    { "HTMLTextAreaElement",
+      JS_CGETSET_MAGIC_DEF("wrap", ns_element_attr_getter, ns_element_attr_setter, 85) },
+    { "HTMLTableCellElement",
+      JS_CGETSET_MAGIC_DEF("scope", ns_element_attr_getter, ns_element_attr_setter, 86) },
+    { "HTMLModElement HTMLQuoteElement",
+      JS_CGETSET_MAGIC_DEF("cite", ns_element_attr_getter, ns_element_attr_setter, 87) },
+    { "HTMLLinkElement HTMLMetaElement HTMLSourceElement HTMLStyleElement",
+      JS_CGETSET_MAGIC_DEF("media", ns_element_attr_getter, ns_element_attr_setter, 88) },
+    { NS_IFACES_HYPERLINK " SVGAElement",
+      JS_CGETSET_MAGIC_DEF("download", ns_element_attr_getter, ns_element_attr_setter, 89) },
+    { "HTMLDetailsElement HTMLDialogElement",
+      JS_CGETSET_MAGIC_DEF("open", ns_element_boolattr_getter, ns_element_boolattr_setter, 0) },
+    { "HTMLOptionElement",
+      JS_CGETSET_DEF("selected", ns_element_get_selected, ns_element_set_selected) },
+    { "HTMLInputElement HTMLSelectElement",
+      JS_CGETSET_MAGIC_DEF("multiple", ns_element_boolattr_getter, ns_element_boolattr_setter, 2) },
+    { NS_IFACES_TEXT_CONTROL,
+      JS_CGETSET_MAGIC_DEF("readOnly", ns_element_boolattr_getter, ns_element_boolattr_setter, 3) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_MAGIC_DEF("controls", ns_element_boolattr_getter, ns_element_boolattr_setter, 5) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_MAGIC_DEF("loop", ns_element_boolattr_getter, ns_element_boolattr_setter, 6) },
+    { NS_IFACES_MEDIA,
+      JS_CGETSET_MAGIC_DEF("autoplay", ns_element_boolattr_getter, ns_element_boolattr_setter, 8) },
+    { "HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("defer", ns_element_boolattr_getter, ns_element_boolattr_setter, 9) },
+    { "HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("async", ns_element_boolattr_getter, ns_element_boolattr_setter, 10) },
+    { "HTMLFormElement",
+      JS_CGETSET_MAGIC_DEF("noValidate", ns_element_boolattr_getter, ns_element_boolattr_setter, 11) },
+    { "HTMLImageElement",
+      JS_CGETSET_MAGIC_DEF("isMap", ns_element_boolattr_getter, ns_element_boolattr_setter, 12) },
+    { "HTMLOListElement",
+      JS_CGETSET_MAGIC_DEF("reversed", ns_element_boolattr_getter, ns_element_boolattr_setter, 14) },
+    { "HTMLVideoElement",
+      JS_CGETSET_MAGIC_DEF("playsInline", ns_element_boolattr_getter, ns_element_boolattr_setter, 15) },
+    { "HTMLScriptElement",
+      JS_CGETSET_MAGIC_DEF("noModule", ns_element_boolattr_getter, ns_element_boolattr_setter, 18) },
+    { "HTMLButtonElement HTMLInputElement",
+      JS_CGETSET_MAGIC_DEF("formNoValidate", ns_element_boolattr_getter, ns_element_boolattr_setter, 19) },
+    { "HTMLInputElement HTMLSelectElement HTMLTextAreaElement",
+      JS_CGETSET_MAGIC_DEF("required", ns_element_boolattr_getter, ns_element_boolattr_setter, 20) },
+    { "HTMLLabelElement HTMLOutputElement HTMLScriptElement",
+      JS_CGETSET_DEF("htmlFor", ns_element_get_htmlFor, ns_element_set_htmlFor) },
+    { "HTMLLabelElement",
+      JS_CGETSET_DEF("control", ns_element_get_label_control, ns_element_noop_set) },
+    { "HTMLButtonElement HTMLInputElement",
+      JS_CGETSET_DEF("popoverTargetElement", ns_element_get_popoverTargetElement, ns_element_set_popoverTargetElement) },
+    { "HTMLButtonElement HTMLFieldSetElement HTMLInputElement "
+      "HTMLLinkElement HTMLOptGroupElement HTMLOptionElement "
+      "HTMLSelectElement HTMLStyleElement HTMLTextAreaElement",
+      JS_CGETSET_DEF("disabled", ns_element_get_disabled, ns_element_set_disabled) },
+    { "HTMLInputElement",
+      JS_CGETSET_DEF("checked", ns_element_get_checked, ns_element_set_checked) },
+    { "HTMLOptGroupElement HTMLOptionElement HTMLTrackElement",
+      JS_CGETSET_DEF("label", ns_element_get_label_prop, ns_element_set_label_prop) },
+    { "HTMLSelectElement",
+      JS_CGETSET_DEF("selectedIndex", ns_element_get_selectedIndex, ns_element_set_selectedIndex) },
+    { "HTMLDataListElement HTMLSelectElement",
+      JS_CGETSET_DEF("options", ns_element_get_options, ns_element_noop_set) },
+    { "HTMLSelectElement",
+      JS_CGETSET_DEF("selectedOptions", ns_element_get_selectedOptions, ns_element_noop_set) },
+    { "HTMLFieldSetElement HTMLFormElement",
+      JS_CGETSET_DEF("elements", ns_element_get_form_elements, ns_element_noop_set) },
+    { NS_IFACES_LISTED " HTMLLabelElement HTMLLegendElement HTMLOptionElement",
+      JS_CGETSET_DEF("form", ns_element_get_form, ns_element_noop_set) },
 };
 
 static ns_node *
@@ -44137,7 +44882,7 @@ ns_document_set_body(JSContext *ctx, JSValueConst this_val,
     }
     if (js) {
         g_hash_table_remove(js->orphan_nodes, new_body);
-        js->mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
         ns_js_record_child_change(js, root, new_body, NULL,
                                   new_body->prev_sibling,
                                   new_body->next_sibling);
@@ -44318,7 +45063,7 @@ ns_js_fonts_idle(gpointer user_data)
 {
     ns_js *js = user_data;
     if (!js || !js->font_ready_resolvers) return;
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     GArray *resolvers = js->font_ready_resolvers;
     js->font_ready_resolvers = NULL;
     for (guint i = 0; i + 1 < resolvers->len; i += 2) {
@@ -45607,7 +46352,7 @@ ns_document_adopt_node(JSContext *ctx, JSValueConst this_val,
         }
     }
     ns_adopt_owner_walk(ctx, this_val, node, 0);
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_DupValue(ctx, argv[0]);
 }
 
@@ -47804,6 +48549,23 @@ ns_proto_define_getset(JSContext *ctx, JSValueConst proto, const char *name,
 }
 
 static void
+ns_install_interface_members(JSContext *ctx, JSValueConst global)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_interface_members); i++) {
+        const ns_interface_member *m = &ns_interface_members[i];
+        char **names = g_strsplit(m->interfaces, " ", -1);
+        for (gsize k = 0; names[k]; k++) {
+            if (!*names[k]) continue;
+            JSValue proto = ns_proto_of(ctx, global, names[k]);
+            if (JS_IsObject(proto))
+                JS_SetPropertyFunctionList(ctx, proto, &m->member, 1);
+            JS_FreeValue(ctx, proto);
+        }
+        g_strfreev(names);
+    }
+}
+
+static void
 ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
 {
     JSValue node_proto = ns_proto_of(ctx, global, "Node");
@@ -47943,7 +48705,7 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     JS_FreeValue(ctx, shadow_proto);
 
     static const char *const misplaced_element_members[] = {
-        "attachShadow", "shadowRoot", "assignedSlot", "default",
+        "attachShadow", "shadowRoot", "assignedSlot",
     };
     ns_proto_delete_names(ctx, node_proto, misplaced_element_members,
                           G_N_ELEMENTS(misplaced_element_members));
@@ -47982,17 +48744,6 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     if (JS_IsObject(attr_proto)) JS_SetPrototype(ctx, attr_proto, node_proto);
     JS_FreeValue(ctx, attr_proto);
 
-    {
-        static const JSCFunctionListEntry track_accessors[] = {
-            JS_CGETSET_MAGIC_DEF("default", ns_element_bool_attr_getter,
-                                 ns_element_bool_attr_setter, 3),
-        };
-        JSValue track_proto = ns_proto_of(ctx, global, "HTMLTrackElement");
-        if (JS_IsObject(track_proto))
-            JS_SetPropertyFunctionList(ctx, track_proto, track_accessors,
-                                       G_N_ELEMENTS(track_accessors));
-        JS_FreeValue(ctx, track_proto);
-    }
     {
         JSValue dialog_proto = ns_proto_of(ctx, global, "HTMLDialogElement");
         if (JS_IsObject(dialog_proto))
@@ -48099,6 +48850,14 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     if (JS_IsObject(chardata_proto))
         ns_proto_define_getset(ctx, chardata_proto, "data",
                                ns_element_get_data, ns_element_set_data);
+    JSValue media_proto = ns_proto_of(ctx, global, "HTMLMediaElement");
+    if (JS_IsObject(media_proto)) {
+        JS_SetPrototype(ctx, media_proto, htmlelem_proto);
+        ns_chain_proto(ctx, global, "HTMLAudioElement", media_proto);
+        ns_chain_proto(ctx, global, "HTMLVideoElement", media_proto);
+    }
+    JS_FreeValue(ctx, media_proto);
+    ns_install_interface_members(ctx, global);
 
     js->dom_protos_set    = 1;
 
@@ -48230,6 +48989,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
           ns_js_navigate_cb nav_cb, gpointer nav_user_data,
           const ns_js_navigation_timing *navigation_timing)
 {
+    layout_targets_ensure();
     ns_js *js = g_new0(ns_js, 1);
     if (navigation_timing && navigation_timing->origin_us > 0 &&
         navigation_timing->origin_real_ms > 0) {
@@ -48854,6 +49614,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__ndMediaSourceTypeSupported",
                ns_media_source_type_supported, 1);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
+    ns_js_mse_install(ctx, global);
     ns_bind_fn(ctx, global, "__ndChildFrame",        ns_window_child_frame,            1);
 
     ns_bind_ctor(ctx, global, "Event",        ns_event_ctor,        2);
@@ -50674,7 +51435,7 @@ ns_synthdoc_set_title(JSContext *ctx, JSValueConst this_val,
     ns_js *_j = js_from_ctx(ctx);
     ns_js_clear_children(_j, t);
     ns_node_append_child(t, ns_node_new_text(g_strdup(s)));
-    if (_j) _j->mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
@@ -51355,7 +52116,7 @@ ns_document_set_title(JSContext *ctx, JSValueConst this_val, JSValueConst val)
             ? ns_node_new_text_len(g_memdup2(s, len + 1), (guint32)len)
             : NULL;
         ns_element_replace_all_recorded(_j, t, added);
-        if (_j) _j->mutated = TRUE;
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
@@ -51737,7 +52498,7 @@ ns_document_write_insert_output(ns_js *js, ns_document_write_state *state)
                                             document);
         JS_FreeValue(js->ctx, document);
         JS_FreeValue(js->ctx, global);
-        js->mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
         ns_ce_upgrade_subtree_all(js, state->parent);
         js->throw_on_dynamic_markup--;
         ns_js_run_inserted_scripts(js, state->parent);
@@ -51800,7 +52561,7 @@ ns_document_open_impl(ns_js *js)
     if (js->document_write_states)
         g_ptr_array_set_size(js->document_write_states, 0);
     js->document_write_parser_open = TRUE;
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     ns_node_arm_js_invalidate(js->current_doc);
 }
 
@@ -51915,7 +52676,7 @@ ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
             (ns_node_is_element_named(host, "iframe") ||
              ns_node_is_element_named(host, "frame")))
             ns_element_set_attr(host, "data-nd-doc-written", "1");
-        js->mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     return JS_DupValue(ctx, this_val);
 }
@@ -51992,7 +52753,7 @@ ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
                 c = next;
             }
             ns_node_free(parsed);
-            js->mutated = TRUE;
+            ns_js_note_layout_unscoped(js, G_STRFUNC);
         }
     }
     JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_UNDEFINED);
@@ -52008,7 +52769,7 @@ ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
             if (g_ptr_array_index(js->pending_iframe_loads, i) == host)
                 present = TRUE;
         if (!present) g_ptr_array_add(js->pending_iframe_loads, host);
-        js->mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     return JS_UNDEFINED;
 }
@@ -52685,7 +53446,9 @@ ns_js_reset_runtime_state(ns_js *js)
     }
 
     ns_drain_microtasks(js);
+    gint64 gc_start = ns_trace_now();
     JS_RunGC(js->rt);
+    ns_trace_complete("script", "GC", gc_start, "frame contexts freed");
 }
 
 static gboolean
@@ -54624,7 +55387,8 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             }
             return;
         }
-        char *abs_url = ns_url_resolve(origin, src);
+        g_autofree char *script_base = ns_js_node_document_base_url(js, n);
+        char *abs_url = ns_url_resolve(script_base ? script_base : origin, src);
         if (!abs_url) return;
         if (g_str_has_prefix(origin, "https://") &&
             g_str_has_prefix(abs_url, "http://")) {
@@ -54991,6 +55755,19 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
     ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
 }
 
+static void
+ns_js_load_document_stylesheets(ns_js *js, ns_node *doc)
+{
+    GPtrArray *sheets = g_ptr_array_new();
+    ns_js_collect_pending_stylesheets(doc, sheets);
+    for (guint i = 0; i < sheets->len && !js->halted; i++) {
+        ns_node *sheet = g_ptr_array_index(sheets, i);
+        g_autofree char *base = ns_js_node_document_base_url(js, sheet);
+        ns_js_load_stylesheet_element(js, sheet, base ? base : "inline");
+    }
+    g_ptr_array_free(sheets, TRUE);
+}
+
 static gboolean
 ns_js_root_connected(ns_js *js, const ns_node *root)
 {
@@ -55259,7 +56036,7 @@ ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe, gboolean force)
     for (guint i = 0; i < js->pending_iframe_loads->len; i++)
         if (g_ptr_array_index(js->pending_iframe_loads, i) == iframe) return;
     g_ptr_array_add(js->pending_iframe_loads, iframe);
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 static void
@@ -55335,7 +56112,9 @@ ns_js_sweep_orphans(ns_js *js)
         return;
     js->last_orphan_sweep_us = now;
 
+    gint64 gc_start = ns_trace_now();
     JS_RunGC(js->rt);
+    ns_trace_complete("script", "GC", gc_start, "orphan sweep");
 
     GPtrArray *to_free = g_ptr_array_new();
     GHashTableIter it; gpointer key;
@@ -56316,7 +57095,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
     if (srcdoc && *srcdoc) {
         decoded = g_strdup(srcdoc);
         abs_url = g_strdup(origin);
-    } else if (src && *src && !g_str_has_prefix(src, "about:")) {
+    } else if (src && *src && !g_str_has_prefix(src, "about:") &&
+               g_ascii_strncasecmp(src, "javascript:", 11) != 0) {
         abs_url = ns_url_resolve(origin, src);
         gboolean is_object = ns_node_is_element_named(iframe, "object");
         ns_csp_kind frame_kind = is_object ? NS_CSP_OBJECT : NS_CSP_FRAME;
@@ -56378,8 +57158,10 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                     js->log_cb(line, js->log_user_data);
                     g_free(line);
                 }
-            } else if (resp && resp->body &&
-                (resp->status == 200 || resp->status == 0) && !resp->error) {
+            } else if (resp && resp->body && !resp->error &&
+                       (resp->status == 200 || resp->status == 0 ||
+                        (!is_object && resp->status > 200 &&
+                         resp->status != 204 && resp->status != 205))) {
                 if (resp->body->len > 0 && resp->content_type &&
                     g_ascii_strncasecmp(resp->content_type, "image/", 6) == 0 &&
                     !ns_html_mime_is_xml(resp->content_type)) {
@@ -56541,6 +57323,11 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 
     if (content_root && content_doc) {
         ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
+        if ((sandbox & NS_SANDBOX_ACTIVE) &&
+            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN))
+            ns_element_set_attr(iframe, "data-nd-frame-opaque", "1");
+        else
+            ns_element_remove_attr(iframe, "data-nd-frame-opaque");
         ns_js_record_child_change(js, iframe, content_doc, NULL, NULL, NULL);
 
         const char *iorigin = abs_url && *abs_url ? abs_url : origin;
@@ -56660,7 +57447,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         JS_FreeValue(js->ctx, realm_doc);
     }
 
-    js->mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     if (content_root)
         ns_js_schedule_static_iframes(js, content_root);
     ns_js_schedule_pending_script_drain(js);
@@ -56803,6 +57590,7 @@ ns_js_lifecycle_tick(gpointer data)
             ns_js_lifecycle_schedule(js);
             return G_SOURCE_REMOVE;
         }
+        ns_js_load_document_stylesheets(js, doc);
         ns_js_drain_deferred_scripts(js);
         ns_js_drain_async_script_roots(js);
         ns_js_process_pending_iframes(js);
@@ -56823,7 +57611,11 @@ ns_js_lifecycle_tick(gpointer data)
     ns_js_set_navigation_milestone(js,
         &js->navigation_timing.dom_complete_ms, "domComplete");
     js->ready_state = 2;
-    if (js->rt) JS_RunGC(js->rt);
+    if (js->rt) {
+        gint64 gc_start = ns_trace_now();
+        JS_RunGC(js->rt);
+        ns_trace_complete("script", "GC", gc_start, "load event");
+    }
     ns_js_flush_autofocus(js);
     ns_js_dispatch_event(js, doc, "readystatechange", NULL);
     ns_js_set_navigation_milestone(js,
@@ -57059,17 +57851,21 @@ static void
 ns_js_note_font_loads(ns_js *js)
 {
     if (js->layout_root && js->layout_font_generation != ns_font_generation())
-        js->mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 static void
-ns_js_flush_layout(ns_js *js)
+ns_js_flush_layout_from(ns_js *js, const char *api)
 {
     if (!js || !js->layout_flush_cb || js->in_layout_flush) return;
     ns_js_note_font_loads(js);
+    gint64 start = ns_trace_now();
     js->in_layout_flush = TRUE;
     js->layout_flush_cb(js->layout_flush_user_data);
     js->in_layout_flush = FALSE;
+    /* Flushes with nothing to do are left out. */
+    if (start && g_get_monotonic_time() - start >= 50)
+        ns_trace_complete("layout", "forced reflow", start, api);
 }
 
 void
@@ -57137,6 +57933,110 @@ ns_js_dispatch_hashchange(ns_js *js, const char *old_url, const char *new_url)
     JS_FreeValue(ctx, ev);
     JS_FreeValue(ctx, global);
     js->in_hashchange = FALSE;
+}
+
+/* Whether a change since the last call needs the box tree rebuilt, not
+ * only a restyle: everything that sets mutated except attributes that
+ * reach rendering through the cascade alone. */
+/* Nodes whose content changed in a way layout must see, each with the
+ * context that changed it, until the browser takes them. A target freed
+ * meanwhile drops out: its removal noted its parent too. */
+static GHashTable *g_layout_targets;
+
+static void
+layout_target_node_freed(ns_node *node)
+{
+    if (g_layout_targets) g_hash_table_remove(g_layout_targets, node);
+}
+
+/* A node left parent, wherever script moved it to: parent's content
+ * changed for layout too. Which script context saw it is told apart by
+ * document when the targets are taken. */
+static void
+layout_target_node_detached(ns_node *parent)
+{
+    if (!g_layout_targets) return;
+    if (!g_hash_table_contains(g_layout_targets, parent))
+        g_hash_table_insert(g_layout_targets, parent, NULL);
+}
+
+static void
+layout_targets_ensure(void)
+{
+    if (g_layout_targets) return;
+    g_layout_targets = g_hash_table_new(g_direct_hash, g_direct_equal);
+    ns_node_free_hook = layout_target_node_freed;
+    ns_node_detach_hook = layout_target_node_detached;
+}
+
+/* A change that needs the whole page laid out again, named for traces. */
+static void
+ns_js_note_layout_unscoped(ns_js *js, const char *why)
+{
+    if (!js) return;
+    js->mutated = TRUE;
+    if (!js->layout_mutated) js->layout_mutated_by = why;
+    js->layout_mutated = TRUE;
+}
+
+static void
+ns_js_note_layout_target_from(ns_js *js, const ns_node *target,
+                              const char *why)
+{
+    if (!js) return;
+    js->mutated = TRUE;
+    if (!target || js->layout_mutated) {
+        ns_js_note_layout_unscoped(js, why);
+        return;
+    }
+    layout_targets_ensure();
+    g_hash_table_insert(g_layout_targets, (gpointer)target, js);
+}
+
+GPtrArray *
+ns_js_take_layout_targets(ns_js *js)
+{
+    if (!js || !g_layout_targets || g_hash_table_size(g_layout_targets) == 0)
+        return NULL;
+    GPtrArray *out = NULL;
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, g_layout_targets);
+    const ns_node *page = js->main_document ? js->main_document
+                                            : js->current_doc;
+    const ns_node *page_root = page ? ns_node_root(page) : NULL;
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        if (!v) {
+            const ns_node *root = ns_node_root(k);
+            if (root->kind != NS_NODE_DOCUMENT ||
+                (root->flags & NS_NODE_FRAGMENT)) {
+                g_hash_table_iter_remove(&it);
+                continue;
+            }
+            if (root != page_root) continue;
+        } else if (v != js) {
+            continue;
+        }
+        if (!out) out = g_ptr_array_new();
+        g_ptr_array_add(out, k);
+        g_hash_table_iter_remove(&it);
+    }
+    return out;
+}
+
+const char *
+ns_js_layout_mutated_by(ns_js *js)
+{
+    return js && js->layout_mutated ? js->layout_mutated_by : NULL;
+}
+
+gboolean
+ns_js_consume_layout_mutated(ns_js *js)
+{
+    if (!js) return FALSE;
+    gboolean m = js->layout_mutated;
+    js->layout_mutated = FALSE;
+    return m;
 }
 
 gboolean

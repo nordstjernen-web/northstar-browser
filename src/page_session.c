@@ -9,6 +9,8 @@
 #include "libnorthstar.h"
 #include "mainctx.h"
 #include "net.h"
+#include "paint.h"
+#include "videolayer.h"
 #include "trace.h"
 
 #include <cairo.h>
@@ -47,6 +49,8 @@ struct ns_page_session {
     gpointer       wake_data;
     gboolean       rendering;
     gboolean       wake_posted;
+    gboolean       video_layers_enabled;
+    GArray        *video_layers;
 };
 
 typedef struct {
@@ -274,6 +278,8 @@ ns_page_session_free(ns_page_session *s)
         s->cur = NULL;
         ns_browser_close(cur);
     }
+    if (s->video_layers)
+        g_array_free(s->video_layers, TRUE);
     free(s->fb);
     free(s->scratch_fb);
     free(s->verify_fb);
@@ -389,10 +395,74 @@ ns_page_frame_clear(ns_page_frame *frame)
     if (!frame)
         return;
     free(frame->nav);
+    free(frame->url);
+    free(frame->title);
     free(frame->camera);
     free(frame->download);
     free(frame->damage);
+    if (frame->video_layers)
+        g_array_free(frame->video_layers, TRUE);
     memset(frame, 0, sizeof *frame);
+}
+
+static GArray *
+video_layers_new(void)
+{
+    GArray *a = g_array_new(FALSE, TRUE, sizeof(ns_video_layer_rect));
+    g_array_set_clear_func(a, ns_video_layer_rect_clear);
+    return a;
+}
+
+void
+ns_page_session_set_video_layers(ns_page_session *s, gboolean enabled)
+{
+    if (s) s->video_layers_enabled = enabled;
+}
+
+/* Keeps the composited videos of the last frame in page device pixels,
+ * so a scroll blit or a damage repaint that misses a video keeps its
+ * place: a full paint replaces them, a damage repaint updates the ones it
+ * painted. Hands the viewport-relative list to the frame. */
+static void
+session_merge_video_layers(ns_page_session *s, GArray *painted, gboolean full,
+                           double ox, double oy, ns_page_frame *out)
+{
+    if (!s->video_layers)
+        s->video_layers = video_layers_new();
+    if (full)
+        g_array_set_size(s->video_layers, 0);
+    for (guint i = 0; painted && i < painted->len; i++) {
+        ns_video_layer_rect r = g_array_index(painted, ns_video_layer_rect, i);
+        r.layer = ns_video_layer_ref(r.layer);
+        r.x += ox;
+        r.y += oy;
+        guint j = 0;
+        while (j < s->video_layers->len &&
+               g_array_index(s->video_layers, ns_video_layer_rect, j).layer !=
+                   r.layer)
+            j++;
+        if (j < s->video_layers->len)
+            g_array_remove_index(s->video_layers, j);
+        g_array_append_val(s->video_layers, r);
+    }
+    for (guint i = 0; i < s->video_layers->len;) {
+        if (ns_video_layer_detached(
+                g_array_index(s->video_layers, ns_video_layer_rect, i).layer))
+            g_array_remove_index(s->video_layers, i);
+        else
+            i++;
+    }
+    if (s->video_layers->len == 0)
+        return;
+    out->video_layers = video_layers_new();
+    for (guint i = 0; i < s->video_layers->len; i++) {
+        ns_video_layer_rect r =
+            g_array_index(s->video_layers, ns_video_layer_rect, i);
+        r.layer = ns_video_layer_ref(r.layer);
+        r.x -= ox;
+        r.y -= oy;
+        g_array_append_val(out->video_layers, r);
+    }
 }
 
 static int
@@ -523,12 +593,15 @@ session_scratch(ns_page_session *s, unsigned char **buf)
 }
 
 static int
-session_paint_band(ns_page_session *s, unsigned char *scratch, int y0, int y1,
-                   long sx, long sy, int vw, int vh, double scale)
+session_paint_band(ns_page_session *s, unsigned char *scratch, int x0, int x1,
+                   int y0, int y1, long sx, long sy, int vw, int vh,
+                   double scale)
 {
+    x0 = MAX(x0 - NS_DAMAGE_EDGE_PX, 0);
+    x1 = MIN(x1 + NS_DAMAGE_EDGE_PX, vw);
     y0 = MAX(y0 - NS_DAMAGE_EDGE_PX, -NS_DAMAGE_EDGE_PX);
     y1 = MIN(y1 + NS_DAMAGE_EDGE_PX, vh + NS_DAMAGE_EDGE_PX);
-    int band[4] = { 0, y0, vw, y1 - y0 };
+    int band[4] = { x0, y0, x1 - x0, y1 - y0 };
     return ns_browser_render_argb32_rects(s->cur, (int)sx, (int)sy, vw, vh,
                                           NS_DAMAGE_EDGE_PX, scale, scratch,
                                           vw * 4, band, 1);
@@ -540,7 +613,8 @@ session_verify_region(ns_page_session *s, long sx, long sy, int vw, int vh,
 {
     size_t size = (size_t)vw * 4u * (size_t)vh;
     if (!session_scratch(s, &s->verify_fb) ||
-        session_paint_band(s, s->verify_fb, 0, vh, sx, sy, vw, vh, scale) != 0)
+        session_paint_band(s, s->verify_fb, 0, vw, 0, vh, sx, sy, vw, vh,
+                           scale) != 0)
         return;
     const unsigned char *reference = session_view(s->verify_fb, vw);
     unsigned char *view = session_view(s->fb, vw);
@@ -581,7 +655,12 @@ session_paint_rows(ns_page_session *s, const cairo_rectangle_int_t *rects,
                    int n, int y0, int y1, long sx, long sy, int vw, int vh,
                    double scale)
 {
-    if (session_paint_band(s, s->scratch_fb, y0, y1, sx, sy, vw, vh,
+    int x0 = vw, x1 = 0;
+    for (int i = 0; i < n; i++) {
+        x0 = MIN(x0, rects[i].x);
+        x1 = MAX(x1, rects[i].x + rects[i].width);
+    }
+    if (session_paint_band(s, s->scratch_fb, x0, x1, y0, y1, sx, sy, vw, vh,
                            scale) != 0)
         return -1;
     size_t stride = (size_t)vw * 4u;
@@ -722,6 +801,11 @@ ns_page_session_render(ns_page_session *s, int width, int height,
         region = NULL;
         unchanged = 1;
     }
+    GArray *video_painted = s->video_layers_enabled && !unchanged
+        ? video_layers_new() : NULL;
+    if (video_painted)
+        ns_paint_set_video_layers(video_painted);
+    gboolean video_full = !region;
     if (!unchanged) {
         phase_start = ns_trace_now();
         int painted;
@@ -730,8 +814,8 @@ ns_page_session_render(ns_page_session *s, int width, int height,
             if (!scrolled)
                 session_frame_damage(out, region);
         } else {
-            painted = session_paint_band(s, s->fb, 0, vh, sx, sy, vw, vh,
-                                         scale);
+            painted = session_paint_band(s, s->fb, 0, vw, 0, vh, sx, sy,
+                                         vw, vh, scale);
         }
         ns_trace_complete("frame", region ? "paint (damage)" : "paint",
                           phase_start, NULL);
@@ -753,6 +837,14 @@ ns_page_session_render(ns_page_session *s, int width, int height,
             g_clear_pointer(&out->damage, free);
         }
     }
+    if (video_painted)
+        ns_paint_set_video_layers(NULL);
+    if (s->video_layers_enabled)
+        session_merge_video_layers(s, video_painted, !unchanged && video_full,
+                                   (double)sx * scale, (double)sy * scale,
+                                   out);
+    if (video_painted)
+        g_array_free(video_painted, TRUE);
     out->gen = s->frame_gen;
     out->ok = 1;
     out->width = vw;
@@ -768,6 +860,11 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     scrub_line_breaks(out->nav);
     if (out->nav)
         session_stash_post(s, out->nav);
+    /* The page can change its address and title without a navigation
+     * (history.pushState, document.title): report them with every frame. */
+    out->url = empty_to_null(ns_browser_url(s->cur));
+    out->url_pushed = ns_browser_take_url_pushed(s->cur);
+    out->title = ns_browser_title(s->cur);
     out->camera = empty_to_null(ns_browser_take_pending_camera(s->cur));
     scrub_line_breaks(out->camera);
     out->download = empty_to_null(ns_browser_take_pending_download(s->cur));

@@ -67,6 +67,20 @@ northstar_engine_sources = files(
   'image.c',
   'svg.c',
   'video.c',
+  'av1.c',
+  'mse.c',
+  'progressive.c',
+  'mp4.c',
+  'webm.c',
+  'yuv.c',
+  'vp9.c',
+  'h264.c',
+  'videodec.c',
+  'videoworker.c',
+  'videolayer.c',
+  'audiodec.c',
+  'audio/aac.c',
+  'js_mse.c',
   'image_ico.c',
   'image_wuffs.c',
   'idb.c',
@@ -149,6 +163,18 @@ if have_seccomp
   northstar_deps += [libseccomp]
 endif
 
+if have_av1
+  northstar_deps += [libdav1d]
+endif
+if have_vp9
+  northstar_deps += [libvpx]
+endif
+if have_h264
+  northstar_deps += [libopenh264]
+endif
+if libopus.found()
+  northstar_deps += [libopus]
+endif
 if have_avif
   northstar_deps += [libavif]
 endif

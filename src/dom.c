@@ -1158,6 +1158,9 @@ ns_node_has_class(const ns_node *el, const char *name, gsize len)
     return FALSE;
 }
 
+void (*ns_node_free_hook)(ns_node *node);
+void (*ns_node_detach_hook)(ns_node *parent);
+
 void
 ns_node_free(ns_node *node)
 {
@@ -1188,6 +1191,8 @@ ns_node_free(ns_node *node)
             continue;
         }
         g_ptr_array_set_size(stack, stack->len - 1);
+        if (ns_node_free_hook)
+            ns_node_free_hook(cur);
         if (cur->js_invalidate)
             cur->js_invalidate(cur);
         ns_css_forget_node(cur);
@@ -1226,6 +1231,8 @@ ns_node_detach(ns_node *child)
     ns_node *p = child->parent;
     if (!p)
         return;
+    if (ns_node_detach_hook)
+        ns_node_detach_hook(p);
     if (child->prev_sibling)
         child->prev_sibling->next_sibling = child->next_sibling;
     else

@@ -75,6 +75,9 @@ struct ns_js {
     guint         next_audio_token;
     NsAudioContext *audio_context;
     GHashTable   *media_players;
+    GHashTable   *mse_objects;
+    GHashTable   *mse_urls;
+    guint         next_mse_id;
     GPtrArray    *media_tasks;
     GPtrArray    *media_tasks_flushing;
     guint         media_poll_source;
@@ -119,6 +122,8 @@ struct ns_js {
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
+    gboolean      layout_mutated;
+    const char   *layout_mutated_by;
     GHashTable   *timers;
     GMainContext *main_context;
     GPtrArray    *workers;
@@ -361,6 +366,10 @@ typedef struct ns_draw_path_ud {
 
 double ns_arg_d(JSContext *ctx, JSValueConst v);
 void ns_bind_fn(JSContext *ctx, JSValueConst obj, const char *name, JSCFunction *fn, int argc);
+struct ns_mse_source;
+struct ns_mse_source *ns_js_mse_source_for_url(ns_js *js, const char *url);
+void ns_js_mse_teardown(ns_js *js);
+void ns_js_mse_install(JSContext *ctx, JSValueConst global);
 const ns_box *ns_box_find_by_dom(const ns_box *root, const ns_node *target);
 uint32_t ns_js_array_length(JSContext *ctx, JSValueConst arr);
 gboolean ns_webaudio_render_offline(JSContext *ctx, JSValueConst destination,
@@ -373,16 +382,20 @@ void ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj,
                                const char *iface);
 JSValue ns_returns_resolved_undefined(JSContext *ctx, JSValueConst this_val,
                                       int argc, JSValueConst *argv);
+gboolean ns_js_has_transient_activation(ns_js *js);
 JSValue ns_promise_reject_dom(JSContext *ctx, const char *name,
                               const char *message);
 JSValue ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
                                const char *message);
 JSValue ns_media_time_ranges_for(JSContext *ctx, double dur);
+JSValue ns_media_time_ranges_from(JSContext *ctx, const double *edges, guint n_ranges);
 
 gboolean ns_node_is_media_element(const ns_node *n);
 char    *ns_media_resolve_src(JSContext *ctx, ns_node *node);
 ns_image *ns_media_animation_for(JSContext *ctx, JSValueConst this_val);
 double   ns_media_position(JSContext *ctx, JSValueConst this_val);
+gboolean ns_media_frame_counts(JSContext *ctx, JSValueConst this_val,
+                               guint *presented, guint *dropped);
 void     ns_media_attr_changed(ns_js *js, ns_node *el, const char *name);
 void     ns_media_subtree_connected(ns_js *js, ns_node *root);
 void     ns_media_subtree_disconnected(ns_js *js, ns_node *root);

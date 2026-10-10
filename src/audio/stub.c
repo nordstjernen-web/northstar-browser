@@ -34,6 +34,10 @@ void ns_audio_context_set_volume(NsAudioContext *context, const char *token,
 void ns_audio_context_set_loop(NsAudioContext *context, const char *token,
                                gboolean loop)
 { (void)context; (void)token; (void)loop; }
+gboolean ns_audio_context_open_stream(NsAudioContext *context, const char *token, int rate, int channels) { (void)context; (void)token; (void)rate; (void)channels; return FALSE; }
+gboolean ns_audio_context_stream_push(NsAudioContext *context, const char *token, const float *samples, int frames, int channels) { (void)context; (void)token; (void)samples; (void)frames; (void)channels; return FALSE; }
+void ns_audio_context_stream_restart(NsAudioContext *context, const char *token, double seconds) { (void)context; (void)token; (void)seconds; }
+void ns_audio_context_stream_end(NsAudioContext *context, const char *token, gboolean ended) { (void)context; (void)token; (void)ended; }
 void ns_audio_context_close(NsAudioContext *context, const char *token)
 { (void)context; (void)token; }
 gboolean ns_audio_context_status(NsAudioContext *context, const char *token,
