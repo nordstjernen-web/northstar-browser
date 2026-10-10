@@ -16521,6 +16521,22 @@ emit_longhands(GArray *decls_out, const ns_css_prop *props,
 }
 
 static void
+emit_pair(GArray *decls_out, ns_css_prop first, ns_css_prop second,
+          const char *vtext, gboolean important)
+{
+    int count = css_ws_token_count(vtext);
+    if (count < 1 || count > 2) return;
+    char *tokens[2] = {0};
+    int n = split_ws_limit(vtext, tokens, 2);
+    if (n > 0) {
+        const ns_css_prop props[2] = { first, second };
+        const char *const texts[2] = { tokens[0], n == 2 ? tokens[1] : tokens[0] };
+        emit_longhands(decls_out, props, texts, 2, important);
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+}
+
+static void
 border_shorthand_split(char *const tokens[], int n, const char **width,
                        const char **style, const char **color)
 {
@@ -17464,23 +17480,8 @@ parse_declaration_block(const char **pp, const char *end,
         gboolean border_pair_prop = FALSE;
         for (int i = 0; border_pair_props[i].name; i++) {
             if (strcmp(pname, border_pair_props[i].name) != 0) continue;
-            char *tokens[4] = {0};
-            int n = split_ws(vtext, tokens);
-            if (n > 0) {
-                const char *a = tokens[0];
-                const char *b = n >= 2 ? tokens[1] : a;
-                ns_css_value *va = parse_value_for(border_pair_props[i].a, a);
-                ns_css_value *vb = parse_value_for(border_pair_props[i].b, b);
-                if (va) {
-                    ns_css_decl d = { .prop = border_pair_props[i].a, .value = va, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-                if (vb) {
-                    ns_css_decl d = { .prop = border_pair_props[i].b, .value = vb, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            for (int j = 0; j < n; j++) g_free(tokens[j]);
+            emit_pair(decls_out, border_pair_props[i].a,
+                      border_pair_props[i].b, vtext, important);
             border_pair_prop = TRUE;
             break;
         }
@@ -17494,19 +17495,9 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "overflow") == 0) {
             char *tokens[3] = {0};
             int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
-            if (n == 1 || n == 2) {
-                ns_css_value *vx = parse_value_for(NS_CSS_OVERFLOW_X, tokens[0]);
-                ns_css_value *vy = parse_value_for(NS_CSS_OVERFLOW_Y,
-                                                   tokens[n == 2 ? 1 : 0]);
-                if (vx) {
-                    ns_css_decl d = { .prop = NS_CSS_OVERFLOW_X, .value = vx, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-                if (vy) {
-                    ns_css_decl d = { .prop = NS_CSS_OVERFLOW_Y, .value = vy, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
+            if (n == 1 || n == 2)
+                emit_pair(decls_out, NS_CSS_OVERFLOW_X, NS_CSS_OVERFLOW_Y,
+                          vtext, important);
             gboolean expanded = n == 2;
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             if (expanded) {
@@ -17750,25 +17741,8 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         if (strcmp(pname, "gap") == 0 || strcmp(pname, "grid-gap") == 0) {
-            char *tokens[4] = {0};
-            int n = split_ws(vtext, tokens);
-            const char *row = n >= 1 ? tokens[0] : NULL;
-            const char *col = n >= 2 ? tokens[1] : row;
-            if (row) {
-                ns_css_value *v = parse_value_for(NS_CSS_ROW_GAP, row);
-                if (v) {
-                    ns_css_decl d = { .prop = NS_CSS_ROW_GAP, .value = v, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            if (col) {
-                ns_css_value *v = parse_value_for(NS_CSS_COLUMN_GAP, col);
-                if (v) {
-                    ns_css_decl d = { .prop = NS_CSS_COLUMN_GAP, .value = v, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            for (int i = 0; i < n; i++) g_free(tokens[i]);
+            emit_pair(decls_out, NS_CSS_ROW_GAP, NS_CSS_COLUMN_GAP, vtext,
+                      important);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -18437,48 +18411,28 @@ parse_declaration_block(const char **pp, const char *end,
             strcmp(pname, "padding-inline") == 0 ||
             strcmp(pname, "inset-block") == 0 ||
             strcmp(pname, "inset-inline") == 0) {
-            char *tokens[4] = {0};
-            int n = split_ws(vtext, tokens);
-            if (n > 2) {
-                for (int i = 2; i < n; i++) g_free(tokens[i]);
-                n = 2;
+            ns_css_prop pa = NS_CSS_MARGIN_BLOCK_START;
+            ns_css_prop pb = NS_CSS_MARGIN_BLOCK_END;
+            if (strcmp(pname, "margin-block") == 0) {
+                pa = NS_CSS_MARGIN_BLOCK_START;
+                pb = NS_CSS_MARGIN_BLOCK_END;
+            } else if (strcmp(pname, "margin-inline") == 0) {
+                pa = NS_CSS_MARGIN_INLINE_START;
+                pb = NS_CSS_MARGIN_INLINE_END;
+            } else if (strcmp(pname, "padding-block") == 0) {
+                pa = NS_CSS_PADDING_BLOCK_START;
+                pb = NS_CSS_PADDING_BLOCK_END;
+            } else if (strcmp(pname, "padding-inline") == 0) {
+                pa = NS_CSS_PADDING_INLINE_START;
+                pb = NS_CSS_PADDING_INLINE_END;
+            } else if (strcmp(pname, "inset-block") == 0) {
+                pa = NS_CSS_INSET_BLOCK_START;
+                pb = NS_CSS_INSET_BLOCK_END;
+            } else {
+                pa = NS_CSS_INSET_INLINE_START;
+                pb = NS_CSS_INSET_INLINE_END;
             }
-            if (n > 0) {
-                const char *a = tokens[0];
-                const char *b = n >= 2 ? tokens[1] : a;
-                ns_css_prop pa = NS_CSS_MARGIN_BLOCK_START;
-                ns_css_prop pb = NS_CSS_MARGIN_BLOCK_END;
-                if (strcmp(pname, "margin-block") == 0) {
-                    pa = NS_CSS_MARGIN_BLOCK_START;
-                    pb = NS_CSS_MARGIN_BLOCK_END;
-                } else if (strcmp(pname, "margin-inline") == 0) {
-                    pa = NS_CSS_MARGIN_INLINE_START;
-                    pb = NS_CSS_MARGIN_INLINE_END;
-                } else if (strcmp(pname, "padding-block") == 0) {
-                    pa = NS_CSS_PADDING_BLOCK_START;
-                    pb = NS_CSS_PADDING_BLOCK_END;
-                } else if (strcmp(pname, "padding-inline") == 0) {
-                    pa = NS_CSS_PADDING_INLINE_START;
-                    pb = NS_CSS_PADDING_INLINE_END;
-                } else if (strcmp(pname, "inset-block") == 0) {
-                    pa = NS_CSS_INSET_BLOCK_START;
-                    pb = NS_CSS_INSET_BLOCK_END;
-                } else {
-                    pa = NS_CSS_INSET_INLINE_START;
-                    pb = NS_CSS_INSET_INLINE_END;
-                }
-                ns_css_value *va = parse_value_for(pa, a);
-                ns_css_value *vb = parse_value_for(pb, b);
-                if (va) {
-                    ns_css_decl d = { .prop = pa, .value = va, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-                if (vb) {
-                    ns_css_decl d = { .prop = pb, .value = vb, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            for (int i = 0; i < n; i++) g_free(tokens[i]);
+            emit_pair(decls_out, pa, pb, vtext, important);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -18487,7 +18441,7 @@ parse_declaration_block(const char **pp, const char *end,
 
         if (strcmp(pname, "inset") == 0) {
             char *tokens[4] = {0};
-            int n = split_ws(vtext, tokens);
+            int n = css_ws_token_count(vtext) > 4 ? 0 : split_ws(vtext, tokens);
             if (n > 0) {
                 emit_quad(decls_out,
                     NS_CSS_TOP, NS_CSS_RIGHT,

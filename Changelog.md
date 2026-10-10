@@ -22,6 +22,13 @@ Significant changes in each release:
     function names are case-insensitive, so `data-bg="URL(http://…)"`
     under `background-image: attr(data-bg type(*))` was fetched. The
     check now recognises every spelling of every URL-taking function.
+* A `gap`, `margin-block`, `margin-inline`, `padding-block`,
+  `padding-inline`, `inset-block`, `inset-inline`,
+  `border-block-*`/`border-inline-*` width, style or color, `overflow`
+  or `inset` declaration with too many values, or with one invalid
+  value, is ignored as a whole, as CSS Syntax requires, instead of
+  applying the values that parsed. `gap: 1px 2px 3px` used to set
+  `row-gap` to 1px.
 * Security: a page could free the address the engine was still reading.
   Laying out a page fetches its stylesheets and images synchronously,
   and the engine waited for them by spinning its own main context, so
