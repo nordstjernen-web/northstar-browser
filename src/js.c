@@ -8735,7 +8735,8 @@ ns_js_fetch_has_prop(JSContext *ctx, JSValueConst obj, const char *name)
 }
 
 static JSValue
-ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+ns_js_fetch_for(JSContext *ctx, JSValueConst frame_url, int argc,
+                JSValueConst *argv);
 
 static gboolean
 ns_fetch_body_is_stream(JSContext *ctx, JSValueConst obj, JSValue *out_stream)
@@ -8790,7 +8791,7 @@ ns_fetch_stream_drained(JSContext *ctx, JSValueConst this_val,
                                       JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
         JSValueConst fargs[2] = { data[0], data[1] };
         int n = JS_IsUndefined(data[1]) ? 1 : 2;
-        JSValue inner = ns_js_fetch(ctx, data[5], n, fargs);
+        JSValue inner = ns_js_fetch_for(ctx, data[5], n, fargs);
         JSValueConst rargs[1] = { inner };
         JSValue r = JS_Call(ctx, data[3], JS_UNDEFINED, 1, rargs);
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
@@ -8806,7 +8807,7 @@ ns_fetch_stream_drained(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_fetch_defer_stream_body(JSContext *ctx, JSValueConst this_val,
+ns_fetch_defer_stream_body(JSContext *ctx, JSValueConst frame_url,
                            int argc, JSValueConst *argv,
                            JSValueConst carrier, JSValue stream)
 {
@@ -8862,7 +8863,7 @@ ns_fetch_defer_stream_body(JSContext *ctx, JSValueConst this_val,
     data[2] = JS_DupValue(ctx, carrier);
     data[3] = resolving[0];
     data[4] = resolving[1];
-    data[5] = JS_DupValue(ctx, this_val);
+    data[5] = JS_DupValue(ctx, frame_url);
     JSValue onful = JS_NewCFunctionData(ctx, ns_fetch_stream_drained, 1, 0, 6, data);
     JSValue onrej = JS_NewCFunctionData(ctx, ns_fetch_stream_drained, 1, 1, 6, data);
     for (int i = 0; i < 6; i++)
@@ -8879,41 +8880,19 @@ ns_fetch_defer_stream_body(JSContext *ctx, JSValueConst this_val,
 }
 
 static char *
-ns_js_fetch_base_from_this(JSContext *ctx, JSValueConst this_val)
+ns_js_fetch_frame_url(JSContext *ctx, JSValueConst frame_url)
 {
-    if (!JS_IsObject(this_val)) return NULL;
-    JSValue loc = JS_GetPropertyStr(ctx, this_val, "location");
-    if (JS_IsException(loc)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return NULL;
-    }
-    if (JS_IsUndefined(loc) || JS_IsNull(loc)) {
-        JS_FreeValue(ctx, loc);
-        return NULL;
-    }
-    JSValue href = JS_GetPropertyStr(ctx, loc, "href");
-    char *out = NULL;
-    if (!JS_IsException(href) && !JS_IsUndefined(href) && !JS_IsNull(href)) {
-        const char *s = JS_ToCString(ctx, href);
-        if (s && *s) out = g_strdup(s);
-        if (s) JS_FreeCString(ctx, s);
-        else JS_FreeValue(ctx, JS_GetException(ctx));
-    } else if (JS_IsException(href)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-    }
-    JS_FreeValue(ctx, href);
-    if (!out) {
-        const char *s = JS_ToCString(ctx, loc);
-        if (s && *s) out = g_strdup(s);
-        if (s) JS_FreeCString(ctx, s);
-        else JS_FreeValue(ctx, JS_GetException(ctx));
-    }
-    JS_FreeValue(ctx, loc);
+    if (!JS_IsString(frame_url)) return NULL;
+    const char *s = JS_ToCString(ctx, frame_url);
+    char *out = s && *s ? g_strdup(s) : NULL;
+    if (s) JS_FreeCString(ctx, s);
+    else JS_FreeValue(ctx, JS_GetException(ctx));
     return out;
 }
 
 static JSValue
-ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_js_fetch_for(JSContext *ctx, JSValueConst frame_url, int argc,
+                JSValueConst *argv)
 {
     if (!js_from_ctx(ctx) || argc < 1)
         return JS_ThrowTypeError(ctx, "fetch requires a URL");
@@ -8926,7 +8905,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
                  ns_fetch_body_is_stream(ctx, argv[0], &stream_body))
             carrier = argv[0];
         if (!JS_IsUndefined(stream_body))
-            return ns_fetch_defer_stream_body(ctx, this_val, argc, argv,
+            return ns_fetch_defer_stream_body(ctx, frame_url, argc, argv,
                                               carrier, stream_body);
     }
     JSValue resolving[2];
@@ -8969,7 +8948,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     g_autofree char *method = NULL;
     g_autofree char *body = NULL;
     g_autofree char *content_type = NULL;
-    g_autofree char *base_url = ns_js_fetch_base_from_this(ctx, this_val);
+    g_autofree char *base_url = ns_js_fetch_frame_url(ctx, frame_url);
     gsize body_len = 0;
     GPtrArray *extras = g_ptr_array_new_with_free_func(g_free);
     gboolean init_has_headers = argc >= 2 && JS_IsObject(argv[1]) &&
@@ -9170,6 +9149,34 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     g_free(abs_url);
     JS_FreeCString(ctx, url);
     return promise;
+}
+
+static JSValue
+ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    return ns_js_fetch_for(ctx, JS_UNDEFINED, argc, argv);
+}
+
+static JSValue
+ns_js_frame_fetch(JSContext *ctx, JSValueConst this_val, int argc,
+                  JSValueConst *argv, int magic, JSValue *data)
+{
+    (void)this_val;
+    (void)magic;
+    ns_js *js = js_from_ctx(ctx);
+    JSContext *main_ctx = js && js->main_realm_ctx ? js->main_realm_ctx : ctx;
+    return ns_js_fetch_for(main_ctx, data[0], argc, argv);
+}
+
+static JSValue
+ns_js_frame_fetch_new(JSContext *ctx, const char *frame_url)
+{
+    JSValue url = JS_NewString(ctx, frame_url && *frame_url ? frame_url
+                                                            : "about:blank");
+    JSValue fn = JS_NewCFunctionData(ctx, ns_js_frame_fetch, 2, 0, 1, &url);
+    JS_FreeValue(ctx, url);
+    return fn;
 }
 
 static JSValue
@@ -42754,7 +42761,7 @@ ns_iframe_ensure_content_root(ns_node *iframe)
 }
 
 static const char ns_iframe_scope_bootstrap[] =
-    "(function(realWin, iframeDoc, initialURL, sandbox){"
+    "(function(realWin, iframeDoc, initialURL, sandbox, frameFetch){"
     "  var url = initialURL || 'about:blank';"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
@@ -42805,7 +42812,7 @@ static const char ns_iframe_scope_bootstrap[] =
     "    fetch: function(input, init){"
     "      var req = input;"
     "      try { if (typeof input === 'string') { var u = mk(input); if (u) req = u.href; } } catch(e){}"
-    "      return realWin.fetch.call(win, req, init); },"
+    "      return frameFetch(req, init); },"
     "    get onhashchange(){ return onhash; }, set onhashchange(v){ onhash=v; },"
     "    get onpopstate(){ return onpop; }, set onpopstate(v){ onpop=v; },"
     "    get onmessage(){ return onmsg; }, set onmessage(v){ onmsg=v; },"
@@ -42904,9 +42911,11 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
     if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
         JSValue urlv = JS_NewString(ctx, initial_url ? initial_url : "about:blank");
         JSValue sbv = JS_NewInt32(ctx, (int32_t)sandbox);
-        JSValueConst args[4] = { global, iframe_doc, urlv, sbv };
-        scope = JS_Call(ctx, maker, JS_UNDEFINED, 4, args);
+        JSValue fetchv = ns_js_frame_fetch_new(ctx, initial_url);
+        JSValueConst args[5] = { global, iframe_doc, urlv, sbv, fetchv };
+        scope = JS_Call(ctx, maker, JS_UNDEFINED, 5, args);
         if (JS_IsException(scope)) { JS_FreeValue(ctx, JS_GetException(ctx)); scope = JS_NULL; }
+        JS_FreeValue(ctx, fetchv);
         JS_FreeValue(ctx, urlv);
     } else if (JS_IsException(maker)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -42917,7 +42926,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameFetch){"
     "  var url = initialURL || 'about:blank';"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
@@ -43003,7 +43012,7 @@ static const char ns_iframe_global_bootstrap[] =
     "  def('fetch', { writable: true, value: function(input, init){"
     "      var req = input;"
     "      try { if (typeof input === 'string') { var u = mk(input); if (u) req = u.href; } } catch(e){}"
-    "      return realWin.fetch.call(win, req, init); } });"
+    "      return frameFetch(req, init); } });"
     "  def('onhashchange', { get: function(){ return onhash; }, set: function(v){ onhash=v; } });"
     "  def('onpopstate',   { get: function(){ return onpop; }, set: function(v){ onpop=v; } });"
     "  def('onmessage',    { get: function(){ return onmsg; }, set: function(v){ onmsg=v; } });"
@@ -43150,8 +43159,11 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JSValue urlv = JS_NewString(fctx, initial_url ? initial_url : "about:blank");
         JSValue sbv = JS_NewInt32(fctx, (int32_t)sandbox);
         JSValue platform = ns_iframe_platform_names(fctx, js);
-        JSValueConst args[6] = { fg, parent_global, iframe_doc, urlv, sbv, platform };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 6, args);
+        JSValue fetchv = ns_js_frame_fetch_new(js->ctx, initial_url);
+        JSValueConst args[7] = { fg, parent_global, iframe_doc, urlv, sbv,
+                                 platform, fetchv };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 7, args);
+        JS_FreeValue(js->ctx, fetchv);
         JS_FreeValue(fctx, platform);
         if (!JS_IsException(res) && JS_IsObject(res)) {
             *out_location = JS_GetPropertyStr(fctx, res, "location");

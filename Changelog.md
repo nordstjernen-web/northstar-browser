@@ -22,6 +22,14 @@ Significant changes in each release:
     function names are case-insensitive, so `data-bg="URL(http://…)"`
     under `background-image: attr(data-bg type(*))` was fetched. The
     check now recognises every spelling of every URL-taking function.
+  - Any page could read another site's responses with that site's
+    cookies. `fetch()` took the request's origin, which decides the
+    cookies sent and whether the response may be read, from
+    `this.location.href`, so `fetch.call({location: {href:
+    "https://bank.example/"}}, "https://bank.example/account")` was sent
+    with the bank's cookies and resolved with its body. The origin now
+    comes from the document that owns the `fetch` function: the page's
+    own, or, for a frame, the URL the engine loaded into that frame.
 * A `gap`, `margin-block`, `margin-inline`, `padding-block`,
   `padding-inline`, `inset-block`, `inset-inline`,
   `border-block-*`/`border-inline-*` width, style or color, `overflow`
