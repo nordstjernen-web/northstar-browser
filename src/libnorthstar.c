@@ -2510,7 +2510,10 @@ ns_browser_cursor_at(ns_browser *browser, int x, int y)
         "sw-resize", "ew-resize", "ns-resize", "nesw-resize", "nwse-resize",
         "zoom-in", "zoom-out",
     };
-    if (!browser || !browser->layout || !browser->styles) return NULL;
+    if (!browser || !browser->layout) return NULL;
+    if (browser->js && !browser->relaying)
+        browser_flush_style(browser);
+    if (!browser->layout || !browser->styles) return NULL;
 
     const ns_node *node =
         ns_box_hit_dom(browser->layout, (double)x, (double)y);

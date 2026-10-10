@@ -2753,8 +2753,10 @@ on_released(GtkGestureClick *gesture, int n_press, double x, double y,
     NsProcView *v = data;
     if (v->opened) {
         double s = cur_scale(v);
-        start_release(v, v->scroll_x + (int)(x / s),
-                      v->scroll_y + (int)(y / s));
+        int px = v->scroll_x + (int)(x / s);
+        int py = v->scroll_y + (int)(y / s);
+        start_release(v, px, py);
+        request_link(v, px, py, ACT_HOVER);
     }
 }
 

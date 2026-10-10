@@ -61,6 +61,13 @@ Significant changes in each release:
     worker's, a `ServiceWorkerGlobalScope`), so `self instanceof
     DedicatedWorkerGlobalScope` holds, as worker scripts check before
     running.
+* The mouse cursor follows a page that changes `cursor` from its own
+  pointer handlers. The cursor was looked up in the styles of the last
+  frame, so a drag that set `cursor: move` on `mousedown` showed it a
+  move late, and nothing looked again when the button came up, so the
+  page's reset on `mouseup` never showed and dragging the Google Maps map
+  left the move cursor behind. Pending style changes are now applied
+  before the lookup, and a button release looks the cursor up again.
 * A `gap`, `margin-block`, `margin-inline`, `padding-block`,
   `padding-inline`, `inset-block`, `inset-inline`,
   `border-block-*`/`border-inline-*` width, style or color, `overflow`
