@@ -258,7 +258,10 @@ static void ns_sw_persist_registration(ns_worker_host *host);
 static JSValue ns_sw_unregister(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv);
 static void ns_js_flush_document_write(ns_js *js);
-static void ns_js_flush_layout(ns_js *js);
+static void ns_js_flush_layout_from(ns_js *js, const char *api);
+/* A layout flush, traced as a forced reflow under the name of the binding
+ * that asked for it. */
+#define ns_js_flush_layout(js) ns_js_flush_layout_from((js), G_STRFUNC)
 static void ns_js_flush_style(ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
@@ -1152,6 +1155,7 @@ ns_drain_microtasks(ns_js *js)
     int jobs = 0;
     gint64 slice_deadline =
         g_get_monotonic_time() + NS_MICROTASK_SLICE_US;
+    gint64 trace_start = ns_trace_now();
     js->callback_depth++;
     for (;;) {
         if (js->eval_deadline_us != 0 &&
@@ -1165,6 +1169,9 @@ ns_drain_microtasks(ns_js *js)
         jobs++;
     }
     js->callback_depth--;
+    if (jobs > 0)
+        ns_trace_completef("script", "microtasks", trace_start, "%d jobs",
+                           jobs);
     if (r < 0 && js->log_cb) {
         char *msg = NULL;
         if (ctx_out) {
@@ -1420,8 +1427,40 @@ ns_idle_deadline_time_remaining(JSContext *ctx, JSValueConst this_val,
     return JS_NewFloat64(ctx, tr);
 }
 
+static gboolean ns_timer_fire_impl(gpointer data);
+
+/* A timer's callback, traced with its kind, id and function name. */
 static gboolean
 ns_timer_fire(gpointer data)
+{
+    if (!ns_trace_enabled()) return ns_timer_fire_impl(data);
+    ns_timer *t = data;
+    const char *kind = t->is_idle ? "idle callback"
+                     : t->is_interval ? "setInterval" : "setTimeout";
+    char *fn = NULL;
+    if (!t->code && !JS_IsUndefined(t->cb) && t->js && t->js->ctx) {
+        JSContext *c = t->ctx ? t->ctx : t->js->ctx;
+        JSValue name = JS_GetPropertyStr(c, t->cb, "name");
+        const char *str = JS_IsString(name) ? JS_ToCString(c, name) : NULL;
+        if (str) {
+            fn = g_strdup(str);
+            JS_FreeCString(c, str);
+        }
+        JS_FreeValue(c, name);
+    }
+    char *detail = g_strdup_printf("%s %d (%d ms) %s", kind, t->id,
+                                   t->interval_ms,
+                                   fn && *fn ? fn : t->code ? "<code>" : "");
+    gint64 start = ns_trace_now();
+    gboolean keep = ns_timer_fire_impl(data);
+    ns_trace_complete("script", "timer", start, detail);
+    g_free(detail);
+    g_free(fn);
+    return keep;
+}
+
+static gboolean
+ns_timer_fire_impl(gpointer data)
 {
     ns_timer *t = data;
     ns_js *js = t->js;
@@ -5002,8 +5041,19 @@ ns_make_svg_animated_length(JSContext *ctx, const ns_node *n, const char *attr)
     return o;
 }
 
-static const struct ns_box *ns_box_for_this(JSContext *ctx,
-                                            JSValueConst this_val);
+static const struct ns_box *ns_box_for_this_from(JSContext *ctx,
+                                                 JSValueConst this_val,
+                                                 const char *api);
+#define ns_box_for_this(ctx, this_val) \
+    ns_box_for_this_from((ctx), (this_val), G_STRFUNC)
+static gboolean ns_inline_rect_for_this_from(JSContext *ctx,
+                                             JSValueConst this_val,
+                                             double *x, double *y,
+                                             double *w, double *h,
+                                             const char *api);
+#define ns_inline_rect_for_this(ctx, this_val, x, y, w, h) \
+    ns_inline_rect_for_this_from((ctx), (this_val), (x), (y), (w), (h), \
+                                 G_STRFUNC)
 static void ns_box_border_box(const struct ns_box *b,
                               double *x, double *y, double *w, double *h);
 static void ns_box_visual_border_box(const struct ns_box *b,
@@ -14659,7 +14709,8 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 
     ns_js *js = js_from_ctx(ctx);
     if (js) {
-        if (ns_computed_prop_needs_layout(name)) ns_js_flush_layout(js);
+        if (ns_computed_prop_needs_layout(name))
+            ns_js_flush_layout_from(js, "getComputedStyle");
         else ns_js_flush_style(js);
     }
     const char *style = ns_element_get_attr(n, "style");
@@ -27064,9 +27115,32 @@ ns_js_dispatch_window_only_event(ns_js *js, const ns_node *target_doc,
     ns_js_budget_pop(js, &bg);
 }
 
+static gboolean ns_js_dispatch_built_event_impl(ns_js *js,
+                                                const ns_node *target,
+                                                const char *type,
+                                                JSValue event,
+                                                gboolean *default_prevented);
+
 static gboolean
 ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
                            JSValue event, gboolean *default_prevented)
+{
+    gint64 start = ns_trace_now();
+    gboolean r = ns_js_dispatch_built_event_impl(js, target, type, event,
+                                                 default_prevented);
+    if (start)
+        ns_trace_completef("script", "event", start, "%s on %s",
+                           type ? type : "?",
+                           target && target->name ? target->name
+                           : target && target->kind == NS_NODE_DOCUMENT
+                               ? "#document" : "?");
+    return r;
+}
+
+static gboolean
+ns_js_dispatch_built_event_impl(ns_js *js, const ns_node *target,
+                                const char *type, JSValue event,
+                                gboolean *default_prevented)
 {
     JSContext *saved_ctx = js->ctx;
     ns_node *saved_doc = js->current_doc;
@@ -27541,10 +27615,24 @@ ns_js_run_animation_frame(ns_js *js)
     return ns_js_run_animation_frame_internal(js);
 }
 
+static gboolean ns_js_run_animation_frame_body(ns_js *js);
+
 static gboolean
 ns_js_run_animation_frame_internal(ns_js *js)
 {
     if (!js || js->halted || js->in_pump) return FALSE;
+    guint callbacks = js->raf_pending ? js->raf_pending->len : 0;
+    gint64 start = ns_trace_now();
+    gboolean r = ns_js_run_animation_frame_body(js);
+    if (start)
+        ns_trace_completef("script", "animation frame", start,
+                           "%u callbacks", callbacks);
+    return r;
+}
+
+static gboolean
+ns_js_run_animation_frame_body(ns_js *js)
+{
     ns_js_flush_scrollend(js);
     ns_js_flush_ready_images(js);
     ns_js_flush_autofocus(js);
@@ -32033,11 +32121,11 @@ ns_box_border_box(const ns_box *b, double *x, double *y, double *w, double *h)
 }
 
 static const ns_box *
-ns_box_for_this(JSContext *ctx, JSValueConst this_val)
+ns_box_for_this_from(JSContext *ctx, JSValueConst this_val, const char *api)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js) return NULL;
-    ns_js_flush_layout(js);
+    ns_js_flush_layout_from(js, api);
     if (!js->layout_root) return NULL;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return NULL;
@@ -32045,12 +32133,13 @@ ns_box_for_this(JSContext *ctx, JSValueConst this_val)
 }
 
 static gboolean
-ns_inline_rect_for_this(JSContext *ctx, JSValueConst this_val,
-                        double *x, double *y, double *w, double *h)
+ns_inline_rect_for_this_from(JSContext *ctx, JSValueConst this_val,
+                             double *x, double *y, double *w, double *h,
+                             const char *api)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js) return FALSE;
-    ns_js_flush_layout(js);
+    ns_js_flush_layout_from(js, api);
     if (!js->layout_root) return FALSE;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
@@ -32777,8 +32866,13 @@ ns_element_get_clientHeight(JSContext *ctx, JSValueConst this_val)
     return JS_NewInt32(ctx, (int)(h + 0.5));
 }
 
-static void ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
-                                    double *out_x, double *out_y);
+static void ns_offset_parent_origin_from(JSContext *ctx,
+                                         JSValueConst this_val,
+                                         double *out_x, double *out_y,
+                                         const char *api);
+#define ns_offset_parent_origin(ctx, this_val, out_x, out_y) \
+    ns_offset_parent_origin_from((ctx), (this_val), (out_x), (out_y), \
+                                 G_STRFUNC)
 
 static JSValue
 ns_element_get_offsetTop(JSContext *ctx, JSValueConst this_val)
@@ -32860,15 +32954,15 @@ ns_offset_parent_is_static_root(ns_js *js, const ns_node *p)
 }
 
 static void
-ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
-                        double *out_x, double *out_y)
+ns_offset_parent_origin_from(JSContext *ctx, JSValueConst this_val,
+                             double *out_x, double *out_y, const char *api)
 {
     *out_x = 0;
     *out_y = 0;
     ns_js *js = js_from_ctx(ctx);
     const ns_node *n = ns_unwrap_element(this_val);
     if (!js || !n || n->kind != NS_NODE_ELEMENT) return;
-    ns_js_flush_layout(js);
+    ns_js_flush_layout_from(js, api);
     const ns_style *own = js->style_table
                         ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (own && ns_css_keyword_is(own->values[NS_CSS_POSITION], "fixed"))
@@ -53094,7 +53188,9 @@ ns_js_reset_runtime_state(ns_js *js)
     }
 
     ns_drain_microtasks(js);
+    gint64 gc_start = ns_trace_now();
     JS_RunGC(js->rt);
+    ns_trace_complete("script", "GC", gc_start, "frame contexts freed");
 }
 
 static gboolean
@@ -55758,7 +55854,9 @@ ns_js_sweep_orphans(ns_js *js)
         return;
     js->last_orphan_sweep_us = now;
 
+    gint64 gc_start = ns_trace_now();
     JS_RunGC(js->rt);
+    ns_trace_complete("script", "GC", gc_start, "orphan sweep");
 
     GPtrArray *to_free = g_ptr_array_new();
     GHashTableIter it; gpointer key;
@@ -57255,7 +57353,11 @@ ns_js_lifecycle_tick(gpointer data)
     ns_js_set_navigation_milestone(js,
         &js->navigation_timing.dom_complete_ms, "domComplete");
     js->ready_state = 2;
-    if (js->rt) JS_RunGC(js->rt);
+    if (js->rt) {
+        gint64 gc_start = ns_trace_now();
+        JS_RunGC(js->rt);
+        ns_trace_complete("script", "GC", gc_start, "load event");
+    }
     ns_js_flush_autofocus(js);
     ns_js_dispatch_event(js, doc, "readystatechange", NULL);
     ns_js_set_navigation_milestone(js,
@@ -57495,13 +57597,17 @@ ns_js_note_font_loads(ns_js *js)
 }
 
 static void
-ns_js_flush_layout(ns_js *js)
+ns_js_flush_layout_from(ns_js *js, const char *api)
 {
     if (!js || !js->layout_flush_cb || js->in_layout_flush) return;
     ns_js_note_font_loads(js);
+    gint64 start = ns_trace_now();
     js->in_layout_flush = TRUE;
     js->layout_flush_cb(js->layout_flush_user_data);
     js->in_layout_flush = FALSE;
+    /* Flushes with nothing to do are left out. */
+    if (start && g_get_monotonic_time() - start >= 50)
+        ns_trace_complete("layout", "forced reflow", start, api);
 }
 
 void

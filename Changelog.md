@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* `--trace` also records timers, events, animation frame callbacks,
+  microtasks and garbage collections, forced reflows with the API that
+  asked for them, and restyles.
 * A change to a class, an inline style or an attribute that only
   selectors read restyles the page without rebuilding and laying out the
   box tree when the new computed styles differ only in what paint reads

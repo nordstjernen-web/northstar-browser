@@ -16,7 +16,12 @@ gboolean ns_trace_enabled(void);
 gint64   ns_trace_now(void);
 void     ns_trace_complete(const char *category, const char *name,
                            gint64 start_us, const char *detail);
+void     ns_trace_completef(const char *category, const char *name,
+                            gint64 start_us, const char *fmt, ...)
+                            G_GNUC_PRINTF(4, 5);
 void     ns_trace_thread_name(const char *name);
+/* Names the calling thread the first time it is traced from. */
+void     ns_trace_thread_name_once(const char *name);
 
 G_END_DECLS
 

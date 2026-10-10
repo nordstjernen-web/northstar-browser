@@ -38,6 +38,7 @@
 #include "security.h"
 #include "selection.h"
 #include "camera.h"
+#include "trace.h"
 
 #define NS_IMAGE_RELAYOUT_BATCH 8
 
@@ -256,8 +257,20 @@ browser_restore_scroll(ns_box *b, GHashTable *map)
 static void browser_ensure_images(ns_browser *browser);
 static void browser_schedule_media_events(ns_browser *b);
 
+static void browser_relayout_impl(ns_browser *b);
+
+/* A full relayout, traced with what it took beyond cascade, style pass and
+ * layout (scroll restore, observers, image requests). */
 static void
 browser_relayout(ns_browser *b)
+{
+    gint64 start = ns_trace_now();
+    browser_relayout_impl(b);
+    ns_trace_complete("layout", "relayout", start, NULL);
+}
+
+static void
+browser_relayout_impl(ns_browser *b)
 {
     if (b->relaying) { b->dirty = TRUE; return; }
     gint64 relayout_t0 = g_get_monotonic_time();
@@ -578,8 +591,20 @@ browser_verify_layout(ns_browser *b, const char *what)
  * colours of a box, background position ...): the boxes are pointed at the
  * new styles and the page repainted. FALSE, leaving the page as it was, when
  * a relayout is needed after all. */
+static gboolean browser_restyle_impl(ns_browser *b);
+
 static gboolean
 browser_restyle(ns_browser *b)
+{
+    gint64 start = ns_trace_now();
+    gboolean kept = browser_restyle_impl(b);
+    ns_trace_complete("style", "restyle", start,
+                      kept ? "layout kept" : "needs relayout");
+    return kept;
+}
+
+static gboolean
+browser_restyle_impl(ns_browser *b)
 {
     b->restyle_pending = FALSE;
     gint64 t0 = g_get_monotonic_time();
