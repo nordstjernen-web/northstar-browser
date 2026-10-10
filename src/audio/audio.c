@@ -7,6 +7,7 @@
 #endif
 #define SDL_MAIN_HANDLED
 #include "audio.h"
+#include "trace.h"
 
 #include <glib.h>
 #include <SDL.h>
@@ -227,13 +228,17 @@ audio_cb(void *userdata, Uint8 *stream, int len)
     int nframes = len / frame_bytes;
     SDL_memset(stream, 0, (size_t)len);
     gint64 now = g_get_monotonic_time();
+    gint64 trace_start = ns_trace_now();
+    int playing = 0, starved = 0;
 
     for (int i = 0; i < NS_AUDIO_MAX_PLAYERS; i++) {
         ns_audio_player *p = &g_players[i];
         if (!p->used || !p->playing || !p->pcm) continue;
+        playing++;
         player_clock_sample(p, now, nframes);
         for (int f = 0; f < nframes; f++) {
             if (p->streaming && p->cursor >= p->frames) {
+                if (!p->stream_ended) starved++;
                 if (p->stream_ended) {
                     p->playing = 0;
                     p->reached_end = 1;
@@ -261,6 +266,12 @@ audio_cb(void *userdata, Uint8 *stream, int len)
     for (int i = 0; i < total; i++) {
         if (out[i] > 1.0f) out[i] = 1.0f;
         else if (out[i] < -1.0f) out[i] = -1.0f;
+    }
+    if (trace_start && playing) {
+        ns_trace_thread_name_once("audio device");
+        ns_trace_completef("media", "audio device fill", trace_start,
+                           "%d frames, %d players%s", nframes, playing,
+                           starved ? ", ran out of samples" : "");
     }
 }
 

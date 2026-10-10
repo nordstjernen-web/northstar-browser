@@ -13,6 +13,7 @@
 #include "videodec.h"
 #include "videolayer.h"
 #include "videoworker.h"
+#include "trace.h"
 #include "pl_mpeg.h"
 
 enum {
@@ -285,6 +286,8 @@ mse_feed(ns_video_stream *s, ns_mse_buffer *buffer, gssize target, gboolean show
     }
     guint count = ns_mse_buffer_n_frames(buffer);
     ns_video_worker_set_max_pictures(s->worker, mse_decode_ahead(s));
+    gint64 trace_start = ns_trace_now();
+    int pushed = 0;
     for (gssize i = last + 1; i < (gssize)count; i++) {
         const ns_mse_frame *frame = ns_mse_buffer_frame(buffer, (guint)i);
         if (i > target && frame->pts > goal_pts + NS_VIDEO_FEED_AHEAD_S) break;
@@ -293,7 +296,12 @@ mse_feed(ns_video_stream *s, ns_mse_buffer *buffer, gssize target, gboolean show
         ns_video_worker_push(s->worker, frame->data, frame->config, frame->pts, want);
         s->fed_pts = frame->pts;
         s->fed_valid = TRUE;
+        pushed++;
     }
+    if (pushed)
+        ns_trace_completef("media", "video feed", trace_start,
+                           "%d coded frames up to %.3f for %.3f", pushed,
+                           s->fed_pts, goal_pts);
 }
 
 static gboolean

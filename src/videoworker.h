@@ -24,6 +24,9 @@ void             ns_video_worker_push(ns_video_worker *worker, GBytes *sample,
 void             ns_video_worker_set_max_pictures(ns_video_worker *worker,
                                                   guint max_pictures);
 gboolean         ns_video_worker_expects(ns_video_worker *worker, double pts);
+/* How many decoded pictures wait to be shown, and the newest one's time. */
+guint            ns_video_worker_ready(ns_video_worker *worker,
+                                       double *newest_pts);
 ns_texture      *ns_video_worker_take(ns_video_worker *worker, double pts,
                                       double *taken_pts);
 

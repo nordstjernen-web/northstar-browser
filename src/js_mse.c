@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "mse.h"
+#include "trace.h"
 
 typedef struct {
     ns_mse_source *source;
@@ -197,9 +198,11 @@ js_mse_append(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
         return result;
     }
     gboolean sequence = JS_ToBool(ctx, argv[3]) > 0;
+    gint64 trace_start = ns_trace_now();
     ns_mse_append_result status = ns_mse_buffer_append(handle->buffer, data, len,
                                                        &offset, sequence,
                                                        window_start, window_end);
+    ns_trace_completef("media", "MSE append", trace_start, "%zu bytes", len);
     JS_FreeValue(ctx, holder);
     const char *name = status == NS_MSE_APPEND_OK ? "ok"
                      : status == NS_MSE_APPEND_QUOTA_EXCEEDED ? "quota" : "error";

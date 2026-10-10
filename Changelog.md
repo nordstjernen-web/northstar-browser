@@ -4,6 +4,9 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* `--trace` also records the media pipeline: video decoding and feeding,
+  the picture picked for each view frame, audio device fills and
+  feeding, and MSE appends.
 * Video decoding runs on a thread of its own. An MSE video stream hands
   coded frames (references to the buffered samples) to a decode thread
   that decodes and converts to BGRA up to four frames ahead; the

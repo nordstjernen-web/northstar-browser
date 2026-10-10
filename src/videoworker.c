@@ -4,6 +4,7 @@
  */
 
 #include "videoworker.h"
+#include "trace.h"
 
 #include <math.h>
 
@@ -64,6 +65,7 @@ drop_jobs(ns_video_worker *worker)
 static void
 decode_job(ns_video_worker *worker, worker_job *job, gboolean flush)
 {
+    gint64 trace_start = ns_trace_now();
     if (flush) ns_video_decoder_flush(worker->decoder);
     gint64 stamp = (gint64)llround(job->pts * 1e6);
     ns_texture *texture = ns_video_decoder_decode(worker->decoder, job->sample,
@@ -78,6 +80,10 @@ decode_job(ns_video_worker *worker, worker_job *job, gboolean flush)
         ns_texture_unref(texture);
     }
     g_mutex_unlock(&worker->lock);
+    if (trace_start)
+        ns_trace_completef("media", "video decode", trace_start, "pts %.3f%s%s",
+                           job->pts, job->want_texture ? "" : " (skipped)",
+                           flush ? " after flush" : "");
 }
 
 /* A picture is decoded only while fewer than max_pictures wait to be shown,
@@ -95,6 +101,7 @@ static gpointer
 worker_main(gpointer data)
 {
     ns_video_worker *worker = data;
+    ns_trace_thread_name_once("ns-video-decode");
     g_mutex_lock(&worker->lock);
     while (!worker->quit) {
         if (!worker_may_decode(worker)) {
@@ -211,6 +218,24 @@ ns_video_worker_expects(ns_video_worker *worker, double pts)
     }
     g_mutex_unlock(&worker->lock);
     return found;
+}
+
+guint
+ns_video_worker_ready(ns_video_worker *worker, double *newest_pts)
+{
+    if (newest_pts) *newest_pts = -1.0;
+    if (!worker) return 0;
+    g_mutex_lock(&worker->lock);
+    guint n = 0;
+    for (guint i = 0; i < worker->pictures->len; i++) {
+        const worker_picture *p =
+            &g_array_index(worker->pictures, worker_picture, i);
+        if (!p->texture) continue;
+        n++;
+        if (newest_pts && p->pts > *newest_pts) *newest_pts = p->pts;
+    }
+    g_mutex_unlock(&worker->lock);
+    return n;
 }
 
 ns_texture *

@@ -4,6 +4,7 @@
  */
 
 #include "videolayer.h"
+#include "trace.h"
 
 static const gint64 NS_VIDEO_LAYER_STALE_US = 250 * 1000;
 
@@ -151,10 +152,19 @@ gboolean
 ns_video_layer_present_now(ns_video_layer *layer, gint64 now_us)
 {
     if (!layer) return FALSE;
+    gint64 trace_start = ns_trace_now();
     g_mutex_lock(&layer->lock);
     layer->presented_us = now_us;
-    gboolean changed = layer->composited &&
-        layer_present_locked(layer, clock_position(&layer->clock, now_us));
+    double t = clock_position(&layer->clock, now_us);
+    gboolean changed = layer->composited && layer_present_locked(layer, t);
+    if (trace_start && layer->composited && !layer->clock.paused) {
+        double newest = -1.0;
+        guint ready = ns_video_worker_ready(layer->worker, &newest);
+        ns_trace_completef("media", "video pick", trace_start,
+                           "clock %.3f shown %.3f %s, %u decoded up to %.3f",
+                           t, layer->shown_pts, changed ? "new" : "kept",
+                           ready, newest);
+    }
     g_mutex_unlock(&layer->lock);
     return changed;
 }

@@ -17,6 +17,7 @@
 #include "net.h"
 #include "progressive.h"
 #include "video.h"
+#include "trace.h"
 
 #define NS_MEDIA_POLL_MS 50
 #define NS_MEDIA_TIMEUPDATE_US (250 * 1000)
@@ -826,6 +827,8 @@ static void
 media_mse_feed_audio(ns_media_player *p, double position)
 {
     if (!p->fetching || !p->decoder) return;
+    gint64 trace_start = ns_trace_now();
+    double trace_from = p->mse_audio_next;
     ns_mse_buffer *audio = ns_mse_source_track_buffer(p->mse, NS_MSE_TRACK_AUDIO);
     int channels = ns_audio_decoder_channels(p->decoder);
     float pcm[NS_AUDIO_DECODER_MAX_FRAMES * 2];
@@ -846,6 +849,10 @@ media_mse_feed_audio(ns_media_player *p, double position)
                                          frames, channels);
         p->mse_audio_next = frame->pts + frame->duration;
     }
+    if (trace_start && p->mse_audio_next > trace_from)
+        ns_trace_completef("media", "audio feed", trace_start,
+                           "%.3f-%.3f s decoded", trace_from,
+                           p->mse_audio_next);
     guint n = ns_mse_buffer_n_frames(audio);
     const ns_mse_frame *last = n ? ns_mse_buffer_frame(audio, n - 1) : NULL;
     ns_audio_context_stream_end(p->js->audio_context, p->token,
