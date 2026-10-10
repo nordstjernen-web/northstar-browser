@@ -46,9 +46,29 @@ Windows; the CI workflows are `linux.yml` (Ubuntu/gcc), `musl.yml`
   `controls` attribute paints a play/pause button, seek bar, time and
   mute button (`paint_media_controls`), laid out and hit-tested by
   `ns_media_controls_layout` in `src/js_media.c`; a press on it acts on
-  the element and a drag along the bar seeks. No other
-  video codec is present, and MPEG-1 is not a format the web serves, so
-  this does not play streaming sites. Audio plays in the browser process through
+  the element and a drag along the bar seeks. Streaming sites play
+  through Media Source Extensions: `MediaSource`/`SourceBuffer` in
+  `data/js/polyfills.js` hand appended bytes to the native side
+  (`src/js_mse.c`), which demuxes fragmented MP4 (`src/mp4.c`) or WebM
+  (`src/webm.c`) into per-track frame buffers with buffered ranges,
+  quotas and removal (`src/mse.c`). An MSE video's image becomes a
+  stream (`ns_video_stream_new_mse`) that hands coded frames, from the
+  nearest keyframe on, to a decode thread per stream
+  (`src/videoworker.c`); it decodes AV1 (libdav1d), VP9 (libvpx) or
+  H.264 (OpenH264) and converts to BGRA up to four frames ahead, and
+  each animation tick only picks the decoded frame for the playback
+  clock, so layout and script do not hold up decoding; its
+  sound decodes AAC-LC (in-tree, `src/audio/aac.c`) or Opus (libopus) a
+  few seconds ahead into a streaming mixer player.
+  A plain MP4 or WebM file in `<video src>` plays through the same
+  buffers: `src/progressive.c` fetches it with HTTP range requests,
+  finds the `moov` wherever it sits, and appends the samples an
+  ordinary MP4's sample tables index (`ns_mp4_demuxer_index_*` in
+  `src/mp4.c`) up to half a minute ahead of the playhead, evicting what lies
+  well behind; a seek restarts the download at the keyframe before
+  the target. WebM and fragmented MP4 files are read from the start.
+  A file that is neither falls back to the MPEG-1 path above.
+  Audio plays in the browser process through
   the asynchronous mixer (`src/audio/audio.c`), which decodes
   in-tree — the vendored CC0 [minimp3](https://github.com/lieff/minimp3)
   (`src/audio/minimp3.h`) for `.mp3`, the vendored MIT
@@ -314,7 +334,9 @@ Opus/Vorbis decode to the in-process mixer. `libavif-dev` is optional
 too and adds AVIF decoding; it drags in a full AV1 decoder for a format
 that is rare on the web, so `-Davif=disabled` drops it and AVIF images
 simply fail to decode. `libthai-dev`, also optional, gives
-ns-pango Thai word breaking.
+ns-pango Thai word breaking. `libopenh264-dev` (OpenH264, BSD) adds
+H.264 video; only Cisco's prebuilt OpenH264 binaries carry Cisco's H.264
+patent license, so `-Dh264=disabled` drops it where that matters.
 
 On Fedora/RHEL:
 
