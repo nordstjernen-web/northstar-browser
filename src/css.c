@@ -28723,6 +28723,14 @@ url_function_at(const char *text, const char *open_paren)
            (len == 17 && g_ascii_strncasecmp(q, "-webkit-image-set", 17) == 0);
 }
 
+static gboolean
+contains_url_function(const char *text)
+{
+    for (const char *p = strchr(text, '('); p; p = strchr(p + 1, '('))
+        if (url_function_at(text, p)) return TRUE;
+    return FALSE;
+}
+
 static char *
 substitute_attrs(const char *text, const ns_node *node, int depth,
                  gboolean *tainted)
@@ -28775,8 +28783,7 @@ substitute_attrs(const char *text, const ns_node *node, int depth,
                 g_string_free(out, TRUE);
                 return NULL;
             }
-            if (tainted && (strstr(val, "url(") || strstr(val, "src(") ||
-                            strstr(val, "image-set(")))
+            if (tainted && contains_url_function(val))
                 *tainted = TRUE;
             g_string_append(out, val);
             g_free(val);

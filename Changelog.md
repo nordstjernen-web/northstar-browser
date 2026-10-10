@@ -14,6 +14,14 @@ Significant changes in each release:
     end of that record into the next rule's, or past the end of the heap
     block for the last rule, which AddressSanitizer reported as a heap
     buffer overflow. The record now has a slot for every destination.
+  - A value that `attr()` substitutes is tainted, and a tainted value
+    inside a URL-taking function makes the declaration invalid, so that
+    markup a site lets users author cannot make the browser fetch an
+    arbitrary URL. The check for URL functions in the substituted text
+    matched only lower-case `url(`, `src(` and `image-set(`, while CSS
+    function names are case-insensitive, so `data-bg="URL(http://…)"`
+    under `background-image: attr(data-bg type(*))` was fetched. The
+    check now recognises every spelling of every URL-taking function.
 * Security: a page could free the address the engine was still reading.
   Laying out a page fetches its stylesheets and images synchronously,
   and the engine waited for them by spinning its own main context, so
