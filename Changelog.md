@@ -14,6 +14,17 @@ Significant changes in each release:
   that AddressSanitizer caught on github.com. The engine now waits for
   those fetches on a private context that only the fetch itself can
   wake, and layout works on its own copy of the page URL.
+* Security: moving focus held the old and new elements only as raw
+  pointers while it fired `blur`, `focusout`, `focus` and `focusin`, and
+  each of those handlers can remove either element. A removed element
+  stays alive while script can still reach it, so no page was found that
+  turns this into a use-after-free today, but nothing in the focus code
+  guaranteed it: freeing a node never cleared the focused-node pointer,
+  and an element a `blur` handler removed still received focus. Focus
+  now holds a reference to both elements across the dispatches, declines
+  to focus an element a handler has removed, gives the later events a
+  null `relatedTarget` when the old element is gone, and clears the
+  focused-node pointer when that node is freed.
 * Security: fixes from Nordstjernen's 2026-10-04 audit, ported where
   the same code exists here. Each was reachable from an ordinary page.
   - `font-family: random-item(…)` validated every option by

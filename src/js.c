@@ -3466,6 +3466,8 @@ ns_invalidate_wrapper(ns_node *n)
             JS_FreeValue(js->ctx, pinned);
         }
     }
+    if (js && js->focused_node == n)
+        js->focused_node = NULL;
     if (js && js->orphan_nodes)
         g_hash_table_remove(js->orphan_nodes, n);
     if (js && js->js_image_loads)
@@ -38007,18 +38009,34 @@ ns_js_set_focus(ns_js *js, const ns_node *el)
 {
     if (!js || js->focused_node == el) return;
     const ns_node *old = js->focused_node;
+    gboolean el_was_connected = el && ns_js_node_in_page(js, el);
+    JSValue old_ref = old ? ns_make_element(js->ctx, old) : JS_NULL;
+    JSValue el_ref = el ? ns_make_element(js->ctx, el) : JS_NULL;
+
     if (old) {
         ns_js_dispatch_focus_event(js, old, el, "blur", FALSE);
         ns_js_dispatch_focus_event(js, old, el, "focusout", TRUE);
     }
+
+    if (el && el_was_connected && !ns_js_node_in_page(js, el))
+        el = NULL;
+
     js->focused_node = el;
     if (el) js->focus_nav_start = NULL;
     ns_js_update_focus_visible(js);
     js->mutated = TRUE;
+
     if (el) {
-        ns_js_dispatch_focus_event(js, el, old, "focus", FALSE);
-        ns_js_dispatch_focus_event(js, el, old, "focusin", TRUE);
+        const ns_node *related = old && ns_js_node_in_page(js, old) ? old : NULL;
+        ns_js_dispatch_focus_event(js, el, related, "focus", FALSE);
+        if (js->focused_node == el) {
+            related = old && ns_js_node_in_page(js, old) ? old : NULL;
+            ns_js_dispatch_focus_event(js, el, related, "focusin", TRUE);
+        }
     }
+
+    JS_FreeValue(js->ctx, el_ref);
+    JS_FreeValue(js->ctx, old_ref);
 }
 
 void
