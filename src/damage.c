@@ -337,16 +337,19 @@ ns_paint_hazards_clear(ns_paint_hazards *hazards)
 }
 
 static gboolean
-box_local_transform(const ns_box *b, ns_mat4 *m)
+box_local_transform(const ns_box *b, ns_anim *anim, ns_mat4 *m)
 {
     ns_mat4_identity(m);
     const ns_style *s = b->style;
-    if (!s || !(s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
-                s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]))
+    const ns_css_transform *anim_tf =
+        anim && b->dom ? ns_anim_get_transform(anim, b->dom) : NULL;
+    if (!s || (!anim_tf &&
+               !(s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
+                 s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE])))
         return FALSE;
     ns_css_transform eff;
     eff.n_ops = 0;
-    ns_css_style_effective_transform(s, NULL, &eff);
+    ns_css_style_effective_transform(s, anim_tf, &eff);
     if (eff.n_ops == 0) return FALSE;
     double bx, by, bw, bh;
     box_border_rect(b, &bx, &by, &bw, &bh);
@@ -397,14 +400,13 @@ subtree_visual_extent(const ns_box *b, ns_anim *anim, const ns_mat4 *m,
         if (ns_box_is_fixed(b) ||
             style_keyword_is(b->style, NS_CSS_POSITION, "sticky") ||
             style_keyword_is(b->style, NS_CSS_TRANSFORM_STYLE, "preserve-3d") ||
-            box_has_perspective(b) ||
-            (anim && b->dom && ns_anim_get_transform(anim, b->dom)))
+            box_has_perspective(b))
             return FALSE;
         gboolean three_d = FALSE;
-        if (box_has_transform(b, NULL, &three_d)) {
+        if (box_has_transform(b, anim, &three_d)) {
             if (three_d) return FALSE;
             ns_mat4 t;
-            box_local_transform(b, &t);
+            box_local_transform(b, anim, &t);
             ns_mat4_multiply(m, &t, &local);
         }
     }
@@ -442,6 +444,20 @@ subtree_visual_extent(const ns_box *b, ns_anim *anim, const ns_mat4 *m,
  * change that keeps the layout: its subtree's extent carried through the
  * transforms and scroll offsets of b and its ancestors. FALSE when that
  * cannot be told from the boxes. */
+/* The slot of b among its parent's atomic inline boxes, if it is one. */
+static const ns_inline_atomic *
+box_atomic_slot(const ns_box *b)
+{
+    const ns_box *o = b->parent;
+    for (guint i = 0; o && o->inline_atomics && i < o->inline_atomics->len;
+         i++) {
+        const ns_inline_atomic *a =
+            &g_array_index(o->inline_atomics, ns_inline_atomic, i);
+        if (a->box == b) return a;
+    }
+    return NULL;
+}
+
 gboolean
 ns_damage_box_visual_rect(const ns_box *b, ns_anim *anim, ns_damage_rect *out)
 {
@@ -464,8 +480,6 @@ ns_damage_box_visual_rect(const ns_box *b, ns_anim *anim, ns_damage_rect *out)
                 style_keyword_is(p->style, NS_CSS_TRANSFORM_STYLE, "preserve-3d") ||
                 box_has_perspective(p))
                 return FALSE;
-            if (anim && p->dom && ns_anim_get_transform(anim, p->dom))
-                return FALSE;
         }
         /* An ancestor scrolls its content, then transforms all it paints. */
         if (p != b && (p->scroll_x != 0 || p->scroll_y != 0)) {
@@ -476,10 +490,21 @@ ns_damage_box_visual_rect(const ns_box *b, ns_anim *anim, ns_damage_rect *out)
             ns_mat4_multiply(&m, &total, &total);
         }
         gboolean three_d = FALSE;
-        if (p->style && box_has_transform(p, NULL, &three_d)) {
+        if (p->style && box_has_transform(p, anim, &three_d)) {
             if (three_d) return FALSE;
             ns_mat4 m;
-            box_local_transform(p, &m);
+            box_local_transform(p, anim, &m);
+            ns_mat4_multiply(&m, &total, &total);
+        }
+        /* An inline-block keeps the coordinates of its own line. */
+        const ns_inline_atomic *at = box_atomic_slot(p);
+        if (at) {
+            double tx = p->parent->x + at->owner_offset_x - p->x;
+            double ty = p->parent->y + at->owner_offset_y - p->y;
+            if (!isfinite(tx) || !isfinite(ty)) return FALSE;
+            ns_mat4 m;
+            ns_mat4_identity(&m);
+            ns_mat4_translate(&m, tx, ty, 0);
             ns_mat4_multiply(&m, &total, &total);
         }
         if (ns_box_is_fixed(p)) fixed = TRUE;
@@ -497,4 +522,34 @@ ns_damage_box_visual_rect(const ns_box *b, ns_anim *anim, ns_damage_rect *out)
     out->h = ceil(r.y1) - out->y;
     out->fixed = fixed;
     return TRUE;
+}
+
+static gboolean
+nodes_visual_rects_walk(const ns_box *b, ns_anim *anim, GHashTable *nodes,
+                        GHashTable *found, GArray *out)
+{
+    if (b->dom && g_hash_table_contains(nodes, b->dom)) {
+        ns_damage_rect r;
+        if (!ns_damage_box_visual_rect(b, anim, &r)) return FALSE;
+        if (r.w > 0 && r.h > 0) g_array_append_val(out, r);
+        g_hash_table_add(found, (gpointer)b->dom);
+    }
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        if (!nodes_visual_rects_walk(c, anim, nodes, found, out))
+            return FALSE;
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        const ns_box *a =
+            g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (a && !nodes_visual_rects_walk(a, anim, nodes, found, out))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+gboolean
+ns_damage_nodes_visual_rects(const ns_box *root, ns_anim *anim,
+                             GHashTable *nodes, GHashTable *found,
+                             GArray *out)
+{
+    return !root || nodes_visual_rects_walk(root, anim, nodes, found, out);
 }

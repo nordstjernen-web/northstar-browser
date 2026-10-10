@@ -1294,6 +1294,7 @@ void ns_css_style_change_free(gpointer data);
 void  ns_css_compute_want_delta(GPtrArray *changes);
 /* Changes whenever the styles the next cascade starts from do. */
 guint ns_css_incremental_serial(void);
+gboolean ns_css_last_cascade_continued(void);
 void ns_css_selector_cache_begin(void);
 void ns_css_selector_cache_end(void);
 

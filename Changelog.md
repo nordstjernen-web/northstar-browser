@@ -4,6 +4,31 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Script that changes an attribute layout cannot see no longer lays the
+  page out again: SVG content attributes repaint their `<svg>`, `dir`
+  only relayouts when the text's base direction changes, an `<a>`'s href
+  only when it gains or loses one (clicks read the current href), a form
+  control's class only when it gains or loses one, and attributes of
+  undisplayed scripts and templates not at all. Changes made from timers,
+  messages and events now also restyle without a relayout when they can,
+  as changes from animation frames already did.
+* Each relayout spends less time around layout itself: it looks for
+  transitions and animations only on elements whose style has some, no
+  longer copies every `@keyframes` rule again, and finds the page's style
+  sheets with fewer string comparisons. The style pass after the cascade
+  takes about a third less time on YouTube.
+* Script that adds or removes nodes where layout does not go (inside an
+  element that is not displayed, in an `<svg>`'s content, in `<head>`, or
+  in a tree not yet in the document) restyles the page instead of laying
+  it out again, unless the change brings new style sheets, a new viewport
+  or a new `<base>`. Changes inside an `<svg>` repaint it. `--trace` now
+  names what asked for each relayout.
+* A running CSS animation or transition of opacity, transforms or colours
+  repaints only where its element painted before and after each frame,
+  instead of the whole page, including elements in inline-blocks. The
+  Twitch landing page, whose carousel keeps an animation running,
+  repainted the whole window some 50 times a second and now spends about
+  a fifth of the time painting.
 * `--trace` also records timers, events, animation frame callbacks,
   microtasks and garbage collections, forced reflows with the API that
   asked for them, and restyles.

@@ -21,6 +21,10 @@ void     ns_anim_apply(ns_anim *a, GHashTable *styles);
 gboolean ns_anim_tick(ns_anim *a, gint64 now_us);
 gboolean ns_anim_has_active(const ns_anim *a);
 gboolean ns_anim_needs_layout(const ns_anim *a);
+/* When every running animation and transition changes only properties that
+ * repaint the element's own boxes where they are (opacity, transforms,
+ * colours), adds the animated elements to out and returns TRUE. */
+gboolean ns_anim_repaint_nodes(const ns_anim *a, GPtrArray *out);
 /* Whether a transition or animation ended since the last call. Its values
  * were written into the computed styles, so the elements it ran on need
  * their styles computed again to show where it ended. */

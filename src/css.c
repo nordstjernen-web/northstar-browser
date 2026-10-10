@@ -31088,6 +31088,14 @@ ns_css_forget_node(const ns_node *node)
     style_memo_forget(node);
 }
 
+/* Whether the last cascade went on from the one before it: same document,
+ * style sheets, container sizes and viewport. */
+gboolean
+ns_css_last_cascade_continued(void)
+{
+    return g_incr_pass_active;
+}
+
 static gboolean incr_node_matches_keys(const ns_node *n, GHashTable *keyset);
 static gboolean incr_node_matches_attr_preds(const ns_node *n,
                                              const GPtrArray *preds);

@@ -258,6 +258,12 @@ static void ns_sw_persist_registration(ns_worker_host *host);
 static JSValue ns_sw_unregister(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv);
 static void ns_js_flush_document_write(ns_js *js);
+static void ns_js_note_layout_target_from(ns_js *js, const ns_node *target,
+                                          const char *why);
+#define ns_js_note_layout_target(js, target) \
+    ns_js_note_layout_target_from((js), (target), G_STRFUNC)
+static void ns_js_note_layout_unscoped(ns_js *js, const char *why);
+static void layout_targets_ensure(void);
 static void ns_js_flush_layout_from(ns_js *js, const char *api);
 /* A layout flush, traced as a forced reflow under the name of the binding
  * that asked for it. */
@@ -6298,7 +6304,7 @@ ns_element_append_data(JSContext *ctx, JSValueConst this_val,
     ns_node_replace_text_owned(n, merged);
     JS_FreeCString(ctx, s);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = _j->layout_mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_layout_target(_j, n->parent); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -6322,7 +6328,7 @@ ns_element_delete_data(JSContext *ctx, JSValueConst this_val,
     char *old_copy = g_strdup(n->text ? n->text : "");
     ns_cdata_splice(n, (glong)off, cnt_units, NULL, 0);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = _j->layout_mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_layout_target(_j, n->parent); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -6349,7 +6355,7 @@ ns_element_insert_data(JSContext *ctx, JSValueConst this_val,
     ns_cdata_splice(n, (glong)off, 0, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = _j->layout_mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_layout_target(_j, n->parent); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -6378,7 +6384,7 @@ ns_element_replace_data(JSContext *ctx, JSValueConst this_val,
     ns_cdata_splice(n, (glong)off, cnt_units, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
     { ns_js *_j = js_from_ctx(ctx);
-      if (_j) { _j->mutated = _j->layout_mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+      if (_j) { ns_js_note_layout_target(_j, n->parent); ns_js_record_character_data(_j, n, old_copy); } }
     g_free(old_copy);
     return JS_UNDEFINED;
 }
@@ -6417,7 +6423,7 @@ ns_element_split_text(JSContext *ctx, JSValueConst this_val,
     } else if (_j) {
         g_hash_table_add(_j->orphan_nodes, tail);
     }
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return ns_make_element(ctx, tail);
 }
 
@@ -6480,7 +6486,7 @@ ns_text_replaceWholeText(JSContext *ctx, JSValueConst this_val,
         c = next;
     }
     if (js) {
-        js->mutated = js->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
         ns_qcache_invalidate(js);
         if (parent) ns_css_mark_restyle_dirty(parent);
     }
@@ -6503,7 +6509,7 @@ ns_element_set_nodeValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
         if (!is_null) JS_FreeCString(ctx, s);
         ns_js *_j = js_from_ctx(ctx);
         if (_j) {
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_target(_j, n->kind == NS_NODE_TEXT ? n->parent : NULL);
             ns_js_record_character_data(_j, n, old_copy);
         }
         g_free(old_copy);
@@ -7374,7 +7380,7 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
     ns_element_replace_all_recorded(_j, n, added);
     if (free_s) JS_FreeCString(ctx, s);
     if (_j) {
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_target(_j, n->kind == NS_NODE_TEXT ? n->parent : n);
         if (added) ns_js_script_needs_prepare(_j, n);
     }
     return JS_UNDEFINED;
@@ -7416,7 +7422,7 @@ ns_element_set_innerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
     }
     if (free_s) JS_FreeCString(ctx, s);
     ns_css_mark_restyle_dirty(n);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, n);
     return JS_UNDEFINED;
 }
 
@@ -7513,7 +7519,7 @@ ns_element_set_outerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
     if (next && next->prev_sibling)
         ns_merge_with_next_text_node(_j, next->prev_sibling);
     ns_merge_with_next_text_node(_j, previous);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -7574,7 +7580,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
             c = next;
         }
         ns_node_free(tfrag);
-        if (_j) _j->mutated = _j->layout_mutated = TRUE;
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         return JS_UNDEFINED;
     }
     const ns_node *root = ns_node_root(n);
@@ -7603,7 +7609,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
         ns_node_free(fragment);
     }
     if (_j) {
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_target(_j, n);
         if (!ns_node_in_template_content(n)) {
             ns_ce_upgrade_subtree_all(_j, n);
             ns_js_run_inserted_scripts(_j, n);
@@ -7704,7 +7710,7 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
             ns_js_record_child_change_arrays(_j, parent, kids, removed,
                                              previous, next);
             g_ptr_array_free(removed, TRUE);
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_unscoped(_j, G_STRFUNC);
             ns_ce_upgrade_subtree_all(_j, parent);
             ns_js_run_inserted_scripts(_j, parent);
         }
@@ -7859,7 +7865,7 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
                 added->len ? added : NULL, original->len ? original : NULL,
                 NULL, NULL);
         }
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_target(_j, self);
     }
     ns_js_activate_inserted(_j, self, added);
     g_ptr_array_free(added, FALSE);
@@ -12805,7 +12811,7 @@ ns_css_registerProperty(JSContext *ctx, JSValueConst this_val,
             "registerProperty: 'initialValue' does not match the syntax");
     }
     ns_js *js = js_from_ctx(ctx);
-    if (js) js->mutated = js->layout_mutated = TRUE;
+    if (js) ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -15440,7 +15446,7 @@ ns_anim_seek_native(JSContext *ctx, JSValueConst this_val,
     double ms = 0;
     if (!node || prop == -2 || JS_ToFloat64(ctx, &ms, argv[2]) != 0) return JS_FALSE;
     gboolean ok = ns_anim_seek(js->anim, node, prop, ms);
-    if (ok) js->mutated = js->layout_mutated = TRUE;
+    if (ok) ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_NewBool(ctx, ok);
 }
 
@@ -15460,7 +15466,7 @@ ns_anim_control_native(JSContext *ctx, JSValueConst this_val,
     }
     gboolean ok = ns_anim_control(js->anim, node, prop, op);
     JS_FreeCString(ctx, op);
-    if (ok) js->mutated = js->layout_mutated = TRUE;
+    if (ok) ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_NewBool(ctx, ok);
 }
 
@@ -15615,7 +15621,7 @@ ns_anim_animate_native(JSContext *ctx, JSValueConst this_val,
     g_free(css);
     g_free(pct);
     if (!ok) return JS_NULL;
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     JSValue o = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, o, "run", JS_NewInt32(ctx, -1 - prop));
     JS_SetPropertyStr(ctx, o, "generation", JS_NewInt32(ctx, (int)gen));
@@ -18920,7 +18926,7 @@ ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
     g_hash_table_replace(js->blob_urls, g_strdup(url),
                          ns_blob_entry_new_for_object(ctx, argv[1]));
     ns_media_blob_updated(js, url);
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     JS_FreeCString(ctx, url);
     return JS_TRUE;
 }
@@ -23741,14 +23747,177 @@ ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value)
                        NULL, NULL, NULL, NULL, old_value);
 }
 
-static void
-ns_js_note_attr_style_change(ns_js *js, const ns_node *n, const char *name)
+/* SVG elements that other SVG content may paint by reference. */
+static gboolean
+svg_is_resource(const ns_node *n)
 {
+    static const char *const kinds[] = {
+        "defs", "symbol", "linearGradient", "radialGradient", "pattern",
+        "clipPath", "mask", "marker", "filter",
+    };
+    if (!n->name) return FALSE;
+    for (guint i = 0; i < G_N_ELEMENTS(kinds); i++)
+        if (g_ascii_strcasecmp(n->name, kinds[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+/* The <svg> element that paints n, when n is SVG content below it (not
+ * inside a foreignObject): the SVG painter reads its attributes as it
+ * paints, so layout never sees them. *shared is set when content of other
+ * <svg> elements may paint it by reference. */
+static const ns_node *
+attr_svg_painter(const ns_node *n, gboolean *shared)
+{
+    *shared = svg_is_resource(n);
+    for (const ns_node *p = n->parent; p; p = p->parent) {
+        if (p->kind != NS_NODE_ELEMENT || !p->name) continue;
+        if (g_ascii_strcasecmp(p->name, "foreignObject") == 0) return NULL;
+        if (g_ascii_strcasecmp(p->name, "svg") == 0) return p;
+        if (svg_is_resource(p)) *shared = TRUE;
+    }
+    return NULL;
+}
+
+/* Layout and paint read the dir attribute directly: text inputs align by
+ * the nearest ltr or rtl, bidi isolation by the element's own value, and
+ * text shaping by the nearest non-empty value, with ltr and rtl setting the
+ * base direction and anything else leaving it to the text. */
+typedef enum { DIR_NEUTRAL, DIR_LTR, DIR_RTL } dir_base;
+
+static dir_base
+dir_base_of(const char *v)
+{
+    if (v && g_ascii_strcasecmp(v, "rtl") == 0) return DIR_RTL;
+    if (v && g_ascii_strcasecmp(v, "ltr") == 0) return DIR_LTR;
+    return DIR_NEUTRAL;
+}
+
+static dir_base
+dir_shaping_base(const ns_node *n, const char *own)
+{
+    if (own && *own) return dir_base_of(own);
+    for (const ns_node *p = n->parent; p; p = p->parent) {
+        if (p->kind != NS_NODE_ELEMENT) continue;
+        const char *v = ns_element_get_attr(p, "dir");
+        if (v && *v) return dir_base_of(v);
+    }
+    return DIR_NEUTRAL;
+}
+
+static gboolean
+dir_char_is_rtl(gunichar ch)
+{
+    return (ch >= 0x0590 && ch <= 0x08FF) || (ch >= 0xFB1D && ch <= 0xFDFF) ||
+           (ch >= 0xFE70 && ch <= 0xFEFF) || (ch >= 0x10800 && ch <= 0x10FFF) ||
+           (ch >= 0x1E800 && ch <= 0x1EFFF) || ch == 0x200F || ch == 0x202B ||
+           ch == 0x202E || ch == 0x2067;
+}
+
+/* Whether some text that takes its base direction from n could shape
+ * right to left on its own; budget bounds the walk. */
+static gboolean
+dir_text_may_be_rtl(const ns_node *n, int *budget)
+{
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (--*budget < 0) return TRUE;
+        if (c->kind == NS_NODE_TEXT && c->text) {
+            for (const char *p = c->text; *p; p = g_utf8_next_char(p))
+                if (dir_char_is_rtl(g_utf8_get_char(p))) return TRUE;
+        } else if (c->kind == NS_NODE_ELEMENT) {
+            const char *v = ns_element_get_attr(c, "dir");
+            if (!(v && *v) && dir_text_may_be_rtl(c, budget)) return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static gboolean
+dir_change_reaches_layout(ns_js *js, const ns_node *n, const char *old_value)
+{
+    const char *now = ns_element_get_attr(n, "dir");
+    if (dir_base_of(old_value) != dir_base_of(now)) return TRUE;
+    const ns_style *s = js->style_table
+                      ? g_hash_table_lookup(js->style_table, n) : NULL;
+    if (!s) return TRUE;
+    const char *ub = ns_style_keyword(s, NS_CSS_UNICODE_BIDI);
+    if (ub && strcmp(ub, "normal") != 0) return TRUE;
+    dir_base was = dir_shaping_base(n, old_value);
+    dir_base is = dir_shaping_base(n, now);
+    if (was == is) return FALSE;
+    if (was == DIR_RTL || is == DIR_RTL) return TRUE;
+    /* ltr against a base left to the text: the same unless the text or the
+     * direction property can make it right to left. */
+    const char *d = ns_style_keyword(s, NS_CSS_DIRECTION);
+    if (d && strcmp(d, "rtl") == 0) return TRUE;
+    int budget = 4096;
+    return dir_text_may_be_rtl(n, &budget);
+}
+
+/* Whether layout can see the change of name on n from old_value to its
+ * current value. */
+static gboolean
+attr_change_reaches_layout(ns_js *js, const ns_node *n, const char *name,
+                           const char *old_value)
+{
+    if (n->name && g_ascii_strcasecmp(n->name, "template") == 0)
+        return FALSE;
+    if (n->name && g_ascii_strcasecmp(n->name, "script") == 0) {
+        /* Unrendered unless a style sheet displays it. */
+        const ns_style *s = js->style_table
+                          ? g_hash_table_lookup(js->style_table, n) : NULL;
+        if (s && ns_display_is_none(ns_css_display_of(s))) return FALSE;
+    }
+    if (g_ascii_strcasecmp(name, "dir") == 0)
+        return dir_change_reaches_layout(js, n, old_value);
+    if (g_ascii_strcasecmp(name, "href") == 0 && n->name &&
+        g_ascii_strcasecmp(n->name, "a") == 0) {
+        /* Hit testing reads the link's current href; only whether there
+         * is one decides that a link is laid out. */
+        const char *now = ns_element_get_attr(n, "href");
+        return !(old_value && *old_value && now && *now);
+    }
+    if (g_ascii_strcasecmp(name, "class") == 0 && n->name &&
+        (g_ascii_strcasecmp(n->name, "input") == 0 ||
+         g_ascii_strcasecmp(n->name, "button") == 0 ||
+         g_ascii_strcasecmp(n->name, "select") == 0 ||
+         g_ascii_strcasecmp(n->name, "textarea") == 0))
+        /* Form control chrome looks only at whether a class is set. */
+        return (old_value != NULL) != (ns_element_get_attr(n, "class") != NULL);
+    return !ns_css_attr_only_restyles(n, name) ||
+           ns_layout_reads_label_attr(n, name);
+}
+
+static void
+ns_js_note_attr_style_change(ns_js *js, const ns_node *n, const char *name,
+                             const char *old_value)
+{
+    /* Not rendered: inserting it later lays it out with what it has then. */
+    if (!ns_js_node_in_page(js, n)) return;
+    gboolean shared = FALSE;
+    const ns_node *svg = attr_svg_painter(n, &shared);
+    if (svg) {
+        /* Repainted where its <svg> is, or everywhere when other <svg>
+         * elements may reference it; the cascade still sees it for
+         * selectors that match it. */
+        if (shared || g_ascii_strcasecmp(name, "id") == 0)
+            ns_js_request_repaint(js);
+        else
+            ns_js_request_repaint_node(js, svg);
+        if (ns_css_attr_may_affect_style(n, name)) js->mutated = TRUE;
+        return;
+    }
     if (!ns_css_attr_may_affect_style(n, name)) return;
     js->mutated = TRUE;
-    if (!ns_css_attr_only_restyles(n, name) ||
-        ns_layout_reads_label_attr(n, name))
-        js->layout_mutated = TRUE;
+    if (attr_change_reaches_layout(js, n, name, old_value)) {
+        if (!n->parent || js->layout_mutated) {
+            char *why = g_strdup_printf("attribute %s on %s", name,
+                                        n->name ? n->name : "?");
+            ns_js_note_layout_unscoped(js, g_intern_string(why));
+            g_free(why);
+        } else {
+            ns_js_note_layout_target(js, n->parent);
+        }
+    }
 }
 
 static void
@@ -23765,7 +23934,7 @@ ns_js_set_attr_recorded_len(ns_js *js, ns_node *n, const char *name,
     char *old_copy = old ? ns_value_dup_len(old, old_len) : NULL;
     ns_element_set_attr_len(n, name, new_value, (gssize)vlen);
     if (js) {
-        if (changed) ns_js_note_attr_style_change(js, n, name);
+        if (changed) ns_js_note_attr_style_change(js, n, name, old_copy);
         ns_js_record_attr_change(js, n, name, old_copy);
         ns_ce_attr_changed(js, n, name, old_copy, new_value);
     }
@@ -23794,7 +23963,7 @@ ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n, const char *namespace_uri,
     char *record_copy = g_strdup(record_name);
     ns_element_set_attr_ns(n, namespace_uri, prefix, local_name, name, new_value);
     if (js) {
-        if (changed) ns_js_note_attr_style_change(js, n, record_copy);
+        if (changed) ns_js_note_attr_style_change(js, n, record_copy, old_copy);
         ns_js_record_attr_change_ns(js, n, local_name, namespace_uri,
                                     old_copy);
         ns_ce_attr_changed(js, n, record_copy, old_copy, new_value);
@@ -23815,7 +23984,7 @@ ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name)
                             ns_attr_local_name(old_attr));
     ns_element_remove_attr(n, name);
     if (js) {
-        ns_js_note_attr_style_change(js, n, name);
+        ns_js_note_attr_style_change(js, n, name, old_copy);
         ns_js_record_attr_change(js, n, name, old_copy);
         ns_ce_attr_changed(js, n, name, old_copy, NULL);
     }
@@ -23835,7 +24004,7 @@ ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n, const char *namespace_uri,
     ns_attr_detach_matching(js, n, namespace_uri, local_name);
     ns_element_remove_attr_ns(n, namespace_uri, local_name);
     if (js) {
-        ns_js_note_attr_style_change(js, n, record_copy);
+        ns_js_note_attr_style_change(js, n, record_copy, old_copy);
         ns_js_record_attr_change_ns(js, n, local_name, namespace_uri,
                                     old_copy);
         ns_ce_attr_changed(js, n, record_copy, old_copy, NULL);
@@ -28555,7 +28724,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
                                                  batch_prev, NULL);
         }
         if (_j) {
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_target(_j, parent);
             if (!inert_parent) {
                 for (guint i = 0; i < moved->len; i++) {
                     ns_node *moved_root = g_ptr_array_index(moved, i);
@@ -28575,7 +28744,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     }
     ns_node_append_child(parent, child);
     if (_j) {
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_target(_j, parent);
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
         if (!inert_parent) {
@@ -28607,7 +28776,7 @@ ns_element_removeChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     ns_node_remove(child);
     if (_j2) {
         g_hash_table_add(_j2->orphan_nodes, child);
-        _j2->mutated = _j2->layout_mutated = TRUE;
+        ns_js_note_layout_target(_j2, parent);
         ns_js_record_child_change(_j2, parent, NULL, child,
                                   saved_prev, saved_next);
     }
@@ -28780,7 +28949,7 @@ ns_element_moveBefore(JSContext *ctx, JSValueConst this_val,
         ns_node_append_child(parent, node);
     }
     if (_j) {
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
         ns_js_record_child_change(_j, parent, node, NULL,
                                   node->prev_sibling, node->next_sibling);
     }
@@ -28839,7 +29008,7 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         }
         g_ptr_array_free(added, FALSE);
         if (_j) {
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_target(_j, parent);
             if (!inert_parent) {
                 ns_ce_upgrade_subtree_all(_j, parent);
                 ns_js_run_inserted_scripts(_j, parent);
@@ -28858,7 +29027,7 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, parent, newc, ref);
     }
     if (_j) {
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_target(_j, parent);
         ns_js_record_child_change(_j, parent, newc, NULL,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
@@ -28957,7 +29126,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
             ns_node *p = oldc->prev_sibling, *nx = oldc->next_sibling;
             ns_js_record_child_change(_j, parent, NULL, oldc, p, nx);
             ns_js_record_child_change(_j, parent, oldc, NULL, p, nx);
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_target(_j, parent);
         }
         return JS_DupValue(ctx, argv[1]);
     }
@@ -28990,7 +29159,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
             c = next;
         }
         if (_j) {
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_target(_j, parent);
             if (!inert_parent) {
                 ns_ce_upgrade_subtree_all(_j, parent);
                 ns_js_run_inserted_scripts(_j, parent);
@@ -29019,7 +29188,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         ns_ce_disconnect_subtree(_j, oldc);
         g_hash_table_add(_j->orphan_nodes, oldc);
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_target(_j, parent);
         ns_js_record_child_change(_j, parent, newc, oldc,
                                   newc->prev_sibling, newc->next_sibling);
         if (!inert_parent) {
@@ -29157,7 +29326,7 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
         g_ptr_array_free(kids, TRUE);
         ns_node_free(fragment);
         if (_j) {
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_unscoped(_j, G_STRFUNC);
             if (upgrade_root) {
                 ns_ce_upgrade_subtree_all(_j, upgrade_root);
                 ns_js_run_inserted_scripts(_j, upgrade_root);
@@ -29261,7 +29430,7 @@ ns_element_insertAdjacentElement(JSContext *ctx, JSValueConst this_val,
     if (_j && parent) {
         ns_js_record_child_change(_j, parent, child, NULL,
                                   child->prev_sibling, child->next_sibling);
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
         ns_ce_upgrade_subtree_all(_j, child);
         ns_js_run_inserted_scripts(_j, child);
     }
@@ -29293,7 +29462,7 @@ ns_element_insertAdjacentText(JSContext *ctx, JSValueConst this_val,
     if (_j && parent) {
         ns_js_record_child_change(_j, parent, node, NULL,
                                   node->prev_sibling, node->next_sibling);
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     return JS_UNDEFINED;
 }
@@ -29347,7 +29516,7 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, self->parent);
     ns_js_activate_inserted(_j, self->parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -29394,7 +29563,7 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, node, NULL,
                                       node->prev_sibling, node->next_sibling);
     }
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, parent);
     ns_js_activate_inserted(_j, parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -29462,7 +29631,7 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
                                       saved_prev, saved_next);
         }
     }
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, parent);
     ns_js_activate_inserted(_j, parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -29512,7 +29681,7 @@ ns_element_normalize(JSContext *ctx, JSValueConst this_val,
     if (!el) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     ns_node_normalize_walk(_j, el, 0);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -29600,7 +29769,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
                     g_hash_table_add(_j->orphan_nodes, target);
                     ns_js_record_child_change(_j, old_parent, NULL, target,
                                               saved_prev, saved_next);
-                    _j->mutated = _j->layout_mutated = TRUE;
+                    ns_js_note_layout_target(_j, old_parent);
                 }
             }
         }
@@ -29618,7 +29787,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
         g_hash_table_add(_j->orphan_nodes, n);
         ns_js_record_child_change(_j, old_parent, NULL, n,
                                   saved_prev, saved_next);
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_target(_j, old_parent);
     }
     return JS_UNDEFINED;
 }
@@ -29691,7 +29860,7 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, parent, added, NULL,
                                       added->prev_sibling, added->next_sibling);
     }
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, parent);
     ns_js_activate_inserted(_j, parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -29747,7 +29916,7 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_target(_j, parent);
     ns_js_activate_inserted(_j, parent, seq);
     g_ptr_array_free(seq, TRUE);
     return JS_UNDEFINED;
@@ -30555,7 +30724,7 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         ns_body_forward_content_handler(ctx, n, name, val);
         if (changed && _j) {
             if (!img_src_paint_only)
-                ns_js_note_attr_style_change(_j, n, name);
+                ns_js_note_attr_style_change(_j, n, name, old_copy);
             if (img_src_paint_only)
                 ns_js_request_repaint_node(_j, n);
         }
@@ -33684,7 +33853,7 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
         }
         if (s) JS_FreeCString(ctx, s);
         ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
-        if (_j) _j->mutated = _j->layout_mutated = TRUE;
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         return JS_UNDEFINED;
     }
     if (ns_node_is_element_named(el, "textarea")) {
@@ -33694,7 +33863,7 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
             ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         if (s) JS_FreeCString(ctx, s);
         ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
-        if (_j) _j->mutated = _j->layout_mutated = TRUE;
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     return JS_UNDEFINED;
 }
@@ -33760,7 +33929,7 @@ ns_element_set_selected(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (!ns_node_is_element_named(n, "option")) return JS_UNDEFINED;
     ns_option_set_selected(n, JS_ToBool(ctx, val) ? TRUE : FALSE);
     ns_js *_j = js_from_ctx(ctx);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -33961,7 +34130,7 @@ ns_js_set_input_used_value(ns_js *js, ns_node *n, const char *s)
                                                            : "value", s ? s : "");
     ns_element_remove_attr(n, "data-nd-user-edited");
     ns_css_mark_restyle_dirty(n->parent ? n->parent : n);
-    if (js) js->mutated = js->layout_mutated = TRUE;
+    if (js) ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 static JSValue
@@ -35588,7 +35757,7 @@ ns_element_set_disabled(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (ns_node_is_element_named(el, "style")) {
         guint32 flags = disabled ? el->flags | NS_NODE_SHEET_DISABLED
                                  : el->flags & ~NS_NODE_SHEET_DISABLED;
-        if (flags != el->flags && _j) _j->mutated = _j->layout_mutated = TRUE;
+        if (flags != el->flags && _j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         el->flags = flags;
         return JS_UNDEFINED;
     }
@@ -35620,7 +35789,7 @@ ns_element_set_checked(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     } else {
         ns_element_set_attr(el, "data-nd-checked", "0");
     }
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
     return JS_UNDEFINED;
 }
@@ -35639,7 +35808,7 @@ ns_js_set_indeterminate(ns_js *js, ns_node *el, gboolean indeterminate)
         el->flags |= NS_NODE_INPUT_INDETERMINATE;
     else
         el->flags &= ~NS_NODE_INPUT_INDETERMINATE;
-    if (js) js->mutated = js->layout_mutated = TRUE;
+    if (js) ns_js_note_layout_unscoped(js, G_STRFUNC);
     ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
 }
 
@@ -36149,7 +36318,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
         ns_css_mark_restyle_dirty(el);
-        { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = _j->layout_mutated = TRUE; }
+        { ns_js *_j = js_from_ctx(ctx); if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC); }
         return JS_UNDEFINED;
     }
     if (el->name && strcmp(el->name, "output") == 0) {
@@ -36166,7 +36335,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, old_value);
         ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
-        if (_j) _j->mutated = _j->layout_mutated = TRUE;
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         return JS_UNDEFINED;
     }
     if (el->name && strcmp(el->name, "textarea") == 0) {
@@ -36177,7 +36346,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         ns_text_selection_value_changed(ctx, this_val, old_value);
         JS_FreeValue(ctx, old_value);
         ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
-        if (_j) _j->mutated = _j->layout_mutated = TRUE;
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
         return JS_UNDEFINED;
     }
     if (el->name && strcmp(el->name, "input") == 0) {
@@ -36203,7 +36372,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         ns_text_selection_value_changed(ctx, this_val, old_value);
     JS_FreeValue(ctx, old_value);
     ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
-    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = _j->layout_mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx); if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC); }
     return JS_UNDEFINED;
 }
 
@@ -36262,7 +36431,7 @@ ns_element_set_selectedIndex(JSContext *ctx, JSValueConst this_val,
     ns_select_set_selected_option(el, chosen);
     ns_js *_j = js_from_ctx(ctx);
     ns_css_mark_restyle_dirty(el);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -38105,7 +38274,7 @@ ns_js_set_focus(ns_js *js, const ns_node *el)
     js->focused_node = el;
     if (el) js->focus_nav_start = NULL;
     ns_js_update_focus_visible(js);
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 
     if (el) {
         const ns_node *related = old && ns_js_node_in_page(js, old) ? old : NULL;
@@ -38126,7 +38295,7 @@ ns_js_set_focused_node(ns_js *js, const ns_node *el)
     if (!js || js->focused_node == el) return;
     js->focused_node = el;
     ns_js_update_focus_visible(js);
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 void
@@ -38459,7 +38628,7 @@ ns_details_close_others_in_group(ns_js *js, ns_node *opened, const char *name)
                                         "open", "closed", FALSE, NULL);
             ns_element_remove_attr(c, "open");
             ns_css_mark_restyle_dirty(c);
-            js->mutated = js->layout_mutated = TRUE;
+            ns_js_note_layout_unscoped(js, G_STRFUNC);
             ns_js_dispatch_toggle_event(js, c, "toggle",
                                         "open", "closed", FALSE, NULL);
         }
@@ -38591,7 +38760,7 @@ ns_popover_set_showing(ns_js *js, ns_node *el, gboolean showing)
     if (showing) ns_element_set_attr(el, "data-nd-popover-open", "");
     else         ns_element_remove_attr(el, "data-nd-popover-open");
     ns_css_mark_attr_dirty(el, "data-nd-popover-open", showing ? NULL : "");
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
 }
 
@@ -39539,7 +39708,7 @@ ns_dialog_set_modal(ns_js *js, ns_node *dialog, gboolean modal)
     if (modal) ns_element_set_attr(dialog, "data-nd-modal", "");
     else       ns_element_remove_attr(dialog, "data-nd-modal");
     ns_css_mark_attr_dirty(dialog, "data-nd-modal", modal ? NULL : "");
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 void
@@ -39778,7 +39947,7 @@ ns_dialog_close_steps(ns_js *js, ns_node *dialog, const char *result,
         ns_node_is_shadow_including_inclusive_ancestor(dialog, js->focused_node))
         ns_js_set_focus(js, NULL);
     ns_queue_event_task(js, dialog, "close");
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 static void
@@ -39873,7 +40042,7 @@ ns_dialog_show_modal(ns_js *js, ns_node *dialog, ns_node *source)
     ns_popover_hide_until(js, ns_popover_topmost_ancestor(js, dialog, NULL),
                           FALSE, TRUE);
     ns_dialog_focusing_steps(js, dialog);
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -39902,7 +40071,7 @@ ns_element_show(JSContext *ctx, JSValueConst this_val,
     ns_popover_hide_until(js, ns_popover_topmost_ancestor(js, el, NULL),
                           FALSE, TRUE);
     ns_dialog_focusing_steps(js, el);
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -40408,7 +40577,7 @@ ns_js_reset_form(JSContext *ctx, ns_node *form)
     ns_js_reset_owned_outputs(_j, form, (ns_node *)(doc ? doc : form),
                               doc ? doc : form, 0);
     ns_css_mark_restyle_dirty(form);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -40829,7 +40998,7 @@ ns_js_click_end(ns_js *js, const ns_node *node, const ns_js_click_state *state,
         ns_css_mark_restyle_dirty(state->control->parent
                                   ? state->control->parent
                                   : (ns_node *)state->control);
-        js->mutated = js->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
         return TRUE;
     }
     if (prevented) return FALSE;
@@ -40855,7 +41024,7 @@ ns_js_select_choose_option(ns_js *js, ns_node *option)
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
     ns_css_mark_restyle_dirty(select);
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     return TRUE;
 }
 
@@ -40873,7 +41042,7 @@ ns_js_select_toggle_option(ns_js *js, ns_node *option)
     ns_js_dispatch_event(js, select, "input",  &p);
     ns_js_dispatch_event(js, select, "change", &p);
     ns_css_mark_restyle_dirty(select);
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     return TRUE;
 }
 
@@ -41210,7 +41379,7 @@ ns_js_image_ready_idle(gpointer data)
                                  end_ms - start_ms, 0);
         }
         ns_js_fire_img_load_once(js, r->el, img->failed);
-        if (img->loaded) js->mutated = js->layout_mutated = TRUE;
+        if (img->loaded) ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
     return G_SOURCE_REMOVE;
@@ -42099,7 +42268,7 @@ ns_table_create_section(JSContext *ctx, JSValueConst this_val, const char *name,
         ns_node_append_child(tbl, sec);
     }
     ns_css_mark_restyle_dirty(tbl);
-    if (_j) { _j->mutated = _j->layout_mutated = TRUE; ns_qcache_invalidate(_j); }
+    if (_j) { ns_js_note_layout_unscoped(_j, G_STRFUNC); ns_qcache_invalidate(_j); }
     return ns_make_element(ctx, sec);
 }
 
@@ -42134,7 +42303,7 @@ ns_table_createCaption(JSContext *ctx, JSValueConst this_val,
     else
         ns_node_append_child(tbl, cap);
     ns_css_mark_restyle_dirty(tbl);
-    if (_j) { _j->mutated = _j->layout_mutated = TRUE; ns_qcache_invalidate(_j); }
+    if (_j) { ns_js_note_layout_unscoped(_j, G_STRFUNC); ns_qcache_invalidate(_j); }
     return ns_make_element(ctx, cap);
 }
 
@@ -42149,7 +42318,7 @@ ns_table_delete_section(JSContext *ctx, JSValueConst this_val, const char *name)
     ns_node_remove(existing);
     ns_js_orphan_node(_j, existing);
     ns_css_mark_restyle_dirty(tbl);
-    if (_j) { _j->mutated = _j->layout_mutated = TRUE; ns_qcache_invalidate(_j); }
+    if (_j) { ns_js_note_layout_unscoped(_j, G_STRFUNC); ns_qcache_invalidate(_j); }
 }
 
 static JSValue
@@ -42272,7 +42441,7 @@ ns_table_insertRow(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         ns_js_record_child_change(_j, new_tr->parent, new_tr, NULL,
                                   new_tr->prev_sibling, new_tr->next_sibling);
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     return ns_make_element(ctx, new_tr);
 }
@@ -42297,7 +42466,7 @@ ns_table_deleteRow(JSContext *ctx, JSValueConst this_val,
         ns_js_orphan_node(_j, r);
         if (_j) {
             ns_js_record_child_change(_j, parent, NULL, r, prev, next);
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_unscoped(_j, G_STRFUNC);
         }
     }
     g_ptr_array_free(rows, TRUE);
@@ -42332,7 +42501,7 @@ ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         ns_js_record_child_change(_j, cell->parent, cell, NULL,
                                   cell->prev_sibling, cell->next_sibling);
-        _j->mutated = _j->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     return ns_make_element(ctx, cell);
 }
@@ -42362,7 +42531,7 @@ ns_tr_deleteCell(JSContext *ctx, JSValueConst this_val,
         ns_js_orphan_node(_j, r);
         if (_j) {
             ns_js_record_child_change(_j, parent, NULL, r, prev, next);
-            _j->mutated = _j->layout_mutated = TRUE;
+            ns_js_note_layout_unscoped(_j, G_STRFUNC);
         }
     }
     g_ptr_array_free(cells, TRUE);
@@ -42403,7 +42572,7 @@ ns_select_add(JSContext *ctx, JSValueConst this_val,
     else
         ns_node_append_child(sel, opt);
     ns_css_mark_restyle_dirty(sel);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_UNDEFINED;
 }
 
@@ -42418,7 +42587,7 @@ ns_element_setCustomValidity(JSContext *ctx, JSValueConst this_val,
     else            ns_element_remove_attr(el, NS_CUSTOM_VALIDITY_ATTR);
     ns_js *_j = js_from_ctx(ctx);
     ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     if (msg) JS_FreeCString(ctx, msg);
     return JS_UNDEFINED;
 }
@@ -42600,7 +42769,7 @@ ns_media_set_srcObject(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     }
     if (el) {
         ns_element_set_attr(el, NS_MEDIA_STREAM_ATTR, is_cam ? "camera" : "");
-        if (js) js->mutated = js->layout_mutated = TRUE;
+        if (js) ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     if (el && js && is_cam)
         ns_js_dispatch_event(js, el, "loadedmetadata", NULL);
@@ -44626,7 +44795,7 @@ ns_document_set_body(JSContext *ctx, JSValueConst this_val,
     }
     if (js) {
         g_hash_table_remove(js->orphan_nodes, new_body);
-        js->mutated = js->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
         ns_js_record_child_change(js, root, new_body, NULL,
                                   new_body->prev_sibling,
                                   new_body->next_sibling);
@@ -44807,7 +44976,7 @@ ns_js_fonts_idle(gpointer user_data)
 {
     ns_js *js = user_data;
     if (!js || !js->font_ready_resolvers) return;
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     GArray *resolvers = js->font_ready_resolvers;
     js->font_ready_resolvers = NULL;
     for (guint i = 0; i + 1 < resolvers->len; i += 2) {
@@ -46096,7 +46265,7 @@ ns_document_adopt_node(JSContext *ctx, JSValueConst this_val,
         }
     }
     ns_adopt_owner_walk(ctx, this_val, node, 0);
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     return JS_DupValue(ctx, argv[0]);
 }
 
@@ -48733,6 +48902,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
           ns_js_navigate_cb nav_cb, gpointer nav_user_data,
           const ns_js_navigation_timing *navigation_timing)
 {
+    layout_targets_ensure();
     ns_js *js = g_new0(ns_js, 1);
     if (navigation_timing && navigation_timing->origin_us > 0 &&
         navigation_timing->origin_real_ms > 0) {
@@ -51177,7 +51347,7 @@ ns_synthdoc_set_title(JSContext *ctx, JSValueConst this_val,
     ns_js *_j = js_from_ctx(ctx);
     ns_js_clear_children(_j, t);
     ns_node_append_child(t, ns_node_new_text(g_strdup(s)));
-    if (_j) _j->mutated = _j->layout_mutated = TRUE;
+    if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
@@ -51858,7 +52028,7 @@ ns_document_set_title(JSContext *ctx, JSValueConst this_val, JSValueConst val)
             ? ns_node_new_text_len(g_memdup2(s, len + 1), (guint32)len)
             : NULL;
         ns_element_replace_all_recorded(_j, t, added);
-        if (_j) _j->mutated = _j->layout_mutated = TRUE;
+        if (_j) ns_js_note_layout_unscoped(_j, G_STRFUNC);
     }
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
@@ -52240,7 +52410,7 @@ ns_document_write_insert_output(ns_js *js, ns_document_write_state *state)
                                             document);
         JS_FreeValue(js->ctx, document);
         JS_FreeValue(js->ctx, global);
-        js->mutated = js->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
         ns_ce_upgrade_subtree_all(js, state->parent);
         js->throw_on_dynamic_markup--;
         ns_js_run_inserted_scripts(js, state->parent);
@@ -52303,7 +52473,7 @@ ns_document_open_impl(ns_js *js)
     if (js->document_write_states)
         g_ptr_array_set_size(js->document_write_states, 0);
     js->document_write_parser_open = TRUE;
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     ns_node_arm_js_invalidate(js->current_doc);
 }
 
@@ -52418,7 +52588,7 @@ ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
             (ns_node_is_element_named(host, "iframe") ||
              ns_node_is_element_named(host, "frame")))
             ns_element_set_attr(host, "data-nd-doc-written", "1");
-        js->mutated = js->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     return JS_DupValue(ctx, this_val);
 }
@@ -52495,7 +52665,7 @@ ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
                 c = next;
             }
             ns_node_free(parsed);
-            js->mutated = js->layout_mutated = TRUE;
+            ns_js_note_layout_unscoped(js, G_STRFUNC);
         }
     }
     JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_UNDEFINED);
@@ -52511,7 +52681,7 @@ ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
             if (g_ptr_array_index(js->pending_iframe_loads, i) == host)
                 present = TRUE;
         if (!present) g_ptr_array_add(js->pending_iframe_loads, host);
-        js->mutated = js->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
     }
     return JS_UNDEFINED;
 }
@@ -55778,7 +55948,7 @@ ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe, gboolean force)
     for (guint i = 0; i < js->pending_iframe_loads->len; i++)
         if (g_ptr_array_index(js->pending_iframe_loads, i) == iframe) return;
     g_ptr_array_add(js->pending_iframe_loads, iframe);
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 static void
@@ -57189,7 +57359,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         JS_FreeValue(js->ctx, realm_doc);
     }
 
-    js->mutated = js->layout_mutated = TRUE;
+    ns_js_note_layout_unscoped(js, G_STRFUNC);
     if (content_root)
         ns_js_schedule_static_iframes(js, content_root);
     ns_js_schedule_pending_script_drain(js);
@@ -57593,7 +57763,7 @@ static void
 ns_js_note_font_loads(ns_js *js)
 {
     if (js->layout_root && js->layout_font_generation != ns_font_generation())
-        js->mutated = js->layout_mutated = TRUE;
+        ns_js_note_layout_unscoped(js, G_STRFUNC);
 }
 
 static void
@@ -57680,6 +57850,98 @@ ns_js_dispatch_hashchange(ns_js *js, const char *old_url, const char *new_url)
 /* Whether a change since the last call needs the box tree rebuilt, not
  * only a restyle: everything that sets mutated except attributes that
  * reach rendering through the cascade alone. */
+/* Nodes whose content changed in a way layout must see, each with the
+ * context that changed it, until the browser takes them. A target freed
+ * meanwhile drops out: its removal noted its parent too. */
+static GHashTable *g_layout_targets;
+
+static void
+layout_target_node_freed(ns_node *node)
+{
+    if (g_layout_targets) g_hash_table_remove(g_layout_targets, node);
+}
+
+/* A node left parent, wherever script moved it to: parent's content
+ * changed for layout too. Which script context saw it is told apart by
+ * document when the targets are taken. */
+static void
+layout_target_node_detached(ns_node *parent)
+{
+    if (!g_layout_targets) return;
+    if (!g_hash_table_contains(g_layout_targets, parent))
+        g_hash_table_insert(g_layout_targets, parent, NULL);
+}
+
+static void
+layout_targets_ensure(void)
+{
+    if (g_layout_targets) return;
+    g_layout_targets = g_hash_table_new(g_direct_hash, g_direct_equal);
+    ns_node_free_hook = layout_target_node_freed;
+    ns_node_detach_hook = layout_target_node_detached;
+}
+
+/* A change that needs the whole page laid out again, named for traces. */
+static void
+ns_js_note_layout_unscoped(ns_js *js, const char *why)
+{
+    if (!js) return;
+    js->mutated = TRUE;
+    if (!js->layout_mutated) js->layout_mutated_by = why;
+    js->layout_mutated = TRUE;
+}
+
+static void
+ns_js_note_layout_target_from(ns_js *js, const ns_node *target,
+                              const char *why)
+{
+    if (!js) return;
+    js->mutated = TRUE;
+    if (!target || js->layout_mutated) {
+        ns_js_note_layout_unscoped(js, why);
+        return;
+    }
+    layout_targets_ensure();
+    g_hash_table_insert(g_layout_targets, (gpointer)target, js);
+}
+
+GPtrArray *
+ns_js_take_layout_targets(ns_js *js)
+{
+    if (!js || !g_layout_targets || g_hash_table_size(g_layout_targets) == 0)
+        return NULL;
+    GPtrArray *out = NULL;
+    GHashTableIter it;
+    gpointer k, v;
+    g_hash_table_iter_init(&it, g_layout_targets);
+    const ns_node *page = js->main_document ? js->main_document
+                                            : js->current_doc;
+    const ns_node *page_root = page ? ns_node_root(page) : NULL;
+    while (g_hash_table_iter_next(&it, &k, &v)) {
+        if (!v) {
+            const ns_node *root = ns_node_root(k);
+            if (root->kind != NS_NODE_DOCUMENT ||
+                (root->flags & NS_NODE_FRAGMENT)) {
+                g_hash_table_iter_remove(&it);
+                continue;
+            }
+            if (root != page_root) continue;
+        } else if (v != js) {
+            continue;
+        }
+        if (!out) out = g_ptr_array_new();
+        g_ptr_array_add(out, k);
+        g_hash_table_iter_remove(&it);
+    }
+    return out;
+}
+
+const char *
+ns_js_layout_mutated_by(ns_js *js)
+{
+    return js && js->layout_mutated ? js->layout_mutated_by : NULL;
+}
+
 gboolean
 ns_js_consume_layout_mutated(ns_js *js)
 {

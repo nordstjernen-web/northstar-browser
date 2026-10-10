@@ -16341,7 +16341,10 @@ const char *
 ns_box_hit_link(const ns_box *root, double x, double y)
 {
     const ns_link_range *r = ns_box_hit_link_range(root, x, y);
-    return r ? r->href : NULL;
+    if (!r) return NULL;
+    /* A link's href may change without a relayout while it stays set. */
+    const char *live = r->dom ? ns_element_get_attr(r->dom, "href") : NULL;
+    return live && *live ? live : r->href;
 }
 
 const ns_node *

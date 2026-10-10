@@ -72,6 +72,12 @@ engine_document_base_href(const ns_node *doc)
     return NULL;
 }
 
+const char *
+ns_engine_document_base_href(const ns_node *doc)
+{
+    return engine_document_base_href(doc);
+}
+
 static char *
 engine_document_base_url(ns_node *doc, const char *fallback)
 {
@@ -655,12 +661,17 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc, int depth)
 {
     if (!n || depth >= 512 ||
-        (n->kind != NS_NODE_ELEMENT && n->kind != NS_NODE_DOCUMENT) ||
-        ns_node_is_element_named(n, "noscript"))
+        (n->kind != NS_NODE_ELEMENT && n->kind != NS_NODE_DOCUMENT))
         return;
-    if (ns_node_is_element_named(n, "iframe") ||
-        ns_node_is_element_named(n, "frame") ||
-        ns_node_is_element_named(n, "object")) {
+    /* Runs over every element on each cascade: tell the few names that
+     * matter by their first letter before comparing them. */
+    const char *nm = n->kind == NS_NODE_ELEMENT && n->name ? n->name : "";
+    if (nm[0] == 'n' && strcmp(nm, "noscript") == 0) return;
+    gboolean is_style = nm[0] == 's' && strcmp(nm, "style") == 0;
+    gboolean is_link = nm[0] == 'l' && strcmp(nm, "link") == 0;
+    if ((nm[0] == 'i' && strcmp(nm, "iframe") == 0) ||
+        (nm[0] == 'f' && strcmp(nm, "frame") == 0) ||
+        (nm[0] == 'o' && strcmp(nm, "object") == 0)) {
         sheet_run_flush(cc);
         const char *furl = ns_element_get_attr(n, "data-nd-frame-url");
         if (furl && *furl) base_url = furl;
@@ -691,7 +702,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     }
     GPtrArray *out = cc->out;
     GHashTable *cache = cc->cache;
-    if (ns_node_is_element_named(n, "style") && style_sheet_enabled(n)) {
+    if (is_style && style_sheet_enabled(n)) {
         char *css = ns_css_style_element_text(n);
         if (css) {
             if (css_has_viewport_media(css)) cc->media_seen = TRUE;
@@ -717,7 +728,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             }
             g_free(css);
         }
-    } else if (ns_node_is_element_named(n, "link") && base_url) {
+    } else if (is_link && base_url) {
         sheet_run_flush(cc);
         const char *rel = ns_element_get_attr(n, "rel");
         const char *href = ns_element_get_attr(n, "href");

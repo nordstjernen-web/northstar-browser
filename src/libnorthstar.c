@@ -47,6 +47,10 @@ struct ns_browser {
     ns_box         *layout;
     GHashTable     *styles;
     GHashTable     *layout_styles;
+    /* The document's <base> href when the page was last laid out. */
+    char           *layout_base_href;
+    /* What asked for the pending relayout, for traces. */
+    const char     *relayout_why;
     /* ns_css_incremental_serial() when styles was the cascade's own. */
     guint           styles_serial;
     gboolean        styles_serial_valid;
@@ -265,8 +269,11 @@ static void
 browser_relayout(ns_browser *b)
 {
     gint64 start = ns_trace_now();
+    const char *why = b->js ? ns_js_layout_mutated_by(b->js) : NULL;
+    if (!why) why = b->relayout_why;
+    b->relayout_why = NULL;
     browser_relayout_impl(b);
-    ns_trace_complete("layout", "relayout", start, NULL);
+    ns_trace_complete("layout", "relayout", start, why);
 }
 
 static void
@@ -281,7 +288,11 @@ browser_relayout_impl(ns_browser *b)
     if (b->js) {
         (void)ns_js_consume_mutated(b->js);
         (void)ns_js_consume_layout_mutated(b->js);
+        GPtrArray *targets = ns_js_take_layout_targets(b->js);
+        if (targets) g_ptr_array_free(targets, TRUE);
     }
+    g_free(b->layout_base_href);
+    b->layout_base_href = g_strdup(ns_engine_document_base_href(b->doc));
     b->image_arrivals_since_layout = 0;
     GHashTable *scroll_save =
         g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
@@ -453,6 +464,7 @@ browser_image_arrived(gpointer user_data)
         browser_images_outstanding(b) == 0) {
         b->image_arrivals_since_layout = 0;
         b->dirty = TRUE;
+        if (!b->relayout_why) b->relayout_why = "images arrived";
     }
 }
 
@@ -523,7 +535,9 @@ browser_absorb_js_mutation(ns_browser *b)
 {
     if (!b->js || !ns_js_consume_mutated(b->js)) return BROWSER_JS_NONE;
     ns_render_offer_styles(NULL, 0, NULL, NULL);
+    const char *why = ns_js_layout_mutated_by(b->js);
     if (ns_js_consume_layout_mutated(b->js) || !b->layout) {
+        if (why && !b->relayout_why) b->relayout_why = why;
         b->dirty = TRUE;
         return BROWSER_JS_RELAYOUT;
     }
@@ -591,20 +605,92 @@ browser_verify_layout(ns_browser *b, const char *what)
  * colours of a box, background position ...): the boxes are pointed at the
  * new styles and the page repainted. FALSE, leaving the page as it was, when
  * a relayout is needed after all. */
-static gboolean browser_restyle_impl(ns_browser *b);
+static gboolean browser_restyle_impl(ns_browser *b, GPtrArray *targets);
+static gboolean target_children_unrendered(GHashTable *styles,
+                                           const ns_node *doc,
+                                           const ns_node *t);
+static void browser_damage_node(ns_browser *browser, const ns_node *node);
 
 static gboolean
 browser_restyle(ns_browser *b)
 {
+    GPtrArray *targets = b->js ? ns_js_take_layout_targets(b->js) : NULL;
     gint64 start = ns_trace_now();
-    gboolean kept = browser_restyle_impl(b);
+    /* Script added or removed nodes where layout goes: lay the page out
+     * again without first computing styles for a restyle. */
+    gboolean hopeless = FALSE;
+    for (guint i = 0; targets && !hopeless && i < targets->len; i++)
+        hopeless = !b->styles ||
+                   !target_children_unrendered(b->styles, b->doc,
+                                               g_ptr_array_index(targets, i));
+    gboolean kept = !hopeless && browser_restyle_impl(b, targets);
+    if (hopeless) b->dirty = TRUE;
+    if (!kept && !b->relayout_why)
+        b->relayout_why = targets ? "nodes added or removed"
+                                  : "style change moved boxes";
+    if (targets) g_ptr_array_free(targets, TRUE);
     ns_trace_complete("style", "restyle", start,
-                      kept ? "layout kept" : "needs relayout");
+                      kept ? "layout kept"
+                      : targets ? "needs relayout: nodes added or removed"
+                      : "needs relayout");
     return kept;
 }
 
+/* Whether n's element is left out of layout: it or an ancestor is not
+ * displayed, or it is content of an <svg>, which paints its content as it
+ * paints itself. */
 static gboolean
-browser_restyle_impl(ns_browser *b)
+node_unrendered(GHashTable *styles, const ns_node *n)
+{
+    for (const ns_node *p = n; p; p = p->parent) {
+        if (p->kind != NS_NODE_ELEMENT || !p->name) continue;
+        if (p != n && g_ascii_strcasecmp(p->name, "svg") == 0) return TRUE;
+        if (g_ascii_strcasecmp(p->name, "foreignObject") == 0) return FALSE;
+        const ns_style *st = g_hash_table_lookup(styles, p);
+        if (st && ns_display_is_none(ns_css_display_of(st))) return TRUE;
+    }
+    return FALSE;
+}
+
+/* Whether a change to the children of t leaves layout as it was: they are
+ * left out of layout, and not inside an element whose layout reads its
+ * content whether displayed or not. */
+static gboolean
+target_children_unrendered(GHashTable *styles, const ns_node *doc,
+                           const ns_node *t)
+{
+    const ns_node *root = t;
+    while (root->parent) root = root->parent;
+    if (root != doc) return TRUE;
+    static const char *const read_hidden[] = {
+        "select", "datalist", "option", "optgroup", "textarea", "picture",
+        "video", "audio", "object", "embed", "iframe", "frame", "canvas",
+        "map", "details", "noscript", "template",
+    };
+    for (const ns_node *p = t; p; p = p->parent) {
+        if (p->kind != NS_NODE_ELEMENT || !p->name) continue;
+        for (guint i = 0; i < G_N_ELEMENTS(read_hidden); i++)
+            if (g_ascii_strcasecmp(p->name, read_hidden[i]) == 0) return FALSE;
+    }
+    if (t->kind == NS_NODE_ELEMENT && t->name &&
+        g_ascii_strcasecmp(t->name, "svg") == 0)
+        return TRUE;
+    return node_unrendered(styles, t);
+}
+
+/* The <svg> element that paints n, if any. */
+static const ns_node *
+node_svg_painter(const ns_node *n)
+{
+    for (const ns_node *p = n; p; p = p->parent)
+        if (p->kind == NS_NODE_ELEMENT && p->name &&
+            g_ascii_strcasecmp(p->name, "svg") == 0)
+            return p;
+    return NULL;
+}
+
+static gboolean
+browser_restyle_impl(ns_browser *b, GPtrArray *targets)
 {
     b->restyle_pending = FALSE;
     gint64 t0 = g_get_monotonic_time();
@@ -643,8 +729,18 @@ browser_restyle_impl(ns_browser *b)
     GHashTable *old_to_new = g_hash_table_new(g_direct_hash, g_direct_equal);
     GHashTable *moved = g_hash_table_new(g_direct_hash, g_direct_equal);
     GPtrArray *changed_nodes = g_ptr_array_new();
-    gboolean ok = delta ||
-                  g_hash_table_size(styles) == g_hash_table_size(box_styles);
+    /* Script added or removed nodes: layout stays as it is when they all
+     * sit where layout does not go, and did not change the page's style
+     * sheets, viewport or <base> URL. */
+    gboolean structural = targets && targets->len > 0 &&
+        ns_css_last_cascade_continued() &&
+        g_strcmp0(ns_engine_document_base_href(b->doc),
+                  b->layout_base_href) == 0;
+    for (guint i = 0; structural && styles && i < targets->len; i++)
+        structural = target_children_unrendered(styles, b->doc,
+                                                g_ptr_array_index(targets, i));
+    gboolean ok = (targets && targets->len > 0) ? structural
+        : delta || g_hash_table_size(styles) == g_hash_table_size(box_styles);
     GHashTableIter it;
     if (styles) g_hash_table_iter_init(&it, styles);
     for (guint di = 0; ok; di++) {
@@ -660,6 +756,7 @@ browser_restyle_impl(ns_browser *b)
         const ns_style *ns = val;
         const ns_style *os = g_hash_table_lookup(box_styles, key);
         if (os == ns) continue;
+        if (!os && structural && node_unrendered(styles, key)) continue;
         if (os && node_in_svg(key)) {
             g_ptr_array_add(changed_nodes, key);
             continue;
@@ -760,6 +857,10 @@ browser_restyle_impl(ns_browser *b)
                    "cascade=%.2f%s\n", changed,
                    (g_get_monotonic_time() - t0) / 1000.0, (t1 - t0) / 1000.0,
                    was_delta ? " (changes only)" : "");
+    for (guint i = 0; structural && i < targets->len; i++) {
+        const ns_node *svg = node_svg_painter(g_ptr_array_index(targets, i));
+        if (svg) browser_damage_node(b, svg);
+    }
     browser_verify_layout(b, "restyle");
     return TRUE;
 }
@@ -981,7 +1082,7 @@ typedef struct settle_ctx {
 static gboolean
 browser_settle_quiet(ns_browser *b)
 {
-    if (b->dirty) return FALSE;
+    if (b->dirty || b->restyle_pending) return FALSE;
     if (b->js && ns_js_has_pending_work(b->js)) return FALSE;
     if (b->js && ns_js_has_pending_animation_frame(b->js)) return FALSE;
     if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
@@ -1003,6 +1104,11 @@ settle_tick_cb(gpointer user_data)
     if (b->anim && ns_anim_take_restyle(b->anim)) b->dirty = TRUE;
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
     if (b->js) ns_js_run_animation_frame(b->js);
+    /* Script that ran between ticks (timers, messages, events) may have
+     * asked for a restyle only; one that turns out to need layout is laid
+     * out below. */
+    if (!b->dirty && b->restyle_pending && b->layout && !browser_restyle(b))
+        b->dirty = TRUE;
     if (b->dirty || (b->js && ns_js_consume_mutated(b->js))) {
         if (browser_relayout_from_mutation(b))
             b->dirty = FALSE;
@@ -1102,12 +1208,22 @@ browser_js_repaint_node(const ns_node *node, gpointer user_data)
     if (browser) browser_damage_node(browser, node);
 }
 
+/* Script changed the document between event loop tasks. Changes that
+ * reach rendering only through the cascade restyle; the rest relayout. */
 static void
 browser_js_mutated(gpointer user_data)
 {
     ns_browser *browser = user_data;
     if (!browser) return;
-    browser->dirty = TRUE;
+    ns_render_offer_styles(NULL, 0, NULL, NULL);
+    const char *why = browser->js ? ns_js_layout_mutated_by(browser->js) : NULL;
+    if (!browser->js || !browser->layout ||
+        ns_js_consume_layout_mutated(browser->js)) {
+        if (why && !browser->relayout_why) browser->relayout_why = why;
+        browser->dirty = TRUE;
+    } else {
+        browser->restyle_pending = TRUE;
+    }
     browser->cascade_dirty = TRUE;
 }
 
@@ -1861,6 +1977,71 @@ browser_frame_now(ns_browser *browser)
     return t;
 }
 
+/* The rectangles where the animated elements in nodes paint now, or FALSE
+ * when that cannot be told: some element is rendered in a way that has no
+ * box of its own (an inline element), or a box's place is hard to tell. */
+static gboolean
+browser_anim_rects(ns_browser *b, GHashTable *nodes, GArray *out)
+{
+    GHashTable *found = g_hash_table_new(g_direct_hash, g_direct_equal);
+    gboolean ok = ns_damage_nodes_visual_rects(b->layout, b->anim, nodes,
+                                               found, out);
+    GHashTableIter it;
+    gpointer k;
+    g_hash_table_iter_init(&it, nodes);
+    while (ok && g_hash_table_iter_next(&it, &k, NULL)) {
+        const ns_node *n = k;
+        if (g_hash_table_contains(found, n)) continue;
+        const ns_node *root = n;
+        while (root->parent) root = root->parent;
+        ok = root != b->doc || (b->styles && node_unrendered(b->styles, n));
+    }
+    g_hash_table_destroy(found);
+    return ok;
+}
+
+/* Advances the page's animations. Animations of opacity, transforms and
+ * colours repaint where their elements painted before the step and where
+ * they paint after it; any other animation repaints the whole page. */
+static gboolean
+browser_anim_tick(ns_browser *browser, gint64 now)
+{
+    GPtrArray *nodes = g_ptr_array_new();
+    GHashTable *set = NULL;
+    GArray *rects = NULL;
+    if (browser->layout && !browser->damage_full && !browser->dirty &&
+        ns_anim_repaint_nodes(browser->anim, nodes) && nodes->len > 0) {
+        set = g_hash_table_new(g_direct_hash, g_direct_equal);
+        for (guint i = 0; i < nodes->len; i++)
+            g_hash_table_add(set, g_ptr_array_index(nodes, i));
+        rects = g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
+        if (!browser_anim_rects(browser, set, rects))
+            g_clear_pointer(&rects, g_array_unref);
+    }
+    gboolean ticked = ns_anim_tick(browser->anim, now);
+    if (ticked) {
+        g_ptr_array_set_size(nodes, 0);
+        gboolean same = rects && !ns_anim_needs_layout(browser->anim) &&
+                        ns_anim_repaint_nodes(browser->anim, nodes);
+        for (guint i = 0; same && i < nodes->len; i++)
+            same = g_hash_table_contains(set, g_ptr_array_index(nodes, i));
+        if (same && browser_anim_rects(browser, set, rects)) {
+            if (!browser->damage_rects)
+                browser->damage_rects =
+                    g_array_new(FALSE, FALSE, sizeof(ns_damage_rect));
+            g_array_append_vals(browser->damage_rects, rects->data,
+                                rects->len);
+            browser->repaint_pending = TRUE;
+        } else {
+            browser->damage_full = TRUE;
+        }
+    }
+    if (rects) g_array_unref(rects);
+    if (set) g_hash_table_destroy(set);
+    g_ptr_array_free(nodes, TRUE);
+    return ticked;
+}
+
 int
 ns_browser_tick(ns_browser *browser, int budget_ms)
 {
@@ -1910,12 +2091,15 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
             changed = TRUE;
             other_changed = TRUE;
         }
-        if (browser->anim && ns_anim_tick(browser->anim, now)) {
+        if (browser->anim && browser_anim_tick(browser, now)) {
             changed = TRUE;
             other_changed = TRUE;
-            browser->damage_full = TRUE;
             browser->cascade_dirty = TRUE;
-            if (ns_anim_needs_layout(browser->anim)) browser->dirty = TRUE;
+            if (ns_anim_needs_layout(browser->anim)) {
+                browser->dirty = TRUE;
+                if (!browser->relayout_why)
+                    browser->relayout_why = "animation moves boxes";
+            }
         }
         /* A finished transition left its last written value in the
          * computed style: compute the styles again to show where it
@@ -3886,6 +4070,7 @@ ns_browser_close(ns_browser *browser)
     if (browser->doc) ns_node_free(browser->doc);
     if (browser->images) ns_image_cache_free(browser->images);
     g_free(browser->base_url);
+    g_free(browser->layout_base_href);
     g_free(browser->doc_charset);
     g_free(browser->doc_language);
     g_free(browser->pending_nav);

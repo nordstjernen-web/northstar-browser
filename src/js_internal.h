@@ -120,6 +120,7 @@ struct ns_js {
     char         *early_inject_src;
     gboolean      mutated;
     gboolean      layout_mutated;
+    const char   *layout_mutated_by;
     GHashTable   *timers;
     GMainContext *main_context;
     GPtrArray    *workers;

@@ -45,6 +45,7 @@ GHashTable *ns_engine_compute_cascade_delta(ns_node *doc, const char *base_url,
                                             GHashTable *css_cache,
                                             ns_anim *anim, GPtrArray *changes);
 
+const char *ns_engine_document_base_href(const ns_node *doc);
 GHashTable *ns_engine_relayout(ns_node *doc, const char *base_url,
                                int viewport_width, double viewport_height,
                                ns_image_cache *images, ns_anim *anim,

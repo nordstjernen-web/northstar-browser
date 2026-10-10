@@ -44,6 +44,10 @@ typedef struct ns_attr {
 typedef struct ns_node ns_node;
 
 typedef void (*ns_node_invalidator)(ns_node *self);
+/* Called for every node ns_node_free() frees, when set. */
+extern void (*ns_node_free_hook)(ns_node *node);
+/* Called with the parent of every node taken out of the tree, when set. */
+extern void (*ns_node_detach_hook)(ns_node *parent);
 
 #define NS_NODE_OWN_NAME      (1u << 0)
 #define NS_NODE_OWN_TEXT      (1u << 1)
