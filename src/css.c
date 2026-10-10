@@ -856,6 +856,15 @@ parse_css_wide_keyword(const char *text)
     return v;
 }
 
+static gboolean
+css_text_is_wide_keyword(const char *text)
+{
+    ns_css_value *v = parse_css_wide_keyword(text);
+    gboolean wide = v != NULL;
+    ns_css_value_free(v);
+    return wide;
+}
+
 ns_css_value *
 ns_css_value_dup(const ns_css_value *v)
 {
@@ -18357,7 +18366,7 @@ parse_declaration_block(const char **pp, const char *end,
 
         if ((strcmp(pname, "border-radius") == 0 ||
              strcmp(pname, "-webkit-border-radius") == 0) &&
-            !parse_css_wide_keyword(vtext) && !strstr(vtext, "var(")) {
+            !css_text_is_wide_keyword(vtext) && !strstr(vtext, "var(")) {
             char *radius_canon = border_radius_canonical(vtext);
             if (!radius_canon) {
                 g_free(pname);
