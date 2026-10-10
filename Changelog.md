@@ -4,6 +4,12 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* Media no longer starts by itself: a new `autoplay_enabled` setting,
+  off by default, makes `play()` reject with `NotAllowedError` unless the
+  user clicked or pressed a key in the last five seconds, and ignores the
+  `autoplay` attribute, as browsers' "block audio and video" option
+  does. Video then starts when the user asks, after the page has
+  settled, instead of competing with its layout.
 * getVideoPlaybackQuality() counts the frames a Media Source video
   showed and the ones it decoded too late to show, and
   MediaCapabilities.decodingInfo() reports a video configuration as smooth

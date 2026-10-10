@@ -189,7 +189,7 @@ ns_js_note_user_activation(ns_js *js)
     js->user_ever_activated = TRUE;
 }
 
-static gboolean
+gboolean
 ns_js_has_transient_activation(ns_js *js)
 {
     return js && js->user_activation_us != 0 &&

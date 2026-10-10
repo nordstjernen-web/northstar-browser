@@ -10,6 +10,7 @@
 
 #include "audio/audio.h"
 #include "audiodec.h"
+#include "config.h"
 #include "image.h"
 #include "mainctx.h"
 #include "media_types.h"
@@ -479,9 +480,21 @@ media_start_fetch(ns_media_player *p)
     media_poll_ensure(js);
 }
 
+/* With autoplay_enabled off (the default), media only starts from a user
+ * gesture: the autoplay attribute is ignored and play() needs transient
+ * activation, as with browsers' "block audio and video" setting. */
+static gboolean
+media_autoplay_blocked(const ns_media_player *p)
+{
+    const ns_config *cfg = ns_config_get();
+    return cfg && !cfg->autoplay_enabled &&
+           !ns_js_has_transient_activation(p->js);
+}
+
 static gboolean
 media_autoplay_allowed(const ns_media_player *p)
 {
+    if (media_autoplay_blocked(p)) return FALSE;
     return (p->video && !p->fetching) || media_muted(p) ||
            p->js->user_ever_activated;
 }
@@ -1350,6 +1363,10 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
     if (p->error == MEDIA_ERR_SRC_NOT_SUPPORTED)
         return ns_promise_reject_dom(ctx, "NotSupportedError",
             "Failed to load because no supported source was found.");
+    if (p->paused && media_autoplay_blocked(p))
+        return ns_promise_reject_dom(ctx, "NotAllowedError",
+            "play() failed because the user didn't interact with the "
+            "document first.");
     JSValue *pair = g_new0(JSValue, 2);
     JSValue promise = JS_NewPromiseCapability(ctx, pair);
     if (JS_IsException(promise)) {

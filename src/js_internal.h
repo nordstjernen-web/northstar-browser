@@ -382,6 +382,7 @@ void ns_obj_adopt_global_proto(JSContext *ctx, JSValueConst obj,
                                const char *iface);
 JSValue ns_returns_resolved_undefined(JSContext *ctx, JSValueConst this_val,
                                       int argc, JSValueConst *argv);
+gboolean ns_js_has_transient_activation(ns_js *js);
 JSValue ns_promise_reject_dom(JSContext *ctx, const char *name,
                               const char *message);
 JSValue ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
