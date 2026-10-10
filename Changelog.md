@@ -68,6 +68,13 @@ Significant changes in each release:
   page's reset on `mouseup` never showed and dragging the Google Maps map
   left the move cursor behind. Pending style changes are now applied
   before the lookup, and a button release looks the cursor up again.
+* An absolutely positioned box resolves percentages in its `max-width`,
+  `min-width`, margins and padding against its containing block. They
+  were resolved against the box's own shrink-to-fit width, so
+  `max-width: calc(100% - 740px)` went negative and was dropped, and
+  `max-width: 42%` took 42% of the content's width. Google Maps' row of
+  category chips beside the search box showed one clipped chip instead
+  of five.
 * A `gap`, `margin-block`, `margin-inline`, `padding-block`,
   `padding-inline`, `inset-block`, `inset-inline`,
   `border-block-*`/`border-inline-*` width, style or color, `overflow`

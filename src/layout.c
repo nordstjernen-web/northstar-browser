@@ -12712,7 +12712,9 @@ block_align_content_shift(const ns_box *box, double free_space)
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
-    edges_from_style(box->style, parent_content_width,
+    double cb_width = box->cb_width_override > 0 ? box->cb_width_override
+                                                 : parent_content_width;
+    edges_from_style(box->style, cb_width,
                      &box->margin, &box->padding, &box->border);
 
     const ns_css_value *wv  = box->style ? box->style->values[NS_CSS_WIDTH]     : NULL;
@@ -12750,7 +12752,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             length_is_auto(box->style ? box->style->values[NS_CSS_MARGIN_RIGHT] : NULL))
             flex_col_item_stretch = FALSE;
     }
-    double pct_width_base = parent_content_width;
+    double pct_width_base = cb_width;
     if (flex_row_item && box->parent->content_width > 0)
         pct_width_base = box->parent->content_width;
     if (box->has_flex_main) {
@@ -14835,6 +14837,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         gboolean has_explicit_height = ahv &&
             (ahv->kind == NS_CSS_V_LENGTH || ahv->kind == NS_CSS_V_CALC);
         abox->cb_height_override = cb_h > 0 ? cb_h : 0;
+        abox->cb_width_override = avail > 0 ? avail : 0;
         if (has_explicit_height && value_is_percent(ahv) &&
             cb_h > 0) {
             double pre_h = resolve_height_with_basis(ahv, avail, cb_h, -1);
