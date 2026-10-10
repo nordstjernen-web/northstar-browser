@@ -16,6 +16,8 @@ void          ns_bytecode_cache_shutdown(void);
 guint8 *ns_bytecode_cache_get(const char *src, gsize src_len, gsize *out_len);
 void    ns_bytecode_cache_put(const char *src, gsize src_len,
                       const guint8 *bc, gsize bc_len);
+void    ns_bytecode_cache_precompile(const char *url, const guint8 *src,
+                                     gsize len);
 
 G_END_DECLS
 

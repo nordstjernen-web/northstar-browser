@@ -234,6 +234,33 @@ ns_box *ns_layout_build(const ns_node *doc, GHashTable *styles,
 
 gboolean ns_layout_frame_viewport(const ns_node *frame, double *w, double *h);
 
+/* Whether layout shows the attribute as text: an inline <button> with no
+ * text, pseudo content or replaced content is labelled with its aria-label
+ * or title. */
+gboolean ns_layout_reads_label_attr(const ns_node *n, const char *name);
+
+/* Points the boxes at the new computed styles (styles) where old_to_new maps
+ * an old style that differs from its new one only in values paint reads at
+ * use time, or (old styles in moved) in the insets of an absolutely
+ * positioned box, which is shifted; keeps the layout. The plan is NULL,
+ * changing nothing, when a box baked in at build time values of an old
+ * style that change, or a moved box's size would change too.
+ * ns_layout_restyle_apply() carries the plan out. */
+typedef struct ns_layout_restyle_plan ns_layout_restyle_plan;
+ns_layout_restyle_plan *ns_layout_restyle_plan_new(ns_box *root,
+                                                   GHashTable *styles,
+                                                   GHashTable *old_to_new,
+                                                   GHashTable *moved);
+/* The boxes the plan changes a style of in value. */
+const GPtrArray *ns_layout_restyle_plan_changed(
+    const ns_layout_restyle_plan *plan);
+void ns_layout_restyle_apply(ns_layout_restyle_plan *plan);
+void ns_layout_restyle_plan_free(ns_layout_restyle_plan *plan);
+
+/* The first geometry, style or structure difference between two box trees,
+ * for NS_LAYOUT_VERIFY; NULL when they match. */
+char *ns_layout_diff(const ns_box *a, const ns_box *b);
+
 void ns_layout_set_open_select(const ns_node *select);
 void ns_layout_set_datalist_open(gboolean open);
 char *ns_vertical_stack_text(const char *text);

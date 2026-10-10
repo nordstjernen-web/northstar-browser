@@ -42,6 +42,78 @@ int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
     return -1;
 }
 
+static JSValue ns_quickjs_error_stack_set(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv,
+                                          int magic, JSValueConst *func_data)
+{
+    (void)magic;
+    if (!JS_IsObject(this_val))
+        return JS_ThrowTypeError(ctx, "Error.prototype.stack setter called on a non-object");
+    if (JS_IsStrictEqual(ctx, this_val, func_data[0]))
+        return JS_ThrowTypeError(ctx, "Error.prototype.stack setter called on the home object");
+    JSValueConst value = argc > 0 ? argv[0] : JS_UNDEFINED;
+    JSAtom stack = JS_NewAtom(ctx, "stack");
+    JSPropertyDescriptor desc;
+    int own = JS_GetOwnProperty(ctx, &desc, this_val, stack);
+    int ret = -1;
+    if (own == 0) {
+        ret = JS_DefinePropertyValue(ctx, this_val, stack, JS_DupValue(ctx, value),
+                                     JS_PROP_C_W_E | JS_PROP_THROW);
+    } else if (own > 0) {
+        JS_FreeValue(ctx, desc.value);
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+        ret = JS_SetProperty(ctx, this_val, stack, JS_DupValue(ctx, value));
+    }
+    JS_FreeAtom(ctx, stack);
+    return ret < 0 ? JS_EXCEPTION : JS_UNDEFINED;
+}
+
+static void ns_quickjs_accept_any_error_stack(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue error = JS_GetPropertyStr(ctx, global, "Error");
+    JSValue proto = JS_GetPropertyStr(ctx, error, "prototype");
+    JSAtom stack = JS_NewAtom(ctx, "stack");
+    JSPropertyDescriptor desc;
+    if (JS_IsObject(proto) && JS_GetOwnProperty(ctx, &desc, proto, stack) > 0) {
+        if ((desc.flags & JS_PROP_GETSET) && JS_IsFunction(ctx, desc.setter)) {
+            JSValue setter = JS_NewCFunctionData(ctx, ns_quickjs_error_stack_set,
+                                                 1, 0, 1, (JSValueConst *)&proto);
+            JS_DefinePropertyValueStr(ctx, setter, "name",
+                                      JS_NewString(ctx, "set stack"),
+                                      JS_PROP_CONFIGURABLE);
+            JS_DefineProperty(ctx, proto, stack, JS_UNDEFINED, desc.getter, setter,
+                              JS_PROP_HAS_GET | JS_PROP_HAS_SET);
+            JS_FreeValue(ctx, setter);
+        }
+        JS_FreeValue(ctx, desc.value);
+        JS_FreeValue(ctx, desc.getter);
+        JS_FreeValue(ctx, desc.setter);
+    }
+    if (JS_HasException(ctx))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeAtom(ctx, stack);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, error);
+    JS_FreeValue(ctx, global);
+}
+
+#ifdef NS_QUICKJS_ORIGINAL
+static void ns_quickjs_learn_class_ids_once(JSContext *ctx);
+#endif
+
+JSContext *ns_quickjs_new_context(JSRuntime *rt)
+{
+    JSContext *ctx = (JS_NewContext)(rt);
+    if (!ctx) return NULL;
+#ifdef NS_QUICKJS_ORIGINAL
+    ns_quickjs_learn_class_ids_once(ctx);
+#endif
+    ns_quickjs_accept_any_error_stack(ctx);
+    return ctx;
+}
+
 #ifdef NS_QUICKJS_ORIGINAL
 
 #include <stdarg.h>
@@ -83,15 +155,13 @@ static void ns_quickjs_learn_class_ids(JSContext *ctx)
             JS_NewTypedArray(ctx, 1, &zero, (JSTypedArrayEnum)type));
 }
 
-JSContext *ns_quickjs_new_context(JSRuntime *rt)
+static void ns_quickjs_learn_class_ids_once(JSContext *ctx)
 {
     static gsize learned;
-    JSContext *ctx = (JS_NewContext)(rt);
-    if (ctx && g_once_init_enter(&learned)) {
+    if (g_once_init_enter(&learned)) {
         ns_quickjs_learn_class_ids(ctx);
         g_once_init_leave(&learned, 1);
     }
-    return ctx;
 }
 
 static bool ns_quickjs_has_class(JSValueConst val, JSClassID class_id)

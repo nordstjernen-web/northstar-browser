@@ -14,6 +14,13 @@
 #include "paint.h"
 
 static gboolean g_render_page_uses_hover = FALSE;
+static gboolean g_render_page_uses_containers = FALSE;
+
+gboolean
+ns_render_page_uses_containers(void)
+{
+    return g_render_page_uses_containers;
+}
 
 gboolean
 ns_render_page_uses_hover(void)
@@ -320,6 +327,51 @@ render_keep_container_seed(const ns_node *doc, double viewport_width,
 }
 
 GHashTable *
+ns_render_container_map(const ns_node *doc)
+{
+    return g_cq_seed && g_cq_seed_doc == doc ? g_cq_seed : NULL;
+}
+
+static GHashTable    *g_offered_styles;
+static const ns_node *g_offered_doc;
+static double         g_offered_width;
+static GHashTable    *g_offered_containers;
+
+void
+ns_render_offer_styles(const ns_node *doc, double viewport_width,
+                       GHashTable *containers, GHashTable *styles)
+{
+    if (g_offered_styles) g_hash_table_destroy(g_offered_styles);
+    g_offered_styles = styles;
+    g_offered_doc = doc;
+    g_offered_width = viewport_width;
+    g_offered_containers = containers;
+}
+
+double
+ns_render_viewport_width(ns_node *doc, double viewport_width)
+{
+    ns_render_ctx c = { .doc = doc, .viewport_width = viewport_width };
+    return render_effective_viewport_width(&c);
+}
+
+static GHashTable *
+render_take_offered_styles(const ns_node *doc, double viewport_width,
+                           GHashTable *containers)
+{
+    GHashTable *styles = g_offered_styles;
+    gboolean usable = styles && g_offered_doc == doc &&
+                      g_offered_width == viewport_width &&
+                      g_offered_containers == containers;
+    g_offered_styles = NULL;
+    if (styles && !usable) {
+        g_hash_table_destroy(styles);
+        styles = NULL;
+    }
+    return styles;
+}
+
+GHashTable *
 ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
                            ns_render_profile *profile)
 {
@@ -355,14 +407,19 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
     for (guint i = 0; i < c->n_sheets && !container_rules; i++)
         container_rules = ns_css_stylesheet_has_container_rules(c->sheets[i]);
     GHashTable *seed = render_container_seed(c->doc, viewport_width);
+    g_render_page_uses_containers = container_rules || seed != NULL;
     gboolean cache_selectors = container_rules &&
                                !(seed && g_cq_seed_settled);
     if (cache_selectors) ns_css_selector_cache_begin();
     gint64 trace_start = ns_trace_now();
-    ns_css_set_container_map(seed);
-    GHashTable *styles = ns_css_compute_scoped(c->doc, c->sheets, c->sheet_docs,
-                                               c->n_sheets);
-    ns_css_set_container_map(NULL);
+    GHashTable *styles = render_take_offered_styles(c->doc, viewport_width,
+                                                    seed);
+    if (!styles) {
+        ns_css_set_container_map(seed);
+        styles = ns_css_compute_scoped(c->doc, c->sheets, c->sheet_docs,
+                                       c->n_sheets);
+        ns_css_set_container_map(NULL);
+    }
     ns_trace_complete("style", "cascade", trace_start, NULL);
     gint64 t1 = profile ? g_get_monotonic_time() : 0;
 

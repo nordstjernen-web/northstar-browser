@@ -326,6 +326,10 @@ them, their notices apply:
 - **opusfile / libopus / vorbisfile / libvorbis / libogg** — BSD 3-Clause,
   © the Xiph.Org Foundation. Optional Ogg Opus / Vorbis decode in the
   in-process audio mixer.
+- **OpenH264** — BSD 2-Clause, © Cisco Systems and the OpenH264
+  contributors. Optional H.264 video decode (meson `h264` feature). The
+  H.264 patent license Cisco pays for covers only the binaries Cisco
+  builds and distributes, not builds from source.
 
 ---
 

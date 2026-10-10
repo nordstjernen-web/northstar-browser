@@ -626,14 +626,17 @@ svg_parse_transform(const char *s, cairo_matrix_t *out)
     return any;
 }
 
-static void
+static gboolean
 svg_apply_transform_attr(svg_ctx *ctx, const ns_node *n, const char *attr)
 {
     const char *t = ns_element_get_attr(n, attr);
-    if (!t) return;
+    if (!t) return TRUE;
     cairo_matrix_t m;
-    if (!svg_parse_transform(t, &m)) return;
+    if (!svg_parse_transform(t, &m)) return TRUE;
+    cairo_matrix_t inverse = m;
+    if (cairo_matrix_invert(&inverse) != CAIRO_STATUS_SUCCESS) return FALSE;
     cairo_transform(ctx->cr, &m);
+    return TRUE;
 }
 
 static void
@@ -1264,16 +1267,16 @@ svg_clip_path_children(svg_ctx *ctx, const ns_node *clip, const svg_state *st)
                 ctx->depth++;
                 svg_clip_path_children(ctx, c, st);
                 cairo_save(ctx->cr);
-                svg_apply_transform_attr(ctx, c, "transform");
-                if (svg_shape_path(ctx, t, st)) { }
+                if (svg_apply_transform_attr(ctx, c, "transform"))
+                    svg_shape_path(ctx, t, st);
                 cairo_restore(ctx->cr);
                 ctx->depth--;
             }
             continue;
         }
         cairo_save(ctx->cr);
-        svg_apply_transform_attr(ctx, c, "transform");
-        svg_shape_path(ctx, c, st);
+        if (svg_apply_transform_attr(ctx, c, "transform"))
+            svg_shape_path(ctx, c, st);
         cairo_restore(ctx->cr);
     }
 }
@@ -1375,13 +1378,14 @@ svg_apply_clip(svg_ctx *ctx, const ns_node *n, const svg_state *st)
     cairo_save(ctx->cr);
     const char *units = ns_element_get_attr(clip, "clipPathUnits");
     gboolean obb = units && g_ascii_strcasecmp(units, "objectBoundingBox") == 0;
-    if (obb) {
+    gboolean degenerate = obb && (ctx->vw <= 0 || ctx->vh <= 0);
+    if (obb && !degenerate) {
         cairo_matrix_t m;
         cairo_matrix_init_scale(&m, ctx->vw, ctx->vh);
         cairo_transform(ctx->cr, &m);
     }
     cairo_new_path(ctx->cr);
-    svg_clip_path_children(ctx, clip, st);
+    if (!degenerate) svg_clip_path_children(ctx, clip, st);
     cairo_restore(ctx->cr);
     cairo_set_fill_rule(ctx->cr, st->clip_rule);
     cairo_clip(ctx->cr);
@@ -1776,7 +1780,11 @@ svg_render_element(svg_ctx *ctx, const ns_node *n, const svg_state *parent)
 
     cairo_t *cr = ctx->cr;
     cairo_save(cr);
-    svg_apply_transform_attr(ctx, n, "transform");
+    if (!svg_apply_transform_attr(ctx, n, "transform")) {
+        cairo_restore(cr);
+        svg_state_clear(&st);
+        return;
+    }
 
     cairo_surface_t *mask = svg_mask_surface(ctx, n, &st);
     gboolean grouped = opacity < 1.0 || mask != NULL;

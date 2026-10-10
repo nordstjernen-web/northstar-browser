@@ -283,7 +283,7 @@ selects it; headless runs are never supervised by the watchdog.
 | `--settle-ms=N` | Time to let the page settle before output (default 200). |
 | `--time-ms=N` | Page time between the first and final image or PDF capture (default 1000). |
 | `--eval=EXPR` | Evaluate JavaScript after settling and print the result. |
-| `--act='ACTION; ACTION'` | Input before output: `click X,Y`, `rightclick X,Y`, `type TEXT`, `key NAME`, `wait MS`, `eval JS`, `evalfile PATH`, and more. |
+| `--act='ACTION; ACTION'` | Input before output: `click X,Y`, `rightclick X,Y`, `move X,Y` (pointer motion: hover, `:hover`, mouseover/mousemove), `down X,Y` and `up` (press and release, with `move`s between them for a drag), `type TEXT`, `key NAME`, `wait MS`, `eval JS`, `evalfile PATH`, and more. Outside `--dump=png`, a point may be `sel=CSS [dx=N] [dy=N]`: the centre of the first matching element when the action runs. |
 | `--inspect=SELECTOR`, `--inspect-at=X,Y` | Report the layout boxes matching a selector, or at a point. |
 | `--wpt`, `--wpt-timeout-ms=N` | Run a testharness.js page and report every subtest; see [compliance.md](compliance.md). |
 | `--debug[=info,warn,error,render,net,js]` | Stream engine events to stderr; `net` adds fetch, layout and shaping-cache totals at exit. |

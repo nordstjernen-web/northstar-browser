@@ -922,6 +922,8 @@ char *
 ns_url_origin_from(const char *url)
 {
     if (!url || !*url) return NULL;
+    if (g_str_has_prefix(url, "blob:") && ns_url_is_http_or_https(url + 5))
+        return ns_url_origin_from(url + 5);
     if (!ns_url_is_http_or_https(url))
         return NULL;
 
@@ -5167,6 +5169,11 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                               : (top_origin ? top_origin : "");
     char *cache_partition = ns_net_partition_key(url, top_url);
     const char *request_accept = "*/*";
+    gboolean range_request = FALSE;
+    for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
+        const char *h = g_ptr_array_index(extra_headers, i);
+        if (g_ascii_strncasecmp(h, "Range:", 6) == 0) range_request = TRUE;
+    }
     for (guint i = 0; extra_headers && i < extra_headers->len; i++) {
         const char *h = g_ptr_array_index(extra_headers, i);
         if (g_ascii_strncasecmp(h, "Accept:", 7) != 0) continue;
@@ -5199,7 +5206,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         ? cookie_partition_get(partition_key) : NULL;
 
     ns_cache_entry *cached = NULL;
-    if (request_http && is_simple_get(method)) {
+    if (request_http && is_simple_get(method) && !range_request) {
         cached = ns_cache_get(url, cache_partition, cache_request_headers);
         if (cached && ns_cache_is_fresh(cached)) {
             gboolean cache_has_cors =
@@ -5670,7 +5677,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         cookie_partition_flush(cookie_partition);
 
     if (rc == CURLE_OK && request_http && is_simple_get(method) &&
-        !header_ctx.set_cookie_seen &&
+        !range_request && !header_ctx.set_cookie_seen &&
         !resp->tls_warning) {
         if (resp->status == 304 && cached && cached->body) {
             ns_cache_promote_304(url, cache_partition, cache_request_headers,

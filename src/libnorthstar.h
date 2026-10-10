@@ -97,6 +97,9 @@ int ns_browser_set_caret_blink_active(ns_browser *browser, int active);
 int ns_browser_caret_blinking(ns_browser *browser);
 char *ns_browser_title(ns_browser *browser);
 char *ns_browser_url(ns_browser *browser);
+/* Whether the page pushed a new history entry (history.pushState, a new
+ * fragment) since the last call. */
+int   ns_browser_take_url_pushed(ns_browser *browser);
 void ns_browser_set_next_navigation(const char *referrer,
                                     int user_activated);
 int ns_browser_security(ns_browser *browser, const char **out_ip);

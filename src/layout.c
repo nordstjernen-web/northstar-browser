@@ -669,6 +669,7 @@ ns_box_free(ns_box *box)
             c = next;
         }
         if (cur->paint_layout) ns_paint_drop_box_cache(cur);
+        if (cur->svg_styles) g_hash_table_unref(cur->svg_styles);
         fragment_context_free(cur->fragment_context);
         if (cur->links) g_array_free(cur->links, TRUE);
         if (cur->attrs) g_array_free(cur->attrs, TRUE);
@@ -1046,6 +1047,7 @@ static ns_box *build_inline_run(const ns_node *first, const ns_node *last_excl, 
 static void translate_subtree(ns_box *box, double dx, double dy);
 static ns_box *build_inline_run_no_abs_placeholders(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
 static gboolean inline_atomic_needs_layout(const ns_box *ab);
+static void inline_atomic_prepare(ns_box *ab, const ns_style *parent_style);
 static double pango_layout_line_top(NsPangoLayout *layout, int line_index);
 static ns_box *build_pseudo_inline_for(const ns_style *ps, const ns_node *host);
 static ns_box *build_pseudo_block_for(const ns_style *ps, const ns_node *host);
@@ -1079,6 +1081,17 @@ static gboolean
 button_has_replaced_child(const ns_node *n)
 {
     return button_has_replaced_child_depth(n, 0);
+}
+
+gboolean
+ns_layout_reads_label_attr(const ns_node *n, const char *name)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name || !name ||
+        (g_ascii_strcasecmp(name, "aria-label") != 0 &&
+         g_ascii_strcasecmp(name, "title") != 0))
+        return FALSE;
+    return g_ascii_strcasecmp(n->name, "button") == 0 &&
+           !button_has_replaced_child(n);
 }
 
 static gboolean
@@ -4930,7 +4943,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         ns_box *box = box_new(NS_BOX_SVG);
         box->dom = n;
         box->style = s;
-        box->svg_styles = styles;
+        box->svg_styles = styles ? g_hash_table_ref(styles) : NULL;
         ns_box_media *m = ns_box_media_ensure(box);
 
         ns_svg_size size;
@@ -5545,8 +5558,7 @@ inline_layout_atomics_prepare(ns_box *box, const ns_style *parent_style)
     for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
         ns_box *ab =
             g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-        if (inline_atomic_needs_layout(ab))
-            layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+        inline_atomic_prepare(ab, parent_style);
     }
 }
 
@@ -6208,6 +6220,11 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             if (outer > line_heights[line]) line_heights[line] = outer;
         }
     }
+    double strut_off = 0, strut_h = 0, strut_base = 0;
+    gboolean strut_line = ns_paint_inline_strut_line(box, parent_style, layout,
+                                                     &strut_off, &strut_h,
+                                                     &strut_base);
+    if (strut_line) line_heights[0] = strut_h;
     double expected = 0;
     for (int i = 0; i < line_count; i++) expected += line_heights[i];
     box->content_width  = content_width;
@@ -6223,7 +6240,9 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     if (ta_h > box->content_height) box->content_height = ta_h;
     box->first_baseline =
         (double)ns_pango_layout_get_baseline(layout) / NS_PANGO_SCALE;
-    if (line_heights[0] > measured)
+    if (strut_line)
+        box->first_baseline = strut_base;
+    else if (line_heights[0] > measured)
         box->first_baseline += (line_heights[0] - measured) / 2.0;
     if (cacheable) {
         box->inline_layout_cache_style = parent_style;
@@ -6268,7 +6287,9 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             for (int j = 0; j < line && j < line_count; j++)
                 line_y += line_heights[j];
             double within = 0;
-            if (line >= 0 && line < line_count)
+            if (strut_line)
+                within = (double)pos.y / NS_PANGO_SCALE - line_tops[0] + strut_off;
+            else if (line >= 0 && line < line_count)
                 within = (double)pos.y / NS_PANGO_SCALE - line_tops[line]
                        + (line_heights[line] - line_pango_h[line]) / 2.0;
             double slack = (line >= 0 && line < line_count)
@@ -7415,6 +7436,22 @@ inline_atomic_measure_basis(const ns_box *box)
     return basis;
 }
 
+/* Lay out an atomic inline for measurement. Replaced elements arrive with
+ * their content size already set, so only their edges need resolving. */
+static void
+inline_atomic_prepare(ns_box *ab, const ns_style *parent_style)
+{
+    if (!ab) return;
+    if (inline_atomic_needs_layout(ab)) {
+        layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+        return;
+    }
+    if ((ab->kind == NS_BOX_IMAGE || ab->kind == NS_BOX_SVG ||
+         ab->kind == NS_BOX_VIDEO) && ab->style)
+        edges_from_style(ab->style, inline_atomic_measure_basis(ab),
+                         &ab->margin, &ab->padding, &ab->border);
+}
+
 static double
 replaced_box_intrinsic_width(const ns_box *box)
 {
@@ -7440,12 +7477,102 @@ replaced_box_intrinsic_width(const ns_box *box)
     return w;
 }
 
+static gboolean
+grid_value_is_set(const ns_css_value *v)
+{
+    return v && !(v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+                  g_ascii_strcasecmp(v->u.keyword, "auto") == 0);
+}
+
+static double
+grid_gap_px(const ns_style *s)
+{
+    const ns_css_value *gv = s->values[NS_CSS_COLUMN_GAP];
+    if (!gv || (gv->kind != NS_CSS_V_LENGTH && gv->kind != NS_CSS_V_CALC))
+        gv = s->values[NS_CSS_GAP];
+    if (gv && (gv->kind == NS_CSS_V_LENGTH || gv->kind == NS_CSS_V_CALC)) {
+        double gap = length_resolve(gv, 0, 0);
+        if (gap > 0) return gap;
+    }
+    return 0;
+}
+
+/* The intrinsic width of a grid that places its items column by column
+ * (grid-auto-flow: column): each run of as many items as there are
+ * explicit rows fills a new column, so the columns sit side by side and
+ * the width is their sum plus the gaps. Returns -1 when items are placed
+ * explicitly, which this does not model. */
+static double
+grid_column_flow_width(ns_box *box, const ns_style *child_style,
+                       gboolean min)
+{
+    const ns_css_value *rv = box->style->values[NS_CSS_GRID_TEMPLATE_ROWS];
+    int rows = 1;
+    if (rv && rv->kind == NS_CSS_V_TRACKS && !rv->u.tracks.subgrid &&
+        rv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE &&
+        rv->u.tracks.n > 0)
+        rows = rv->u.tracks.n;
+    const ns_css_value *cv = box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
+    const ns_css_tracks *tk =
+        cv && cv->kind == NS_CSS_V_TRACKS && !cv->u.tracks.subgrid &&
+        cv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE
+            ? &cv->u.tracks : NULL;
+    const ns_css_value *av = box->style->values[NS_CSS_GRID_AUTO_COLUMNS];
+    const ns_css_track *auto_track =
+        av && av->kind == NS_CSS_V_TRACKS && av->u.tracks.n > 0
+            ? &av->u.tracks.tracks[0] : NULL;
+    GArray *col = g_array_new(FALSE, TRUE, sizeof(double));
+    int slot = 0;
+    for (ns_box *c = box->first_child; c; c = c->next_sibling) {
+        if (style_is_absolute_or_fixed(c->style)) continue;
+        if (c->style &&
+            (grid_value_is_set(c->style->values[NS_CSS_GRID_COLUMN_START]) ||
+             grid_value_is_set(c->style->values[NS_CSS_GRID_ROW_START]) ||
+             grid_value_is_set(c->style->values[NS_CSS_GRID_AREA]))) {
+            g_array_free(col, TRUE);
+            return -1;
+        }
+        double w = min ? measure_min_content_width(c, child_style)
+                       : measure_natural_width(c, child_style);
+        if (c->style) {
+            ns_edges m = {0}, pd = {0}, bd = {0};
+            edges_from_style(c->style, 0, &m, &pd, &bd);
+            w += m.left + m.right + pd.left + pd.right + bd.left + bd.right;
+        }
+        guint t = (guint)(slot / rows);
+        if (t >= col->len) g_array_set_size(col, t + 1);
+        double *cw = &g_array_index(col, double, t);
+        if (w > *cw) *cw = w;
+        slot++;
+    }
+    int n = (int)col->len;
+    if (tk && tk->n > n) n = tk->n;
+    if (n == 0) {
+        g_array_free(col, TRUE);
+        return -1;
+    }
+    double sum = 0;
+    for (int i = 0; i < n; i++) {
+        double track = i < (int)col->len ? g_array_index(col, double, i) : 0;
+        const ns_css_track *t = tk && i < tk->n ? &tk->tracks[i] : auto_track;
+        if (t && t->kind == NS_CSS_TRACK_PX)
+            track = t->v;
+        else if (t && t->has_min && t->min_kind == NS_CSS_TRACK_PX &&
+                 t->min_v > track)
+            track = t->min_v;
+        sum += track;
+    }
+    g_array_free(col, TRUE);
+    return sum + grid_gap_px(box->style) * (n - 1);
+}
+
 static double
 grid_natural_width(ns_box *box, const ns_style *child_style)
 {
     const ns_css_value *fv = box->style->values[NS_CSS_GRID_AUTO_FLOW];
     if (fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword &&
-        strstr(fv->u.keyword, "column")) return -1;
+        strstr(fv->u.keyword, "column"))
+        return grid_column_flow_width(box, child_style, FALSE);
     const ns_css_value *cv = box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
     if (!cv || cv->kind != NS_CSS_V_TRACKS || cv->u.tracks.n <= 0 ||
         cv->u.tracks.subgrid ||
@@ -7685,9 +7812,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
                 ns_box *ab = g_array_index(box->inline_atomics,
                                            ns_inline_atomic, ai).box;
                 if (!ab) continue;
-                if (inline_atomic_needs_layout(ab))
-                    layout_box(ab, inline_atomic_measure_basis(ab),
-                               parent_style);
+                inline_atomic_prepare(ab, parent_style);
                 sum += ab->content_width +
                        ab->margin.left + ab->margin.right +
                        ab->padding.left + ab->padding.right +
@@ -7716,8 +7841,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         if (box->inline_atomics) {
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
                 ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-                if (inline_atomic_needs_layout(ab))
-                    layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+                inline_atomic_prepare(ab, parent_style);
             }
         }
         ns_pango_layout_set_text(layout, box->text, -1);
@@ -7921,8 +8045,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (box->inline_atomics) {
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
                 ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-                if (inline_atomic_needs_layout(ab))
-                    layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+                inline_atomic_prepare(ab, parent_style);
             }
         }
         ns_pango_layout_set_text(layout, box->text, -1);
@@ -8007,6 +8130,13 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
         return table_intrinsic_width(
             box, box->style ? box->style : parent_style, TRUE);
     if (box->style && style_is_grid_container(box->style)) {
+        const ns_css_value *fv = box->style->values[NS_CSS_GRID_AUTO_FLOW];
+        if (fv && fv->kind == NS_CSS_V_KEYWORD && fv->u.keyword &&
+            strstr(fv->u.keyword, "column")) {
+            double gw = grid_column_flow_width(
+                box, box->style ? box->style : parent_style, TRUE);
+            if (gw >= 0) return gw;
+        }
         const ns_css_value *cv =
             box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
         if (cv && cv->kind == NS_CSS_V_TRACKS && cv->u.tracks.n > 0 &&
@@ -13499,6 +13629,7 @@ relative_pct_cb_height(const ns_box *box)
     const ns_box *p = box ? box->parent : NULL;
     while (p && !p->style) p = p->parent;
     if (!p) return -1;
+    if (p->definite_height > 0) return p->definite_height;
     const ns_css_value *h = p->style->values[NS_CSS_HEIGHT];
     if (h && h->kind == NS_CSS_V_KEYWORD)
         return height_keyword_stretches(h) ? containing_block_definite_height(box) : -1;
@@ -14703,6 +14834,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             ? abox->style->values[NS_CSS_HEIGHT] : NULL;
         gboolean has_explicit_height = ahv &&
             (ahv->kind == NS_CSS_V_LENGTH || ahv->kind == NS_CSS_V_CALC);
+        abox->cb_height_override = cb_h > 0 ? cb_h : 0;
         if (has_explicit_height && value_is_percent(ahv) &&
             cb_h > 0) {
             double pre_h = resolve_height_with_basis(ahv, avail, cb_h, -1);
@@ -14864,6 +14996,270 @@ compute_paint_bounds(ns_box *b)
     }
     b->paint_top = top;
     b->paint_bottom = bottom;
+}
+
+typedef struct {
+    GHashTable *old_to_new;
+    GHashTable *moved;
+    GHashTable *styles;
+} restyle_ctx;
+
+static gboolean
+restyle_inset_set(const ns_css_value *v)
+{
+    return v && !length_is_auto(v) &&
+           (v->kind == NS_CSS_V_LENGTH || v->kind == NS_CSS_V_CALC);
+}
+
+/* How far an absolutely positioned box moves when one inset changes while
+ * its opposite stays auto, so its size and everything else hold. */
+static gboolean
+restyle_inset_shift(const ns_style *os, const ns_style *ns, ns_css_prop start,
+                    ns_css_prop end, double basis, double *delta)
+{
+    const ns_css_value *sa = os->values[start], *sb = ns->values[start];
+    const ns_css_value *ea = os->values[end], *eb = ns->values[end];
+    gboolean start_same = sa == sb || ns_css_value_equal(sa, sb);
+    gboolean end_same = ea == eb || ns_css_value_equal(ea, eb);
+    *delta = 0;
+    if (start_same && end_same) return TRUE;
+    if (!start_same && end_same && !restyle_inset_set(ea) &&
+        restyle_inset_set(sa) && restyle_inset_set(sb)) {
+        *delta = length_resolve(sb, basis, 0) - length_resolve(sa, basis, 0);
+        return TRUE;
+    }
+    if (start_same && !end_same && !restyle_inset_set(sa) &&
+        restyle_inset_set(ea) && restyle_inset_set(eb)) {
+        *delta = length_resolve(ea, basis, 0) - length_resolve(eb, basis, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+restyle_move(const ns_box *b, const ns_style *os, const ns_style *ns,
+             double *dx, double *dy)
+{
+    const ns_box *cb = b->parent;
+    if (!cb || style_is_grid_container(cb->style) || !b->dom ||
+        b->style != os)
+        return FALSE;
+    double cb_w = cb->content_width + cb->padding.left + cb->padding.right;
+    double cb_h = cb->content_height + cb->padding.top + cb->padding.bottom;
+    return restyle_inset_shift(os, ns, NS_CSS_LEFT, NS_CSS_RIGHT, cb_w, dx) &&
+           restyle_inset_shift(os, ns, NS_CSS_TOP, NS_CSS_BOTTOM, cb_h, dy);
+}
+
+static gboolean
+layout_num_differs(double a, double b)
+{
+    if (isnan(a) || isnan(b)) return isnan(a) != isnan(b);
+    return fabs(a - b) > 0.01;
+}
+
+static void
+layout_diff_path(GString *out, const ns_box *b)
+{
+    GPtrArray *chain = g_ptr_array_new();
+    for (const ns_box *p = b; p; p = p->parent) g_ptr_array_add(chain, (gpointer)p);
+    for (guint i = chain->len; i > 0; i--) {
+        const ns_box *p = g_ptr_array_index(chain, i - 1);
+        const char *cls = p->dom ? ns_element_get_attr(p->dom, "class") : NULL;
+        g_string_append_printf(out, "/%s%s%.30s",
+                               p->dom && p->dom->name ? p->dom->name
+                                                      : ns_box_kind_name(p->kind),
+                               cls ? "." : "", cls ? cls : "");
+    }
+    g_ptr_array_free(chain, TRUE);
+}
+
+static gboolean
+layout_diff_walk(const ns_box *a, const ns_box *b, GString *out, int depth)
+{
+    if (depth > NS_LAYOUT_MAX_DEPTH) return TRUE;
+    const char *what = NULL;
+    double va = 0, vb = 0;
+#define DIFF_NUM(f) \
+    else if (layout_num_differs(a->f, b->f)) { what = #f; va = a->f; vb = b->f; }
+    if (a->kind != b->kind) what = "kind";
+    else if (a->dom != b->dom) what = "dom";
+    else if (a->style != b->style &&
+             (!a->style || !b->style || !ns_css_style_equal(a->style, b->style)))
+        what = "style";
+    else if (g_strcmp0(a->text, b->text) != 0) what = "text";
+    DIFF_NUM(x) DIFF_NUM(y) DIFF_NUM(content_width) DIFF_NUM(content_height)
+    DIFF_NUM(first_baseline)
+    DIFF_NUM(margin.top) DIFF_NUM(margin.right) DIFF_NUM(margin.bottom)
+    DIFF_NUM(margin.left) DIFF_NUM(padding.top) DIFF_NUM(padding.right)
+    DIFF_NUM(padding.bottom) DIFF_NUM(padding.left) DIFF_NUM(border.top)
+    DIFF_NUM(border.right) DIFF_NUM(border.bottom) DIFF_NUM(border.left)
+    DIFF_NUM(scroll_max_x) DIFF_NUM(scroll_max_y)
+    DIFF_NUM(paint_top) DIFF_NUM(paint_bottom)
+#undef DIFF_NUM
+    guint na = a->inline_atomics ? a->inline_atomics->len : 0;
+    guint nb = b->inline_atomics ? b->inline_atomics->len : 0;
+    if (!what && na != nb) what = "inline atomics";
+    if (what) {
+        layout_diff_path(out, a);
+        g_string_append_printf(out, ": %s differs (%g vs %g)", what, va, vb);
+        return FALSE;
+    }
+    const ns_box *ca = a->first_child, *cb = b->first_child;
+    for (; ca && cb; ca = ca->next_sibling, cb = cb->next_sibling)
+        if (!layout_diff_walk(ca, cb, out, depth + 1)) return FALSE;
+    if (ca || cb) {
+        layout_diff_path(out, a);
+        g_string_append(out, ": child count differs");
+        return FALSE;
+    }
+    for (guint i = 0; i < na; i++) {
+        const ns_inline_atomic *ia = &g_array_index(a->inline_atomics, ns_inline_atomic, i);
+        const ns_inline_atomic *ib = &g_array_index(b->inline_atomics, ns_inline_atomic, i);
+        if (layout_num_differs(ia->owner_offset_x, ib->owner_offset_x) ||
+            layout_num_differs(ia->owner_offset_y, ib->owner_offset_y)) {
+            layout_diff_path(out, a);
+            g_string_append(out, ": inline atomic offset differs");
+            return FALSE;
+        }
+        if (ia->box && ib->box && !layout_diff_walk(ia->box, ib->box, out, depth + 1))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+char *
+ns_layout_diff(const ns_box *a, const ns_box *b)
+{
+    if (!a || !b) return (a || b) ? g_strdup("one layout missing") : NULL;
+    GString *out = g_string_new(NULL);
+    if (layout_diff_walk(a, b, out, 0)) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+struct ns_layout_restyle_plan {
+    restyle_ctx  rc;
+    ns_box      *root;
+    GPtrArray   *patch;
+    GPtrArray   *changed;
+};
+
+/* The check pass of a restyle: FALSE when a box baked in at build time the
+ * values of an old style that change (an inline run's text attributes), or
+ * a moved box cannot simply be shifted; otherwise the boxes to patch go to
+ * plan in tree order. */
+static gboolean
+restyle_scan(ns_box *b, ns_layout_restyle_plan *plan, int depth)
+{
+    if (!b || depth > NS_LAYOUT_MAX_DEPTH) return FALSE;
+    const restyle_ctx *rc = &plan->rc;
+    gboolean patch = FALSE;
+    if (b->style) {
+        const ns_style *os = b->style;
+        const ns_style *ns = g_hash_table_lookup(rc->old_to_new, os);
+        if (ns) {
+            gboolean same = ns_css_style_equal(os, ns);
+            if ((b->kind == NS_BOX_INLINE || b->kind == NS_BOX_TEXT) && !same)
+                return FALSE;
+            if (g_hash_table_contains(rc->moved, os)) {
+                double dx = 0, dy = 0;
+                if (!restyle_move(b, os, ns, &dx, &dy)) return FALSE;
+            }
+            if (!same) g_ptr_array_add(plan->changed, b);
+            patch = TRUE;
+        }
+    }
+    for (guint i = 0; b->attrs && i < b->attrs->len; i++) {
+        ns_inline_attr *a = &g_array_index(b->attrs, ns_inline_attr, i);
+        const ns_style *ns = a->style
+            ? g_hash_table_lookup(rc->old_to_new, a->style) : NULL;
+        if (!ns) continue;
+        if (!ns_css_style_equal(a->style, ns)) return FALSE;
+        patch = TRUE;
+    }
+    if (b->svg_styles && b->svg_styles != rc->styles) patch = TRUE;
+    if (patch) g_ptr_array_add(plan->patch, b);
+    for (ns_box *c = b->first_child; c; c = c->next_sibling)
+        if (!restyle_scan(c, plan, depth + 1)) return FALSE;
+    for (guint i = 0; b->inline_atomics && i < b->inline_atomics->len; i++) {
+        ns_box *ab = g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+        if (ab && !restyle_scan(ab, plan, depth + 1)) return FALSE;
+    }
+    return TRUE;
+}
+
+ns_layout_restyle_plan *
+ns_layout_restyle_plan_new(ns_box *root, GHashTable *styles,
+                           GHashTable *old_to_new, GHashTable *moved)
+{
+    if (!root || !styles || !old_to_new || !moved) return NULL;
+    ns_layout_restyle_plan *plan = g_new0(ns_layout_restyle_plan, 1);
+    plan->rc.old_to_new = old_to_new;
+    plan->rc.moved = moved;
+    plan->rc.styles = styles;
+    plan->root = root;
+    plan->patch = g_ptr_array_new();
+    plan->changed = g_ptr_array_new();
+    if (!restyle_scan(root, plan, 0)) {
+        ns_layout_restyle_plan_free(plan);
+        return NULL;
+    }
+    return plan;
+}
+
+const GPtrArray *
+ns_layout_restyle_plan_changed(const ns_layout_restyle_plan *plan)
+{
+    return plan ? plan->changed : NULL;
+}
+
+void
+ns_layout_restyle_plan_free(ns_layout_restyle_plan *plan)
+{
+    if (!plan) return;
+    g_ptr_array_free(plan->patch, TRUE);
+    g_ptr_array_free(plan->changed, TRUE);
+    g_free(plan);
+}
+
+void
+ns_layout_restyle_apply(ns_layout_restyle_plan *plan)
+{
+    if (!plan) return;
+    const restyle_ctx *rc = &plan->rc;
+    gboolean bounds = FALSE;
+    for (guint i = 0; i < plan->patch->len; i++) {
+        ns_box *b = g_ptr_array_index(plan->patch, i);
+        const ns_style *os = b->style;
+        const ns_style *ns = os ? g_hash_table_lookup(rc->old_to_new, os)
+                                : NULL;
+        if (ns) {
+            if (g_hash_table_contains(rc->moved, os)) {
+                double dx = 0, dy = 0;
+                restyle_move(b, os, ns, &dx, &dy);
+                if (dx != 0 || dy != 0) shift_box_tree(b, dx, dy);
+                if (dy != 0) bounds = TRUE;
+            }
+            gboolean unbounded = box_paint_unbounded(b);
+            b->style = ns;
+            if (box_paint_unbounded(b) != unbounded) bounds = TRUE;
+        }
+        for (guint j = 0; b->attrs && j < b->attrs->len; j++) {
+            ns_inline_attr *a = &g_array_index(b->attrs, ns_inline_attr, j);
+            const ns_style *as = a->style
+                ? g_hash_table_lookup(rc->old_to_new, a->style) : NULL;
+            if (as) a->style = as;
+        }
+        if (b->svg_styles && b->svg_styles != rc->styles) {
+            g_hash_table_unref(b->svg_styles);
+            b->svg_styles = g_hash_table_ref(rc->styles);
+        }
+    }
+    /* Paint bounds are vertical: they move only with a box moved down or
+     * up, or a style that makes a box paint anywhere. */
+    if (bounds) compute_paint_bounds(plan->root);
 }
 
 static ns_box *
@@ -15364,9 +15760,11 @@ typedef struct {
     double x, y;
     guint order;
     int   z;
+    const ns_box *hit;
 } hit_deferred;
 
 static __thread GArray       *g_hit_deferred;
+static __thread GArray       *g_hit_hoist;
 static __thread int           g_hit_defer_depth;
 static __thread const ns_box *g_hit_flush_box;
 static __thread double        g_hit_local_x, g_hit_local_y;
@@ -15575,6 +15973,20 @@ box_svg_yields_hit(const ns_box *b)
            b->border.bottom <= 0 && b->border.left <= 0;
 }
 
+static gboolean
+box_hit_layer_is_stacking_context(const ns_box *b)
+{
+    const ns_css_value *p = b->style ? b->style->values[NS_CSS_POSITION] : NULL;
+    if (p && p->kind == NS_CSS_V_KEYWORD && p->u.keyword &&
+        (!strcmp(p->u.keyword, "fixed") || !strcmp(p->u.keyword, "sticky")))
+        return TRUE;
+    const ns_css_value *z = b->style ? b->style->values[NS_CSS_Z_INDEX] : NULL;
+    if (z && z->kind == NS_CSS_V_LENGTH) return TRUE;
+    const ns_css_value *o = b->style ? b->style->values[NS_CSS_OPACITY] : NULL;
+    if (o && o->kind == NS_CSS_V_LENGTH && o->u.length.v < 1.0) return TRUE;
+    return box_has_hit_transform(b) || box_clips_children(b);
+}
+
 static int
 hit_deferred_cmp(const void *a, const void *b)
 {
@@ -15589,17 +16001,23 @@ static const ns_box *
 hit_flush_deferred(GArray *list)
 {
     if (!list || list->len == 0) return NULL;
-    g_array_sort(list, hit_deferred_cmp);
-    const ns_box *best = NULL;
     const ns_box *saved_flush = g_hit_flush_box;
+    GArray *saved_hoist = g_hit_hoist;
+    g_hit_hoist = list;
     for (guint i = 0; i < list->len; i++) {
-        const hit_deferred *d = &g_array_index(list, hit_deferred, i);
-        g_hit_flush_box = d->box;
-        const ns_box *m = box_hit_test_tree(d->box, d->x, d->y);
-        if (m) best = m;
+        hit_deferred d = g_array_index(list, hit_deferred, i);
+        g_hit_flush_box = d.box;
+        const ns_box *m = box_hit_test_tree(d.box, d.x, d.y);
+        g_array_index(list, hit_deferred, i).hit = m;
     }
+    g_hit_hoist = saved_hoist;
     g_hit_flush_box = saved_flush;
-    return best;
+    g_array_sort(list, hit_deferred_cmp);
+    for (guint i = list->len; i > 0; i--) {
+        const ns_box *m = g_array_index(list, hit_deferred, i - 1).hit;
+        if (m) return m;
+    }
+    return NULL;
 }
 
 static const ns_box *
@@ -15611,7 +16029,7 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         box_defers_hit_layer(root, &defer_z)) {
         if (!g_hit_deferred)
             g_hit_deferred = g_array_new(FALSE, FALSE, sizeof(hit_deferred));
-        hit_deferred d = { root, x, y, g_hit_deferred->len, defer_z };
+        hit_deferred d = { root, x, y, g_hit_deferred->len, defer_z, NULL };
         g_array_append_val(g_hit_deferred, d);
         return NULL;
     }
@@ -15633,6 +16051,9 @@ box_hit_test_tree(const ns_box *root, double x, double y)
     double cy = y + root->scroll_y;
     gboolean own_scope = root->parent == NULL || root == g_hit_flush_box ||
                          clipped || box_has_hit_transform(root);
+    GArray *hoist = root == g_hit_flush_box && root->parent &&
+                    !box_hit_layer_is_stacking_context(root)
+                    ? g_hit_hoist : NULL;
     GArray *saved_deferred = NULL;
     if (own_scope) {
         saved_deferred = g_hit_deferred;
@@ -15668,8 +16089,12 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         GArray *mine = g_hit_deferred;
         g_hit_deferred = saved_deferred;
         g_hit_defer_depth--;
-        const ns_box *m = hit_flush_deferred(mine);
-        if (m) best = m;
+        if (hoist && mine) {
+            g_array_append_vals(hoist, mine->data, mine->len);
+        } else {
+            const ns_box *m = hit_flush_deferred(mine);
+            if (m) best = m;
+        }
         if (mine) g_array_free(mine, TRUE);
     }
     if (best) return best;
@@ -15916,7 +16341,10 @@ const char *
 ns_box_hit_link(const ns_box *root, double x, double y)
 {
     const ns_link_range *r = ns_box_hit_link_range(root, x, y);
-    return r ? r->href : NULL;
+    if (!r) return NULL;
+    /* A link's href may change without a relayout while it stays set. */
+    const char *live = r->dom ? ns_element_get_attr(r->dom, "href") : NULL;
+    return live && *live ? live : r->href;
 }
 
 const ns_node *

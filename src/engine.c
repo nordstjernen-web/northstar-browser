@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "bytecode_cache.h"
 #include "config.h"
 #include "css.h"
 #include "css_syntax.h"
@@ -40,14 +41,48 @@ ns_engine_in_blocking_fetch(void)
 static guint64 g_engine_relayout_count;
 static gint64  g_engine_relayout_us;
 
+static const char *
+engine_base_href_walk(const ns_node *n, int depth)
+{
+    if (!n || depth >= 512) return NULL;
+    if (ns_node_is_element_named(n, "base")) {
+        const char *href = ns_element_get_attr(n, "href");
+        if (href && *href) return href;
+    }
+    if (ns_node_is_element_named(n, "template")) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_DOCUMENT) continue;
+        const char *href = engine_base_href_walk(c, depth + 1);
+        if (href) return href;
+    }
+    return NULL;
+}
+
+static const char *
+engine_document_base_href(const ns_node *doc)
+{
+    if (!doc) return NULL;
+    if (!doc->tag_index) return engine_base_href_walk(doc, 0);
+    GPtrArray *bases = ns_doc_tag_index_lookup(doc, "base");
+    for (guint i = 0; bases && i < bases->len; i++) {
+        const char *href =
+            ns_element_get_attr(g_ptr_array_index(bases, i), "href");
+        if (href && *href) return href;
+    }
+    return NULL;
+}
+
+const char *
+ns_engine_document_base_href(const ns_node *doc)
+{
+    return engine_document_base_href(doc);
+}
+
 static char *
 engine_document_base_url(ns_node *doc, const char *fallback)
 {
-    GPtrArray *bases = doc ? ns_doc_tag_index_lookup(doc, "base") : NULL;
-    for (guint i = 0; bases && i < bases->len; i++) {
-        const ns_node *base = g_ptr_array_index(bases, i);
-        const char *href = ns_element_get_attr(base, "href");
-        if (!href || !*href) continue;
+    const char *href = engine_document_base_href(doc);
+    if (href) {
         if (fallback && *fallback) {
             char *resolved = ns_url_resolve(fallback, href);
             if (resolved) return resolved;
@@ -333,8 +368,11 @@ static void
 on_preload_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 {
     (void)src;
-    (void)user_data;
     ns_response *resp = ns_net_fetch_finish(res, NULL);
+    if (resp && GPOINTER_TO_INT(user_data) == NS_FETCH_DEST_SCRIPT &&
+        resp->status == 200 && resp->body)
+        ns_bytecode_cache_precompile(resp->final_url, resp->body->data,
+                                     resp->body->len);
     if (resp) ns_response_free(resp);
 }
 
@@ -350,7 +388,8 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                                              g_free, NULL);
     GHashTable *connect_seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                      g_free, NULL);
-    preload_collect(doc, base_url, include_images, urls, seen,
+    g_autofree char *document_base = engine_document_base_url(doc, base_url);
+    preload_collect(doc, document_base, include_images, urls, seen,
                     connects, connect_seen, 0);
     g_hash_table_destroy(seen);
     g_hash_table_destroy(connect_seen);
@@ -367,7 +406,8 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
         }
         ns_net_request_async(target->url, base_url, "GET", NULL, 0, NULL,
                              headers, target->dest, NULL, NULL,
-                             on_preload_fetched, NULL);
+                             on_preload_fetched,
+                             GINT_TO_POINTER(target->dest));
     }
     g_ptr_array_free(urls, TRUE);
     g_ptr_array_free(connects, TRUE);
@@ -620,10 +660,18 @@ static void
 collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc, int depth)
 {
-    if (!n || depth >= 512 || ns_node_is_element_named(n, "noscript")) return;
-    if (ns_node_is_element_named(n, "iframe") ||
-        ns_node_is_element_named(n, "frame") ||
-        ns_node_is_element_named(n, "object")) {
+    if (!n || depth >= 512 ||
+        (n->kind != NS_NODE_ELEMENT && n->kind != NS_NODE_DOCUMENT))
+        return;
+    /* Runs over every element on each cascade: tell the few names that
+     * matter by their first letter before comparing them. */
+    const char *nm = n->kind == NS_NODE_ELEMENT && n->name ? n->name : "";
+    if (nm[0] == 'n' && strcmp(nm, "noscript") == 0) return;
+    gboolean is_style = nm[0] == 's' && strcmp(nm, "style") == 0;
+    gboolean is_link = nm[0] == 'l' && strcmp(nm, "link") == 0;
+    if ((nm[0] == 'i' && strcmp(nm, "iframe") == 0) ||
+        (nm[0] == 'f' && strcmp(nm, "frame") == 0) ||
+        (nm[0] == 'o' && strcmp(nm, "object") == 0)) {
         sheet_run_flush(cc);
         const char *furl = ns_element_get_attr(n, "data-nd-frame-url");
         if (furl && *furl) base_url = furl;
@@ -654,7 +702,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     }
     GPtrArray *out = cc->out;
     GHashTable *cache = cc->cache;
-    if (ns_node_is_element_named(n, "style") && style_sheet_enabled(n)) {
+    if (is_style && style_sheet_enabled(n)) {
         char *css = ns_css_style_element_text(n);
         if (css) {
             if (css_has_viewport_media(css)) cc->media_seen = TRUE;
@@ -680,7 +728,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             }
             g_free(css);
         }
-    } else if (ns_node_is_element_named(n, "link") && base_url) {
+    } else if (is_link && base_url) {
         sheet_run_flush(cc);
         const char *rel = ns_element_get_attr(n, "rel");
         const char *href = ns_element_get_attr(n, "href");
@@ -765,6 +813,18 @@ ns_engine_compute_cascade(ns_node *doc, const char *page_url,
     g_ptr_array_free(page_sheets, TRUE);
     g_ptr_array_free(sheet_docs, TRUE);
     ns_css_relayout_leave();
+    return styles;
+}
+
+GHashTable *
+ns_engine_compute_cascade_delta(ns_node *doc, const char *page_url,
+                                GHashTable *css_cache, ns_anim *anim,
+                                GPtrArray *changes)
+{
+    ns_css_compute_want_delta(changes);
+    GHashTable *styles = ns_engine_compute_cascade(doc, page_url, css_cache,
+                                                   anim);
+    ns_css_compute_want_delta(NULL);
     return styles;
 }
 

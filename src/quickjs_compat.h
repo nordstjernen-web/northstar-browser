@@ -19,6 +19,9 @@ int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
 
 JSClassID ns_new_class_id(JSClassID *pclass_id);
 
+JSContext *ns_quickjs_new_context(JSRuntime *rt);
+#define JS_NewContext(rt) ns_quickjs_new_context(rt)
+
 #ifdef NS_QUICKJS_ORIGINAL
 
 #define NS_QUICKJS_ENGINE_NAME "QuickJS"
@@ -37,7 +40,6 @@ typedef struct JSEvalOptions {
 typedef void *JSReallocArrayBufferDataFunc(JSRuntime *rt, void *opaque,
                                            void *ptr, size_t size);
 
-JSContext *ns_quickjs_new_context(JSRuntime *rt);
 JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
                                     size_t max_len,
                                     JSReallocArrayBufferDataFunc *realloc_func,
@@ -60,7 +62,6 @@ JS_IsStrictEqual(JSContext *ctx, JSValueConst op1, JSValueConst op2)
     return JS_StrictEq(ctx, op1, op2);
 }
 
-#define JS_NewContext(rt) ns_quickjs_new_context(rt)
 #define JS_NewArrayBuffer(ctx, buf, len, max_len, realloc_func, opaque, is_shared) \
     ns_quickjs_new_array_buffer((ctx), (buf), (len), (max_len), (realloc_func), \
                                 (opaque), (is_shared))

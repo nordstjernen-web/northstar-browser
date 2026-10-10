@@ -284,6 +284,34 @@ rdrv_tick_take_nav(ns_page_session *s, int vw, int vh)
     return nav;
 }
 
+/* "x,y" or "sel=<css selector> [dx=N] [dy=N]": the selector form aims at
+ * the centre of the first match, looked up when the action runs. */
+static gboolean
+rdrv_point(ns_page_session *s, const char *arg, double *x, double *y)
+{
+    if (sscanf(arg, "%lf , %lf", x, y) == 2) return TRUE;
+    if (!g_str_has_prefix(arg, "sel=")) return FALSE;
+    char *sel = g_strdup(arg + 4);
+    double dx = 0, dy = 0;
+    char *sp = strstr(sel, " dx=");
+    char *sq = strstr(sel, " dy=");
+    if (sp) dx = g_ascii_strtod(sp + 4, NULL);
+    if (sq) dy = g_ascii_strtod(sq + 4, NULL);
+    if (sp) *sp = 0;
+    if (sq) *sq = 0;
+    char *quoted = g_strescape(sel, NULL);
+    char *src = g_strdup_printf(
+        "(function(){var e=document.querySelector(\"%s\");if(!e)return '';"
+        "var r=e.getBoundingClientRect();"
+        "return (r.left+r.width/2)+','+(r.top+r.height/2);})()", quoted);
+    char *res = ns_page_session_eval(s, src);
+    gboolean ok = res && sscanf(res, "%lf , %lf", x, y) == 2;
+    if (ok) { *x += dx; *y += dy; }
+    else fprintf(stderr, "[headless] no element for %s\n", sel);
+    g_free(res); g_free(src); g_free(quoted); g_free(sel);
+    return ok;
+}
+
 static void
 rdrv_run_actions(ns_page_session *s, const char *spec, int vw, int vh,
                  int settle_ms)
@@ -304,6 +332,20 @@ rdrv_run_actions(ns_page_session *s, const char *spec, int vw, int vh,
                 rdrv_follow_nav(s, href, vw, vh, settle_ms, TRUE);
             else
                 g_free(href);
+        } else if (g_str_has_prefix(a, "move ")) {
+            double x = 0, y = 0;
+            if (!rdrv_point(s, a + 5, &x, &y)) continue;
+            fprintf(stderr, "[headless] move %g,%g\n", x, y);
+            ns_page_session_hover(s, (int)x, (int)y, NULL, NULL);
+        } else if (g_str_has_prefix(a, "down ")) {
+            double x = 0, y = 0;
+            if (!rdrv_point(s, a + 5, &x, &y)) continue;
+            fprintf(stderr, "[headless] down %g,%g\n", x, y);
+            g_free(ns_page_session_click(s, (int)x, (int)y, 0));
+        } else if (g_strcmp0(a, "up") == 0) {
+            fprintf(stderr, "[headless] up\n");
+            int changed = 0;
+            g_free(ns_page_session_release(s, &changed));
         } else if (g_str_has_prefix(a, "select ")) {
             int kind = 0;
             double x = 0, y = 0;
@@ -522,6 +564,7 @@ typedef struct headless_flush_ctx {
     GHashTable       **styles;
     ns_box           **layout;
     const ns_node     *focused;
+    const ns_node     *hover;
     gsize              caret;
     gsize              anchor;
 } headless_flush_ctx;
@@ -545,7 +588,7 @@ headless_relayout(headless_flush_ctx *c)
 
     *c->styles = ns_engine_relayout(c->doc, c->base, c->vw, c->vh,
                                     c->image_cache, c->anim, c->js,
-                                    c->css_cache, headless_focus(c), NULL,
+                                    c->css_cache, headless_focus(c), c->hover,
                                     c->caret, c->anchor, c->layout);
     g_headless_styles_stale = FALSE;
 }
@@ -1152,6 +1195,38 @@ headless_emit_pointer_and_mouse(headless_flush_ctx *fc, const ns_node *target,
     return prevented;
 }
 
+/* Pointer motion without buttons, as the GUI's hover handling sends it. */
+static void
+headless_mouse_move(headless_flush_ctx *fc, double x, double y)
+{
+    if (!fc || !fc->js) return;
+    const ns_node *node = headless_mouse_target_at(fc, x, y);
+    const ns_node *prev = fc->hover;
+    if (node != prev) {
+        if (prev) {
+            ns_js_dispatch_mouse_event(fc->js, prev, "pointerout", x, y, x, y,
+                                       0, 0, FALSE, FALSE, FALSE, FALSE,
+                                       node, NULL);
+            ns_js_dispatch_mouse_event(fc->js, prev, "mouseout", x, y, x, y,
+                                       0, 0, FALSE, FALSE, FALSE, FALSE,
+                                       node, NULL);
+        }
+        if (node) {
+            ns_js_dispatch_mouse_event(fc->js, node, "pointerover", x, y, x, y,
+                                       0, 0, FALSE, FALSE, FALSE, FALSE,
+                                       prev, NULL);
+            ns_js_dispatch_mouse_event(fc->js, node, "mouseover", x, y, x, y,
+                                       0, 0, FALSE, FALSE, FALSE, FALSE,
+                                       prev, NULL);
+        }
+        fc->hover = node;
+    }
+    if (node)
+        headless_emit_pointer_and_mouse(fc, node, "pointermove", "mousemove",
+                                        x, y, 0, 0);
+    headless_relayout(fc);
+}
+
 static void
 headless_mouse_drag(headless_flush_ctx *fc,
                     double x0, double y0, double x1, double y1)
@@ -1357,6 +1432,12 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
                     ns_css_set_active_node(NULL);
                     headless_relayout(fc);
                 }
+            }
+        } else if (g_str_has_prefix(a, "move ")) {
+            double x = 0, y = 0;
+            if (sscanf(a + 5, "%lf , %lf", &x, &y) == 2) {
+                fprintf(stderr, "[headless] move %g,%g\n", x, y);
+                headless_mouse_move(fc, x, y);
             }
         } else if (g_str_has_prefix(a, "mousedrag ")) {
             double x0 = 0, y0 = 0, x1 = 0, y1 = 0;

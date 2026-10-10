@@ -154,6 +154,7 @@ static const cfg_field cfg_fields[] = {
     FB(speculative_preload,   TRUE),
     FB(async_image_decode,    TRUE),
     FB(images_enabled,        TRUE),
+    FB(autoplay_enabled,      FALSE),
     FB(javascript_enabled,    TRUE),
     FB(camera_enabled,        FALSE),
     FB(local_storage_enabled, TRUE),
@@ -489,6 +490,7 @@ ns_config_dump(void)
     g_string_append_printf(s, "speculative_preload   = %s\n", c->speculative_preload ? "true" : "false");
     g_string_append_printf(s, "async_image_decode    = %s\n", c->async_image_decode ? "true" : "false");
     g_string_append_printf(s, "images_enabled        = %s\n", c->images_enabled ? "true" : "false");
+    g_string_append_printf(s, "autoplay_enabled      = %s\n", c->autoplay_enabled ? "true" : "false");
     g_string_append_printf(s, "camera_enabled        = %s\n", c->camera_enabled ? "true" : "false");
     g_string_append_printf(s, "local_storage_enabled = %s\n", c->local_storage_enabled ? "true" : "false");
     g_string_append_printf(s, "cache_enabled         = %s\n", c->cache_enabled ? "true" : "false");

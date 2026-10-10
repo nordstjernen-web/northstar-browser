@@ -5,16 +5,35 @@
 
 #include "video.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "mse.h"
+#include "videodec.h"
+#include "videolayer.h"
+#include "videoworker.h"
+#include "trace.h"
 #include "pl_mpeg.h"
 
 enum {
     NS_VIDEO_MAX_DIMENSION = 4096,
+    NS_VIDEO_DECODE_AHEAD = 4,
+    NS_VIDEO_DECODE_AHEAD_MAX = 12,
 };
 
+/* Decoded pictures may hold this much memory ahead of the clock. */
+static const gsize NS_VIDEO_DECODE_AHEAD_BYTES = 48u * 1024u * 1024u;
+/* Coded frames are queued this far ahead of the clock, so the decoder keeps
+ * the view supplied while the engine thread is busy for seconds. */
+static const double NS_VIDEO_FEED_AHEAD_S = 3.0;
+
 static const double NS_VIDEO_FORWARD_DECODE_S = 2.0;
+/* Without a seek, a picture at most this far ahead of the clock (the view's
+ * clock is ahead of the engine's tick, or drift correction held the clock
+ * back) stays up and the decoder carries on; a larger gap restarts it. */
+static const double NS_VIDEO_LAYER_LEAD_S = 0.5;
+static const int NS_VIDEO_OPEN_ENDED_MS = 24 * 3600 * 1000;
 
 struct ns_video_stream {
     GBytes      *bytes;
@@ -27,6 +46,14 @@ struct ns_video_stream {
     gboolean     has_audio;
     ns_texture  *texture;
     double       shown_time;
+    ns_mse_source   *mse;
+    ns_video_worker *worker;
+    ns_video_layer  *layer;
+    guint            seek_gen;
+    guint            shown_seek_gen;
+    double           fed_pts;
+    gboolean         fed_valid;
+    gboolean         waiting;
 };
 
 static gboolean
@@ -174,14 +201,185 @@ ns_video_stream_new(const guchar *data, gsize len)
     return s;
 }
 
+ns_video_stream *
+ns_video_stream_new_mse(ns_mse_source *source)
+{
+    if (!source) return NULL;
+    ns_video_stream *s = g_new0(ns_video_stream, 1);
+    s->mse = ns_mse_source_ref(source);
+    s->layer = ns_video_layer_new();
+    s->shown_time = -1.0;
+    return s;
+}
+
+static guint
+mse_decode_ahead(const ns_video_stream *s)
+{
+    if (s->width <= 0 || s->height <= 0) return NS_VIDEO_DECODE_AHEAD;
+    gsize frame_bytes = (gsize)s->width * (gsize)s->height * 4u;
+    gsize n = NS_VIDEO_DECODE_AHEAD_BYTES / frame_bytes;
+    return (guint)CLAMP(n, (gsize)NS_VIDEO_DECODE_AHEAD,
+                        (gsize)NS_VIDEO_DECODE_AHEAD_MAX);
+}
+
+/* Takes the layer's current picture. Returns TRUE when the page must be
+ * repainted: always for a new picture the engine paints itself, and only
+ * for a size change while the view composites it. */
+static gboolean
+mse_sync_texture(ns_video_stream *s, gboolean composited)
+{
+    double pts = -1.0;
+    ns_texture *texture = ns_video_layer_texture(s->layer, &pts);
+    if (!texture || texture == s->texture) {
+        ns_texture_unref(texture);
+        return FALSE;
+    }
+    int width = ns_texture_get_width(texture);
+    int height = ns_texture_get_height(texture);
+    gboolean resized = !s->texture || width != s->width || height != s->height;
+    ns_texture_unref(s->texture);
+    s->texture = texture;
+    s->shown_time = pts;
+    s->shown_seek_gen = s->seek_gen;
+    s->width = width;
+    s->height = height;
+    return !composited || resized;
+}
+
+static gssize
+mse_fed_index(ns_video_stream *s, ns_mse_buffer *buffer)
+{
+    if (!s->fed_valid) return -1;
+    gssize last = ns_mse_buffer_frame_at(buffer, s->fed_pts);
+    const ns_mse_frame *at = last >= 0 ? ns_mse_buffer_frame(buffer, (guint)last) : NULL;
+    return at && fabs(at->pts - s->fed_pts) < 1e-6 ? last : -1;
+}
+
+static gboolean
+mse_needs_restart(ns_video_stream *s, ns_mse_buffer *buffer, gssize last,
+                  gssize target, gboolean shown)
+{
+    const ns_mse_frame *goal = ns_mse_buffer_frame(buffer, (guint)target);
+    if (last < 0) return TRUE;
+    if (shown) return FALSE;
+    /* A goal the view has already shown (it took the picture since the
+     * engine last looked) is not lost. */
+    if (target <= last)
+        return !ns_video_worker_expects(s->worker, goal->pts) &&
+               goal->pts > ns_video_layer_shown_pts(s->layer) + 1e-6;
+    if (goal->pts < s->shown_time) return TRUE;
+    return goal->pts - s->shown_time > NS_VIDEO_FORWARD_DECODE_S &&
+           ns_mse_buffer_keyframe_at_or_before(buffer, target) > last;
+}
+
+static void
+mse_feed(ns_video_stream *s, ns_mse_buffer *buffer, gssize target, gboolean shown)
+{
+    const ns_mse_frame *goal = ns_mse_buffer_frame(buffer, (guint)target);
+    double goal_pts = goal->pts;
+    gssize last = mse_fed_index(s, buffer);
+    if (mse_needs_restart(s, buffer, last, target, shown)) {
+        gssize keyframe = ns_mse_buffer_keyframe_at_or_before(buffer, target);
+        if (keyframe < 0) return;
+        ns_video_worker_restart(s->worker);
+        last = keyframe - 1;
+    }
+    guint count = ns_mse_buffer_n_frames(buffer);
+    ns_video_worker_set_max_pictures(s->worker, mse_decode_ahead(s));
+    gint64 trace_start = ns_trace_now();
+    int pushed = 0;
+    for (gssize i = last + 1; i < (gssize)count; i++) {
+        const ns_mse_frame *frame = ns_mse_buffer_frame(buffer, (guint)i);
+        if (i > target && frame->pts > goal_pts + NS_VIDEO_FEED_AHEAD_S) break;
+        gboolean want = frame->pts > goal_pts - 1e-6 &&
+                        !(shown && fabs(frame->pts - goal_pts) < 1e-6);
+        ns_video_worker_push(s->worker, frame->data, frame->config, frame->pts, want);
+        s->fed_pts = frame->pts;
+        s->fed_valid = TRUE;
+        pushed++;
+    }
+    if (pushed)
+        ns_trace_completef("media", "video feed", trace_start,
+                           "%d coded frames up to %.3f for %.3f", pushed,
+                           s->fed_pts, goal_pts);
+}
+
+static gboolean
+mse_show(ns_video_stream *s, double t)
+{
+    s->waiting = FALSE;
+    ns_mse_buffer *buffer = ns_mse_source_track_buffer(s->mse, NS_MSE_TRACK_VIDEO);
+    const ns_mp4_track *track = ns_mse_buffer_track(buffer);
+    if (!track) return FALSE;
+    if (!s->worker) {
+        s->worker = ns_video_worker_new(ns_video_decoder_new(track->codec));
+        s->fed_valid = FALSE;
+        if (!s->worker) return FALSE;
+        ns_video_layer_attach(s->layer, s->worker);
+    }
+    gboolean composited =
+        ns_video_layer_composited(s->layer, g_get_monotonic_time());
+    /* The view may have moved the picture on since the last look: aim at
+     * what it shows now, or a frame it has already taken and dropped from
+     * the decoder looks lost and the decoder restarts from the keyframe. */
+    gboolean changed = mse_sync_texture(s, composited);
+    if (s->texture && s->shown_seek_gen == s->seek_gen &&
+        s->shown_time > t && s->shown_time - t < NS_VIDEO_LAYER_LEAD_S)
+        t = s->shown_time;
+    gssize target = ns_mse_buffer_frame_at(buffer, t);
+    if (target < 0) return FALSE;
+    double goal_pts = ns_mse_buffer_frame(buffer, (guint)target)->pts;
+    if (!composited && !(s->texture && fabs(goal_pts - s->shown_time) < 1e-6))
+        ns_video_layer_present(s->layer, goal_pts);
+    if (mse_sync_texture(s, composited)) changed = TRUE;
+    gboolean shown = s->texture && fabs(goal_pts - s->shown_time) < 1e-6;
+    mse_feed(s, buffer, target, shown);
+    s->waiting = !shown && ns_video_worker_expects(s->worker, goal_pts);
+    return changed;
+}
+
+ns_video_layer *
+ns_video_stream_layer(const ns_video_stream *s)
+{
+    return s ? s->layer : NULL;
+}
+
+void
+ns_video_stream_set_clock(ns_video_stream *s, const ns_video_clock *clock)
+{
+    if (!s || !clock) return;
+    s->seek_gen = clock->seek_gen;
+    ns_video_layer_set_clock(s->layer, clock);
+}
+
+gboolean
+ns_video_stream_frame_counts(const ns_video_stream *s, guint *presented,
+                             guint *dropped)
+{
+    *presented = *dropped = 0;
+    if (!s || !s->worker) return FALSE;
+    ns_video_worker_counts(s->worker, presented, dropped);
+    return TRUE;
+}
+
+gboolean
+ns_video_stream_waiting(const ns_video_stream *s)
+{
+    return s && s->waiting;
+}
+
 void
 ns_video_stream_free(ns_video_stream *s)
 {
     if (!s) return;
+    ns_video_layer_detach(s->layer);
+    ns_video_layer_unref(s->layer);
+    ns_video_worker_free(s->worker);
+    ns_mse_source_unref(s->mse);
     if (s->program) plm_destroy(s->program);
     if (s->elementary) plm_video_destroy(s->elementary);
     ns_texture_unref(s->texture);
-    g_bytes_unref(s->bytes);
+    if (s->bytes) g_bytes_unref(s->bytes);
     g_free(s);
 }
 
@@ -200,6 +398,12 @@ ns_video_stream_height(const ns_video_stream *s)
 int
 ns_video_stream_duration_ms(const ns_video_stream *s)
 {
+    if (s && s->mse) {
+        double d = ns_mse_source_duration(s->mse);
+        if (!(d > 0) || isinf(d) || d * 1000.0 > NS_VIDEO_OPEN_ENDED_MS)
+            return NS_VIDEO_OPEN_ENDED_MS;
+        return (int)(d * 1000.0 + 0.5);
+    }
     return s ? s->duration_ms : 0;
 }
 
@@ -212,14 +416,21 @@ ns_video_stream_has_audio(const ns_video_stream *s)
 GBytes *
 ns_video_stream_bytes(const ns_video_stream *s)
 {
-    return s ? g_bytes_ref(s->bytes) : NULL;
+    return s && s->bytes ? g_bytes_ref(s->bytes) : NULL;
 }
 
 gsize
 ns_video_stream_memory(const ns_video_stream *s)
 {
     if (!s) return 0;
-    return g_bytes_get_size(s->bytes) + (gsize)s->width * (gsize)s->height * 4;
+    gsize encoded = s->bytes ? g_bytes_get_size(s->bytes) : 0;
+    return encoded + (gsize)s->width * (gsize)s->height * 4;
+}
+
+gboolean
+ns_video_stream_is_mse(const ns_video_stream *s)
+{
+    return s && s->mse;
 }
 
 ns_texture *
@@ -233,6 +444,7 @@ ns_video_stream_show(ns_video_stream *s, int phase_ms)
 {
     if (!s) return FALSE;
     double t = phase_ms / 1000.0;
+    if (s->mse) return mse_show(s, t);
     if (t >= s->shown_time && t < s->shown_time + s->frame_s) return FALSE;
     gboolean forward = t > s->shown_time &&
                        t - s->shown_time < NS_VIDEO_FORWARD_DECODE_S;
