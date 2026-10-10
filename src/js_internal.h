@@ -393,6 +393,8 @@ gboolean ns_node_is_media_element(const ns_node *n);
 char    *ns_media_resolve_src(JSContext *ctx, ns_node *node);
 ns_image *ns_media_animation_for(JSContext *ctx, JSValueConst this_val);
 double   ns_media_position(JSContext *ctx, JSValueConst this_val);
+gboolean ns_media_frame_counts(JSContext *ctx, JSValueConst this_val,
+                               guint *presented, guint *dropped);
 void     ns_media_attr_changed(ns_js *js, ns_node *el, const char *name);
 void     ns_media_subtree_connected(ns_js *js, ns_node *root);
 void     ns_media_subtree_disconnected(ns_js *js, ns_node *root);

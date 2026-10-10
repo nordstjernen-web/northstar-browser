@@ -24,6 +24,11 @@ void             ns_video_worker_push(ns_video_worker *worker, GBytes *sample,
 void             ns_video_worker_set_max_pictures(ns_video_worker *worker,
                                                   guint max_pictures);
 gboolean         ns_video_worker_expects(ns_video_worker *worker, double pts);
+/* Pictures shown, and pictures decoded too late to be shown. */
+void             ns_video_worker_counts(ns_video_worker *worker,
+                                        guint *presented, guint *dropped);
+/* Pixels a second the video decoders have managed lately, 0 before any. */
+double           ns_video_decode_pixel_rate(void);
 /* How many decoded pictures wait to be shown, and the newest one's time. */
 guint            ns_video_worker_ready(ns_video_worker *worker,
                                        double *newest_pts);

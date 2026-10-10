@@ -38,7 +38,38 @@ struct ns_video_worker {
     double            decoding_pts;
     gboolean          decoding_wanted;
     gboolean          quit;
+    guint             presented;
+    guint             dropped;
 };
+
+/* How many pixels a second the decoders have managed lately, for telling
+ * pages which streams play smoothly. */
+static GMutex g_rate_lock;
+static double g_pixel_rate;
+static guint  g_rate_samples;
+
+static void
+note_decode_rate(ns_texture *texture, gint64 us)
+{
+    if (!texture || us <= 0) return;
+    double px = (double)ns_texture_get_width(texture) *
+                ns_texture_get_height(texture);
+    double rate = px / ((double)us / 1e6);
+    g_mutex_lock(&g_rate_lock);
+    g_pixel_rate = g_pixel_rate > 0 ? g_pixel_rate * 0.9 + rate * 0.1 : rate;
+    g_rate_samples++;
+    g_mutex_unlock(&g_rate_lock);
+}
+
+double
+ns_video_decode_pixel_rate(void)
+{
+    g_mutex_lock(&g_rate_lock);
+    /* A few pictures in, past the decoder's start-up. */
+    double rate = g_rate_samples >= 30 ? g_pixel_rate : 0.0;
+    g_mutex_unlock(&g_rate_lock);
+    return rate;
+}
 
 static void
 job_free(worker_job *job)
@@ -66,11 +97,15 @@ static void
 decode_job(ns_video_worker *worker, worker_job *job, gboolean flush)
 {
     gint64 trace_start = ns_trace_now();
+    gint64 decode_start = g_get_monotonic_time();
     if (flush) ns_video_decoder_flush(worker->decoder);
     gint64 stamp = (gint64)llround(job->pts * 1e6);
     ns_texture *texture = ns_video_decoder_decode(worker->decoder, job->sample,
                                                   job->config, stamp,
                                                   job->want_texture);
+    if (texture) note_decode_rate(texture, g_get_monotonic_time() - decode_start);
+    int tex_w = texture ? ns_texture_get_width(texture) : 0;
+    int tex_h = texture ? ns_texture_get_height(texture) : 0;
     g_mutex_lock(&worker->lock);
     worker->decoding = FALSE;
     if (job->want_texture && job->epoch == worker->epoch) {
@@ -81,8 +116,9 @@ decode_job(ns_video_worker *worker, worker_job *job, gboolean flush)
     }
     g_mutex_unlock(&worker->lock);
     if (trace_start)
-        ns_trace_completef("media", "video decode", trace_start, "pts %.3f%s%s",
-                           job->pts, job->want_texture ? "" : " (skipped)",
+        ns_trace_completef("media", "video decode", trace_start,
+                           "pts %.3f %dx%d%s%s", job->pts, tex_w, tex_h,
+                           job->want_texture ? "" : " (skipped)",
                            flush ? " after flush" : "");
 }
 
@@ -220,6 +256,18 @@ ns_video_worker_expects(ns_video_worker *worker, double pts)
     return found;
 }
 
+void
+ns_video_worker_counts(ns_video_worker *worker, guint *presented,
+                       guint *dropped)
+{
+    *presented = *dropped = 0;
+    if (!worker) return;
+    g_mutex_lock(&worker->lock);
+    *presented = worker->presented;
+    *dropped = worker->dropped;
+    g_mutex_unlock(&worker->lock);
+}
+
 guint
 ns_video_worker_ready(ns_video_worker *worker, double *newest_pts)
 {
@@ -258,13 +306,17 @@ ns_video_worker_take(ns_video_worker *worker, double pts, double *taken_pts)
         texture = picture->texture;
         picture->texture = NULL;
         if (taken_pts) *taken_pts = picture->pts;
+        worker->presented++;
     }
     for (guint i = 0; i < worker->pictures->len;) {
-        if (g_array_index(worker->pictures, worker_picture, i).pts <=
-            pts + NS_VIDEO_WORKER_EPSILON_S)
+        const worker_picture *p = &g_array_index(worker->pictures, worker_picture, i);
+        if (p->pts <= pts + NS_VIDEO_WORKER_EPSILON_S) {
+            /* Decoded too late to be shown. */
+            if (p->texture) worker->dropped++;
             g_array_remove_index(worker->pictures, i);
-        else
+        } else {
             i++;
+        }
     }
     g_cond_signal(&worker->wake);
     g_mutex_unlock(&worker->lock);

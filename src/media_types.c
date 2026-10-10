@@ -174,8 +174,7 @@ ns_media_type_support(const char *type, ns_media_element element,
     char **params = g_strsplit(lower, ";", -1);
     g_free(lower);
     const char *mime = g_strstrip(params[0]);
-    if (element == NS_MEDIA_ELEMENT_VIDEO && source == NS_MEDIA_SOURCE_FILE &&
-        !find_row(mime, element)) {
+    if (element == NS_MEDIA_ELEMENT_VIDEO && !find_row(mime, element)) {
         ns_media_answer answer = progressive_type_support(type, mime, params);
         g_strfreev(params);
         return answer;

@@ -33,6 +33,10 @@ ns_texture  *ns_video_stream_texture(const ns_video_stream *stream);
 gboolean     ns_video_stream_show(ns_video_stream *stream, int phase_ms);
 gboolean     ns_video_stream_is_mse(const ns_video_stream *stream);
 gboolean     ns_video_stream_waiting(const ns_video_stream *stream);
+/* Frames of a Media Source stream shown so far and frames decoded too late
+ * to be shown. FALSE for other streams. */
+gboolean     ns_video_stream_frame_counts(const ns_video_stream *stream,
+                                          guint *presented, guint *dropped);
 ns_video_layer *ns_video_stream_layer(const ns_video_stream *stream);
 void         ns_video_stream_set_clock(ns_video_stream *stream,
                                        const ns_video_clock *clock);

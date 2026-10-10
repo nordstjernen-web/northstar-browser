@@ -353,6 +353,16 @@ ns_video_stream_set_clock(ns_video_stream *s, const ns_video_clock *clock)
 }
 
 gboolean
+ns_video_stream_frame_counts(const ns_video_stream *s, guint *presented,
+                             guint *dropped)
+{
+    *presented = *dropped = 0;
+    if (!s || !s->worker) return FALSE;
+    ns_video_worker_counts(s->worker, presented, dropped);
+    return TRUE;
+}
+
+gboolean
 ns_video_stream_waiting(const ns_video_stream *s)
 {
     return s && s->waiting;

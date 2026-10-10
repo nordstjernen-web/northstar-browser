@@ -1622,6 +1622,17 @@ ns_media_position(JSContext *ctx, JSValueConst this_val)
     return p ? media_current_time(p) : 0.0;
 }
 
+gboolean
+ns_media_frame_counts(JSContext *ctx, JSValueConst this_val,
+                      guint *presented, guint *dropped)
+{
+    *presented = *dropped = 0;
+    ns_media_player *p = media_player_this(ctx, this_val);
+    ns_image *frames = p ? media_video_frames(p) : NULL;
+    return frames && frames->video &&
+           ns_video_stream_frame_counts(frames->video, presented, dropped);
+}
+
 static void
 media_controls_dirty(ns_media_player *p)
 {

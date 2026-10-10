@@ -43,6 +43,7 @@
 #include "media_types.h"
 #include "trace.h"
 #include "video.h"
+#include "videoworker.h"
 #include "js_date.h"
 #include "js_intl.h"
 #include "js_realm.h"
@@ -10394,6 +10395,48 @@ ns_media_config_supported(JSContext *ctx, JSValueConst config)
     return supported;
 }
 
+/* Whether a supported video configuration plays without dropping frames:
+ * its pixels a second within what the software decoders have sustained
+ * (with a margin), or within 1080p at 30 frames a second before they have
+ * decoded anything. */
+static gboolean
+ns_media_config_smooth(JSContext *ctx, JSValueConst config)
+{
+    if (!JS_IsObject(config)) return TRUE;
+    JSValue video = JS_GetPropertyStr(ctx, config, "video");
+    if (!JS_IsObject(video)) {
+        JS_FreeValue(ctx, video);
+        return TRUE;
+    }
+    double w = 0, h = 0, fps = 0;
+    JSValue v = JS_GetPropertyStr(ctx, video, "width");
+    JS_ToFloat64(ctx, &w, v);
+    JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, video, "height");
+    JS_ToFloat64(ctx, &h, v);
+    JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, video, "framerate");
+    if (JS_IsString(v)) {
+        const char *str = JS_ToCString(ctx, v);
+        if (str) {
+            char *end = NULL;
+            double num = g_ascii_strtod(str, &end);
+            double den = end && *end == '/' ? g_ascii_strtod(end + 1, NULL) : 1;
+            fps = den > 0 ? num / den : num;
+            JS_FreeCString(ctx, str);
+        }
+    } else {
+        JS_ToFloat64(ctx, &fps, v);
+    }
+    JS_FreeValue(ctx, v);
+    JS_FreeValue(ctx, video);
+    if (!(w > 0) || !(h > 0)) return TRUE;
+    if (!(fps > 0)) fps = 30;
+    double measured = ns_video_decode_pixel_rate();
+    double capacity = measured > 0 ? measured * 0.7 : 1920.0 * 1080.0 * 30.0;
+    return w * h * fps <= capacity;
+}
+
 static JSValue
 ns_media_capabilities_result(JSContext *ctx, int argc, JSValueConst *argv,
                              gboolean supported)
@@ -10403,7 +10446,9 @@ ns_media_capabilities_result(JSContext *ctx, int argc, JSValueConst *argv,
     if (JS_IsException(promise)) return promise;
     JSValue info = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, info, "supported",      JS_NewBool(ctx, supported));
-    JS_SetPropertyStr(ctx, info, "smooth",         JS_NewBool(ctx, supported));
+    JS_SetPropertyStr(ctx, info, "smooth",
+                      JS_NewBool(ctx, supported && argc >= 1 &&
+                                      ns_media_config_smooth(ctx, argv[0])));
     JS_SetPropertyStr(ctx, info, "powerEfficient", JS_FALSE);
     JS_SetPropertyStr(ctx, info, "supportedConfiguration",
                       argc >= 1 && JS_IsObject(argv[0])
@@ -42770,13 +42815,21 @@ ns_media_get_video_playback_quality(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc;
     (void)argv;
+    guint presented = 0, dropped = 0;
+    gboolean counted = ns_media_frame_counts(ctx, this_val, &presented,
+                                             &dropped);
     double pos = ns_media_position(ctx, this_val);
     JSValue q = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, q, "creationTime",
                       JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
+    /* Media Source video counts what the decoder delivered: a frame
+     * decoded after its time was dropped. Pages lower the quality they
+     * stream when many are. */
     JS_SetPropertyStr(ctx, q, "totalVideoFrames",
-                      JS_NewInt32(ctx, (int)(pos * 30.0)));
-    JS_SetPropertyStr(ctx, q, "droppedVideoFrames", JS_NewInt32(ctx, 0));
+                      JS_NewInt32(ctx, counted ? (int)(presented + dropped)
+                                               : (int)(pos * 30.0)));
+    JS_SetPropertyStr(ctx, q, "droppedVideoFrames",
+                      JS_NewInt32(ctx, counted ? (int)dropped : 0));
     JS_SetPropertyStr(ctx, q, "corruptedVideoFrames", JS_NewInt32(ctx, 0));
     return q;
 }

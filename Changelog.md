@@ -4,6 +4,14 @@ Significant changes in each release:
 
 1.0.14:
 =======
+* getVideoPlaybackQuality() counts the frames a Media Source video
+  showed and the ones it decoded too late to show, and
+  MediaCapabilities.decodingInfo() reports a video configuration as smooth
+  only when its pixel rate fits what the decoder has sustained (1080p at
+  30 frames a second before it has measured anything). It also answers
+  for Media Source video, which it always called unsupported. Pages such
+  as YouTube lower the quality they stream when frames are dropped; they
+  were told none ever were.
 * `--trace` also records the media pipeline: video decoding and feeding,
   the picture picked for each view frame, audio device fills and
   feeding, and MSE appends.
