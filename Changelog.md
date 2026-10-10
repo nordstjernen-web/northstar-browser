@@ -47,6 +47,20 @@ Significant changes in each release:
     inside a frame from another site was treated as same-origin with the
     top page and could read its DOM. A frame's embedder is now the
     document that contains its element.
+* Google Maps loads its full interface: the place card, sign-in button,
+  layer switcher, zoom and location controls, Street View bar, footer and
+  scale. Two engine gaps stopped its start-up half way and showed "an
+  error occurred":
+  - XPath 1.0: `document.evaluate()`, `createExpression()`,
+    `createNSResolver()`, `XPathEvaluator`, `XPathExpression` and
+    `XPathResult`, with every axis, node test, operator and core function,
+    HTML-document name matching, namespace prefixes through a resolver, and
+    all ten result types.
+  - A dedicated worker's global object is now a `DedicatedWorkerGlobalScope`
+    inheriting from `WorkerGlobalScope` and `EventTarget` (a service
+    worker's, a `ServiceWorkerGlobalScope`), so `self instanceof
+    DedicatedWorkerGlobalScope` holds, as worker scripts check before
+    running.
 * A `gap`, `margin-block`, `margin-inline`, `padding-block`,
   `padding-inline`, `inset-block`, `inset-inline`,
   `border-block-*`/`border-inline-*` width, style or color, `overflow`

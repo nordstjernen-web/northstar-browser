@@ -9770,14 +9770,6 @@ ns_returns_false(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_returns_null(JSContext *ctx, JSValueConst this_val,
-                int argc, JSValueConst *argv)
-{
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
-    return JS_NULL;
-}
-
-static JSValue
 ns_navigator_get_battery(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
@@ -22172,10 +22164,27 @@ ns_sw_clients_claim(JSContext *ctx, JSValueConst this_val,
 }
 
 static void
+ns_worker_install_scope_chain(JSContext *ctx, JSValueConst global,
+                              const char *scope_name)
+{
+    JSValue target = JS_GetPropertyStr(ctx, global, "EventTarget");
+    JSValue target_proto = JS_IsObject(target)
+        ? JS_GetPropertyStr(ctx, target, "prototype") : JS_UNDEFINED;
+    JSValue worker_proto = JS_IsObject(target_proto)
+        ? JS_NewObjectProto(ctx, target_proto) : JS_NewObject(ctx);
+    JSValue scope_proto = JS_NewObjectProto(ctx, worker_proto);
+    ns_make_interface_object(ctx, global, "WorkerGlobalScope", worker_proto);
+    ns_make_interface_object(ctx, global, scope_name, scope_proto);
+    JS_SetPrototype(ctx, (JSValue)global, scope_proto);
+    JS_FreeValue(ctx, scope_proto);
+    JS_FreeValue(ctx, worker_proto);
+    JS_FreeValue(ctx, target_proto);
+    JS_FreeValue(ctx, target);
+}
+
+static void
 ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
 {
-    JS_SetPropertyStr(ctx, global, "ServiceWorkerGlobalScope",
-                      JS_GetPropertyStr(ctx, global, "EventTarget"));
     ns_bind_fn(ctx, global, "skipWaiting", ns_returns_resolved_undefined, 0);
     JS_SetPropertyStr(ctx, global, "oninstall",  JS_NULL);
     JS_SetPropertyStr(ctx, global, "onactivate", JS_NULL);
@@ -22438,10 +22447,9 @@ ns_worker_js_new(ns_worker_host *host)
     }
     JS_SetPropertyStr(ctx, global, "self", JS_DupValue(ctx, global));
     JS_SetPropertyStr(ctx, global, "globalThis", JS_DupValue(ctx, global));
-    JS_SetPropertyStr(ctx, global, "DedicatedWorkerGlobalScope",
-                      JS_GetPropertyStr(ctx, global, "EventTarget"));
-    JS_SetPropertyStr(ctx, global, "WorkerGlobalScope",
-                      JS_GetPropertyStr(ctx, global, "EventTarget"));
+    ns_worker_install_scope_chain(ctx, global,
+        host->is_service_worker ? "ServiceWorkerGlobalScope"
+                                : "DedicatedWorkerGlobalScope");
     JS_SetPropertyStr(ctx, global, "_listeners", JS_NewArray(ctx));
     ns_bind_event_target_listeners(ctx, global);
     ns_bind_fn(ctx, global, "dispatchEvent",       ns_target_dispatchEvent, 1);
@@ -47979,33 +47987,6 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
             JS_FreeValue(ctx, proto);
         }
         JS_FreeValue(ctx, svglen);
-    }
-
-    {
-        static const struct { const char *name; int value; } constants[] = {
-            { "ANY_TYPE", 0 }, { "NUMBER_TYPE", 1 }, { "STRING_TYPE", 2 },
-            { "BOOLEAN_TYPE", 3 }, { "UNORDERED_NODE_ITERATOR_TYPE", 4 },
-            { "ORDERED_NODE_ITERATOR_TYPE", 5 },
-            { "UNORDERED_NODE_SNAPSHOT_TYPE", 6 },
-            { "ORDERED_NODE_SNAPSHOT_TYPE", 7 },
-            { "ANY_UNORDERED_NODE_TYPE", 8 },
-            { "FIRST_ORDERED_NODE_TYPE", 9 },
-        };
-        JSValue ctor = JS_GetPropertyStr(ctx, global, "XPathResult");
-        JSValue proto = JS_IsObject(ctor)
-            ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
-        if (JS_IsObject(proto)) {
-            ns_bind_fn(ctx, proto, "iterateNext", ns_returns_null, 0);
-            ns_bind_fn(ctx, proto, "snapshotItem", ns_returns_null, 1);
-            for (gsize i = 0; i < G_N_ELEMENTS(constants); i++) {
-                JS_DefinePropertyValueStr(ctx, ctor, constants[i].name,
-                    JS_NewInt32(ctx, constants[i].value), 0);
-                JS_DefinePropertyValueStr(ctx, proto, constants[i].name,
-                    JS_NewInt32(ctx, constants[i].value), 0);
-            }
-        }
-        JS_FreeValue(ctx, proto);
-        JS_FreeValue(ctx, ctor);
     }
 
     ns_install_event_handler_props(ctx, global);

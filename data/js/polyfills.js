@@ -1043,6 +1043,830 @@
         defineCtor('NodeFilter', NF);
     }
 
+    if (global.document && typeof global.XPathResult !== 'function') (function () {
+        var XHTML_NS = 'http://www.w3.org/1999/xhtml';
+        var XML_NS = 'http://www.w3.org/XML/1998/namespace';
+        var XMLNS_NS = 'http://www.w3.org/2000/xmlns/';
+        var NODE_TYPES = { node: 1, text: 1, comment: 1, 'processing-instruction': 1 };
+        var AXES = {
+            ancestor: 1, 'ancestor-or-self': 1, attribute: 1, child: 1,
+            descendant: 1, 'descendant-or-self': 1, following: 1,
+            'following-sibling': 1, namespace: 1, parent: 1, preceding: 1,
+            'preceding-sibling': 1, self: 1
+        };
+        var REVERSE_AXES = {
+            ancestor: 1, 'ancestor-or-self': 1, preceding: 1, 'preceding-sibling': 1
+        };
+        var NAME_START = /[A-Za-z_À-ÖØ-öø-˿Ͱ-ͽͿ-῿‌‍⁰-↏Ⰰ-⿯、-퟿豈-﷏ﷰ-�]/;
+        var NAME_CHAR = /[-.0-9·̀-ͯ‿⁀A-Za-z_À-ÖØ-öø-˿Ͱ-ͽͿ-῿‌‍⁰-↏Ⰰ-⿯、-퟿豈-﷏ﷰ-�]/;
+        var XP_WS = /^[\x20\x09\x0D\x0A]+|[\x20\x09\x0D\x0A]+$/g;
+
+        function xpError(msg, name) {
+            return new global.DOMException(msg, name);
+        }
+
+        function xpTokenize(src) {
+            var toks = [], i = 0, n = src.length;
+            function operandBefore() {
+                var p = toks[toks.length - 1];
+                if (!p) return false;
+                if (p.t === 'num' || p.t === 'str' || p.t === 'name' || p.t === 'var')
+                    return true;
+                return p.t === 'op' && (p.v === ')' || p.v === ']' || p.v === '.' ||
+                                        p.v === '..');
+            }
+            function ncname() {
+                var s = i;
+                if (i < n && NAME_START.test(src[i])) {
+                    i++;
+                    while (i < n && NAME_CHAR.test(src[i])) i++;
+                }
+                return src.slice(s, i);
+            }
+            function peekNonSpace() {
+                var j = i;
+                while (j < n && /\s/.test(src[j])) j++;
+                return j;
+            }
+            while (i < n) {
+                var c = src[i];
+                if (/\s/.test(c)) { i++; continue; }
+                if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(src[i + 1] || ''))) {
+                    var m = /^[0-9]*(\.[0-9]*)?/.exec(src.slice(i));
+                    toks.push({ t: 'num', v: parseFloat(m[0]) });
+                    i += m[0].length;
+                    continue;
+                }
+                if (c === '"' || c === "'") {
+                    var end = src.indexOf(c, i + 1);
+                    if (end < 0) throw xpError('Unterminated string literal', 'SyntaxError');
+                    toks.push({ t: 'str', v: src.slice(i + 1, end) });
+                    i = end + 1;
+                    continue;
+                }
+                var two = src.substr(i, 2);
+                if (two === '..' || two === '//' || two === '!=' || two === '<=' ||
+                    two === '>=' || two === '::') {
+                    toks.push({ t: 'op', v: two });
+                    i += 2;
+                    continue;
+                }
+                if ('/|+-=<>()[],@.'.indexOf(c) >= 0) {
+                    toks.push({ t: 'op', v: c });
+                    i++;
+                    continue;
+                }
+                if (c === '*') {
+                    toks.push(operandBefore() ? { t: 'op', v: '*' } : { t: 'name', v: '*' });
+                    i++;
+                    continue;
+                }
+                if (c === '$') {
+                    i++;
+                    var vn = ncname();
+                    if (src[i] === ':' && src[i + 1] !== ':') { i++; vn += ':' + ncname(); }
+                    if (!vn) throw xpError('Invalid variable reference', 'SyntaxError');
+                    toks.push({ t: 'var', v: vn });
+                    continue;
+                }
+                var name = ncname();
+                if (!name) throw xpError('Unexpected character ' + c, 'SyntaxError');
+                if (operandBefore()) {
+                    if (name !== 'and' && name !== 'or' && name !== 'mod' && name !== 'div')
+                        throw xpError('Unexpected name ' + name, 'SyntaxError');
+                    toks.push({ t: 'op', v: name });
+                    continue;
+                }
+                if (src[i] === ':' && src[i + 1] !== ':') {
+                    i++;
+                    if (src[i] === '*') { i++; name += ':*'; }
+                    else {
+                        var local = ncname();
+                        if (!local) throw xpError('Invalid QName', 'SyntaxError');
+                        name += ':' + local;
+                    }
+                    var j0 = peekNonSpace();
+                    if (src[j0] === '(' && name.indexOf('*') < 0) {
+                        toks.push({ t: 'func', v: name });
+                        continue;
+                    }
+                    toks.push({ t: 'name', v: name });
+                    continue;
+                }
+                var j = peekNonSpace();
+                if (src.substr(j, 2) === '::') {
+                    if (!AXES[name]) throw xpError('Unknown axis ' + name, 'SyntaxError');
+                    toks.push({ t: 'axis', v: name });
+                    i = j + 2;
+                    continue;
+                }
+                if (src[j] === '(') {
+                    toks.push({ t: NODE_TYPES[name] ? 'nodetype' : 'func', v: name });
+                    continue;
+                }
+                toks.push({ t: 'name', v: name });
+            }
+            return toks;
+        }
+
+        function xpParse(src) {
+            var toks = xpTokenize(src), p = 0;
+            function peek() { return toks[p]; }
+            function isOp(v) { var t = toks[p]; return !!t && t.t === 'op' && t.v === v; }
+            function expect(v) {
+                if (!isOp(v)) throw xpError('Expected ' + v, 'SyntaxError');
+                p++;
+            }
+            function binary(next, ops, kind) {
+                return function () {
+                    var a = next();
+                    while (toks[p] && toks[p].t === 'op' && ops.indexOf(toks[p].v) >= 0) {
+                        var op = toks[p++].v;
+                        a = { k: kind, op: op, a: a, b: next() };
+                    }
+                    return a;
+                };
+            }
+            function startsStep(t) {
+                if (!t) return false;
+                if (t.t === 'name' || t.t === 'axis' || t.t === 'nodetype') return true;
+                return t.t === 'op' && (t.v === '@' || t.v === '.' || t.v === '..');
+            }
+            function step() {
+                if (isOp('.')) { p++; return { axis: 'self', test: { type: 'node' }, preds: [] }; }
+                if (isOp('..')) { p++; return { axis: 'parent', test: { type: 'node' }, preds: [] }; }
+                var axis = 'child', t;
+                if (isOp('@')) { p++; axis = 'attribute'; }
+                else if (peek() && peek().t === 'axis') axis = toks[p++].v;
+                t = toks[p++];
+                var test;
+                if (t && t.t === 'name') {
+                    var ci = t.v.indexOf(':');
+                    test = ci < 0 ? { type: 'name', prefix: null, local: t.v }
+                                  : { type: 'name', prefix: t.v.slice(0, ci), local: t.v.slice(ci + 1) };
+                } else if (t && t.t === 'nodetype') {
+                    expect('(');
+                    test = { type: t.v };
+                    if (t.v === 'processing-instruction' && peek() && peek().t === 'str')
+                        test.lit = toks[p++].v;
+                    expect(')');
+                } else {
+                    throw xpError('Expected a node test', 'SyntaxError');
+                }
+                return { axis: axis, test: test, preds: predicates() };
+            }
+            function predicates() {
+                var preds = [];
+                while (isOp('[')) { p++; preds.push(expr()); expect(']'); }
+                return preds;
+            }
+            var DSLASH = { axis: 'descendant-or-self', test: { type: 'node' }, preds: [] };
+            function relativePath(steps) {
+                steps.push(step());
+                while (isOp('/') || isOp('//')) {
+                    if (toks[p++].v === '//') steps.push(DSLASH);
+                    steps.push(step());
+                }
+                return steps;
+            }
+            function pathExpr() {
+                var t = peek();
+                if (t && t.t === 'op' && (t.v === '/' || t.v === '//')) {
+                    p++;
+                    if (t.v === '//') return { k: 'path', absolute: true, steps: relativePath([DSLASH]) };
+                    if (startsStep(peek())) return { k: 'path', absolute: true, steps: relativePath([]) };
+                    return { k: 'path', absolute: true, steps: [] };
+                }
+                if (startsStep(t)) return { k: 'path', absolute: false, steps: relativePath([]) };
+                var prim = primary();
+                var preds = predicates();
+                var filt = preds.length ? { k: 'filter', e: prim, preds: preds } : prim;
+                if (isOp('/') || isOp('//')) {
+                    var steps = [];
+                    if (toks[p++].v === '//') steps.push(DSLASH);
+                    return { k: 'path', filter: filt, steps: relativePath(steps) };
+                }
+                return filt;
+            }
+            function primary() {
+                var t = toks[p++];
+                if (!t) throw xpError('Unexpected end of expression', 'SyntaxError');
+                if (t.t === 'num') return { k: 'lit', v: t.v };
+                if (t.t === 'str') return { k: 'lit', v: t.v };
+                if (t.t === 'var') return { k: 'var', v: t.v };
+                if (t.t === 'op' && t.v === '(') { var e = expr(); expect(')'); return e; }
+                if (t.t === 'func') {
+                    expect('(');
+                    var args = [];
+                    if (!isOp(')')) {
+                        args.push(expr());
+                        while (isOp(',')) { p++; args.push(expr()); }
+                    }
+                    expect(')');
+                    if (!XP_FUNCS[t.v]) throw xpError('Unknown function ' + t.v, 'SyntaxError');
+                    return { k: 'fn', name: t.v, args: args };
+                }
+                throw xpError('Unexpected token ' + t.v, 'SyntaxError');
+            }
+            function union() {
+                var a = pathExpr();
+                while (isOp('|')) { p++; a = { k: 'union', a: a, b: pathExpr() }; }
+                return a;
+            }
+            function unary() {
+                if (isOp('-')) { p++; return { k: 'neg', a: unary() }; }
+                return union();
+            }
+            var multiplicative = binary(unary, ['*', 'div', 'mod'], 'arith');
+            var additive = binary(multiplicative, ['+', '-'], 'arith');
+            var relational = binary(additive, ['<', '>', '<=', '>='], 'cmp');
+            var equality = binary(relational, ['=', '!='], 'cmp');
+            var and = binary(equality, ['and'], 'and');
+            var expr = binary(and, ['or'], 'or');
+            var tree = expr();
+            if (p < toks.length) throw xpError('Unexpected token ' + toks[p].v, 'SyntaxError');
+            return tree;
+        }
+
+        function parentOf(n) {
+            return n.nodeType === 2 ? n.ownerElement : n.parentNode;
+        }
+
+        function rootOf(n) {
+            var r = n, up;
+            while ((up = parentOf(r))) r = up;
+            return r;
+        }
+
+        function inModel(n) {
+            return n.nodeType !== 10;
+        }
+
+        function eachDescendant(n, out) {
+            for (var c = n.firstChild; c; c = c.nextSibling) {
+                if (!inModel(c)) continue;
+                out.push(c);
+                eachDescendant(c, out);
+            }
+        }
+
+        function eachDescendantReverse(n, out) {
+            for (var c = n.lastChild; c; c = c.previousSibling) {
+                if (!inModel(c)) continue;
+                eachDescendantReverse(c, out);
+                out.push(c);
+            }
+        }
+
+        function axisNodes(axis, n) {
+            var out = [], x, s;
+            switch (axis) {
+            case 'self':
+                out.push(n);
+                break;
+            case 'child':
+                if (n.nodeType === 2) break;
+                for (x = n.firstChild; x; x = x.nextSibling) if (inModel(x)) out.push(x);
+                break;
+            case 'descendant-or-self':
+                out.push(n);
+            case 'descendant':
+                if (n.nodeType !== 2) eachDescendant(n, out);
+                break;
+            case 'parent':
+                if ((x = parentOf(n))) out.push(x);
+                break;
+            case 'ancestor-or-self':
+                out.push(n);
+            case 'ancestor':
+                for (x = parentOf(n); x; x = parentOf(x)) out.push(x);
+                break;
+            case 'attribute':
+                if (n.nodeType === 1 && n.attributes) {
+                    for (var i = 0; i < n.attributes.length; i++) {
+                        var a = n.attributes[i];
+                        if (a.namespaceURI !== XMLNS_NS && a.name !== 'xmlns' &&
+                            a.name.indexOf('xmlns:') !== 0) out.push(a);
+                    }
+                }
+                break;
+            case 'following-sibling':
+                if (n.nodeType === 2) break;
+                for (x = n.nextSibling; x; x = x.nextSibling) if (inModel(x)) out.push(x);
+                break;
+            case 'preceding-sibling':
+                if (n.nodeType === 2) break;
+                for (x = n.previousSibling; x; x = x.previousSibling) if (inModel(x)) out.push(x);
+                break;
+            case 'following':
+                x = n;
+                if (n.nodeType === 2) { x = n.ownerElement; if (x) eachDescendant(x, out); }
+                for (; x; x = parentOf(x)) {
+                    for (s = x.nextSibling; s; s = s.nextSibling) {
+                        if (!inModel(s)) continue;
+                        out.push(s);
+                        eachDescendant(s, out);
+                    }
+                }
+                break;
+            case 'preceding':
+                x = n.nodeType === 2 ? n.ownerElement : n;
+                for (; x; x = parentOf(x)) {
+                    for (s = x.previousSibling; s; s = s.previousSibling) {
+                        if (!inModel(s)) continue;
+                        eachDescendantReverse(s, out);
+                        out.push(s);
+                    }
+                }
+                break;
+            }
+            return out;
+        }
+
+        function isHTMLDocument(doc) {
+            return !!doc && doc.nodeType === 9 && doc.contentType === 'text/html';
+        }
+
+        function resolvePrefix(env, prefix) {
+            if (prefix === 'xml') return XML_NS;
+            var r = env.resolver, uri = null;
+            if (r) {
+                if (typeof r === 'function') uri = r(prefix);
+                else if (typeof r.lookupNamespaceURI === 'function') uri = r.lookupNamespaceURI(prefix);
+            }
+            if (uri === null || uri === undefined || uri === '')
+                throw xpError('Prefix ' + prefix + ' is not bound', 'NamespaceError');
+            return String(uri);
+        }
+
+        function matchTest(env, test, axis, n) {
+            var t = n.nodeType;
+            switch (test.type) {
+            case 'node': return true;
+            case 'text': return t === 3 || t === 4;
+            case 'comment': return t === 8;
+            case 'processing-instruction':
+                return t === 7 && (test.lit === undefined || n.target === test.lit);
+            }
+            var principal = axis === 'attribute' ? 2 : 1;
+            if (t !== principal) return false;
+            var ns = n.namespaceURI || null;
+            if (test.prefix !== null) {
+                if (ns !== resolvePrefix(env, test.prefix)) return false;
+                return test.local === '*' || n.localName === test.local;
+            }
+            if (test.local === '*') return true;
+            if (t === 1 && ns === XHTML_NS && isHTMLDocument(n.ownerDocument))
+                return n.localName === test.local.toLowerCase();
+            if (t === 2 && n.ownerElement && n.ownerElement.namespaceURI === XHTML_NS &&
+                isHTMLDocument(n.ownerDocument) && !ns)
+                return n.localName === test.local.toLowerCase();
+            return !ns && n.localName === test.local;
+        }
+
+        function orderKey(env, n) {
+            if (n.nodeType === 2) {
+                var owner = n.ownerElement;
+                if (!owner) return -1;
+                var attrs = owner.attributes, k = 0;
+                for (; k < attrs.length; k++) if (attrs[k].name === n.name) break;
+                return orderKey(env, owner) + (k + 1) / (attrs.length + 2);
+            }
+            var key = env.order.get(n);
+            if (key === undefined) {
+                var stack = [rootOf(n)];
+                while (stack.length) {
+                    var x = stack.pop();
+                    env.order.set(x, env.next++);
+                    var kids = [];
+                    for (var c = x.firstChild; c; c = c.nextSibling) kids.push(c);
+                    for (var i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
+                }
+                key = env.order.get(n);
+            }
+            return key;
+        }
+
+        function docOrder(env, nodes) {
+            var keyed = [], seen = new Map();
+            for (var i = 0; i < nodes.length; i++) {
+                var key = orderKey(env, nodes[i]);
+                if (seen.has(key)) continue;
+                seen.set(key, true);
+                keyed.push({ k: key, n: nodes[i] });
+            }
+            keyed.sort(function (a, b) { return a.k - b.k; });
+            return keyed.map(function (e) { return e.n; });
+        }
+
+        function stringValue(n) {
+            switch (n.nodeType) {
+            case 1: case 11: return n.textContent || '';
+            case 9: return n.documentElement ? n.documentElement.textContent || '' : '';
+            case 2: return n.value;
+            default: return n.nodeValue || '';
+            }
+        }
+
+        function numberToString(x) {
+            if (x !== x) return 'NaN';
+            if (x === 0) return '0';
+            if (x === Infinity) return 'Infinity';
+            if (x === -Infinity) return '-Infinity';
+            var s = String(x);
+            var m = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(s);
+            if (!m) return s;
+            var digits = m[2] + (m[3] || ''), exp = parseInt(m[4], 10) - (m[3] || '').length;
+            if (exp >= 0) return m[1] + digits + new Array(exp + 1).join('0');
+            var point = digits.length + exp;
+            if (point > 0) return m[1] + digits.slice(0, point) + '.' + digits.slice(point);
+            return m[1] + '0.' + new Array(1 - point).join('0') + digits;
+        }
+
+        function toStr(v) {
+            if (Array.isArray(v)) return v.length ? stringValue(v[0]) : '';
+            if (typeof v === 'number') return numberToString(v);
+            if (typeof v === 'boolean') return v ? 'true' : 'false';
+            return v;
+        }
+
+        function strToNum(s) {
+            s = s.replace(XP_WS, '');
+            return /^-?(\d+(\.\d*)?|\.\d+)$/.test(s) ? parseFloat(s) : NaN;
+        }
+
+        function toNum(v) {
+            if (typeof v === 'number') return v;
+            if (typeof v === 'boolean') return v ? 1 : 0;
+            return strToNum(toStr(v));
+        }
+
+        function toBool(v) {
+            if (Array.isArray(v)) return v.length > 0;
+            if (typeof v === 'number') return v !== 0 && v === v;
+            if (typeof v === 'string') return v.length > 0;
+            return v;
+        }
+
+        function compareAtoms(op, a, b) {
+            if (op === '=' || op === '!=') {
+                var eq;
+                if (typeof a === 'boolean' || typeof b === 'boolean') eq = toBool(a) === toBool(b);
+                else if (typeof a === 'number' || typeof b === 'number') eq = toNum(a) === toNum(b);
+                else eq = toStr(a) === toStr(b);
+                return op === '=' ? eq : !eq;
+            }
+            var x = toNum(a), y = toNum(b);
+            switch (op) {
+            case '<': return x < y;
+            case '>': return x > y;
+            case '<=': return x <= y;
+            default: return x >= y;
+            }
+        }
+
+        function compare(op, a, b) {
+            var an = Array.isArray(a), bn = Array.isArray(b), i, j;
+            if (an && bn) {
+                var bs = b.map(stringValue);
+                for (i = 0; i < a.length; i++) {
+                    var as = stringValue(a[i]);
+                    for (j = 0; j < bs.length; j++) if (compareAtoms(op, as, bs[j])) return true;
+                }
+                return false;
+            }
+            if (an || bn) {
+                var set = an ? a : b, other = an ? b : a;
+                if (typeof other === 'boolean')
+                    return an ? compareAtoms(op, toBool(set), other) : compareAtoms(op, other, toBool(set));
+                for (i = 0; i < set.length; i++) {
+                    var sv = stringValue(set[i]);
+                    var atom = typeof other === 'number' ? strToNum(sv) : sv;
+                    if (an ? compareAtoms(op, atom, other) : compareAtoms(op, other, atom)) return true;
+                }
+                return false;
+            }
+            return compareAtoms(op, a, b);
+        }
+
+        function nodeSetArg(v, fn) {
+            if (!Array.isArray(v)) throw new TypeError(fn + '() expects a node-set');
+            return v;
+        }
+
+        function chars(s) {
+            return Array.from(s);
+        }
+
+        function xpRound(x) {
+            if (x !== x || x === Infinity || x === -Infinity || x === 0) return x;
+            if (x < 0 && x >= -0.5) return -0;
+            return Math.floor(x + 0.5);
+        }
+
+        function contextOrArg(env, c, args, fn) {
+            if (!args.length) return c.node;
+            var set = nodeSetArg(ev(env, args[0], c), fn);
+            return set.length ? docOrder(env, set)[0] : null;
+        }
+
+        function qualifiedName(n) {
+            if (!n) return '';
+            if (n.nodeType === 7) return n.target;
+            if (n.nodeType !== 1 && n.nodeType !== 2) return '';
+            return n.prefix ? n.prefix + ':' + n.localName : n.localName;
+        }
+
+        var XP_FUNCS = {
+            last: function (env, c) { return c.size; },
+            position: function (env, c) { return c.pos; },
+            count: function (env, c, a) { return nodeSetArg(ev(env, a[0], c), 'count').length; },
+            id: function (env, c, a) {
+                var v = ev(env, a[0], c), ids = [];
+                if (Array.isArray(v)) v.forEach(function (n) { ids = ids.concat(stringValue(n).split(/[\x20\x09\x0D\x0A]+/)); });
+                else ids = toStr(v).split(/[\x20\x09\x0D\x0A]+/);
+                var root = rootOf(c.node), out = [], all = [];
+                eachDescendant(root, all);
+                ids.forEach(function (id) {
+                    if (!id) return;
+                    for (var i = 0; i < all.length; i++) {
+                        if (all[i].nodeType === 1 && all[i].getAttribute('id') === id) { out.push(all[i]); break; }
+                    }
+                });
+                return docOrder(env, out);
+            },
+            'local-name': function (env, c, a) {
+                var n = contextOrArg(env, c, a, 'local-name');
+                if (!n) return '';
+                if (n.nodeType === 7) return n.target;
+                return n.nodeType === 1 || n.nodeType === 2 ? n.localName : '';
+            },
+            'namespace-uri': function (env, c, a) {
+                var n = contextOrArg(env, c, a, 'namespace-uri');
+                return n && (n.nodeType === 1 || n.nodeType === 2) ? n.namespaceURI || '' : '';
+            },
+            name: function (env, c, a) { return qualifiedName(contextOrArg(env, c, a, 'name')); },
+            string: function (env, c, a) { return a.length ? toStr(ev(env, a[0], c)) : stringValue(c.node); },
+            concat: function (env, c, a) {
+                if (a.length < 2) throw xpError('concat() needs two arguments', 'SyntaxError');
+                return a.map(function (e) { return toStr(ev(env, e, c)); }).join('');
+            },
+            'starts-with': function (env, c, a) {
+                return toStr(ev(env, a[0], c)).indexOf(toStr(ev(env, a[1], c))) === 0;
+            },
+            contains: function (env, c, a) {
+                return toStr(ev(env, a[0], c)).indexOf(toStr(ev(env, a[1], c))) >= 0;
+            },
+            'substring-before': function (env, c, a) {
+                var s = toStr(ev(env, a[0], c)), t = toStr(ev(env, a[1], c)), i = s.indexOf(t);
+                return i < 0 ? '' : s.slice(0, i);
+            },
+            'substring-after': function (env, c, a) {
+                var s = toStr(ev(env, a[0], c)), t = toStr(ev(env, a[1], c)), i = s.indexOf(t);
+                return i < 0 ? '' : s.slice(i + t.length);
+            },
+            substring: function (env, c, a) {
+                var s = chars(toStr(ev(env, a[0], c)));
+                var start = xpRound(toNum(ev(env, a[1], c)));
+                var end = a.length > 2 ? start + xpRound(toNum(ev(env, a[2], c))) : Infinity;
+                var out = '';
+                for (var i = 0; i < s.length; i++) if (i + 1 >= start && i + 1 < end) out += s[i];
+                return out;
+            },
+            'string-length': function (env, c, a) {
+                return chars(a.length ? toStr(ev(env, a[0], c)) : stringValue(c.node)).length;
+            },
+            'normalize-space': function (env, c, a) {
+                var s = a.length ? toStr(ev(env, a[0], c)) : stringValue(c.node);
+                return s.replace(XP_WS, '').replace(/[\x20\x09\x0D\x0A]+/g, ' ');
+            },
+            translate: function (env, c, a) {
+                var s = chars(toStr(ev(env, a[0], c)));
+                var from = chars(toStr(ev(env, a[1], c))), to = chars(toStr(ev(env, a[2], c)));
+                return s.map(function (ch) {
+                    var i = from.indexOf(ch);
+                    return i < 0 ? ch : i < to.length ? to[i] : '';
+                }).join('');
+            },
+            boolean: function (env, c, a) { return toBool(ev(env, a[0], c)); },
+            not: function (env, c, a) { return !toBool(ev(env, a[0], c)); },
+            'true': function () { return true; },
+            'false': function () { return false; },
+            lang: function (env, c, a) {
+                var want = toStr(ev(env, a[0], c)).toLowerCase();
+                for (var n = c.node; n; n = parentOf(n)) {
+                    if (n.nodeType !== 1) continue;
+                    var l = n.getAttributeNS ? n.getAttributeNS(XML_NS, 'lang') : null;
+                    if (l === null || l === '') l = n.getAttribute('xml:lang');
+                    if (l === null) continue;
+                    l = l.toLowerCase();
+                    return l === want || l.indexOf(want + '-') === 0;
+                }
+                return false;
+            },
+            number: function (env, c, a) { return a.length ? toNum(ev(env, a[0], c)) : strToNum(stringValue(c.node)); },
+            sum: function (env, c, a) {
+                return nodeSetArg(ev(env, a[0], c), 'sum').reduce(function (t, n) {
+                    return t + strToNum(stringValue(n));
+                }, 0);
+            },
+            floor: function (env, c, a) { return Math.floor(toNum(ev(env, a[0], c))); },
+            ceiling: function (env, c, a) { return Math.ceil(toNum(ev(env, a[0], c))); },
+            round: function (env, c, a) { return xpRound(toNum(ev(env, a[0], c))); }
+        };
+
+        function filterPredicates(env, nodes, preds) {
+            for (var i = 0; i < preds.length; i++) {
+                var kept = [], size = nodes.length;
+                for (var j = 0; j < size; j++) {
+                    var r = ev(env, preds[i], { node: nodes[j], pos: j + 1, size: size });
+                    if (typeof r === 'number' ? r === j + 1 : toBool(r)) kept.push(nodes[j]);
+                }
+                nodes = kept;
+            }
+            return nodes;
+        }
+
+        function evalStep(env, st, input) {
+            var out = [];
+            for (var i = 0; i < input.length; i++) {
+                var cand = axisNodes(st.axis, input[i]), matched = [];
+                for (var j = 0; j < cand.length; j++)
+                    if (matchTest(env, st.test, st.axis, cand[j])) matched.push(cand[j]);
+                matched = filterPredicates(env, matched, st.preds);
+                for (j = 0; j < matched.length; j++) out.push(matched[j]);
+            }
+            return input.length > 1 || REVERSE_AXES[st.axis] ? docOrder(env, out) : out;
+        }
+
+        function ev(env, e, c) {
+            switch (e.k) {
+            case 'lit': return e.v;
+            case 'var': throw xpError('Variables are not supported', 'SyntaxError');
+            case 'or': return toBool(ev(env, e.a, c)) || toBool(ev(env, e.b, c));
+            case 'and': return toBool(ev(env, e.a, c)) && toBool(ev(env, e.b, c));
+            case 'cmp': return compare(e.op, ev(env, e.a, c), ev(env, e.b, c));
+            case 'neg': return -toNum(ev(env, e.a, c));
+            case 'arith':
+                var x = toNum(ev(env, e.a, c)), y = toNum(ev(env, e.b, c));
+                switch (e.op) {
+                case '+': return x + y;
+                case '-': return x - y;
+                case '*': return x * y;
+                case 'div': return x / y;
+                default: return x % y;
+                }
+            case 'union':
+                var a = ev(env, e.a, c), b = ev(env, e.b, c);
+                if (!Array.isArray(a) || !Array.isArray(b))
+                    throw new TypeError('The | operator requires node-sets');
+                return docOrder(env, a.concat(b));
+            case 'fn': return XP_FUNCS[e.name](env, c, e.args);
+            case 'filter':
+                var base = ev(env, e.e, c);
+                if (!Array.isArray(base)) throw new TypeError('Predicates require a node-set');
+                return filterPredicates(env, docOrder(env, base), e.preds);
+            case 'path':
+                var nodes;
+                if (e.filter) {
+                    nodes = ev(env, e.filter, c);
+                    if (!Array.isArray(nodes)) throw new TypeError('Path step requires a node-set');
+                    nodes = docOrder(env, nodes);
+                } else {
+                    nodes = [e.absolute ? rootOf(c.node) : c.node];
+                }
+                for (var i = 0; i < e.steps.length; i++) nodes = evalStep(env, e.steps[i], nodes);
+                return nodes;
+            }
+            throw xpError('Bad expression', 'SyntaxError');
+        }
+
+        var resultState = new WeakMap();
+
+        function XPathResult() {
+            throw new TypeError('Illegal constructor');
+        }
+
+        function state(r, types, what) {
+            var s = resultState.get(r);
+            if (!s) throw new TypeError('Illegal invocation');
+            if (types && types.indexOf(s.type) < 0)
+                throw new TypeError('The result type is not ' + what);
+            return s;
+        }
+
+        function getter(name, fn) {
+            Object.defineProperty(XPathResult.prototype, name, {
+                get: fn, configurable: true, enumerable: true
+            });
+        }
+
+        getter('resultType', function () { return state(this).type; });
+        getter('numberValue', function () { return state(this, [1], 'a number').value; });
+        getter('stringValue', function () { return state(this, [2], 'a string').value; });
+        getter('booleanValue', function () { return state(this, [3], 'a boolean').value; });
+        getter('singleNodeValue', function () {
+            var s = state(this, [8, 9], 'a single node');
+            return s.nodes[0] || null;
+        });
+        getter('invalidIteratorState', function () { return false; });
+        getter('snapshotLength', function () { return state(this, [6, 7], 'a snapshot').nodes.length; });
+        defineMethod(XPathResult.prototype, 'iterateNext', function () {
+            var s = state(this, [4, 5], 'an iterator');
+            return s.index < s.nodes.length ? s.nodes[s.index++] : null;
+        });
+        defineMethod(XPathResult.prototype, 'snapshotItem', function (i) {
+            var s = state(this, [6, 7], 'a snapshot');
+            i = Number(i);
+            return i >= 0 && i < s.nodes.length ? s.nodes[Math.floor(i)] : null;
+        });
+
+        var RESULT_TYPES = [
+            'ANY_TYPE', 'NUMBER_TYPE', 'STRING_TYPE', 'BOOLEAN_TYPE',
+            'UNORDERED_NODE_ITERATOR_TYPE', 'ORDERED_NODE_ITERATOR_TYPE',
+            'UNORDERED_NODE_SNAPSHOT_TYPE', 'ORDERED_NODE_SNAPSHOT_TYPE',
+            'ANY_UNORDERED_NODE_TYPE', 'FIRST_ORDERED_NODE_TYPE'
+        ];
+        RESULT_TYPES.forEach(function (name, i) {
+            defineConstant(XPathResult, name, i);
+            defineConstant(XPathResult.prototype, name, i);
+        });
+
+        function makeResult(value, type) {
+            type = type === undefined ? 0 : Number(type) >>> 0 & 0xFFFF;
+            if (type > 9) throw xpError('Unsupported result type', 'NotSupportedError');
+            if (type === 0) {
+                type = typeof value === 'number' ? 1 : typeof value === 'string' ? 2
+                     : typeof value === 'boolean' ? 3 : 4;
+            }
+            var s = { type: type, index: 0 };
+            if (type === 1) s.value = toNum(value);
+            else if (type === 2) s.value = toStr(value);
+            else if (type === 3) s.value = toBool(value);
+            else {
+                if (!Array.isArray(value))
+                    throw new TypeError('The expression does not evaluate to a node-set');
+                s.nodes = value;
+            }
+            var r = Object.create(XPathResult.prototype);
+            resultState.set(r, s);
+            return r;
+        }
+
+        function checkNode(n) {
+            if (!n || typeof n.nodeType !== 'number')
+                throw new TypeError('The context node is not a Node');
+        }
+
+        function evaluateTree(tree, resolver, contextNode, type) {
+            checkNode(contextNode);
+            var env = { resolver: resolver, order: new Map(), next: 0 };
+            var value = ev(env, tree, { node: contextNode, pos: 1, size: 1 });
+            if (Array.isArray(value)) value = docOrder(env, value);
+            return makeResult(value, type);
+        }
+
+        var exprState = new WeakMap();
+
+        function XPathExpression() {
+            throw new TypeError('Illegal constructor');
+        }
+        defineMethod(XPathExpression.prototype, 'evaluate', function (contextNode, type) {
+            var s = exprState.get(this);
+            if (!s) throw new TypeError('Illegal invocation');
+            return evaluateTree(s.tree, s.resolver, contextNode, type);
+        });
+
+        function createExpression(expression, resolver) {
+            var e = Object.create(XPathExpression.prototype);
+            exprState.set(e, { tree: xpParse(String(expression)), resolver: resolver || null });
+            return e;
+        }
+
+        function evaluate(expression, contextNode, resolver, type) {
+            var tree = xpParse(String(expression));
+            return evaluateTree(tree, resolver || null, contextNode, type);
+        }
+
+        function createNSResolver(node) {
+            return node;
+        }
+
+        function XPathEvaluator() {
+            if (!(this instanceof XPathEvaluator)) throw new TypeError('Illegal constructor');
+        }
+        [XPathEvaluator.prototype, global.Document && global.Document.prototype].forEach(function (proto) {
+            if (!proto) return;
+            defineMethod(proto, 'createExpression', createExpression);
+            defineMethod(proto, 'createNSResolver', createNSResolver);
+            defineMethod(proto, 'evaluate', evaluate);
+        });
+
+        defineCtor('XPathResult', XPathResult);
+        defineCtor('XPathExpression', XPathExpression);
+        defineCtor('XPathEvaluator', XPathEvaluator);
+    })();
+
     try {
         var doc = global.document;
         if (doc && doc.createElement) {
