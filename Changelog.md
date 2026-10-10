@@ -30,6 +30,16 @@ Significant changes in each release:
     with the bank's cookies and resolved with its body. The origin now
     comes from the document that owns the `fetch` function: the page's
     own, or, for a frame, the URL the engine loaded into that frame.
+  - `XMLHttpRequest.send()` sent the header lines and method it found in
+    the request object's `_headers` and `_method` properties, which page
+    script can rewrite after `setRequestHeader()` and `open()` have
+    checked them. A page could add `Cookie`, `Host`, `Origin`,
+    `Sec-Fetch-*` and the engine's internal `X-ND-Navigate` header,
+    which made a redirected cross-site request travel as a navigation
+    with the target's cookies, or send a `TRACE` request. `send()` now
+    checks every header line and the method again. `X-Requested-With:
+    XMLHttpRequest` is added only to same-origin requests, since sites
+    read it as proof that a request came from their own script.
 * A `gap`, `margin-block`, `margin-inline`, `padding-block`,
   `padding-inline`, `inset-block`, `inset-inline`,
   `border-block-*`/`border-inline-*` width, style or color, `overflow`

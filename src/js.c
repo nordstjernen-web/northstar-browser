@@ -17757,6 +17757,30 @@ ns_xhr_setRequestHeader(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_xhr_header_line_allowed(const char *line)
+{
+    const char *colon = line ? strchr(line, ':') : NULL;
+    if (!colon || colon == line) return FALSE;
+    char *name = g_strndup(line, (gsize)(colon - line));
+    const char *value = colon + 1;
+    while (*value == ' ' || *value == '\t') value++;
+    gboolean ok = ns_header_name_is_token(name) &&
+                  !ns_header_name_is_forbidden(name) &&
+                  ns_header_value_is_safe(value);
+    g_free(name);
+    return ok;
+}
+
+static gboolean
+ns_xhr_method_allowed(const char *method)
+{
+    return method && ns_header_name_is_token(method) &&
+           g_ascii_strcasecmp(method, "CONNECT") != 0 &&
+           g_ascii_strcasecmp(method, "TRACE") != 0 &&
+           g_ascii_strcasecmp(method, "TRACK") != 0;
+}
+
 static JSValue
 ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -17777,6 +17801,13 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     JSValue method_v = JS_GetPropertyStr(ctx, this_val, "_method");
     const char *method = JS_ToCString(ctx, method_v);
     JS_FreeValue(ctx, method_v);
+    if (!method) JS_FreeValue(ctx, JS_GetException(ctx));
+    if (!ns_xhr_method_allowed(method)) {
+        if (method) JS_FreeCString(ctx, method);
+        JS_FreeCString(ctx, url);
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+                                      "XMLHttpRequest.send: forbidden method");
+    }
     gboolean send_body = method &&
                          g_ascii_strcasecmp(method, "GET") != 0 &&
                          g_ascii_strcasecmp(method, "HEAD") != 0;
@@ -17821,9 +17852,10 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
             hdrs = g_ptr_array_new_with_free_func(g_free);
             for (uint32_t i = 0; i < hlen; i++) {
                 JSValue ev = JS_GetPropertyUint32(ctx, headers_arr, i);
-                const char *s = JS_ToCString(ctx, ev);
+                const char *s = JS_IsString(ev) ? JS_ToCString(ctx, ev) : NULL;
                 if (s) {
-                    g_ptr_array_add(hdrs, g_strdup(s));
+                    if (ns_xhr_header_line_allowed(s))
+                        g_ptr_array_add(hdrs, g_strdup(s));
                     JS_FreeCString(ctx, s);
                 }
                 JS_FreeValue(ctx, ev);
@@ -17831,12 +17863,9 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         }
     }
     JS_FreeValue(ctx, headers_arr);
-    if (hdrs) {
+    if (!hdrs) hdrs = g_ptr_array_new_with_free_func(g_free);
+    if (_js && ns_url_same_origin(_js->current_url, st->url))
         g_ptr_array_add(hdrs, g_strdup("X-Requested-With: XMLHttpRequest"));
-    } else {
-        hdrs = g_ptr_array_new_with_free_func(g_free);
-        g_ptr_array_add(hdrs, g_strdup("X-Requested-With: XMLHttpRequest"));
-    }
     st->request_headers = hdrs;
 
     if (st->js && st->js->pending_xhrs)
