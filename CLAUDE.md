@@ -176,16 +176,18 @@ The JavaScript engine is
 [quickjs-ng](https://github.com/quickjs-ng/quickjs), consumed as an
 **upstream meson subproject** pinned to a commit
 (`subprojects/quickjs-ng.wrap`, currently master `9b06171`, after
-v0.17.0) — no in-tree fork. The wrap carries four patches
+v0.17.0) — no in-tree fork. The wrap carries five patches
 (`subprojects/packagefiles/`): one changes how it links on Windows,
 `quickjs-ng-test262.patch` fixes the test262 failures upstream still has,
 so the engine passes every test its own `test262.conf` enables,
 `quickjs-ng-json-number.patch` makes `JSON.parse` convert numbers without
-the C library's locale-dependent `strtod()`, and
+the C library's locale-dependent `strtod()`,
 `quickjs-ng-regexp-first-char.patch` lets a regexp search skip the start
-positions where its first character cannot match. Keep these patches small and
-send their fixes upstream; when the pin moves, drop the hunks upstream has
-taken. `meson setup` uses a system quickjs-ng when it finds
+positions where its first character cannot match, and
+`quickjs-ng-v8-type-errors.patch` words property-access and call TypeErrors
+as V8 does, naming the callee, since bot detection reads those messages to
+identify the engine. Keep these patches small and send their fixes
+upstream; when the pin moves, drop the hunks upstream has taken. `meson setup` uses a system quickjs-ng when it finds
 one, and otherwise fetches it and exposes it as the `libquickjs`
 dependency. The browser includes only the public `<quickjs.h>`. A
 few browser-side entry points that stock quickjs-ng does not expose —

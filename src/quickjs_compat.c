@@ -6,6 +6,7 @@
 #include "quickjs_compat.h"
 
 #include <glib.h>
+#include <string.h>
 
 JSClassID ns_new_class_id(JSClassID *pclass_id)
 {
@@ -69,6 +70,91 @@ static JSValue ns_quickjs_error_stack_set(JSContext *ctx, JSValueConst this_val,
     return ret < 0 ? JS_EXCEPTION : JS_UNDEFINED;
 }
 
+static char *ns_quickjs_error_field(JSContext *ctx, JSValueConst error,
+                                    const char *field, const char *fallback)
+{
+    JSValue v = JS_GetPropertyStr(ctx, error, field);
+    char *out = NULL;
+    if (!JS_IsException(v) && !JS_IsUndefined(v)) {
+        const char *s = JS_ToCString(ctx, v);
+        if (s) {
+            out = g_strdup(s);
+            JS_FreeCString(ctx, s);
+        }
+    }
+    if (JS_HasException(ctx))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, v);
+    return out ? out : g_strdup(fallback);
+}
+
+static void ns_quickjs_append_v8_frame(GString *out, const char *line, size_t len)
+{
+    static const char *const unnamed[] = { "    at <anonymous> (", "    at <eval> (" };
+    GString *frame = g_string_new_len(line, (gssize)len);
+    for (size_t i = 0; i < G_N_ELEMENTS(unnamed); i++) {
+        size_t prefix = strlen(unnamed[i]);
+        if (frame->len > prefix && g_str_has_prefix(frame->str, unnamed[i]) &&
+            frame->str[frame->len - 1] == ')') {
+            g_string_truncate(frame, frame->len - 1);
+            g_string_erase(frame, 7, (gssize)(prefix - 7));
+            break;
+        }
+    }
+    if (g_str_has_prefix(frame->str, "    at <input>:"))
+        g_string_erase(frame, 7, 7);
+    else {
+        char *eval_location = strstr(frame->str, " (<input>:");
+        if (eval_location)
+            g_string_erase(frame, (gssize)(eval_location - frame->str) + 2, 7);
+    }
+    g_string_append_len(out, frame->str, (gssize)frame->len);
+    g_string_free(frame, TRUE);
+}
+
+static JSValue ns_quickjs_error_stack_get(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv,
+                                          int magic, JSValueConst *func_data)
+{
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    JSValue frames = JS_Call(ctx, func_data[0], this_val, 0, NULL);
+    if (!JS_IsString(frames))
+        return frames;
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, frames);
+    if (!s)
+        return frames;
+    if (len == 0 || g_str_has_prefix(s, "    at ")) {
+        char *name = ns_quickjs_error_field(ctx, this_val, "name", "Error");
+        char *message = ns_quickjs_error_field(ctx, this_val, "message", "");
+        GString *stack = g_string_new(NULL);
+        if (!*name)
+            g_string_append(stack, message);
+        else if (!*message)
+            g_string_append(stack, name);
+        else
+            g_string_append_printf(stack, "%s: %s", name, message);
+        for (const char *line = s; line < s + len; ) {
+            const char *eol = memchr(line, '\n', (size_t)(s + len - line));
+            size_t line_len = eol ? (size_t)(eol - line) : (size_t)(s + len - line);
+            if (line_len > 0) {
+                g_string_append_c(stack, '\n');
+                ns_quickjs_append_v8_frame(stack, line, line_len);
+            }
+            line = eol ? eol + 1 : s + len;
+        }
+        JS_FreeValue(ctx, frames);
+        frames = JS_NewStringLen(ctx, stack->str, stack->len);
+        g_string_free(stack, TRUE);
+        g_free(message);
+        g_free(name);
+    }
+    JS_FreeCString(ctx, s);
+    return frames;
+}
+
 static void ns_quickjs_accept_any_error_stack(JSContext *ctx)
 {
     JSValue global = JS_GetGlobalObject(ctx);
@@ -77,14 +163,21 @@ static void ns_quickjs_accept_any_error_stack(JSContext *ctx)
     JSAtom stack = JS_NewAtom(ctx, "stack");
     JSPropertyDescriptor desc;
     if (JS_IsObject(proto) && JS_GetOwnProperty(ctx, &desc, proto, stack) > 0) {
-        if ((desc.flags & JS_PROP_GETSET) && JS_IsFunction(ctx, desc.setter)) {
+        if ((desc.flags & JS_PROP_GETSET) && JS_IsFunction(ctx, desc.setter) &&
+            JS_IsFunction(ctx, desc.getter)) {
+            JSValue getter = JS_NewCFunctionData(ctx, ns_quickjs_error_stack_get,
+                                                 0, 0, 1, (JSValueConst *)&desc.getter);
+            JS_DefinePropertyValueStr(ctx, getter, "name",
+                                      JS_NewString(ctx, "get stack"),
+                                      JS_PROP_CONFIGURABLE);
             JSValue setter = JS_NewCFunctionData(ctx, ns_quickjs_error_stack_set,
                                                  1, 0, 1, (JSValueConst *)&proto);
             JS_DefinePropertyValueStr(ctx, setter, "name",
                                       JS_NewString(ctx, "set stack"),
                                       JS_PROP_CONFIGURABLE);
-            JS_DefineProperty(ctx, proto, stack, JS_UNDEFINED, desc.getter, setter,
+            JS_DefineProperty(ctx, proto, stack, JS_UNDEFINED, getter, setter,
                               JS_PROP_HAS_GET | JS_PROP_HAS_SET);
+            JS_FreeValue(ctx, getter);
             JS_FreeValue(ctx, setter);
         }
         JS_FreeValue(ctx, desc.value);
@@ -99,6 +192,64 @@ static void ns_quickjs_accept_any_error_stack(JSContext *ctx)
     JS_FreeValue(ctx, global);
 }
 
+#define NS_QUICKJS_NATIVE_BODY "() {\n    [native code]\n}"
+
+static JSValue ns_quickjs_function_to_string(JSContext *ctx, JSValueConst this_val,
+                                             int argc, JSValueConst *argv,
+                                             int magic, JSValueConst *func_data)
+{
+    (void)argc;
+    (void)argv;
+    (void)magic;
+    JSValue text = JS_Call(ctx, func_data[0], this_val, 0, NULL);
+    if (!JS_IsString(text))
+        return text;
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, text);
+    if (!s)
+        return text;
+    size_t body = sizeof(NS_QUICKJS_NATIVE_BODY) - 1;
+    if (len >= body && memcmp(s + len - body, NS_QUICKJS_NATIVE_BODY, body) == 0) {
+        GString *flat = g_str_has_prefix(s, "function bound ")
+            ? g_string_new("function ")
+            : g_string_new_len(s, (gssize)(len - body));
+        g_string_append(flat, "() { [native code] }");
+        JS_FreeValue(ctx, text);
+        text = JS_NewStringLen(ctx, flat->str, flat->len);
+        g_string_free(flat, TRUE);
+    }
+    JS_FreeCString(ctx, s);
+    return text;
+}
+
+static void ns_quickjs_print_natives_on_one_line(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue function = JS_GetPropertyStr(ctx, global, "Function");
+    JSValue proto = JS_GetPropertyStr(ctx, function, "prototype");
+    JS_FreeValue(ctx, function);
+    JS_FreeValue(ctx, global);
+    JSValue original = JS_GetPropertyStr(ctx, proto, "toString");
+    if (JS_IsFunction(ctx, original)) {
+        JSValue fn = JS_NewCFunctionData(ctx, ns_quickjs_function_to_string,
+                                         0, 0, 1, (JSValueConst *)&original);
+        JS_DefinePropertyValueStr(ctx, fn, "name", JS_NewString(ctx, "toString"),
+                                  JS_PROP_CONFIGURABLE);
+        JS_DefinePropertyValueStr(ctx, proto, "toString", fn,
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    }
+    static const char *const engine_extras[] = { "fileName", "lineNumber", "columnNumber" };
+    for (size_t i = 0; i < G_N_ELEMENTS(engine_extras); i++) {
+        JSAtom extra = JS_NewAtom(ctx, engine_extras[i]);
+        JS_DeleteProperty(ctx, proto, extra, 0);
+        JS_FreeAtom(ctx, extra);
+    }
+    if (JS_HasException(ctx))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, original);
+    JS_FreeValue(ctx, proto);
+}
+
 #ifdef NS_QUICKJS_ORIGINAL
 static void ns_quickjs_learn_class_ids_once(JSContext *ctx);
 #endif
@@ -111,7 +262,44 @@ JSContext *ns_quickjs_new_context(JSRuntime *rt)
     ns_quickjs_learn_class_ids_once(ctx);
 #endif
     ns_quickjs_accept_any_error_stack(ctx);
+    ns_quickjs_print_natives_on_one_line(ctx);
     return ctx;
+}
+
+JSValue ns_js_compile_without_source(JSContext *ctx, const char *input, size_t input_len,
+                                     const char *filename)
+{
+    int flags = JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY;
+#ifdef NS_QUICKJS_ORIGINAL
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    int strip = JS_GetStripInfo(rt);
+    JS_SetStripInfo(rt, strip | JS_STRIP_SOURCE);
+    JSValue fn = JS_Eval(ctx, input, input_len, filename, flags);
+    JS_SetStripInfo(rt, strip);
+    return fn;
+#else
+    JSValue fn = JS_Eval(ctx, input, input_len, filename, flags);
+    if (JS_IsException(fn))
+        return fn;
+    size_t size = 0;
+    uint8_t *bytes = JS_WriteObject(ctx, &size, fn,
+                                    JS_WRITE_OBJ_BYTECODE | JS_WRITE_OBJ_STRIP_SOURCE);
+    JS_FreeValue(ctx, fn);
+    if (!bytes)
+        return JS_EXCEPTION;
+    fn = JS_ReadObject(ctx, bytes, size, JS_READ_OBJ_BYTECODE);
+    js_free(ctx, bytes);
+    return fn;
+#endif
+}
+
+JSValue ns_js_eval_without_source(JSContext *ctx, const char *input, size_t input_len,
+                                  const char *filename)
+{
+    JSValue fn = ns_js_compile_without_source(ctx, input, input_len, filename);
+    if (JS_IsException(fn))
+        return fn;
+    return JS_EvalFunction(ctx, fn);
 }
 
 #ifdef NS_QUICKJS_ORIGINAL

@@ -1221,7 +1221,8 @@ ns_js_run_due_timers(ns_js *js)
 {
     if (!js || !js->ctx || js->halted || js->in_pump ||
         js->dispatch_depth > 0 || js->running_due_timers ||
-        js->n_immediate_timers <= 0)
+        js->iframe_load_depth > 0 || js->callback_depth > 0 ||
+        js->eval_depth > 0 || js->n_immediate_timers <= 0)
         return;
     if (ns_engine_in_blocking_fetch()) return;
     gint64 now = g_get_monotonic_time();
@@ -8885,8 +8886,8 @@ ns_fetch_defer_stream_body(JSContext *ctx, JSValueConst frame_url,
         "  chunks.push(c); total += c.length; return pump(); }); }"
         " return pump();"
         "})";
-    JSValue drain = JS_Eval(ctx, drain_src, strlen(drain_src),
-                            "<fetch-drain>", JS_EVAL_TYPE_GLOBAL);
+    JSValue drain = ns_js_eval_without_source(ctx, drain_src, strlen(drain_src),
+                                              "<fetch-drain>");
     JSValue drain_p = JS_UNDEFINED;
     if (!JS_IsException(drain)) {
         JSValueConst dargs[1] = { stream };
@@ -9913,33 +9914,6 @@ ns_window_find(JSContext *ctx, JSValueConst this_val,
     return JS_NewBool(ctx, found);
 }
 
-static void
-ns_chrome_version_from_ua(const char *ua, char *major, size_t major_sz,
-                          char *full, size_t full_sz)
-{
-    const char *p = ua ? strstr(ua, "Chrome/") : NULL;
-    if (!p) {
-        g_strlcpy(major, NS_CHROME_MAJOR, major_sz);
-        g_strlcpy(full,  NS_CHROME_VERSION, full_sz);
-        return;
-    }
-    p += strlen("Chrome/");
-    size_t i = 0;
-    while (p[i] && p[i] != ' ' && i + 1 < full_sz) { full[i] = p[i]; i++; }
-    full[i] = '\0';
-    size_t j = 0;
-    while (full[j] && full[j] != '.' && j + 1 < major_sz) { major[j] = full[j]; j++; }
-    major[j] = '\0';
-}
-
-static const char *
-ns_effective_nav_ua(void)
-{
-    const ns_config *c = ns_config_get();
-    if (c && c->user_agent && *c->user_agent) return c->user_agent;
-    return ns_user_agent_for_mode(c ? c->compat_mode : NULL);
-}
-
 static gboolean
 ns_compat_is_firefox(void)
 {
@@ -9974,22 +9948,64 @@ static JSValue
 ns_ua_client_hint_brands(JSContext *ctx, gboolean full_version)
 {
     JSValue arr = JS_NewArray(ctx);
-    char major[16], full[40];
-    ns_chrome_version_from_ua(ns_effective_nav_ua(), major, sizeof major,
-                              full, sizeof full);
-    const char *cver = full_version ? full : major;
     const struct { const char *brand; const char *version; } entries[] = {
-        { "Chromium",      cver },
-        { "Google Chrome", cver },
-        { "Not=A?Brand",   full_version ? "24.0.0.0" : "24" },
+        { "Northstar",   full_version ? NS_VERSION : "1" },
+        { "Not=A?Brand", full_version ? "24.0.0.0" : "24" },
     };
-    for (uint32_t i = 0; i < 3; i++) {
+    for (uint32_t i = 0; i < G_N_ELEMENTS(entries); i++) {
         JSValue o = JS_NewObject(ctx);
         JS_SetPropertyStr(ctx, o, "brand",   JS_NewString(ctx, entries[i].brand));
         JS_SetPropertyStr(ctx, o, "version", JS_NewString(ctx, entries[i].version));
         JS_SetPropertyUint32(ctx, arr, i, o);
     }
     return arr;
+}
+
+static JSValue
+ns_ua_client_hint_form_factors(JSContext *ctx)
+{
+    JSValue values = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, values, 0,
+        JS_NewString(ctx, NS_UA_HINT_MOBILE ? "Mobile" : "Desktop"));
+    return values;
+}
+
+static const char *
+ns_ua_client_hint_architecture(void)
+{
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    return "x86";
+#elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm__) || defined(_M_ARM)
+    return "arm";
+#else
+    return "";
+#endif
+}
+
+static void
+ns_ua_set_requested_high_entropy_hint(JSContext *ctx, JSValueConst obj,
+                                      const char *key)
+{
+    if (strcmp(key, "architecture") == 0) {
+        JS_SetPropertyStr(ctx, obj, key,
+            JS_NewString(ctx, ns_ua_client_hint_architecture()));
+    } else if (strcmp(key, "bitness") == 0) {
+        JS_SetPropertyStr(ctx, obj, key,
+            JS_NewString(ctx, sizeof(void *) == 8 ? "64" : "32"));
+    } else if (strcmp(key, "formFactors") == 0) {
+        JS_SetPropertyStr(ctx, obj, key,
+            ns_ua_client_hint_form_factors(ctx));
+    } else if (strcmp(key, "fullVersionList") == 0) {
+        JS_SetPropertyStr(ctx, obj, key,
+            ns_ua_client_hint_brands(ctx, TRUE));
+    } else if (strcmp(key, "model") == 0 ||
+               strcmp(key, "platformVersion") == 0) {
+        JS_SetPropertyStr(ctx, obj, key, JS_NewString(ctx, ""));
+    } else if (strcmp(key, "uaFullVersion") == 0) {
+        JS_SetPropertyStr(ctx, obj, key, JS_NewString(ctx, NS_VERSION));
+    } else if (strcmp(key, "wow64") == 0) {
+        JS_SetPropertyStr(ctx, obj, key, JS_FALSE);
+    }
 }
 
 static JSValue
@@ -10001,19 +10017,6 @@ ns_navigator_high_entropy_values(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, obj, "brands", ns_ua_client_hint_brands(ctx, FALSE));
     JS_SetPropertyStr(ctx, obj, "mobile", JS_NewBool(ctx, NS_UA_HINT_MOBILE));
     JS_SetPropertyStr(ctx, obj, "platform",       JS_NewString(ctx, NS_UA_HINT_PLATFORM));
-    JS_SetPropertyStr(ctx, obj, "platformVersion",JS_NewString(ctx, "10.0.0"));
-    JS_SetPropertyStr(ctx, obj, "architecture",   JS_NewString(ctx, "x86"));
-    JS_SetPropertyStr(ctx, obj, "bitness",        JS_NewString(ctx, "64"));
-    JS_SetPropertyStr(ctx, obj, "model",          JS_NewString(ctx, ""));
-    char he_major[16], he_full[40];
-    ns_chrome_version_from_ua(ns_effective_nav_ua(), he_major, sizeof he_major,
-                              he_full, sizeof he_full);
-    JS_SetPropertyStr(ctx, obj, "uaFullVersion",
-                      JS_NewString(ctx, he_full));
-    JS_SetPropertyStr(ctx, obj, "fullVersionList",
-                      ns_ua_client_hint_brands(ctx, TRUE));
-    JS_SetPropertyStr(ctx, obj, "wow64",          JS_FALSE);
-    JS_SetPropertyStr(ctx, obj, "formFactors",    JS_NewArray(ctx));
     if (argc > 0 && JS_IsArray(argv[0])) {
         JSValue reqs = argv[0];
         uint32_t len = ns_js_array_length(ctx, reqs);
@@ -10021,10 +10024,7 @@ ns_navigator_high_entropy_values(JSContext *ctx, JSValueConst this_val,
             JSValue item = JS_GetPropertyUint32(ctx, reqs, i);
             const char *key = JS_ToCString(ctx, item);
             if (key) {
-                JSAtom atom = JS_NewAtom(ctx, key);
-                if (!JS_HasProperty(ctx, obj, atom))
-                    JS_SetPropertyStr(ctx, obj, key, JS_NewString(ctx, ""));
-                JS_FreeAtom(ctx, atom);
+                ns_ua_set_requested_high_entropy_hint(ctx, obj, key);
                 JS_FreeCString(ctx, key);
             }
             JS_FreeValue(ctx, item);
@@ -10157,8 +10157,8 @@ ns_clipboard_install_write(JSContext *ctx, JSValueConst clipboard)
         "});"
         "};"
         "})";
-    JSValue fn = JS_Eval(ctx, src, strlen(src), "<clipboard-write>",
-                         JS_EVAL_TYPE_GLOBAL);
+    JSValue fn = ns_js_eval_without_source(ctx, src, strlen(src),
+                                           "<clipboard-write>");
     if (JS_IsException(fn)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, fn);
@@ -12102,8 +12102,8 @@ static ns_sc_builtin_classes ns_sc_classes;
 static JSClassID
 ns_sc_class_of_eval(JSContext *ctx, const char *expr)
 {
-    JSValue v = JS_Eval(ctx, expr, strlen(expr), "<structured-clone>",
-                        JS_EVAL_TYPE_GLOBAL);
+    JSValue v = ns_js_eval_without_source(ctx, expr, strlen(expr),
+                                          "<structured-clone>");
     JSClassID id = JS_IsObject(v) ? JS_GetClassID(v) : JS_INVALID_CLASS_ID;
     if (JS_IsException(v)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, v);
@@ -15730,8 +15730,8 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
             "  }"
             " });"
             "})";
-        JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<getComputedStyle>", JS_EVAL_TYPE_GLOBAL);
+        JSValue h = ns_js_eval_without_source(ctx, helper_src, strlen(helper_src),
+                                              "<getComputedStyle>");
         if (!JS_IsException(h)) {
             jsx->computed_style_proxy = h;
             jsx->computed_style_proxy_set = 1;
@@ -16099,7 +16099,7 @@ ns_url_install_interface(JSContext *ctx)
         " try { Object.defineProperty(globalThis, 'URL', { enumerable: false }); } catch(e) {}"
         " try { Object.defineProperty(URL, 'prototype', { writable: false }); } catch(e) {}"
         "})()";
-    JSValue r = JS_Eval(ctx, src, strlen(src), "<url-iface>", JS_EVAL_TYPE_GLOBAL);
+    JSValue r = ns_js_eval_without_source(ctx, src, strlen(src), "<url-iface>");
     if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, r);
 }
@@ -16113,7 +16113,7 @@ ns_usp_install_interface(JSContext *ctx)
         " try { Object.defineProperty(globalThis, 'URLSearchParams', { enumerable: false }); } catch(e) {}"
         " try { Object.defineProperty(URLSearchParams, 'prototype', { writable: false }); } catch(e) {}"
         "})()";
-    JSValue r = JS_Eval(ctx, src, strlen(src), "<usp-iface>", JS_EVAL_TYPE_GLOBAL);
+    JSValue r = ns_js_eval_without_source(ctx, src, strlen(src), "<usp-iface>");
     if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, r);
 }
@@ -16243,8 +16243,8 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
             " inst.__ndSync();"
             " return inst;"
             "})";
-        JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<url-helper>", JS_EVAL_TYPE_GLOBAL);
+        JSValue h = ns_js_eval_without_source(ctx, helper_src, strlen(helper_src),
+                                              "<url-helper>");
         if (!JS_IsException(h)) {
             jsx->url_helper = h;
             jsx->url_helper_set = 1;
@@ -16361,8 +16361,8 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
             " Object.defineProperty(o,'_owner',{value:null,configurable:true,writable:true});"
             " return o;"
             "})";
-        JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<usp-helper>", JS_EVAL_TYPE_GLOBAL);
+        JSValue h = ns_js_eval_without_source(ctx, helper_src, strlen(helper_src),
+                                              "<usp-helper>");
         if (!JS_IsException(h)) {
             jsx->search_params_helper = h;
             jsx->search_params_helper_set = 1;
@@ -16996,10 +16996,21 @@ ns_target_fire_event(JSContext *ctx, JSValueConst obj, const char *type)
     JS_FreeValue(ctx, ev);
 }
 
+static gboolean
+ns_target_is_document_node(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_DOCUMENT && !(n->flags & NS_NODE_FRAGMENT);
+}
+
 static JSValue
 ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    const ns_node *node = ns_unwrap_element(this_val);
+    if (node)
+        return ns_target_is_document_node(node)
+            ? ns_document_addEventListener(ctx, this_val, argc, argv)
+            : ns_element_addEventListener(ctx, this_val, argc, argv);
     if (argc < 2) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
@@ -17080,8 +17091,11 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "dispatchEvent: argument is not an Event");
-    if (ns_unwrap_element(this_val))
-        return ns_element_dispatchEvent(ctx, this_val, argc, argv);
+    const ns_node *target_node = ns_unwrap_element(this_val);
+    if (target_node)
+        return ns_target_is_document_node(target_node)
+            ? ns_document_dispatchEvent(ctx, this_val, argc, argv)
+            : ns_element_dispatchEvent(ctx, this_val, argc, argv);
     JSValue guard = ns_event_dispatch_guard(ctx, argv[0]);
     if (JS_IsException(guard)) return guard;
     JSValue tv = JS_GetPropertyStr(ctx, argv[0], "type");
@@ -17179,6 +17193,11 @@ static JSValue
 ns_target_removeEventListener(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
+    const ns_node *node = ns_unwrap_element(this_val);
+    if (node)
+        return ns_target_is_document_node(node)
+            ? ns_document_removeEventListener(ctx, this_val, argc, argv)
+            : ns_element_removeEventListener(ctx, this_val, argc, argv);
     if (argc < 2) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
@@ -18368,8 +18387,8 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
             " fd[Symbol.iterator] = fd.entries;"
             " return fd;"
             "})";
-        JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<formdata>", JS_EVAL_TYPE_GLOBAL);
+        JSValue h = ns_js_eval_without_source(ctx, helper_src, strlen(helper_src),
+                                              "<formdata>");
         if (!JS_IsException(h)) {
             jsx->form_data_helper = h;
             jsx->form_data_helper_set = 1;
@@ -19145,8 +19164,8 @@ ns_attach_body_consumers(JSContext *ctx, JSValueConst obj)
             " }"
             " return attach;"
             "})()";
-        JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<body-consumer>", JS_EVAL_TYPE_GLOBAL);
+        JSValue h = ns_js_eval_without_source(ctx, helper_src, strlen(helper_src),
+                                              "<body-consumer>");
         if (!JS_IsException(h)) {
             jsx->body_consumer_helper = h;
             jsx->body_consumer_helper_set = 1;
@@ -19628,8 +19647,8 @@ ns_fetch_install_static_response(JSContext *ctx)
         "  json:{value:json,writable:true,configurable:true},"
         "  redirect:{value:redirect,writable:true,configurable:true}});"
         "})()";
-    JSValue result = JS_Eval(ctx, source, strlen(source),
-                             "<response-static>", JS_EVAL_TYPE_GLOBAL);
+    JSValue result = ns_js_eval_without_source(ctx, source, strlen(source),
+                                               "<response-static>");
     if (JS_IsException(result)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, result);
 }
@@ -22093,8 +22112,8 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
         "__nd_sw_fetch_result(id,1,resp.status||200,resp.statusText||'',hdrs,new Uint8Array(ab));});"
         "}).catch(function(err){__nd_sw_fetch_result(id,2,String(err&&err.message||err));});"
         "};";
-    JSValue fd_ret = JS_Eval(ctx, fetch_dispatch_src, strlen(fetch_dispatch_src),
-                             "<sw-fetch-dispatch>", JS_EVAL_TYPE_GLOBAL);
+    JSValue fd_ret = ns_js_eval_without_source(ctx, fetch_dispatch_src, strlen(fetch_dispatch_src),
+                                               "<sw-fetch-dispatch>");
     JS_FreeValue(ctx, fd_ret);
 }
 
@@ -26539,7 +26558,7 @@ ns_install_drag_event_support(JSContext *ctx)
         "Object.defineProperty(DragEvent.prototype,'constructor',{value:DragEvent,writable:true,configurable:true});"
         "global.DragEvent=DragEvent;"
         "})(globalThis);";
-    JSValue r = JS_Eval(ctx, src, strlen(src), "<drag-event>", JS_EVAL_TYPE_GLOBAL);
+    JSValue r = ns_js_eval_without_source(ctx, src, strlen(src), "<drag-event>");
     if (JS_IsException(r))
         JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, r);
@@ -31093,8 +31112,8 @@ ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len)
             "   { value: 'NodeList', configurable: true }); } catch(e){}"
             " return nl;"
             "})";
-        JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<nodelist>", JS_EVAL_TYPE_GLOBAL);
+        JSValue h = ns_js_eval_without_source(ctx, helper_src, strlen(helper_src),
+                                              "<nodelist>");
         if (!JS_IsException(h)) {
             jsx->nodelist_decorator = h;
             jsx->nodelist_decorator_set = 1;
@@ -42755,9 +42774,8 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
                      unsigned sandbox)
 {
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue maker = JS_Eval(ctx, ns_iframe_scope_bootstrap,
-                            strlen(ns_iframe_scope_bootstrap),
-                            "<iframe-scope>", JS_EVAL_TYPE_GLOBAL);
+    JSValue maker = ns_js_eval_without_source(ctx, ns_iframe_scope_bootstrap, strlen(ns_iframe_scope_bootstrap),
+                                              "<iframe-scope>");
     JSValue scope = JS_NULL;
     if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
         JSValue urlv = JS_NewString(ctx, initial_url ? initial_url : "about:blank");
@@ -42960,9 +42978,8 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     JSValue fg = JS_GetGlobalObject(fctx);
     JSValue parent_global = JS_GetGlobalObject(js->ctx);
 
-    JSValue maker = JS_Eval(fctx, ns_iframe_global_bootstrap,
-                            strlen(ns_iframe_global_bootstrap),
-                            "<iframe-global>", JS_EVAL_TYPE_GLOBAL);
+    JSValue maker = ns_js_eval_without_source(fctx, ns_iframe_global_bootstrap, strlen(ns_iframe_global_bootstrap),
+                                              "<iframe-global>");
     gboolean ok = FALSE;
     if (!JS_IsException(maker) && JS_IsFunction(fctx, maker)) {
         JSValue urlv = JS_NewString(fctx, initial_url ? initial_url : "about:blank");
@@ -43009,8 +43026,8 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         if (JS_IsObject(parent_named) &&
             JS_GetClassID(parent_named) == ns_window_named_class_id) {
             JSValue named = JS_NewObjectClass(fctx, ns_window_named_class_id);
-            JSValue fn = JS_Eval(fctx, rebase_src, strlen(rebase_src),
-                                 "<iframe-named>", JS_EVAL_TYPE_GLOBAL);
+            JSValue fn = ns_js_eval_without_source(fctx, rebase_src, strlen(rebase_src),
+                                                   "<iframe-named>");
             if (!JS_IsException(named) && JS_IsFunction(fctx, fn)) {
                 JS_SetOpaque(named, iframe);
                 JSValue base = JS_GetPrototype(fctx, parent_named);
@@ -43232,9 +43249,8 @@ static JSValue
 ns_iframe_cross_origin_window(JSContext *ctx, JSValue target)
 {
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue maker = JS_Eval(ctx, ns_cross_window_bootstrap,
-                            strlen(ns_cross_window_bootstrap),
-                            "<cross-window>", JS_EVAL_TYPE_GLOBAL);
+    JSValue maker = ns_js_eval_without_source(ctx, ns_cross_window_bootstrap, strlen(ns_cross_window_bootstrap),
+                                              "<cross-window>");
     JSValue proxy = JS_NULL;
     if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
         JSValueConst args[2] = { global, target };
@@ -45871,9 +45887,12 @@ ns_js_emit(ns_js *js, const char *prefix, JSContext *ctx, int argc, JSValueConst
             const char *name  = JS_IsUndefined(name_v)  ? NULL : JS_ToCString(ctx, name_v);
             const char *msg   = JS_IsUndefined(msg_v)   ? NULL : JS_ToCString(ctx, msg_v);
             const char *stack = JS_IsUndefined(stack_v) ? NULL : JS_ToCString(ctx, stack_v);
-            g_string_append(out, name && *name ? name : "Error");
-            if (msg && *msg) { g_string_append(out, ": "); g_string_append(out, msg); }
-            if (stack && *stack) { g_string_append_c(out, '\n'); g_string_append(out, stack); }
+            if (!stack || !*stack || g_str_has_prefix(stack, "    at ")) {
+                g_string_append(out, name && *name ? name : "Error");
+                if (msg && *msg) { g_string_append(out, ": "); g_string_append(out, msg); }
+                if (stack && *stack) g_string_append_c(out, '\n');
+            }
+            if (stack) g_string_append(out, stack);
             if (name)  JS_FreeCString(ctx, name);
             if (msg)   JS_FreeCString(ctx, msg);
             if (stack) JS_FreeCString(ctx, stack);
@@ -47366,6 +47385,9 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
     }
 
     ns_set_if_missing(ctx, global, "crossOriginIsolated", JS_FALSE);
+    JSAtom shared_buffer = JS_NewAtom(ctx, "SharedArrayBuffer");
+    JS_DeleteProperty(ctx, global, shared_buffer, 0);
+    JS_FreeAtom(ctx, shared_buffer);
     ns_set_if_missing(ctx, global, "frameElement", JS_NULL);
     ns_js_intl_install(ctx, global);
     ns_js_temporal_install(ctx, global);
@@ -47828,8 +47850,8 @@ ns_install_web_api_shapes(JSContext *ctx)
         "    try{Object.defineProperty(P,k,d);delete obj[k];}catch(e){}return;"
         "   }"
         "   (function(value,writable,enumerable){"
-        "    var holder={get value(){return value;},set value(v){value=v;}};"
-        "    var hd=Object.getOwnPropertyDescriptor(holder,'value');"
+        "    var holder={get [k](){return value;},set [k](v){value=v;}};"
+        "    var hd=Object.getOwnPropertyDescriptor(holder,k);"
         "    try{Object.defineProperty(P,k,{configurable:true,enumerable:enumerable,"
         "     get:hd.get,set:writable?hd.set:undefined});delete obj[k];}catch(e){}"
         "   })(d.value,d.writable,d.enumerable);"
@@ -47840,7 +47862,21 @@ ns_install_web_api_shapes(JSContext *ctx)
         " }"
         " var nav=globalThis.navigator,doc=globalThis.document;"
         " normalize('History',globalThis.history,'History',false);"
-        " normalize('Performance',globalThis.performance,'Performance',true);"
+        " var perf=globalThis.performance;"
+        " function adopt(name,obj){"
+        "  var C=obj&&typeof obj==='object'?ensure(name):null;"
+        "  if(typeof C!=='function'||!C.prototype)return;"
+        "  try{Object.setPrototypeOf(obj,C.prototype);"
+        "   Object.defineProperty(C.prototype,Symbol.toStringTag,{value:name,configurable:true});}catch(e){}"
+        " }"
+        " adopt('PerformanceTiming',perf&&perf.timing);"
+        " adopt('PerformanceNavigation',perf&&perf.navigation);"
+        " normalize('Performance',perf,'Performance',true);"
+        " [globalThis.localStorage,globalThis.sessionStorage].forEach(function(s){"
+        "  var SP=s&&Object.getPrototypeOf(s);"
+        "  if(SP&&SP!==Object.prototype)"
+        "   try{Object.defineProperty(SP,Symbol.toStringTag,{value:'Storage',configurable:true});}catch(e){}"
+        " });"
         " normalize('Screen',globalThis.screen,'Screen',true);"
         " normalize('Crypto',globalThis.crypto,'Crypto',false);"
         " normalize('SubtleCrypto',globalThis.crypto&&globalThis.crypto.subtle,'SubtleCrypto',false);"
@@ -47864,8 +47900,8 @@ ns_install_web_api_shapes(JSContext *ctx)
         "  try{Object.setPrototypeOf(PS,EventTarget.prototype);"
         "   Object.defineProperty(PS,Symbol.toStringTag,{value:'PermissionStatus',configurable:true});}catch(e){}"
         "})()";
-    JSValue result = JS_Eval(ctx, source, strlen(source),
-                             "<web-api-shapes>", JS_EVAL_TYPE_GLOBAL);
+    JSValue result = ns_js_eval_without_source(ctx, source, strlen(source),
+                                               "<web-api-shapes>");
     if (JS_IsException(result)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, result);
 }
@@ -48490,8 +48526,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             " Object.defineProperty(p, Symbol.toStringTag,"
             "   { value: 'DOMTokenList', configurable: true });"
             "})";
-        JSValue f = JS_Eval(ctx, iter_src, strlen(iter_src),
-                            "<tlist-iter>", JS_EVAL_TYPE_GLOBAL);
+        JSValue f = ns_js_eval_without_source(ctx, iter_src, strlen(iter_src),
+                                              "<tlist-iter>");
         if (!JS_IsException(f)) {
             JSValueConst args[1] = { tlist_proto };
             JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 1, args);
@@ -48552,8 +48588,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "   {value:A.values, writable:true, configurable:true});"
             " def(rnl, Symbol.toStringTag, 'RadioNodeList');"
             "})";
-        JSValue deco = JS_Eval(ctx, deco_src, strlen(deco_src),
-                               "<live-proto>", JS_EVAL_TYPE_GLOBAL);
+        JSValue deco = ns_js_eval_without_source(ctx, deco_src, strlen(deco_src),
+                                                 "<live-proto>");
         if (!JS_IsException(deco)) {
             JSValueConst args[3] = { hc_proto, nl_proto, rnl_proto };
             JSValue r = JS_Call(ctx, deco, JS_UNDEFINED, 3, args);
@@ -48665,7 +48701,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     JS_SetPropertyStr(ctx, navigator, "deviceMemory",
                       JS_NewInt32(ctx, ns_nav_device_memory()));
-    JS_SetPropertyStr(ctx, navigator, "pdfViewerEnabled", JS_TRUE);
+    JS_SetPropertyStr(ctx, navigator, "pdfViewerEnabled", JS_FALSE);
     JS_SetPropertyStr(ctx, navigator, "webdriver", JS_FALSE);
 
     if (nav_chrome_compat) {
@@ -49253,11 +49289,12 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             JSValue carrier = JS_GetPropertyStr(ctx, global, node_carriers[c]);
             if (!JS_IsObject(carrier)) { JS_FreeValue(ctx, carrier); continue; }
             JSValue proto = JS_GetPropertyStr(ctx, carrier, "prototype");
+            gboolean doc_like_carrier = c >= 3;
             for (gsize i = 0; i < G_N_ELEMENTS(node_constants); i++) {
                 JS_DefinePropertyValueStr(ctx, carrier, node_constants[i].name,
                     JS_NewInt32(ctx, node_constants[i].value),
                     JS_PROP_ENUMERABLE);
-                if (JS_IsObject(proto))
+                if (JS_IsObject(proto) && !doc_like_carrier)
                     JS_DefinePropertyValueStr(ctx, proto, node_constants[i].name,
                         JS_NewInt32(ctx, node_constants[i].value),
                         JS_PROP_ENUMERABLE);
@@ -49416,8 +49453,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JS_DefinePropertyValueStr(ctx, global, "__ns_event_report",
             JS_NewCFunction(ctx, ns_event_report_listener_exception,
                            "__ns_event_report", 1), 0);
-        JSValue et_ret = JS_Eval(ctx, et_src, strlen(et_src),
-                                 "<event-target>", JS_EVAL_TYPE_GLOBAL);
+        JSValue et_ret = ns_js_eval_without_source(ctx, et_src, strlen(et_src),
+                                                   "<event-target>");
         if (JS_IsException(et_ret)) {
             JSValue err = JS_GetException(ctx);
             const char *msg = JS_ToCString(ctx, err);
@@ -49469,8 +49506,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "  if (typeof w.scheduler.yield !== 'function')"
             "    w.scheduler.yield = function(){ return new Promise(function(resolve){ later(resolve); }); };"
             "})();";
-        JSValue pm_ret = JS_Eval(ctx, post_message_src, strlen(post_message_src),
-                                 "<post-message>", JS_EVAL_TYPE_GLOBAL);
+        JSValue pm_ret = ns_js_eval_without_source(ctx, post_message_src, strlen(post_message_src),
+                                                   "<post-message>");
         JS_FreeValue(ctx, pm_ret);
     }
 
@@ -49493,8 +49530,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "try{Object.defineProperty(globalThis,Symbol.toStringTag,"
             "{value:'Window',writable:false,enumerable:false,configurable:true});}"
             "catch(e){}";
-        JSValue tag_ret = JS_Eval(ctx, window_tag_src, strlen(window_tag_src),
-                                  "<window-tag>", JS_EVAL_TYPE_GLOBAL);
+        JSValue tag_ret = ns_js_eval_without_source(ctx, window_tag_src, strlen(window_tag_src),
+                                                    "<window-tag>");
         JS_FreeValue(ctx, tag_ret);
     }
     {
@@ -49669,8 +49706,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             " try { Object.defineProperty(Np, Symbol.toStringTag,"
             "   { value:'Navigator', configurable:true }); } catch(e) {}"
             "})();";
-        JSValue nr = JS_Eval(ctx, nav_iface_src, strlen(nav_iface_src),
-                             "<navigator-iface>", JS_EVAL_TYPE_GLOBAL);
+        JSValue nr = ns_js_eval_without_source(ctx, nav_iface_src, strlen(nav_iface_src),
+                                               "<navigator-iface>");
         JS_FreeValue(ctx, nr);
     }
 
@@ -49684,8 +49721,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "       try { Object.defineProperty(globalThis, k,"
             "         { enumerable: false }); } catch(e) {} } } });"
             "})();";
-        JSValue hr = JS_Eval(ctx, hide_src, strlen(hide_src),
-                             "<hide-internals>", JS_EVAL_TYPE_GLOBAL);
+        JSValue hr = ns_js_eval_without_source(ctx, hide_src, strlen(hide_src),
+                                               "<hide-internals>");
         JS_FreeValue(ctx, hr);
     }
 
@@ -49714,6 +49751,147 @@ ns_node_local_name_ptr(const ns_node *n)
     if (!n || !n->name) return NULL;
     const char *colon = strchr(n->name, ':');
     return colon ? colon + 1 : n->name;
+}
+
+static const char ns_node_shapes_src[] =
+    "(function(G){"
+    "  var W = {"
+        "  Node: 'ATTRIBUTE_NODE CDATA_SECTION_NODE COMMENT_NODE "
+        "DOCUMENT_FRAGMENT_NODE DOCUMENT_NODE "
+        "DOCUMENT_POSITION_CONTAINED_BY DOCUMENT_POSITION_CONTAINS "
+        "DOCUMENT_POSITION_DISCONNECTED DOCUMENT_POSITION_FOLLOWING "
+        "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC "
+        "DOCUMENT_POSITION_PRECEDING DOCUMENT_TYPE_NODE ELEMENT_NODE "
+        "ENTITY_NODE ENTITY_REFERENCE_NODE NOTATION_NODE "
+        "PROCESSING_INSTRUCTION_NODE TEXT_NODE appendChild baseURI "
+        "childNodes cloneNode compareDocumentPosition contains firstChild "
+        "getRootNode hasChildNodes insertBefore isConnected "
+        "isDefaultNamespace isEqualNode isSameNode lastChild "
+        "lookupNamespaceURI lookupPrefix nextSibling nodeName nodeType "
+        "nodeValue normalize ownerDocument parentElement parentNode "
+        "previousSibling removeChild replaceChild textContent',"
+        "  CharacterData: 'after appendData before data deleteData insertData length "
+        "nextElementSibling previousElementSibling remove replaceData "
+        "replaceWith substringData',"
+        "  Text: 'assignedSlot splitText wholeText',"
+        "  Comment: '',"
+        "  ProcessingInstruction: 'getAttribute getAttributeNames hasAttribute hasAttributes "
+        "removeAttribute setAttribute sheet target toggleAttribute',"
+        "  CDATASection: '',"
+        "  DocumentType: 'after before name publicId remove replaceWith systemId',"
+        "  Document: 'URL activeElement activeViewTransition adoptNode "
+        "adoptedStyleSheets alinkColor all anchors append applets "
+        "ariaNotify bgColor body browsingTopics captureEvents "
+        "caretPositionFromPoint caretRangeFromPoint characterSet charset "
+        "childElementCount children clear close compatMode contentType "
+        "cookie createAttribute createAttributeNS createCDATASection "
+        "createComment createDocumentFragment createElement createElementNS "
+        "createEvent createExpression createNSResolver createNodeIterator "
+        "createProcessingInstruction createRange createTextNode "
+        "createTreeWalker currentScript customElementRegistry defaultView "
+        "designMode dir doctype documentElement documentURI domain "
+        "elementFromPoint elementsFromPoint embeds evaluate execCommand "
+        "exitFullscreen exitPictureInPicture exitPointerLock featurePolicy "
+        "fgColor firstElementChild fonts forms fragmentDirective fullscreen "
+        "fullscreenElement fullscreenEnabled getAnimations getElementById "
+        "getElementsByClassName getElementsByName getElementsByTagName "
+        "getElementsByTagNameNS getSelection hasFocus hasPrivateToken "
+        "hasRedemptionRecord hasStorageAccess hasUnpartitionedCookieAccess "
+        "head hidden images implementation importNode inputEncoding "
+        "lastElementChild lastModified linkColor links moveBefore onabort "
+        "onanimationcancel onanimationend onanimationiteration "
+        "onanimationstart onauxclick onbeforecopy onbeforecut onbeforeinput "
+        "onbeforematch onbeforepaste onbeforetoggle onbeforexrselect onblur "
+        "oncancel oncanplay oncanplaythrough onchange onclick onclose "
+        "oncommand oncontentvisibilityautostatechange oncontextlost "
+        "oncontextmenu oncontextrestored oncopy oncuechange oncut "
+        "ondblclick ondrag ondragend ondragenter ondragleave ondragover "
+        "ondragstart ondrop ondurationchange onemptied onended onerror "
+        "onfocus onformdata onfreeze onfullscreenchange onfullscreenerror "
+        "ongotpointercapture oninput oninvalid onkeydown onkeypress onkeyup "
+        "onload onloadeddata onloadedmetadata onloadstart "
+        "onlostpointercapture onmousedown onmouseenter onmouseleave "
+        "onmousemove onmouseout onmouseover onmouseup onmousewheel onpaste "
+        "onpause onplay onplaying onpointercancel onpointerdown "
+        "onpointerenter onpointerleave onpointerlockchange "
+        "onpointerlockerror onpointermove onpointerout onpointerover "
+        "onpointerrawupdate onpointerup onprerenderingchange onprogress "
+        "onratechange onreadystatechange onreset onresize onresume onscroll "
+        "onscrollend onscrollsnapchange onscrollsnapchanging onsearch "
+        "onsecuritypolicyviolation onseeked onseeking onselect "
+        "onselectionchange onselectstart onslotchange onstalled onsubmit "
+        "onsuspend ontimeupdate ontoggle ontransitioncancel ontransitionend "
+        "ontransitionrun ontransitionstart onvisibilitychange "
+        "onvolumechange onwaiting onwebkitanimationend "
+        "onwebkitanimationiteration onwebkitanimationstart "
+        "onwebkitfullscreenchange onwebkitfullscreenerror "
+        "onwebkittransitionend onwheel open pictureInPictureElement "
+        "pictureInPictureEnabled plugins pointerLockElement prepend "
+        "prerendering queryCommandEnabled queryCommandIndeterm "
+        "queryCommandState queryCommandSupported queryCommandValue "
+        "querySelector querySelectorAll readyState referrer releaseEvents "
+        "replaceChildren requestStorageAccess rootElement scripts "
+        "scrollingElement startViewTransition styleSheets timeline title "
+        "visibilityState vlinkColor wasDiscarded webkitCancelFullScreen "
+        "webkitCurrentFullScreenElement webkitExitFullscreen "
+        "webkitFullscreenElement webkitFullscreenEnabled webkitHidden "
+        "webkitIsFullScreen webkitVisibilityState write writeln xmlEncoding "
+        "xmlStandalone xmlVersion',"
+        "  HTMLDocument: '',"
+        "  XMLDocument: '',"
+        "  DocumentFragment: 'append childElementCount children firstElementChild getElementById "
+        "lastElementChild moveBefore prepend querySelector querySelectorAll "
+        "replaceChildren',"
+        "  ShadowRoot: 'activeElement adoptedStyleSheets clonable customElementRegistry "
+        "delegatesFocus elementFromPoint elementsFromPoint "
+        "fullscreenElement getAnimations getHTML getSelection host "
+        "innerHTML mode onslotchange pictureInPictureElement "
+        "pointerLockElement referenceTarget serializable setHTML "
+        "setHTMLUnsafe slotAssignment styleSheets',"
+    "  };"
+    "  var up = { HTMLDocument: 'Document', XMLDocument: 'Document' };"
+    "  Object.keys(up).forEach(function(n){"
+    "    var C = G[n], U = G[up[n]]; if (!C || !U || !C.prototype || !U.prototype) return;"
+    "    var P = C.prototype, Q = U.prototype, want = new Set(W[up[n]].split(' '));"
+    "    Object.getOwnPropertyNames(P).forEach(function(k){"
+    "      if (!want.has(k) || Object.prototype.hasOwnProperty.call(Q, k)) return;"
+    "      try { Object.defineProperty(Q, k, Object.getOwnPropertyDescriptor(P, k)); } catch (e) {}"
+    "    });"
+    "  });"
+    "  var from = { CharacterData: ['Node'], Text: ['Node'], Comment: ['Node'],"
+    "    ProcessingInstruction: ['Node'], CDATASection: ['Node'],"
+    "    DocumentType: ['Node'], ShadowRoot: ['DocumentFragment', 'Node'] };"
+    "  var own = Object.prototype.hasOwnProperty, plan = [];"
+    "  Object.keys(W).forEach(function(n){"
+    "    var C = G[n]; if (typeof C !== 'function' || !C.prototype) return;"
+    "    var P = C.prototype, want = new Set(W[n] ? W[n].split(' ') : []), add = [];"
+    "    want.forEach(function(k){"
+    "      if (own.call(P, k)) return;"
+    "      (from[n] || []).some(function(s){"
+    "        var S = G[s] && G[s].prototype, d = S && Object.getOwnPropertyDescriptor(S, k);"
+    "        if (d) add.push([k, d]);"
+    "        return !!d;"
+    "      });"
+    "    });"
+    "    var del = Object.getOwnPropertyNames(P).filter(function(k){"
+    "      return k !== 'constructor' && !want.has(k) && k.slice(0, 8) !== '__shady_';"
+    "    });"
+    "    plan.push([P, add, del]);"
+    "  });"
+    "  plan.forEach(function(p){ p[1].forEach(function(a){"
+    "    try { Object.defineProperty(p[0], a[0], a[1]); } catch (e) {} }); });"
+    "  plan.forEach(function(p){ p[2].forEach(function(k){"
+    "    try { delete p[0][k]; } catch (e) {} }); });"
+    "})(globalThis)";
+
+static void
+ns_install_node_shapes(JSContext *ctx)
+{
+    JSValue r = ns_js_eval_without_source(ctx, ns_node_shapes_src,
+                                          sizeof(ns_node_shapes_src) - 1,
+                                          "<node-shapes>");
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
 }
 
 static void
@@ -51390,6 +51568,375 @@ ns_document_is_other_document(ns_js *js, JSValueConst this_val)
     return js && node && js->main_document && node != js->main_document;
 }
 
+static const char ns_element_shapes_src[] =
+    "(function(G){"
+    "  var W = {"
+        "  Element: 'activeViewTransition after animate append ariaActionsElements "
+        "ariaActiveDescendantElement ariaAtomic ariaAutoComplete "
+        "ariaBrailleLabel ariaBrailleRoleDescription ariaBusy ariaChecked "
+        "ariaColCount ariaColIndex ariaColIndexText ariaColSpan "
+        "ariaControlsElements ariaCurrent ariaDescribedByElements "
+        "ariaDescription ariaDetailsElements ariaDisabled "
+        "ariaErrorMessageElements ariaExpanded ariaFlowToElements "
+        "ariaHasPopup ariaHidden ariaInvalid ariaKeyShortcuts ariaLabel "
+        "ariaLabelledByElements ariaLevel ariaLive ariaModal ariaMultiLine "
+        "ariaMultiSelectable ariaNotify ariaOrientation ariaPlaceholder "
+        "ariaPosInSet ariaPressed ariaReadOnly ariaRelevant ariaRequired "
+        "ariaRoleDescription ariaRowCount ariaRowIndex ariaRowIndexText "
+        "ariaRowSpan ariaSelected ariaSetSize ariaSort ariaValueMax "
+        "ariaValueMin ariaValueNow ariaValueText assignedSlot attachShadow "
+        "attributes before checkVisibility childElementCount children "
+        "classList className clientHeight clientLeft clientTop clientWidth "
+        "closest computedStyleMap currentCSSZoom customElementRegistry "
+        "elementTiming firstElementChild getAnimations getAttribute "
+        "getAttributeNS getAttributeNames getAttributeNode "
+        "getAttributeNodeNS getBoundingClientRect getClientRects "
+        "getElementsByClassName getElementsByTagName getElementsByTagNameNS "
+        "getHTML hasAttribute hasAttributeNS hasAttributes "
+        "hasPointerCapture id innerHTML insertAdjacentElement "
+        "insertAdjacentHTML insertAdjacentText lastElementChild localName "
+        "matches moveBefore namespaceURI nextElementSibling onbeforecopy "
+        "onbeforecut onbeforepaste onfullscreenchange onfullscreenerror "
+        "onsearch onwebkitfullscreenchange onwebkitfullscreenerror "
+        "outerHTML part prefix prepend previousElementSibling pseudo "
+        "querySelector querySelectorAll releasePointerCapture remove "
+        "removeAttribute removeAttributeNS removeAttributeNode "
+        "replaceChildren replaceWith requestFullscreen requestPointerLock "
+        "role scroll scrollBy scrollHeight scrollIntoView "
+        "scrollIntoViewIfNeeded scrollLeft scrollTo scrollTop scrollWidth "
+        "setAttribute setAttributeNS setAttributeNode setAttributeNodeNS "
+        "setHTML setHTMLUnsafe setPointerCapture shadowRoot slot "
+        "startViewTransition tagName toggleAttribute webkitMatchesSelector "
+        "webkitRequestFullScreen webkitRequestFullscreen',"
+        "  HTMLElement: 'accessKey attachInternals attributeStyleMap autocapitalize "
+        "autocorrect autofocus blur click contentEditable dataset dir "
+        "draggable editContext enterKeyHint focus focusGroup "
+        "focusGroupStart hidden hidePopover inert innerText inputMode "
+        "isContentEditable lang nonce offsetHeight offsetLeft offsetParent "
+        "offsetTop offsetWidth onabort onanimationcancel onanimationend "
+        "onanimationiteration onanimationstart onauxclick onbeforeinput "
+        "onbeforematch onbeforetoggle onbeforexrselect onblur oncancel "
+        "oncanplay oncanplaythrough onchange onclick onclose oncommand "
+        "oncontentvisibilityautostatechange oncontextlost oncontextmenu "
+        "oncontextrestored oncopy oncuechange oncut ondblclick ondrag "
+        "ondragend ondragenter ondragleave ondragover ondragstart ondrop "
+        "ondurationchange onemptied onended onerror onfocus onformdata "
+        "ongotpointercapture oninput oninvalid onkeydown onkeypress onkeyup "
+        "onload onloadeddata onloadedmetadata onloadstart "
+        "onlostpointercapture onmousedown onmouseenter onmouseleave "
+        "onmousemove onmouseout onmouseover onmouseup onmousewheel onpaste "
+        "onpause onplay onplaying onpointercancel onpointerdown "
+        "onpointerenter onpointerleave onpointermove onpointerout "
+        "onpointerover onpointerrawupdate onpointerup onprogress "
+        "onratechange onreset onresize onscroll onscrollend "
+        "onscrollsnapchange onscrollsnapchanging onsecuritypolicyviolation "
+        "onseeked onseeking onselect onselectionchange onselectstart "
+        "onslotchange onstalled onsubmit onsuspend ontimeupdate ontoggle "
+        "ontransitioncancel ontransitionend ontransitionrun "
+        "ontransitionstart onvolumechange onwaiting onwebkitanimationend "
+        "onwebkitanimationiteration onwebkitanimationstart "
+        "onwebkittransitionend onwheel outerText popover showPopover "
+        "spellcheck style tabIndex title togglePopover translate "
+        "virtualKeyboardPolicy writingSuggestions',"
+        "  SVGElement: 'LENGTHADJUST_SPACING LENGTHADJUST_SPACINGANDGLYPHS "
+        "LENGTHADJUST_UNKNOWN SVG_CHANNEL_A SVG_CHANNEL_B SVG_CHANNEL_G "
+        "SVG_CHANNEL_R SVG_CHANNEL_UNKNOWN SVG_EDGEMODE_DUPLICATE "
+        "SVG_EDGEMODE_NONE SVG_EDGEMODE_UNKNOWN SVG_EDGEMODE_WRAP "
+        "SVG_FEBLEND_MODE_COLOR SVG_FEBLEND_MODE_COLOR_BURN "
+        "SVG_FEBLEND_MODE_COLOR_DODGE SVG_FEBLEND_MODE_DARKEN "
+        "SVG_FEBLEND_MODE_DIFFERENCE SVG_FEBLEND_MODE_EXCLUSION "
+        "SVG_FEBLEND_MODE_HARD_LIGHT SVG_FEBLEND_MODE_HUE "
+        "SVG_FEBLEND_MODE_LIGHTEN SVG_FEBLEND_MODE_LUMINOSITY "
+        "SVG_FEBLEND_MODE_MULTIPLY SVG_FEBLEND_MODE_NORMAL "
+        "SVG_FEBLEND_MODE_OVERLAY SVG_FEBLEND_MODE_SATURATION "
+        "SVG_FEBLEND_MODE_SCREEN SVG_FEBLEND_MODE_SOFT_LIGHT "
+        "SVG_FEBLEND_MODE_UNKNOWN SVG_FECOLORMATRIX_TYPE_HUEROTATE "
+        "SVG_FECOLORMATRIX_TYPE_LUMINANCETOALPHA "
+        "SVG_FECOLORMATRIX_TYPE_MATRIX SVG_FECOLORMATRIX_TYPE_SATURATE "
+        "SVG_FECOLORMATRIX_TYPE_UNKNOWN "
+        "SVG_FECOMPONENTTRANSFER_TYPE_DISCRETE "
+        "SVG_FECOMPONENTTRANSFER_TYPE_GAMMA "
+        "SVG_FECOMPONENTTRANSFER_TYPE_IDENTITY "
+        "SVG_FECOMPONENTTRANSFER_TYPE_LINEAR "
+        "SVG_FECOMPONENTTRANSFER_TYPE_TABLE "
+        "SVG_FECOMPONENTTRANSFER_TYPE_UNKNOWN "
+        "SVG_FECOMPOSITE_OPERATOR_ARITHMETIC SVG_FECOMPOSITE_OPERATOR_ATOP "
+        "SVG_FECOMPOSITE_OPERATOR_IN SVG_FECOMPOSITE_OPERATOR_OUT "
+        "SVG_FECOMPOSITE_OPERATOR_OVER SVG_FECOMPOSITE_OPERATOR_UNKNOWN "
+        "SVG_FECOMPOSITE_OPERATOR_XOR SVG_MARKERUNITS_STROKEWIDTH "
+        "SVG_MARKERUNITS_UNKNOWN SVG_MARKERUNITS_USERSPACEONUSE "
+        "SVG_MARKER_ORIENT_ANGLE SVG_MARKER_ORIENT_AUTO "
+        "SVG_MARKER_ORIENT_UNKNOWN SVG_MORPHOLOGY_OPERATOR_DILATE "
+        "SVG_MORPHOLOGY_OPERATOR_ERODE SVG_MORPHOLOGY_OPERATOR_UNKNOWN "
+        "SVG_SPREADMETHOD_PAD SVG_SPREADMETHOD_REFLECT "
+        "SVG_SPREADMETHOD_REPEAT SVG_SPREADMETHOD_UNKNOWN "
+        "SVG_STITCHTYPE_NOSTITCH SVG_STITCHTYPE_STITCH "
+        "SVG_STITCHTYPE_UNKNOWN SVG_TURBULENCE_TYPE_FRACTALNOISE "
+        "SVG_TURBULENCE_TYPE_TURBULENCE SVG_TURBULENCE_TYPE_UNKNOWN "
+        "SVG_ZOOMANDPAN_DISABLE SVG_ZOOMANDPAN_MAGNIFY "
+        "SVG_ZOOMANDPAN_UNKNOWN TEXTPATH_METHODTYPE_ALIGN "
+        "TEXTPATH_METHODTYPE_STRETCH TEXTPATH_METHODTYPE_UNKNOWN "
+        "TEXTPATH_SIDETYPE_LEFT TEXTPATH_SIDETYPE_RIGHT "
+        "TEXTPATH_SIDETYPE_UNKNOWN TEXTPATH_SPACINGTYPE_AUTO "
+        "TEXTPATH_SPACINGTYPE_EXACT TEXTPATH_SPACINGTYPE_UNKNOWN amplitude "
+        "animatedPoints animationsPaused async attributeStyleMap autofocus "
+        "azimuth baseFrequencyX baseFrequencyY beginElement beginElementAt "
+        "bias blur checkEnclosure checkIntersection className clipPathUnits "
+        "createSVGAngle createSVGLength createSVGMatrix createSVGNumber "
+        "createSVGPoint createSVGRect createSVGTransform "
+        "createSVGTransformFromMatrix crossOrigin currentScale "
+        "currentTranslate cx cy dataset decode decoding deselectAll "
+        "diffuseConstant disabled divisor download dx dy edgeMode elevation "
+        "endElement endElementAt exponent farthestViewportElement "
+        "filterUnits focus focusGroup focusGroupStart forceRedraw fr fx fy "
+        "getBBox getCTM getCharNumAtPosition getComputedTextLength "
+        "getCurrentTime getElementById getEnclosureList "
+        "getEndPositionOfChar getExtentOfChar getIntersectionList "
+        "getNumberOfChars getPointAtLength getRotationOfChar getScreenCTM "
+        "getSimpleDuration getStartPositionOfChar getStartTime "
+        "getSubStringLength getTotalLength gradientTransform gradientUnits "
+        "height href hreflang in1 in2 intercept interestForElement "
+        "isPointInFill isPointInStroke k1 k2 k3 k4 kernelMatrix "
+        "kernelUnitLengthX kernelUnitLengthY lengthAdjust limitingConeAngle "
+        "markerHeight markerUnits markerWidth maskContentUnits maskUnits "
+        "media method mode nearestViewportElement nonce numOctaves offset "
+        "onabort onanimationcancel onanimationend onanimationiteration "
+        "onanimationstart onauxclick onbeforeinput onbeforematch "
+        "onbeforetoggle onbeforexrselect onbegin onblur oncancel oncanplay "
+        "oncanplaythrough onchange onclick onclose oncommand "
+        "oncontentvisibilityautostatechange oncontextlost oncontextmenu "
+        "oncontextrestored oncopy oncuechange oncut ondblclick ondrag "
+        "ondragend ondragenter ondragleave ondragover ondragstart ondrop "
+        "ondurationchange onemptied onend onended onerror onfocus "
+        "onformdata ongotpointercapture oninput oninvalid onkeydown "
+        "onkeypress onkeyup onload onloadeddata onloadedmetadata "
+        "onloadstart onlostpointercapture onmousedown onmouseenter "
+        "onmouseleave onmousemove onmouseout onmouseover onmouseup "
+        "onmousewheel onpaste onpause onplay onplaying onpointercancel "
+        "onpointerdown onpointerenter onpointerleave onpointermove "
+        "onpointerout onpointerover onpointerrawupdate onpointerup "
+        "onprogress onratechange onrepeat onreset onresize onscroll "
+        "onscrollend onscrollsnapchange onscrollsnapchanging "
+        "onsecuritypolicyviolation onseeked onseeking onselect "
+        "onselectionchange onselectstart onslotchange onstalled onsubmit "
+        "onsuspend ontimeupdate ontoggle ontransitioncancel ontransitionend "
+        "ontransitionrun ontransitionstart onvolumechange onwaiting "
+        "onwebkitanimationend onwebkitanimationiteration "
+        "onwebkitanimationstart onwebkittransitionend onwheel operator "
+        "orderX orderY orientAngle orientType ownerSVGElement pathLength "
+        "patternContentUnits patternTransform patternUnits pauseAnimations "
+        "ping points pointsAtX pointsAtY pointsAtZ preserveAlpha "
+        "preserveAspectRatio primitiveUnits r radiusX radiusY refX refY "
+        "referrerPolicy rel relList requiredExtensions result rotate rx ry "
+        "scale seed selectSubString setCurrentTime setOrientToAngle "
+        "setOrientToAuto setStdDeviation sheet slope spacing "
+        "specularConstant specularExponent spreadMethod startOffset "
+        "stdDeviationX stdDeviationY stitchTiles style surfaceScale "
+        "suspendRedraw systemLanguage tabIndex tableValues target "
+        "targetElement targetX targetY textLength title transform type "
+        "unpauseAnimations unsuspendRedraw unsuspendRedrawAll values "
+        "viewBox viewportElement width x x1 x2 xChannelSelector y y1 y2 "
+        "yChannelSelector z zoomAndPan',"
+        "  HTMLAnchorElement: 'attributionSrc charset coords download hash host hostname href "
+        "hrefTranslate hreflang interestForElement name origin password "
+        "pathname ping port protocol referrerPolicy rel relList rev search "
+        "shape target text toString type username',"
+        "  HTMLAreaElement: 'alt attributionSrc coords download hash host hostname href "
+        "interestForElement noHref origin password pathname ping port "
+        "protocol referrerPolicy rel relList search shape target toString "
+        "username',"
+        "  HTMLBRElement: 'clear',"
+        "  HTMLBaseElement: 'href target',"
+        "  HTMLBodyElement: 'aLink background bgColor link onafterprint onbeforeprint "
+        "onbeforeunload onblur onerror onfocus ongamepadconnected "
+        "ongamepaddisconnected onhashchange onlanguagechange onload "
+        "onmessage onmessageerror onoffline ononline onpagehide onpageshow "
+        "onpopstate onrejectionhandled onresize onscroll onstorage "
+        "onunhandledrejection onunload text vLink',"
+        "  HTMLButtonElement: 'checkValidity command commandForElement disabled form formAction "
+        "formEnctype formMethod formNoValidate formTarget "
+        "interestForElement labels name popoverTargetAction "
+        "popoverTargetElement reportValidity setCustomValidity type "
+        "validationMessage validity value willValidate',"
+        "  HTMLCanvasElement: 'captureStream getContext height toBlob toDataURL "
+        "transferControlToOffscreen width',"
+        "  HTMLDListElement: 'compact',"
+        "  HTMLDataElement: 'value',"
+        "  HTMLDataListElement: 'options',"
+        "  HTMLDetailsElement: 'name open',"
+        "  HTMLDialogElement: 'close closedBy open requestClose returnValue show showModal',"
+        "  HTMLDirectoryElement: 'compact',"
+        "  HTMLDivElement: 'align',"
+        "  HTMLEmbedElement: 'align getSVGDocument height name src type width',"
+        "  HTMLFieldSetElement: 'checkValidity disabled elements form name reportValidity "
+        "setCustomValidity type validationMessage validity willValidate',"
+        "  HTMLFontElement: 'color face size',"
+        "  HTMLFormElement: 'acceptCharset action autocomplete checkValidity elements encoding "
+        "enctype length method name noValidate rel relList reportValidity "
+        "requestSubmit reset submit target',"
+        "  HTMLFrameElement: 'contentDocument contentWindow frameBorder longDesc marginHeight "
+        "marginWidth name noResize scrolling src',"
+        "  HTMLFrameSetElement: 'cols onafterprint onbeforeprint onbeforeunload onblur onerror "
+        "onfocus ongamepadconnected ongamepaddisconnected onhashchange "
+        "onlanguagechange onload onmessage onmessageerror onoffline "
+        "ononline onpagehide onpageshow onpopstate onrejectionhandled "
+        "onresize onscroll onstorage onunhandledrejection onunload rows',"
+        "  HTMLHRElement: 'align color noShade size width',"
+        "  HTMLHeadingElement: 'align',"
+        "  HTMLHtmlElement: 'version',"
+        "  HTMLIFrameElement: 'adAuctionHeaders align allow allowFullscreen allowPaymentRequest "
+        "browsingTopics contentDocument contentWindow credentialless csp "
+        "featurePolicy frameBorder getSVGDocument height loading longDesc "
+        "marginHeight marginWidth name privateToken referrerPolicy sandbox "
+        "scrolling src srcdoc width',"
+        "  HTMLImageElement: 'align alt attributionSrc border browsingTopics complete "
+        "crossOrigin currentSrc decode decoding fetchPriority height hspace "
+        "isMap loading longDesc lowsrc name naturalHeight naturalWidth "
+        "referrerPolicy sizes src srcset useMap vspace width x y',"
+        "  HTMLInputElement: 'accept align alt autocomplete checkValidity checked "
+        "createValueRange defaultChecked defaultValue dirName disabled "
+        "files form formAction formEnctype formMethod formNoValidate "
+        "formTarget height incremental indeterminate labels list max "
+        "maxLength min minLength multiple name pattern placeholder "
+        "popoverTargetAction popoverTargetElement readOnly reportValidity "
+        "required select selectionDirection selectionEnd selectionStart "
+        "setCustomValidity setRangeText setSelectionRange showPicker size "
+        "src step stepDown stepUp type useMap validationMessage validity "
+        "value valueAsDate valueAsNumber webkitEntries webkitdirectory "
+        "width willValidate',"
+        "  HTMLLIElement: 'type value',"
+        "  HTMLLabelElement: 'control form htmlFor',"
+        "  HTMLLegendElement: 'align form',"
+        "  HTMLLinkElement: 'as blocking charset crossOrigin disabled fetchPriority href "
+        "hreflang imageSizes imageSrcset integrity media referrerPolicy rel "
+        "relList rev sheet sizes target type',"
+        "  HTMLMapElement: 'areas name',"
+        "  HTMLMarqueeElement: 'behavior bgColor direction height hspace loop scrollAmount "
+        "scrollDelay start stop trueSpeed vspace width',"
+        "  HTMLMediaElement: 'HAVE_CURRENT_DATA HAVE_ENOUGH_DATA HAVE_FUTURE_DATA HAVE_METADATA "
+        "HAVE_NOTHING NETWORK_EMPTY NETWORK_IDLE NETWORK_LOADING "
+        "NETWORK_NO_SOURCE addTextTrack autoplay buffered canPlayType "
+        "captureStream controls controlsList crossOrigin currentSrc "
+        "currentTime defaultMuted defaultPlaybackRate disableRemotePlayback "
+        "duration ended error load loading loop mediaKeys muted "
+        "networkState onencrypted onwaitingforkey pause paused play "
+        "playbackRate played preload preservesPitch readyState remote "
+        "seekable seeking setMediaKeys setSinkId sinkId src srcObject "
+        "textTracks volume webkitAudioDecodedByteCount "
+        "webkitVideoDecodedByteCount',"
+        "  HTMLMenuElement: 'compact',"
+        "  HTMLMetaElement: 'content httpEquiv media name scheme',"
+        "  HTMLMeterElement: 'high labels low max min optimum value',"
+        "  HTMLModElement: 'cite dateTime',"
+        "  HTMLOListElement: 'compact reversed start type',"
+        "  HTMLObjectElement: 'align archive border checkValidity code codeBase codeType "
+        "contentDocument contentWindow data declare form getSVGDocument "
+        "height hspace name reportValidity setCustomValidity standby type "
+        "useMap validationMessage validity vspace width willValidate',"
+        "  HTMLOptGroupElement: 'disabled label',"
+        "  HTMLOptionElement: 'defaultSelected disabled form index label selected text value',"
+        "  HTMLOutputElement: 'checkValidity defaultValue form htmlFor labels name reportValidity "
+        "setCustomValidity type validationMessage validity value "
+        "willValidate',"
+        "  HTMLParagraphElement: 'align',"
+        "  HTMLParamElement: 'name type value valueType',"
+        "  HTMLPreElement: 'width',"
+        "  HTMLProgressElement: 'labels max position value',"
+        "  HTMLQuoteElement: 'cite',"
+        "  HTMLScriptElement: 'async attributionSrc blocking charset crossOrigin defer event "
+        "fetchPriority htmlFor innerText integrity noModule referrerPolicy "
+        "src text textContent type',"
+        "  HTMLSelectElement: 'add autocomplete checkValidity disabled form item labels length "
+        "multiple name namedItem options remove reportValidity required "
+        "selectedIndex selectedOptions setCustomValidity showPicker size "
+        "type validationMessage validity value willValidate',"
+        "  HTMLSlotElement: 'assign assignedElements assignedNodes name',"
+        "  HTMLSourceElement: 'height media sizes src srcset type width',"
+        "  HTMLStyleElement: 'blocking disabled media sheet type',"
+        "  HTMLTableCaptionElement: 'align',"
+        "  HTMLTableCellElement: 'abbr align axis bgColor cellIndex ch chOff colSpan headers height "
+        "noWrap rowSpan scope vAlign width',"
+        "  HTMLTableColElement: 'align ch chOff span vAlign width',"
+        "  HTMLTableElement: 'align bgColor border caption cellPadding cellSpacing createCaption "
+        "createTBody createTFoot createTHead deleteCaption deleteRow "
+        "deleteTFoot deleteTHead frame insertRow rows rules summary tBodies "
+        "tFoot tHead width',"
+        "  HTMLTableRowElement: 'align bgColor cells ch chOff deleteCell insertCell rowIndex "
+        "sectionRowIndex vAlign',"
+        "  HTMLTableSectionElement: 'align ch chOff deleteRow insertRow rows vAlign',"
+        "  HTMLTemplateElement: 'content htmlFor shadowRootClonable shadowRootCustomElementRegistry "
+        "shadowRootDelegatesFocus shadowRootMode shadowRootReferenceTarget "
+        "shadowRootSerializable shadowRootSlotAssignment',"
+        "  HTMLTextAreaElement: 'autocomplete checkValidity cols createValueRange defaultValue "
+        "dirName disabled form labels maxLength minLength name placeholder "
+        "readOnly reportValidity required rows select selectionDirection "
+        "selectionEnd selectionStart setCustomValidity setRangeText "
+        "setSelectionRange textLength type validationMessage validity value "
+        "willValidate wrap',"
+        "  HTMLTimeElement: 'dateTime',"
+        "  HTMLTitleElement: 'text',"
+        "  HTMLTrackElement: 'ERROR LOADED LOADING NONE default kind label readyState src "
+        "srclang track',"
+        "  HTMLUListElement: 'compact type',"
+        "  HTMLVideoElement: 'cancelVideoFrameCallback disablePictureInPicture "
+        "getVideoPlaybackQuality height onenterpictureinpicture "
+        "onleavepictureinpicture playsInline poster requestPictureInPicture "
+        "requestVideoFrameCallback videoHeight videoWidth "
+        "webkitDecodedFrameCount webkitDroppedFrameCount width',"
+        "  SVGSVGElement: 'SVG_ZOOMANDPAN_DISABLE SVG_ZOOMANDPAN_MAGNIFY "
+        "SVG_ZOOMANDPAN_UNKNOWN animationsPaused checkEnclosure "
+        "checkIntersection createSVGAngle createSVGLength createSVGMatrix "
+        "createSVGNumber createSVGPoint createSVGRect createSVGTransform "
+        "createSVGTransformFromMatrix currentScale currentTranslate "
+        "deselectAll forceRedraw getCurrentTime getElementById "
+        "getEnclosureList getIntersectionList height pauseAnimations "
+        "preserveAspectRatio setCurrentTime suspendRedraw unpauseAnimations "
+        "unsuspendRedraw unsuspendRedrawAll viewBox width x y zoomAndPan',"
+        "  SVGAElement: 'download href hreflang interestForElement ping referrerPolicy rel "
+        "relList target type',"
+    "  };"
+    "  var E = G.Element && G.Element.prototype, H = G.HTMLElement && G.HTMLElement.prototype;"
+    "  if (!E) return;"
+    "  var own = Object.prototype.hasOwnProperty;"
+    "  function down(n, srcs){"
+    "    var C = G[n]; if (typeof C !== 'function' || !C.prototype || !W[n]) return;"
+    "    var P = C.prototype;"
+    "    W[n].split(' ').forEach(function(k){"
+    "      if (!k || own.call(P, k)) return;"
+    "      srcs.some(function(S){"
+    "        var d = S && S !== P && Object.getOwnPropertyDescriptor(S, k);"
+    "        if (d) { try { Object.defineProperty(P, k, d); } catch (e) {} }"
+    "        return !!d;"
+    "      });"
+    "    });"
+    "  }"
+    "  Object.keys(W).forEach(function(n){"
+    "    if (n !== 'HTMLElement' && /^HTML.+Element$/.test(n)) down(n, [E, H]);"
+    "  });"
+    "  down('HTMLElement', [E]);"
+    "  down('SVGElement', [E, H]);"
+    "  down('SVGSVGElement', [E]);"
+    "  down('SVGAElement', [E]);"
+    "  ['Element', 'HTMLElement'].forEach(function(n){"
+    "    var C = G[n]; if (typeof C !== 'function' || !C.prototype) return;"
+    "    var P = C.prototype, want = new Set(W[n].split(' '));"
+    "    Object.getOwnPropertyNames(P).forEach(function(k){"
+    "      if (k === 'constructor' || want.has(k) || k.slice(0, 8) === '__shady_') return;"
+    "      try { delete P[k]; } catch (e) {}"
+    "    });"
+    "  });"
+    "})(globalThis)";
+
+static void
+ns_install_element_shapes(JSContext *ctx)
+{
+    JSValue r = ns_js_eval_without_source(ctx, ns_element_shapes_src,
+                                          sizeof(ns_element_shapes_src) - 1,
+                                          "<element-shapes>");
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+}
+
 static void
 ns_document_refresh_cookie(ns_js *js)
 {
@@ -52864,8 +53411,8 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
             " Object.defineProperty(globalThis, 'location', d);"
             " try { Object.defineProperty(document, 'location', d); } catch(e){}"
             "})();";
-        JSValue r = JS_Eval(ctx, loc_fwd, strlen(loc_fwd),
-                            "<location-forward>", JS_EVAL_TYPE_GLOBAL);
+        JSValue r = ns_js_eval_without_source(ctx, loc_fwd, strlen(loc_fwd),
+                                              "<location-forward>");
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, r);
     }
@@ -52962,8 +53509,8 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
             " d('entries',A.entries);d('keys',A.keys);d('values',A.values);d('forEach',A.forEach);"
             " Object.defineProperty(p,Symbol.iterator,{value:A.values,writable:true,configurable:true});"
             "})(NamedNodeMap.prototype)";
-        JSValue result = JS_Eval(ctx, source, strlen(source),
-                                 "<namednodemap>", JS_EVAL_TYPE_GLOBAL);
+        JSValue result = ns_js_eval_without_source(ctx, source, strlen(source),
+                                                   "<namednodemap>");
         if (JS_IsException(result)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, result);
     }
@@ -53111,6 +53658,8 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url,
                                      ns_attr_class_id);
         JS_FreeValue(ctx, g);
     }
+    ns_install_node_shapes(ctx);
+    ns_install_element_shapes(ctx);
 }
 
 void
@@ -53653,8 +54202,12 @@ ns_js_caller_position(JSContext *ctx, char **file, int *line, int *col)
         const char *eol = strchr(p, '\n');
         gsize n = eol ? (gsize)(eol - p) : strlen(p);
         const char *open = memchr(p, '(', n);
-        if (open && n > 0 && p[n - 1] == ')') {
-            g_autofree char *loc = g_strndup(open + 1, (gsize)(p + n - 1 - open - 1));
+        gboolean wrapped = open && n > 0 && p[n - 1] == ')';
+        if (!wrapped && n > 7 && g_str_has_prefix(p, "    at "))
+            open = p + 6;
+        if (open && (wrapped || open == p + 6)) {
+            g_autofree char *loc = g_strndup(open + 1,
+                                             (gsize)(p + n - (wrapped ? 1 : 0) - open - 1));
             char *c2 = strrchr(loc, ':');
             char *c1 = c2 ? g_strrstr_len(loc, c2 - loc, ":") : NULL;
             if (c1 && c2 && g_ascii_isdigit(c1[1]) && g_ascii_isdigit(c2[1])) {
@@ -53738,7 +54291,9 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
             .filename = origin,
             .line_num = src_line,
         };
-        JSValue fn = JS_EvalThis2(js->ctx, geval, copy, len, &opts);
+        JSValue fn = origin && origin[0] == '<'
+            ? ns_js_compile_without_source(js->ctx, copy, len, origin)
+            : JS_EvalThis2(js->ctx, geval, copy, len, &opts);
         JS_FreeValue(js->ctx, geval);
         if (!JS_IsException(fn)) {
             ns_js_bytecode_cache_store(js, fn, copy, len);
@@ -55653,8 +56208,8 @@ ns_js_iframe_proto_snapshot(JSContext *ctx)
         "Object.getOwnPropertyNames(o).forEach(function(k){try{"
         "if(Object.prototype.propertyIsEnumerable.call(o,k))m[k]=1;"
         "}catch(e){}});return m;});})()";
-    JSValue v = JS_Eval(ctx, src, strlen(src), "<iframe-proto-snapshot>",
-                        JS_EVAL_TYPE_GLOBAL);
+    JSValue v = ns_js_eval_without_source(ctx, src, strlen(src),
+                                          "<iframe-proto-snapshot>");
     if (JS_IsException(v)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         return JS_NULL;
@@ -55683,8 +56238,8 @@ ns_js_iframe_proto_cleanup(JSContext *ctx, JSValueConst before)
         "if(!d||d.configurable===false)return;"
         "d.enumerable=false;Object.defineProperty(o,k,d);"
         "}catch(e){}});}})";
-    JSValue fn = JS_Eval(ctx, src, strlen(src), "<iframe-proto-cleanup>",
-                         JS_EVAL_TYPE_GLOBAL);
+    JSValue fn = ns_js_eval_without_source(ctx, src, strlen(src),
+                                           "<iframe-proto-cleanup>");
     if (JS_IsException(fn)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         return;
@@ -55793,8 +56348,8 @@ ns_js_iframe_restore_event_targets(JSContext *ctx)
         "var win=typeof window!=='undefined'?window:globalThis;"
         "try{if(Object.getPrototypeOf(win)!==W)Object.setPrototypeOf(win,W);}catch(e){}}"
         "})()";
-    JSValue v = JS_Eval(ctx, src, strlen(src), "<iframe-events>",
-                        JS_EVAL_TYPE_GLOBAL);
+    JSValue v = ns_js_eval_without_source(ctx, src, strlen(src),
+                                          "<iframe-events>");
     if (JS_IsException(v)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, v);
     JS_FreeValue(ctx, g);
@@ -55885,8 +56440,8 @@ ns_js_run_iframe_modules(ns_js *js, GPtrArray *modules, const char *origin,
         "get:function(){var d=Object.getOwnPropertyDescriptor(window,'Zone');"
         "return d&&('value' in d)?d.value:void 0;},"
         "set:function(v){Object.defineProperty(window,'Zone',{configurable:true,writable:true,value:v});}})";
-    JSValue bridge = JS_Eval(ctx, bridge_src, strlen(bridge_src),
-                             "<iframe-zone>", JS_EVAL_TYPE_GLOBAL);
+    JSValue bridge = ns_js_eval_without_source(ctx, bridge_src, strlen(bridge_src),
+                                               "<iframe-zone>");
     if (JS_IsException(bridge)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, bridge);
 

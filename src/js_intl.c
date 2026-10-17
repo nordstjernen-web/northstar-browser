@@ -267,6 +267,23 @@ intl_bind(JSContext *ctx, JSValueConst obj, const char *name,
 
 typedef struct { const char *name; JSCFunction *fn; int argc; } intl_method;
 
+static void
+intl_set_to_string_tag(JSContext *ctx, JSValueConst obj, const char *tag)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue symbol = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue key = JS_GetPropertyStr(ctx, symbol, "toStringTag");
+    JSAtom atom = JS_ValueToAtom(ctx, key);
+    if (atom != JS_ATOM_NULL) {
+        JS_DefinePropertyValue(ctx, obj, atom, JS_NewString(ctx, tag),
+                               JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, atom);
+    }
+    JS_FreeValue(ctx, key);
+    JS_FreeValue(ctx, symbol);
+    JS_FreeValue(ctx, global);
+}
+
 static JSValue
 intl_register(JSContext *ctx, JSValueConst intl, const char *name,
               JSCFunction *ctor, int ctor_argc,
@@ -277,6 +294,9 @@ intl_register(JSContext *ctx, JSValueConst intl, const char *name,
     JSValue proto = JS_NewObject(ctx);
     for (int i = 0; i < n_methods; i++)
         intl_bind(ctx, proto, methods[i].name, methods[i].fn, methods[i].argc);
+    char *tag = g_strdup_printf("Intl.%s", name);
+    intl_set_to_string_tag(ctx, proto, tag);
+    g_free(tag);
     JS_SetConstructor(ctx, func, proto);
     JS_FreeValue(ctx, proto);
     intl_bind(ctx, func, "supportedLocalesOf", intl_supportedLocalesOf, 1);
@@ -554,6 +574,34 @@ intl_collation_key(const char *s, const char *sensitivity)
 }
 
 static int
+intl_collation_key_compare(const char *a, const char *b, const char *sensitivity)
+{
+    char *ka = intl_collation_key(a, sensitivity);
+    char *kb = intl_collation_key(b, sensitivity);
+    int r = strcmp(ka, kb);
+    g_free(ka);
+    g_free(kb);
+    return r < 0 ? -1 : r > 0 ? 1 : 0;
+}
+
+static int
+intl_collate(const char *a, const char *b, const char *sensitivity)
+{
+    gboolean accents = strcmp(sensitivity, "accent") == 0 ||
+                       strcmp(sensitivity, "variant") == 0;
+    gboolean cases = strcmp(sensitivity, "case") == 0 ||
+                     strcmp(sensitivity, "variant") == 0;
+    int r = intl_collation_key_compare(a, b, "base");
+    if (r == 0 && accents)
+        r = intl_collation_key_compare(a, b, "accent");
+    if (r == 0 && cases)
+        r = -intl_collation_key_compare(a, b, "case");
+    if (r == 0 && strcmp(sensitivity, "variant") == 0)
+        r = g_utf8_collate(a, b);
+    return r < 0 ? -1 : r > 0 ? 1 : 0;
+}
+
+static int
 intl_numeric_compare(const char *a, const char *b)
 {
     while (*a && *b) {
@@ -595,13 +643,7 @@ intl_collator_compare(JSContext *ctx, JSValueConst this_val,
     if (numeric) {
         r = intl_numeric_compare(a, b);
     } else {
-        char *ka = intl_collation_key(a, sens ? sens : "variant");
-        char *kb = intl_collation_key(b, sens ? sens : "variant");
-        r = strcmp(ka, kb);
-        if (r == 0 && strcmp(sens ? sens : "variant", "variant") == 0)
-            r = g_utf8_collate(a, b);
-        r = r < 0 ? -1 : r > 0 ? 1 : 0;
-        g_free(ka); g_free(kb);
+        r = intl_collate(a, b, sens ? sens : "variant");
     }
     g_free(sens);
     JS_FreeCString(ctx, a);
@@ -2088,12 +2130,7 @@ intl_string_localeCompare(JSContext *ctx, JSValueConst this_val,
     if (numeric) {
         r = intl_numeric_compare(a ? a : "", b ? b : "");
     } else {
-        char *ka = intl_collation_key(a ? a : "", sens ? sens : "variant");
-        char *kb = intl_collation_key(b ? b : "", sens ? sens : "variant");
-        r = strcmp(ka, kb);
-        if (r == 0) r = g_utf8_collate(a ? a : "", b ? b : "");
-        r = r < 0 ? -1 : r > 0 ? 1 : 0;
-        g_free(ka); g_free(kb);
+        r = intl_collate(a ? a : "", b ? b : "", sens ? sens : "variant");
     }
     g_free(sens);
     if (a) JS_FreeCString(ctx, a);
@@ -2231,6 +2268,7 @@ ns_js_intl_install(JSContext *ctx, JSValueConst global)
 
     intl_bind(ctx, intl, "getCanonicalLocales", intl_getCanonicalLocales, 1);
     intl_bind(ctx, intl, "supportedValuesOf", intl_supportedValuesOf, 1);
+    intl_set_to_string_tag(ctx, intl, "Intl");
 
     JS_SetPropertyStr(ctx, global, "Intl", intl);
 

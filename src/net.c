@@ -4871,13 +4871,12 @@ static gboolean ns_fetch_is_navigation(const char *top_url,
                                        GPtrArray *extra_headers);
 
 static gboolean g_navigation_fetch;
-static gboolean g_navigation_user_activated;
 
 void
 ns_net_set_navigation_fetch(gboolean navigation, gboolean user_activated)
 {
+    (void)user_activated;
     g_navigation_fetch = navigation;
-    g_navigation_user_activated = navigation && user_activated;
 }
 
 static const char *const ns_script_accept_headers[] = {
@@ -4988,7 +4987,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
                   GPtrArray *extra_headers,
                   GCancellable *cancellable, GError **error,
                   gboolean follow_redirects, char **location_out,
-                  gboolean navigation, gboolean user_activated)
+                  gboolean navigation)
 {
     if (location_out) *location_out = NULL;
     gboolean is_navigation = ns_fetch_is_navigation(top_url, extra_headers)
@@ -5282,34 +5281,17 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_free(dest_h);
 
         if (is_navigation) {
+            headers = curl_slist_append(headers, "Sec-Fetch-User: ?1");
             headers = curl_slist_append(headers,
                                         "Upgrade-Insecure-Requests: 1");
-            if (user_activated)
-                headers = curl_slist_append(headers, "Sec-Fetch-User: ?1");
         }
 
         const char *platform = "\"" NS_UA_HINT_PLATFORM "\"";
         gboolean chromium_ua = ns_user_agent_has_client_hints(effective_ua);
         if (chromium_ua) {
-            char chrome_major[16];
-            const char *cp = strstr(effective_ua, "Chrome/");
-            if (cp) {
-                cp += strlen("Chrome/");
-                size_t k = 0;
-                while (cp[k] && cp[k] != '.' && k + 1 < sizeof chrome_major) {
-                    chrome_major[k] = cp[k];
-                    k++;
-                }
-                chrome_major[k] = '\0';
-            } else {
-                g_strlcpy(chrome_major, NS_CHROME_MAJOR, sizeof chrome_major);
-            }
-            char *ua_brand = g_strdup_printf(
-                "Sec-CH-UA: \"Chromium\";v=\"%s\", "
-                "\"Google Chrome\";v=\"%s\", \"Not=A?Brand\";v=\"24\"",
-                chrome_major, chrome_major);
-            headers = curl_slist_append(headers, ua_brand);
-            g_free(ua_brand);
+            headers = curl_slist_append(headers,
+                "Sec-CH-UA: \"Northstar\";v=\"1\", "
+                "\"Not=A?Brand\";v=\"24\"");
             headers = curl_slist_append(headers,
                                         "Sec-CH-UA-Mobile: " NS_SEC_CH_UA_MOBILE);
             char *ua_plat = g_strdup_printf("Sec-CH-UA-Platform: %s", platform);
@@ -5700,7 +5682,7 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
               GPtrArray *extra_headers, ns_fetch_destination dest,
               ns_fetch_policy *policy,
               GCancellable *cancellable, GError **error,
-              gboolean navigation, gboolean user_activated)
+              gboolean navigation)
 {
     GBytes *extension_bytes = NULL;
     char *extension_type = NULL;
@@ -5757,8 +5739,7 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
         resp = ns_fetch_sync_hop(cur_url, cur_top, cur_method,
                                  cur_body, cur_len, cur_ct,
                                  extra_headers, cancellable, error,
-                                 FALSE, &location, navigation,
-                                 user_activated);
+                                 FALSE, &location, navigation);
         if (!resp) {
             g_free(location);
             break;
@@ -5842,7 +5823,6 @@ typedef struct ns_fetch_ctx {
     GPtrArray *extra_headers;
     char *coalesce_key;
     gboolean navigation;
-    gboolean user_activated;
     ns_fetch_destination dest;
     ns_fetch_policy *policy;
 } ns_fetch_ctx;
@@ -6209,8 +6189,7 @@ ns_fetch_thread(GTask        *task,
                                       ctx->body, ctx->body_len, ctx->content_type,
                                       ctx->extra_headers, ctx->dest,
                                       ctx->policy,
-                                      cancellable, &err, ctx->navigation,
-                                      ctx->user_activated);
+                                      cancellable, &err, ctx->navigation);
     ns_trace_complete("net", ctx->navigation ? "navigation fetch" : "fetch",
                       trace_start, ctx->url);
     if (ctx->coalesce_key)
@@ -6427,7 +6406,6 @@ ns_net_request_async(const char         *url,
     ns_fetch_ctx *ctx = ns_fetch_gate_ctx_new(url, top_url, dest, policy);
     ctx->coalesce_key = key;
     ctx->navigation = navigation;
-    ctx->user_activated = g_navigation_user_activated;
     if (method && *method) ctx->method = g_strdup(method);
     if (content_type && *content_type) ctx->content_type = g_strdup(content_type);
     if (body && body_len > 0) {
@@ -6488,11 +6466,10 @@ ns_net_request_blocking(const char        *url,
             g_ptr_array_add(hdrs, g_strdup(extra_headers[i]));
     }
     GError *failure = NULL;
-    gboolean user_activated = g_navigation_user_activated;
     ns_response *resp = ns_fetch_sync(url, top_url, method,
                                       body, body_len, content_type,
                                       hdrs, dest, policy, cancellable, &failure,
-                                      navigation, user_activated);
+                                      navigation);
     if (key) {
         ns_fetch_coalesce_deliver(key, resp, failure);
         g_free(key);

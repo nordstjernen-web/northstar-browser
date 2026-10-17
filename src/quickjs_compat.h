@@ -19,6 +19,11 @@ int JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
 
 JSClassID ns_new_class_id(JSClassID *pclass_id);
 
+JSValue ns_js_compile_without_source(JSContext *ctx, const char *input, size_t input_len,
+                                     const char *filename);
+JSValue ns_js_eval_without_source(JSContext *ctx, const char *input, size_t input_len,
+                                  const char *filename);
+
 JSContext *ns_quickjs_new_context(JSRuntime *rt);
 #define JS_NewContext(rt) ns_quickjs_new_context(rt)
 

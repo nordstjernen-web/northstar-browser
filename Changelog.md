@@ -4,6 +4,45 @@ Significant changes in each release:
 
 1.0.15:
 =======
+* Browser identity and engine behaviour that bot detection (Google's
+  BotGuard among them) compares with the browser the user agent names,
+  backported from Nordstjernen:
+  - `Sec-CH-UA` and `navigator.userAgentData` report `"Northstar"` instead
+    of claiming to be Chromium and Google Chrome; `getHighEntropyValues`
+    answers only the hints it is asked for, with the real architecture,
+    bitness and version.
+  - Every top-level navigation sends `Sec-Fetch-User: ?1`; a navigation
+    without it reads as automation.
+  - Built-in functions print as `function f() { [native code] }` on one
+    line and bound functions as `function () { [native code] }`. Engine
+    scripts are compiled without their source text, so the getters,
+    methods and helpers the browser writes in JavaScript print as native
+    code under their member name instead of showing their source.
+  - `Error.prototype.stack` starts with the `Name: message` line and lists
+    frames as V8 does: an anonymous function or script top level as
+    `at url:line:col`, code run by `eval` with an empty file name.
+  - TypeErrors use V8's wording: `Cannot read properties of null (reading
+    'x')`, `Cannot set properties of undefined (setting 'x')`,
+    `obj.f is not a function`, `X is not a constructor`
+    (`quickjs-ng-v8-type-errors.patch`).
+  - `Intl`, its constructors' prototypes, `localStorage`/`sessionStorage`
+    (`Storage`), `performance.timing` (`PerformanceTiming`) and
+    `performance.navigation` (`PerformanceNavigation`) carry their
+    `Symbol.toStringTag`; `Function.prototype` loses quickjs-ng's
+    non-standard `fileName`, `lineNumber` and `columnNumber`.
+  - `SharedArrayBuffer` is not exposed to pages that are not cross-origin
+    isolated, as HTML requires; `navigator.pdfViewerEnabled` is `false`,
+    matching the empty `navigator.plugins` of an edition without a PDF
+    viewer.
+  - `localeCompare` and `Intl.Collator` compare letters before case and
+    accents, so `'a'.localeCompare('B')` is `-1` on Windows too, where
+    GLib fell back to code-point order.
+  - Due 0-1 ms timers run only between tasks, never inside a frame load,
+    a script or another callback.
+  - Node, Document, DocumentFragment and the character-data interfaces
+    keep only the members their WebIDL defines, and Element and
+    HTMLElement only theirs: a document or text node no longer has
+    `click()` or `style`, and a `<div>` no `href`.
 * Security: the Landlock sandbox no longer opens the whole home directory
   when `$XAUTHORITY` is `~/.Xauthority`, as LightDM sets it on X11
   sessions (Linux Mint, Xubuntu). The sandbox granted read access to the
