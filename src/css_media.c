@@ -1074,7 +1074,6 @@ mq_query_list_matches(const char *query)
     return any;
 }
 
-/* Everything a media query list can depend on. */
 typedef struct {
     double              vw, vh;
     ns_css_media_device device;
@@ -1088,9 +1087,6 @@ typedef struct {
     gboolean matched;
 } mq_cached;
 
-/* One query list a parse depended on and its answer then, or a use of the
- * viewport size. A record's first entry (meta) keeps the environment it
- * last held in. */
 typedef struct {
     char    *query;
     gboolean matched;
@@ -1134,8 +1130,6 @@ mq_query_matches_parsed(const char *query)
     return matches;
 }
 
-/* Style sheets are checked against their media again on every cascade, so
- * each query list's answer is kept for as long as what it reads stays. */
 static gboolean
 mq_query_matches_unrecorded(const char *query)
 {

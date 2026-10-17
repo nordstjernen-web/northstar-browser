@@ -388,8 +388,6 @@ typedef struct ns_css_anim_list {
 struct ns_style;
 void  ns_css_anim_effective(const struct ns_style *s, gboolean is_animation,
                             ns_css_anim_list *out);
-/* Whether a style names any animation or transition at all; without one
- * ns_css_anim_effective() returns empty lists. */
 gboolean ns_css_style_has_anim(const struct ns_style *s);
 void  ns_css_anim_list_clear(ns_css_anim_list *list);
 void  ns_css_anim_lists(const struct ns_style *s, gboolean is_animation,
@@ -1279,8 +1277,6 @@ GHashTable *ns_css_compute_scoped(ns_node *doc,
                                   const ns_node *const *sheet_docs,
                                   gsize n_sheets);
 
-/* An element whose computed style a cascade changed, holding the new
- * style. */
 typedef struct {
     const ns_node *node;
     ns_style      *style;
@@ -1288,12 +1284,7 @@ typedef struct {
 
 void ns_css_style_change_free(gpointer data);
 
-/* Asks the next ns_css_compute() to add to changes only the elements whose
- * style changed and return NULL, when it can tell that from the previous
- * cascade (same sheets, viewport and element tree); otherwise it returns
- * every style as usual. */
 void  ns_css_compute_want_delta(GPtrArray *changes);
-/* Changes whenever the styles the next cascade starts from do. */
 guint ns_css_incremental_serial(void);
 gboolean ns_css_last_cascade_continued(void);
 void ns_css_selector_cache_begin(void);
@@ -1345,16 +1336,12 @@ void ns_css_value_free(ns_css_value *v);
 GArray *ns_css_parse_declarations(const char *text);
 void ns_css_declarations_free(GArray *decls);
 gboolean ns_css_prop_affects_layout(int prop);
-/* How a box's computed style change affects layout: not at all (only
- * values paint reads at use time differ), only by moving an absolutely
- * positioned box (its left/top/right/bottom), or otherwise. */
 enum {
     NS_CSS_LAYOUT_EQUAL,
     NS_CSS_LAYOUT_MOVED,
     NS_CSS_LAYOUT_CHANGED,
 };
 int ns_css_style_layout_change(const ns_style *a, const ns_style *b);
-/* Whether two computed styles hold the same values, pseudo-elements too. */
 gboolean ns_css_style_equal(const ns_style *a, const ns_style *b);
 void ns_css_incremental_exclude(const void *node, gboolean exclude);
 char *ns_css_container_condition_canonical(const char *cond);

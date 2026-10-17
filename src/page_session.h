@@ -50,8 +50,6 @@ typedef struct {
     char                *camera;
     char                *download;
     int                  clipboard;
-    /* ns_video_layer_rect in viewport device pixels: MSE videos left as
-     * transparent holes in pixels, for the view to draw under the frame. */
     GArray              *video_layers;
 } ns_page_frame;
 

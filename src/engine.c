@@ -663,8 +663,6 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     if (!n || depth >= 512 ||
         (n->kind != NS_NODE_ELEMENT && n->kind != NS_NODE_DOCUMENT))
         return;
-    /* Runs over every element on each cascade: tell the few names that
-     * matter by their first letter before comparing them. */
     const char *nm = n->kind == NS_NODE_ELEMENT && n->name ? n->name : "";
     if (nm[0] == 'n' && strcmp(nm, "noscript") == 0) return;
     gboolean is_style = nm[0] == 's' && strcmp(nm, "style") == 0;

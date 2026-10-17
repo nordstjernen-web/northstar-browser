@@ -95,7 +95,6 @@ ns_video_layer_set_clock(ns_video_layer *layer, const ns_video_clock *clock)
     g_mutex_unlock(&layer->lock);
 }
 
-/* The same timeline arithmetic as ns_image_anim_phase_ms(). */
 static double
 clock_position(const ns_video_clock *clock, gint64 now_us)
 {
@@ -114,8 +113,6 @@ layer_present_locked(ns_video_layer *layer, double t)
     double pts = 0.0;
     ns_texture *texture = ns_video_worker_take(layer->worker, t, &pts);
     if (!texture) return FALSE;
-    /* The picture only moves back after a seek: a clock that steps back
-     * (drift correction, a decoder restarted from a keyframe) holds it. */
     if (layer->texture && pts < layer->shown_pts &&
         layer->clock.seek_gen == layer->shown_seek_gen) {
         ns_texture_unref(texture);
@@ -193,9 +190,6 @@ ns_video_layer_set_composited(ns_video_layer *layer, gboolean composited)
     g_mutex_unlock(&layer->lock);
 }
 
-/* Composited, and the view is still presenting it: a view that stopped
- * ticking (hidden window, paused page) hands the picture back to the
- * engine. */
 gboolean
 ns_video_layer_composited(ns_video_layer *layer, gint64 now_us)
 {

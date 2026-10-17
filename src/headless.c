@@ -284,8 +284,6 @@ rdrv_tick_take_nav(ns_page_session *s, int vw, int vh)
     return nav;
 }
 
-/* "x,y" or "sel=<css selector> [dx=N] [dy=N]": the selector form aims at
- * the centre of the first match, looked up when the action runs. */
 static gboolean
 rdrv_point(ns_page_session *s, const char *arg, double *x, double *y)
 {
@@ -1195,7 +1193,6 @@ headless_emit_pointer_and_mouse(headless_flush_ctx *fc, const ns_node *target,
     return prevented;
 }
 
-/* Pointer motion without buttons, as the GUI's hover handling sends it. */
 static void
 headless_mouse_move(headless_flush_ctx *fc, double x, double y)
 {

@@ -3787,6 +3787,18 @@ ftp_listing_parent_uri(const char *url)
 }
 
 static gboolean
+ftp_entry_take_name(ns_listing_entry *e, char *name)
+{
+    if (!*name || g_str_equal(name, ".") || g_str_equal(name, "..")) {
+        g_free(name);
+        return FALSE;
+    }
+    e->name = name;
+    e->display = g_strdup(name);
+    return TRUE;
+}
+
+static gboolean
 ftp_parse_unix_listing(char *line, ns_listing_entry *e)
 {
     if (!line || !*line || !e) return FALSE;
@@ -3810,15 +3822,8 @@ ftp_parse_unix_listing(char *line, ns_listing_entry *e)
         if (arrow) *arrow = '\0';
     }
     g_strstrip(name);
-    if (!*name || g_str_equal(name, ".") || g_str_equal(name, "..")) {
-        g_free(name);
-        g_strfreev(tokens);
-        return FALSE;
-    }
-    e->name = name;
-    e->display = g_strdup(name);
     g_strfreev(tokens);
-    return TRUE;
+    return ftp_entry_take_name(e, name);
 }
 
 static gboolean
@@ -3845,15 +3850,8 @@ ftp_parse_dos_listing(char *line, ns_listing_entry *e)
     e->date = g_strdup_printf("%s %s", tokens[0], tokens[1]);
     char *name = g_strdup(tokens[3]);
     g_strstrip(name);
-    if (!*name || g_str_equal(name, ".") || g_str_equal(name, "..")) {
-        g_free(name);
-        g_strfreev(tokens);
-        return FALSE;
-    }
-    e->name = name;
-    e->display = g_strdup(name);
     g_strfreev(tokens);
-    return TRUE;
+    return ftp_entry_take_name(e, name);
 }
 
 static ns_listing_entry *

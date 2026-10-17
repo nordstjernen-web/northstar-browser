@@ -2344,100 +2344,42 @@ ns_wc_settle(JSContext *ctx, JSValue result)
     return promise;
 }
 
-static JSValue
-ns_subtle_encrypt(JSContext *ctx, JSValueConst this_val, int argc,
-                  JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_encrypt_decrypt(ctx, argc, argv, TRUE));
-}
+enum {
+    NS_WC_ENCRYPT,
+    NS_WC_DECRYPT,
+    NS_WC_SIGN,
+    NS_WC_VERIFY,
+    NS_WC_DIGEST,
+    NS_WC_GENERATE_KEY,
+    NS_WC_DERIVE_KEY,
+    NS_WC_DERIVE_BITS,
+    NS_WC_IMPORT_KEY,
+    NS_WC_EXPORT_KEY,
+    NS_WC_WRAP_KEY,
+    NS_WC_UNWRAP_KEY,
+};
 
 static JSValue
-ns_subtle_decrypt(JSContext *ctx, JSValueConst this_val, int argc,
-                  JSValueConst *argv)
+ns_subtle_method(JSContext *ctx, JSValueConst this_val, int argc,
+                 JSValueConst *argv, int magic)
 {
     (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_encrypt_decrypt(ctx, argc, argv, FALSE));
-}
-
-static JSValue
-ns_subtle_sign(JSContext *ctx, JSValueConst this_val, int argc,
-               JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_sign_verify(ctx, argc, argv, TRUE));
-}
-
-static JSValue
-ns_subtle_verify(JSContext *ctx, JSValueConst this_val, int argc,
-                 JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_sign_verify(ctx, argc, argv, FALSE));
-}
-
-static JSValue
-ns_subtle_digest(JSContext *ctx, JSValueConst this_val, int argc,
-                 JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_digest(ctx, argc, argv));
-}
-
-static JSValue
-ns_subtle_generate_key(JSContext *ctx, JSValueConst this_val, int argc,
-                       JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_generate_key(ctx, argc, argv));
-}
-
-static JSValue
-ns_subtle_derive_key(JSContext *ctx, JSValueConst this_val, int argc,
-                     JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_derive_key(ctx, argc, argv));
-}
-
-static JSValue
-ns_subtle_derive_bits(JSContext *ctx, JSValueConst this_val, int argc,
-                      JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_derive_bits(ctx, argc, argv));
-}
-
-static JSValue
-ns_subtle_import_key(JSContext *ctx, JSValueConst this_val, int argc,
-                     JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_import_key(ctx, argc, argv));
-}
-
-static JSValue
-ns_subtle_export_key(JSContext *ctx, JSValueConst this_val, int argc,
-                     JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_export_key(ctx, argc, argv));
-}
-
-static JSValue
-ns_subtle_wrap_key(JSContext *ctx, JSValueConst this_val, int argc,
-                   JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_wrap_key(ctx, argc, argv));
-}
-
-static JSValue
-ns_subtle_unwrap_key(JSContext *ctx, JSValueConst this_val, int argc,
-                     JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_wc_settle(ctx, ns_wc_unwrap_key(ctx, argc, argv));
+    JSValue result;
+    switch (magic) {
+    case NS_WC_ENCRYPT: result = ns_wc_encrypt_decrypt(ctx, argc, argv, TRUE); break;
+    case NS_WC_DECRYPT: result = ns_wc_encrypt_decrypt(ctx, argc, argv, FALSE); break;
+    case NS_WC_SIGN: result = ns_wc_sign_verify(ctx, argc, argv, TRUE); break;
+    case NS_WC_VERIFY: result = ns_wc_sign_verify(ctx, argc, argv, FALSE); break;
+    case NS_WC_DIGEST: result = ns_wc_digest(ctx, argc, argv); break;
+    case NS_WC_GENERATE_KEY: result = ns_wc_generate_key(ctx, argc, argv); break;
+    case NS_WC_DERIVE_KEY: result = ns_wc_derive_key(ctx, argc, argv); break;
+    case NS_WC_DERIVE_BITS: result = ns_wc_derive_bits(ctx, argc, argv); break;
+    case NS_WC_IMPORT_KEY: result = ns_wc_import_key(ctx, argc, argv); break;
+    case NS_WC_EXPORT_KEY: result = ns_wc_export_key(ctx, argc, argv); break;
+    case NS_WC_WRAP_KEY: result = ns_wc_wrap_key(ctx, argc, argv); break;
+    default: result = ns_wc_unwrap_key(ctx, argc, argv); break;
+    }
+    return ns_wc_settle(ctx, result);
 }
 
 static JSValue
@@ -2448,10 +2390,11 @@ ns_wc_illegal_constructor(JSContext *ctx, JSValueConst new_target, int argc,
     return JS_ThrowTypeError(ctx, "Illegal constructor");
 }
 
-#define NS_WC_FUNC(name, length, fn) \
+#define NS_WC_METHOD(name, length, magic) \
     { name, JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE, \
-      JS_DEF_CFUNC, 0, \
-      { .func = { length, JS_CFUNC_generic, { .generic = fn } } } }
+      JS_DEF_CFUNC, magic, \
+      { .func = { length, JS_CFUNC_generic_magic, \
+                  { .generic_magic = ns_subtle_method } } } }
 #define NS_WC_GETTER(name, fn) \
     { name, JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE, JS_DEF_CGETSET, 0, \
       { .getset = { .get = { .getter = fn }, .set = { .setter = NULL } } } }
@@ -2465,18 +2408,18 @@ static const JSCFunctionListEntry ns_cryptokey_proto_funcs[] = {
 };
 
 static const JSCFunctionListEntry ns_subtle_proto_funcs[] = {
-    NS_WC_FUNC("encrypt", 3, ns_subtle_encrypt),
-    NS_WC_FUNC("decrypt", 3, ns_subtle_decrypt),
-    NS_WC_FUNC("sign", 3, ns_subtle_sign),
-    NS_WC_FUNC("verify", 4, ns_subtle_verify),
-    NS_WC_FUNC("digest", 2, ns_subtle_digest),
-    NS_WC_FUNC("generateKey", 3, ns_subtle_generate_key),
-    NS_WC_FUNC("deriveKey", 5, ns_subtle_derive_key),
-    NS_WC_FUNC("deriveBits", 2, ns_subtle_derive_bits),
-    NS_WC_FUNC("importKey", 5, ns_subtle_import_key),
-    NS_WC_FUNC("exportKey", 2, ns_subtle_export_key),
-    NS_WC_FUNC("wrapKey", 4, ns_subtle_wrap_key),
-    NS_WC_FUNC("unwrapKey", 7, ns_subtle_unwrap_key),
+    NS_WC_METHOD("encrypt", 3, NS_WC_ENCRYPT),
+    NS_WC_METHOD("decrypt", 3, NS_WC_DECRYPT),
+    NS_WC_METHOD("sign", 3, NS_WC_SIGN),
+    NS_WC_METHOD("verify", 4, NS_WC_VERIFY),
+    NS_WC_METHOD("digest", 2, NS_WC_DIGEST),
+    NS_WC_METHOD("generateKey", 3, NS_WC_GENERATE_KEY),
+    NS_WC_METHOD("deriveKey", 5, NS_WC_DERIVE_KEY),
+    NS_WC_METHOD("deriveBits", 2, NS_WC_DERIVE_BITS),
+    NS_WC_METHOD("importKey", 5, NS_WC_IMPORT_KEY),
+    NS_WC_METHOD("exportKey", 2, NS_WC_EXPORT_KEY),
+    NS_WC_METHOD("wrapKey", 4, NS_WC_WRAP_KEY),
+    NS_WC_METHOD("unwrapKey", 7, NS_WC_UNWRAP_KEY),
     JS_PROP_STRING_DEF("[Symbol.toStringTag]", "SubtleCrypto",
                        JS_PROP_CONFIGURABLE),
 };

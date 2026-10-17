@@ -158,7 +158,6 @@ struct NsProcView {
     ns_page_session *session;
     gboolean    private_mode;
 
-
     NsProcNotify notify;
     gpointer     notify_ud;
 
@@ -973,7 +972,6 @@ cur_scale(NsProcView *v)
     return v->scale > 0.0 ? v->scale : 1.0;
 }
 
-
 static void
 configure_adjustments(NsProcView *v)
 {
@@ -1053,8 +1051,6 @@ on_area_focus_notify(GObject *object, GParamSpec *pspec, gpointer data)
     request_render(v);
 }
 
-/* Picks each composited video's picture for this frame of the view's own
- * clock, whatever the engine thread is busy with. */
 static void
 present_video_layers(NsProcView *v, gint64 now)
 {
@@ -1077,9 +1073,6 @@ video_texture_release(void *data)
     ns_texture_unref(data);
 }
 
-/* A Cairo surface over a decoded picture's pixels that holds the picture,
- * kept while the picture is shown: GTK may record the drawing and replay
- * it later, and a surface that went away meanwhile would be copied. */
 static cairo_surface_t *
 video_surface_for(NsProcView *v, ns_texture *tex, GHashTable *used)
 {
@@ -1827,7 +1820,6 @@ on_result(gpointer data)
         post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
         post_emit(v, NS_PROC_EVT_STATUS, "");
         finish_loading(v);
-        /* The window may have changed size while the page loaded. */
         maybe_update_viewport(v);
         request_render(v);
     } else if (res->type == RES_FRAME) {
@@ -1837,8 +1829,6 @@ on_result(gpointer data)
                 g_strcmp0(res->url, v->current_url) != 0) {
                 g_free(v->current_url);
                 v->current_url = g_strdup(res->url);
-                /* The page moved to another address of its own: Back,
-                 * Forward and Reload use that address from now on. */
                 if (res->url_pushed)
                     push_history(v, v->current_url);
                 else

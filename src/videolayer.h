@@ -13,12 +13,6 @@
 
 G_BEGIN_DECLS
 
-/* The current picture of an MSE video and the clock that picks it, shared
- * between the engine thread and the view. While the view composites the
- * video (the page frame has a transparent hole where the picture goes),
- * the view takes decoded frames for its own frame clock, so script,
- * relayouts and paints on the engine thread do not hold up the picture.
- * Otherwise the engine takes them on its animation ticks. */
 typedef struct ns_video_layer ns_video_layer;
 
 typedef struct {
@@ -30,8 +24,6 @@ typedef struct {
     guint    seek_gen;
 } ns_video_clock;
 
-/* Where a composited picture goes: the fitted picture rectangle in the
- * page's device pixels (viewport pixels plus the scroll offset). */
 typedef struct {
     ns_video_layer *layer;
     double          x, y, w, h;
@@ -53,8 +45,6 @@ void     ns_video_layer_set_clock(ns_video_layer *layer,
 gboolean     ns_video_layer_present(ns_video_layer *layer, double t);
 gboolean     ns_video_layer_present_now(ns_video_layer *layer, gint64 now_us);
 ns_texture  *ns_video_layer_texture(ns_video_layer *layer, double *shown_pts);
-/* The time of the picture shown now, -1 before the first one since the
- * last seek. */
 double       ns_video_layer_shown_pts(ns_video_layer *layer);
 
 void     ns_video_layer_set_composited(ns_video_layer *layer,

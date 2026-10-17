@@ -128,23 +128,7 @@ ns_canvas_state_reset(ns_canvas_state *st, int w, int h)
 JSValue
 ns_throw_security_error(JSContext *ctx, const char *message)
 {
-    JSValue err = JS_NewError(ctx);
-    JS_DefinePropertyValueStr(ctx, err, "name", JS_NewString(ctx, "SecurityError"),
-        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-    JS_DefinePropertyValueStr(ctx, err, "message", JS_NewString(ctx, message),
-        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-    JS_DefinePropertyValueStr(ctx, err, "code", JS_NewInt32(ctx, 18),
-        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue dx = JS_GetPropertyStr(ctx, global, "DOMException");
-    if (JS_IsObject(dx)) {
-        JSValue proto = JS_GetPropertyStr(ctx, dx, "prototype");
-        if (JS_IsObject(proto)) JS_SetPrototype(ctx, err, proto);
-        JS_FreeValue(ctx, proto);
-    }
-    JS_FreeValue(ctx, dx);
-    JS_FreeValue(ctx, global);
-    return JS_Throw(ctx, err);
+    return ns_throw_dom_exception(ctx, "SecurityError", 18, message);
 }
 
 gboolean
@@ -1852,7 +1836,8 @@ ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_ctx_fillText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_draw_text(JSContext *ctx, JSValueConst this_val, int argc,
+                 JSValueConst *argv, gboolean stroke)
 {
     if (argc < 3) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
@@ -1863,10 +1848,16 @@ ns_ctx_fillText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
     double x = ns_arg_d(ctx, argv[1]);
     double y = ns_arg_d(ctx, argv[2]);
     double mw = argc >= 4 ? ns_arg_d(ctx, argv[3]) : 0;
-    ns_ctx_paint_text(ctx, this_val, st, text, x, y, mw, FALSE);
+    ns_ctx_paint_text(ctx, this_val, st, text, x, y, mw, stroke);
     JS_FreeCString(ctx, text);
     ns_ctx_request_repaint(ctx, this_val);
     return JS_UNDEFINED;
+}
+
+static JSValue
+ns_ctx_fillText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    return ns_ctx_draw_text(ctx, this_val, argc, argv, FALSE);
 }
 
 static JSValue
@@ -2747,19 +2738,7 @@ static JSValue
 ns_ctx_strokeText(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
-    if (argc < 3) return JS_UNDEFINED;
-    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (!st) return JS_UNDEFINED;
-    ns_ctx_sync_styles(ctx, this_val, st);
-    const char *text = JS_ToCString(ctx, argv[0]);
-    if (!text) return JS_UNDEFINED;
-    double x = ns_arg_d(ctx, argv[1]);
-    double y = ns_arg_d(ctx, argv[2]);
-    double mw = argc >= 4 ? ns_arg_d(ctx, argv[3]) : 0;
-    ns_ctx_paint_text(ctx, this_val, st, text, x, y, mw, TRUE);
-    JS_FreeCString(ctx, text);
-    ns_ctx_request_repaint(ctx, this_val);
-    return JS_UNDEFINED;
+    return ns_ctx_draw_text(ctx, this_val, argc, argv, TRUE);
 }
 
 static void

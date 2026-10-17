@@ -2030,76 +2030,56 @@ ns_doc_index_bucket_nodes(const ns_node *doc, ns_doc_index_bucket *b)
 }
 
 static void
-ns_doc_class_index_add_token(GHashTable *map, const char *tok, gsize tok_len,
-                             ns_node *node)
+ns_doc_class_index_update_token(GHashTable *map, const char *tok,
+                                gsize tok_len, ns_node *node, gboolean add)
 {
     if (tok_len == 0) return;
     char stack[96];
-    gchar *key;
-    if (tok_len < sizeof(stack)) {
+    gchar *key = tok_len < sizeof(stack) ? stack : g_strndup(tok, tok_len);
+    if (key == stack) {
         memcpy(stack, tok, tok_len);
         stack[tok_len] = '\0';
-        key = stack;
-    } else {
-        key = g_strndup(tok, tok_len);
     }
     ns_doc_index_bucket *bucket = g_hash_table_lookup(map, key);
-    if (bucket) {
-        if (key != stack) g_free(key);
-        ns_doc_index_bucket_add(bucket, node);
-    } else {
+    if (!bucket && add) {
         bucket = ns_doc_index_bucket_new();
         g_ptr_array_add(bucket->nodes, node);
-        gchar *owned = (key == stack) ? g_strndup(tok, tok_len) : key;
-        g_hash_table_insert(map, owned, bucket);
+        g_hash_table_insert(map, key == stack ? g_strndup(tok, tok_len) : key,
+                            bucket);
+        return;
     }
+    if (key != stack) g_free(key);
+    if (!bucket) return;
+    if (add) ns_doc_index_bucket_add(bucket, node);
+    else ns_doc_index_bucket_remove(bucket, node);
 }
 
 static void
-ns_doc_class_index_remove_token(GHashTable *map, const char *tok, gsize tok_len,
-                                ns_node *node)
+ns_doc_class_index_update(ns_node *doc, const char *class_attr, ns_node *node,
+                          gboolean add)
 {
-    if (tok_len == 0) return;
-    char stack[96];
-    gchar *key;
-    if (tok_len < sizeof(stack)) {
-        memcpy(stack, tok, tok_len);
-        stack[tok_len] = '\0';
-        key = stack;
-    } else {
-        key = g_strndup(tok, tok_len);
+    if (!doc || !doc->class_index || !class_attr || !node) return;
+    const char *p = class_attr;
+    while (*p) {
+        while (*p && ns_is_ascii_ws(*p)) p++;
+        if (!*p) break;
+        const char *tok = p;
+        while (*p && !ns_is_ascii_ws(*p)) p++;
+        ns_doc_class_index_update_token(doc->class_index, tok,
+                                        (gsize)(p - tok), node, add);
     }
-    ns_doc_index_bucket *bucket = g_hash_table_lookup(map, key);
-    if (key != stack) g_free(key);
-    if (bucket) ns_doc_index_bucket_remove(bucket, node);
 }
 
 void
 ns_doc_class_index_register(ns_node *doc, const char *class_attr, ns_node *node)
 {
-    if (!doc || !doc->class_index || !class_attr || !node) return;
-    const char *p = class_attr;
-    while (*p) {
-        while (*p && ns_is_ascii_ws(*p)) p++;
-        if (!*p) break;
-        const char *tok = p;
-        while (*p && !ns_is_ascii_ws(*p)) p++;
-        ns_doc_class_index_add_token(doc->class_index, tok, (gsize)(p - tok), node);
-    }
+    ns_doc_class_index_update(doc, class_attr, node, TRUE);
 }
 
 void
 ns_doc_class_index_unregister(ns_node *doc, const char *class_attr, ns_node *node)
 {
-    if (!doc || !doc->class_index || !class_attr || !node) return;
-    const char *p = class_attr;
-    while (*p) {
-        while (*p && ns_is_ascii_ws(*p)) p++;
-        if (!*p) break;
-        const char *tok = p;
-        while (*p && !ns_is_ascii_ws(*p)) p++;
-        ns_doc_class_index_remove_token(doc->class_index, tok, (gsize)(p - tok), node);
-    }
+    ns_doc_class_index_update(doc, class_attr, node, FALSE);
 }
 
 static void

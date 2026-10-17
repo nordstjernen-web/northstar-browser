@@ -419,10 +419,6 @@ ns_page_session_set_video_layers(ns_page_session *s, gboolean enabled)
     if (s) s->video_layers_enabled = enabled;
 }
 
-/* Keeps the composited videos of the last frame in page device pixels,
- * so a scroll blit or a damage repaint that misses a video keeps its
- * place: a full paint replaces them, a damage repaint updates the ones it
- * painted. Hands the viewport-relative list to the frame. */
 static void
 session_merge_video_layers(ns_page_session *s, GArray *painted, gboolean full,
                            double ox, double oy, ns_page_frame *out)
@@ -860,8 +856,6 @@ ns_page_session_render(ns_page_session *s, int width, int height,
     scrub_line_breaks(out->nav);
     if (out->nav)
         session_stash_post(s, out->nav);
-    /* The page can change its address and title without a navigation
-     * (history.pushState, document.title): report them with every frame. */
     out->url = empty_to_null(ns_browser_url(s->cur));
     out->url_pushed = ns_browser_take_url_pushed(s->cur);
     out->title = ns_browser_title(s->cur);

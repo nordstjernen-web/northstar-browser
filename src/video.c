@@ -22,16 +22,10 @@ enum {
     NS_VIDEO_DECODE_AHEAD_MAX = 12,
 };
 
-/* Decoded pictures may hold this much memory ahead of the clock. */
 static const gsize NS_VIDEO_DECODE_AHEAD_BYTES = 48u * 1024u * 1024u;
-/* Coded frames are queued this far ahead of the clock, so the decoder keeps
- * the view supplied while the engine thread is busy for seconds. */
 static const double NS_VIDEO_FEED_AHEAD_S = 3.0;
 
 static const double NS_VIDEO_FORWARD_DECODE_S = 2.0;
-/* Without a seek, a picture at most this far ahead of the clock (the view's
- * clock is ahead of the engine's tick, or drift correction held the clock
- * back) stays up and the decoder carries on; a larger gap restarts it. */
 static const double NS_VIDEO_LAYER_LEAD_S = 0.5;
 static const int NS_VIDEO_OPEN_ENDED_MS = 24 * 3600 * 1000;
 
@@ -222,9 +216,6 @@ mse_decode_ahead(const ns_video_stream *s)
                         (gsize)NS_VIDEO_DECODE_AHEAD_MAX);
 }
 
-/* Takes the layer's current picture. Returns TRUE when the page must be
- * repainted: always for a new picture the engine paints itself, and only
- * for a size change while the view composites it. */
 static gboolean
 mse_sync_texture(ns_video_stream *s, gboolean composited)
 {
@@ -262,8 +253,6 @@ mse_needs_restart(ns_video_stream *s, ns_mse_buffer *buffer, gssize last,
     const ns_mse_frame *goal = ns_mse_buffer_frame(buffer, (guint)target);
     if (last < 0) return TRUE;
     if (shown) return FALSE;
-    /* A goal the view has already shown (it took the picture since the
-     * engine last looked) is not lost. */
     if (target <= last)
         return !ns_video_worker_expects(s->worker, goal->pts) &&
                goal->pts > ns_video_layer_shown_pts(s->layer) + 1e-6;
@@ -319,9 +308,6 @@ mse_show(ns_video_stream *s, double t)
     }
     gboolean composited =
         ns_video_layer_composited(s->layer, g_get_monotonic_time());
-    /* The view may have moved the picture on since the last look: aim at
-     * what it shows now, or a frame it has already taken and dropped from
-     * the decoder looks lost and the decoder restarts from the keyframe. */
     gboolean changed = mse_sync_texture(s, composited);
     if (s->texture && s->shown_seek_gen == s->seek_gen &&
         s->shown_time > t && s->shown_time - t < NS_VIDEO_LAYER_LEAD_S)

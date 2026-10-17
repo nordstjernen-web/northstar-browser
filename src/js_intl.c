@@ -2020,9 +2020,11 @@ intl_date_format_with(JSContext *ctx, JSValueConst this_val,
     return r;
 }
 
+enum { INTL_DATE_FIELDS = 1, INTL_TIME_FIELDS = 2 };
+
 static JSValue
-intl_date_toLocaleString(JSContext *ctx, JSValueConst this_val,
-                         int argc, JSValueConst *argv)
+intl_date_locale_string(JSContext *ctx, JSValueConst this_val, int argc,
+                        JSValueConst *argv, int fields)
 {
     JSValueConst locales = argc >= 1 ? argv[0] : JS_UNDEFINED;
     JSValue options;
@@ -2030,54 +2032,44 @@ intl_date_toLocaleString(JSContext *ctx, JSValueConst this_val,
         options = JS_DupValue(ctx, argv[1]);
     } else {
         options = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, options, "year", intl_str(ctx, "numeric"));
-        JS_SetPropertyStr(ctx, options, "month", intl_str(ctx, "numeric"));
-        JS_SetPropertyStr(ctx, options, "day", intl_str(ctx, "numeric"));
-        JS_SetPropertyStr(ctx, options, "hour", intl_str(ctx, "numeric"));
-        JS_SetPropertyStr(ctx, options, "minute", intl_str(ctx, "2-digit"));
-        JS_SetPropertyStr(ctx, options, "second", intl_str(ctx, "2-digit"));
+        if (fields & INTL_DATE_FIELDS) {
+            JS_SetPropertyStr(ctx, options, "year", intl_str(ctx, "numeric"));
+            JS_SetPropertyStr(ctx, options, "month", intl_str(ctx, "numeric"));
+            JS_SetPropertyStr(ctx, options, "day", intl_str(ctx, "numeric"));
+        }
+        if (fields & INTL_TIME_FIELDS) {
+            JS_SetPropertyStr(ctx, options, "hour", intl_str(ctx, "numeric"));
+            JS_SetPropertyStr(ctx, options, "minute", intl_str(ctx, "2-digit"));
+            JS_SetPropertyStr(ctx, options, "second", intl_str(ctx, "2-digit"));
+        }
     }
     JSValue r = intl_date_format_with(ctx, this_val, locales, options);
     JS_FreeValue(ctx, options);
     return r;
+}
+
+static JSValue
+intl_date_toLocaleString(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    return intl_date_locale_string(ctx, this_val, argc, argv,
+                                   INTL_DATE_FIELDS | INTL_TIME_FIELDS);
 }
 
 static JSValue
 intl_date_toLocaleDateString(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    JSValueConst locales = argc >= 1 ? argv[0] : JS_UNDEFINED;
-    JSValue options;
-    if (argc >= 2 && JS_IsObject(argv[1])) {
-        options = JS_DupValue(ctx, argv[1]);
-    } else {
-        options = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, options, "year", intl_str(ctx, "numeric"));
-        JS_SetPropertyStr(ctx, options, "month", intl_str(ctx, "numeric"));
-        JS_SetPropertyStr(ctx, options, "day", intl_str(ctx, "numeric"));
-    }
-    JSValue r = intl_date_format_with(ctx, this_val, locales, options);
-    JS_FreeValue(ctx, options);
-    return r;
+    return intl_date_locale_string(ctx, this_val, argc, argv,
+                                   INTL_DATE_FIELDS);
 }
 
 static JSValue
 intl_date_toLocaleTimeString(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    JSValueConst locales = argc >= 1 ? argv[0] : JS_UNDEFINED;
-    JSValue options;
-    if (argc >= 2 && JS_IsObject(argv[1])) {
-        options = JS_DupValue(ctx, argv[1]);
-    } else {
-        options = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, options, "hour", intl_str(ctx, "numeric"));
-        JS_SetPropertyStr(ctx, options, "minute", intl_str(ctx, "2-digit"));
-        JS_SetPropertyStr(ctx, options, "second", intl_str(ctx, "2-digit"));
-    }
-    JSValue r = intl_date_format_with(ctx, this_val, locales, options);
-    JS_FreeValue(ctx, options);
-    return r;
+    return intl_date_locale_string(ctx, this_val, argc, argv,
+                                   INTL_TIME_FIELDS);
 }
 
 static JSValue

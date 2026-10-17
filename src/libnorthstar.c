@@ -49,11 +49,8 @@ struct ns_browser {
     ns_box         *layout;
     GHashTable     *styles;
     GHashTable     *layout_styles;
-    /* The document's <base> href when the page was last laid out. */
     char           *layout_base_href;
-    /* What asked for the pending relayout, for traces. */
     const char     *relayout_why;
-    /* ns_css_incremental_serial() when styles was the cascade's own. */
     guint           styles_serial;
     gboolean        styles_serial_valid;
     ns_js          *js;
@@ -265,8 +262,6 @@ static void browser_schedule_media_events(ns_browser *b);
 
 static void browser_relayout_impl(ns_browser *b);
 
-/* A full relayout, traced with what it took beyond cascade, style pass and
- * layout (scroll restore, observers, image requests). */
 static void
 browser_relayout(ns_browser *b)
 {
@@ -528,10 +523,6 @@ browser_wait_images(ns_browser *browser)
 
 enum { BROWSER_JS_NONE, BROWSER_JS_RESTYLE, BROWSER_JS_RELAYOUT };
 
-/* Takes the page's DOM changes since the last look: structure, text and
- * attributes layout reads need a relayout; attributes that only feed the
- * cascade (class, style, attributes matched by selectors) may get by with
- * a restyle. */
 static int
 browser_absorb_js_mutation(ns_browser *b)
 {
@@ -563,8 +554,6 @@ restyle_map_pseudo(GHashTable *map, const ns_style *o, const ns_style *n)
     if (o && n && o != n) g_hash_table_insert(map, (gpointer)o, (gpointer)n);
 }
 
-/* NS_LAYOUT_VERIFY=1: after a layout short cut, lays the page out again
- * from scratch and reports the first difference. */
 static void
 browser_verify_layout(ns_browser *b, const char *what)
 {
@@ -576,8 +565,6 @@ browser_verify_layout(ns_browser *b, const char *what)
     ns_css_set_doc_language(b->doc_language);
     ns_layout_set_open_select(b->open_select);
     ns_box *ref = NULL;
-    /* Nothing changed since the page's styles were computed, so the
-     * cascade below reuses every one of them: they stay the cascade's. */
     gboolean in_sync = b->styles_serial_valid &&
                        b->styles_serial == ns_css_incremental_serial();
     GHashTable *styles = ns_engine_relayout(
@@ -602,11 +589,6 @@ browser_verify_layout(ns_browser *b, const char *what)
     if (in_sync) b->styles_serial = ns_css_incremental_serial();
 }
 
-/* Restyles without a relayout when every computed style that changed did so
- * only in values paint reads from the box at use time (transforms, opacity,
- * colours of a box, background position ...): the boxes are pointed at the
- * new styles and the page repainted. FALSE, leaving the page as it was, when
- * a relayout is needed after all. */
 static gboolean browser_restyle_impl(ns_browser *b, GPtrArray *targets);
 static gboolean target_children_unrendered(GHashTable *styles,
                                            const ns_node *doc,
@@ -618,8 +600,6 @@ browser_restyle(ns_browser *b)
 {
     GPtrArray *targets = b->js ? ns_js_take_layout_targets(b->js) : NULL;
     gint64 start = ns_trace_now();
-    /* Script added or removed nodes where layout goes: lay the page out
-     * again without first computing styles for a restyle. */
     gboolean hopeless = FALSE;
     for (guint i = 0; targets && !hopeless && i < targets->len; i++)
         hopeless = !b->styles ||
@@ -638,9 +618,6 @@ browser_restyle(ns_browser *b)
     return kept;
 }
 
-/* Whether n's element is left out of layout: it or an ancestor is not
- * displayed, or it is content of an <svg>, which paints its content as it
- * paints itself. */
 static gboolean
 node_unrendered(GHashTable *styles, const ns_node *n)
 {
@@ -654,9 +631,6 @@ node_unrendered(GHashTable *styles, const ns_node *n)
     return FALSE;
 }
 
-/* Whether a change to the children of t leaves layout as it was: they are
- * left out of layout, and not inside an element whose layout reads its
- * content whether displayed or not. */
 static gboolean
 target_children_unrendered(GHashTable *styles, const ns_node *doc,
                            const ns_node *t)
@@ -680,7 +654,6 @@ target_children_unrendered(GHashTable *styles, const ns_node *doc,
     return node_unrendered(styles, t);
 }
 
-/* The <svg> element that paints n, if any. */
 static const ns_node *
 node_svg_painter(const ns_node *n)
 {
@@ -711,8 +684,6 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
         ns_css_set_focus_node(b->js ? ns_js_focused_node(b->js) : NULL);
     const ns_node *prev_hover = ns_css_set_hover_node(b->hover_node);
     ns_css_set_container_map(containers);
-    /* When the page's styles are the last cascade's, only the elements
-     * whose style changed need looking at. */
     GPtrArray *delta = NULL;
     if (!b->layout_styles && b->styles_serial_valid &&
         b->styles_serial == ns_css_incremental_serial())
@@ -731,9 +702,6 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
     GHashTable *old_to_new = g_hash_table_new(g_direct_hash, g_direct_equal);
     GHashTable *moved = g_hash_table_new(g_direct_hash, g_direct_equal);
     GPtrArray *changed_nodes = g_ptr_array_new();
-    /* Script added or removed nodes: layout stays as it is when they all
-     * sit where layout does not go, and did not change the page's style
-     * sheets, viewport or <base> URL. */
     gboolean structural = targets && targets->len > 0 &&
         ns_css_last_cascade_continued() &&
         g_strcmp0(ns_engine_document_base_href(b->doc),
@@ -784,8 +752,6 @@ browser_restyle_impl(ns_browser *b, GPtrArray *targets)
                            ns->file_selector_button);
     }
     guint changed = g_hash_table_size(old_to_new);
-    /* Repaint where the restyled boxes painted and where they paint now,
-     * unless that cannot be told; then the whole page. */
     ns_layout_restyle_plan *plan = ok
         ? ns_layout_restyle_plan_new(b->layout, styles ? styles : b->styles,
                                      old_to_new, moved)
@@ -1106,9 +1072,6 @@ settle_tick_cb(gpointer user_data)
     if (b->anim && ns_anim_take_restyle(b->anim)) b->dirty = TRUE;
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
     if (b->js) ns_js_run_animation_frame(b->js);
-    /* Script that ran between ticks (timers, messages, events) may have
-     * asked for a restyle only; one that turns out to need layout is laid
-     * out below. */
     if (!b->dirty && b->restyle_pending && b->layout && !browser_restyle(b))
         b->dirty = TRUE;
     if (b->dirty || (b->js && ns_js_consume_mutated(b->js))) {
@@ -1210,8 +1173,6 @@ browser_js_repaint_node(const ns_node *node, gpointer user_data)
     if (browser) browser_damage_node(browser, node);
 }
 
-/* Script changed the document between event loop tasks. Changes that
- * reach rendering only through the cascade restyle; the rest relayout. */
 static void
 browser_js_mutated(gpointer user_data)
 {
@@ -1305,7 +1266,6 @@ browser_js_selection_cmd(const char *command, gpointer ud)
     }
     return ok;
 }
-
 
 int
 ns_browser_init(void)
@@ -1960,9 +1920,6 @@ browser_frame_now(ns_browser *browser)
     return t;
 }
 
-/* The rectangles where the animated elements in nodes paint now, or FALSE
- * when that cannot be told: some element is rendered in a way that has no
- * box of its own (an inline element), or a box's place is hard to tell. */
 static gboolean
 browser_anim_rects(ns_browser *b, GHashTable *nodes, GArray *out)
 {
@@ -1983,9 +1940,6 @@ browser_anim_rects(ns_browser *b, GHashTable *nodes, GArray *out)
     return ok;
 }
 
-/* Advances the page's animations. Animations of opacity, transforms and
- * colours repaint where their elements painted before the step and where
- * they paint after it; any other animation repaints the whole page. */
 static gboolean
 browser_anim_tick(ns_browser *browser, gint64 now)
 {
@@ -2084,9 +2038,6 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
                     browser->relayout_why = "animation moves boxes";
             }
         }
-        /* A finished transition left its last written value in the
-         * computed style: compute the styles again to show where it
-         * ended. */
         if (browser->anim && ns_anim_take_restyle(browser->anim)) {
             browser->restyle_pending = TRUE;
             changed = TRUE;

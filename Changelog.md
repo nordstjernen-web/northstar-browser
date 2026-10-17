@@ -67,6 +67,24 @@ Significant changes in each release:
     since no frame was ever read from it; device enumeration and the
     per-site permission are unchanged. The `camera_enabled` config key,
     written on every grant and never read, is gone.
+* A second pass removes about 1,550 more lines, again without changing
+  what pages see: every step was compared with the previous build's
+  rendering, layout dumps and script output.
+  - The 152 comments inside functions, structs and headers that the
+    source policy does not allow are gone; each file keeps its one
+    header comment.
+  - Reflected DOM accessors are table-driven: the anchor and `Location`
+    URL parts, boolean content attributes such as `noshade` and
+    `defaultChecked`, the console methods windows and workers share, and
+    the `SubtleCrypto` methods each go through one function.
+  - Code kept in two to eleven copies now exists once: the CSS
+    inline-declaration, at-rule descriptor and quote-skipping scanners,
+    the shorthand serializers' longhand collection, the inline Pango
+    layout setup that layout and paint both built, layout's hit-test
+    entry and blockified-child handling, IndexedDB's argument handling,
+    the argument conversion of `before`/`after`/`append`/`prepend`/
+    `replaceWith`, listener retirement, selector-list parsing and worker
+    teardown, among others.
 
 1.0.14:
 =======

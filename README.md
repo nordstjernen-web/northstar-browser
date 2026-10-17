@@ -37,7 +37,7 @@ See [SECURITY.md](SECURITY.md) for the exact per-mode posture.
 the main thread and the page engine on one dedicated thread with its own
 main loop, so a slow page never freezes the window; the shell posts
 requests to that thread and gets rendered frames back, all inside the
-same process. The engine is a compact body of C — about 189,000 lines of
+same process. The engine is a compact body of C — about 188,000 lines of
 original C, excluding the vendored WAMR, Wuffs and audio decoders —
 small enough for one person to read and audit end-to-end. See
 [docs/architecture.md](docs/architecture.md) for how it fits together.

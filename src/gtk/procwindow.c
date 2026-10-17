@@ -438,9 +438,6 @@ toolbar_button(const char *icon, const char *label, const char *tooltip,
 {
     GtkWidget *b = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
-    /* Like other browsers' toolbars: a click does not take the keyboard
-     * focus from the page, so Space still scrolls or plays the page
-     * instead of pressing the button again. */
     gtk_widget_set_focus_on_click(b, FALSE);
     if (label && *label) {
         GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -966,7 +963,6 @@ pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
     if (t) g_thread_unref(t);
 }
 
-
 static gboolean
 pw_fullscreen_notice_expire(gpointer data)
 {
@@ -1094,9 +1090,6 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         set_loading_ui(pw, loading);
         if (was_loading && !loading) {
             pw_set_status(pw, ns_i18n("Done"));
-            /* Keys go to the loaded page unless the user is typing in
-             * the address bar (a new window's first focus can otherwise
-             * land on a toolbar button, which Space would press). */
             GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(pw->window));
             if (!focus || (focus != pw->address &&
                            !gtk_widget_is_ancestor(focus, pw->address)))
@@ -1599,18 +1592,15 @@ act_console(GSimpleAction *a, GVariant *p, gpointer ud)
         ns_proc_view_toggle_console(v);
 }
 
-static void
-act_bookmark_page(GSimpleAction *a, GVariant *p, gpointer ud)
+static gboolean
+toggle_bookmark_current(ProcWindow *pw)
 {
-    (void)a;
-    (void)p;
-    ProcWindow *pw = ud;
     NsProcView *v = current_view(pw);
     if (!v || !pw->bookmarks)
-        return;
+        return FALSE;
     const char *url = ns_proc_view_url(v);
     if (!url || !*url)
-        return;
+        return FALSE;
     if (ns_bookmarks_contains(pw->bookmarks, url)) {
         ns_bookmarks_remove(pw->bookmarks, url);
         pw_set_status(pw, ns_i18n("Bookmark removed"));
@@ -1619,6 +1609,15 @@ act_bookmark_page(GSimpleAction *a, GVariant *p, gpointer ud)
         pw_set_status(pw, ns_i18n("Bookmark added"));
     }
     update_bookmark_indicator(pw);
+    return TRUE;
+}
+
+static void
+act_bookmark_page(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    (void)a;
+    (void)p;
+    toggle_bookmark_current(ud);
 }
 
 static void
@@ -1646,7 +1645,6 @@ act_home(GSimpleAction *a, GVariant *p, gpointer ud)
     if (v)
         ns_proc_view_load(v, pw->home_url ? pw->home_url : "about:start");
 }
-
 
 static void
 act_focus_address(GSimpleAction *a, GVariant *p, gpointer ud)
@@ -2231,21 +2229,8 @@ on_bookmark_remove(GtkButton *button, gpointer user_data)
 static void
 on_add_bookmark(GtkButton *button, gpointer user_data)
 {
-    ProcWindow *pw = user_data;
-    NsProcView *v = current_view(pw);
-    if (!v || !pw->bookmarks)
+    if (!toggle_bookmark_current(user_data))
         return;
-    const char *url = ns_proc_view_url(v);
-    if (!url || !*url)
-        return;
-    if (ns_bookmarks_contains(pw->bookmarks, url)) {
-        ns_bookmarks_remove(pw->bookmarks, url);
-        pw_set_status(pw, ns_i18n("Bookmark removed"));
-    } else {
-        ns_bookmarks_add(pw->bookmarks, url, ns_proc_view_title(v));
-        pw_set_status(pw, ns_i18n("Bookmark added"));
-    }
-    update_bookmark_indicator(pw);
     GtkWidget *pop = gtk_widget_get_ancestor(GTK_WIDGET(button),
                                              GTK_TYPE_POPOVER);
     if (pop)

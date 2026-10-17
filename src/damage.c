@@ -387,9 +387,6 @@ extent_add_corners(paint_extent *e, const ns_mat4 *m, double x0, double y0,
     }
 }
 
-/* Where b's subtree paints, in the coordinates m maps its boxes from, with
- * each 2D transform inside it applied. FALSE when something inside paints
- * where boxes cannot tell (fixed, sticky, 3D, animated transforms). */
 static gboolean
 subtree_visual_extent(const ns_box *b, ns_anim *anim, const ns_mat4 *m,
                       paint_extent *e, gboolean root)
@@ -440,11 +437,6 @@ subtree_visual_extent(const ns_box *b, ns_anim *anim, const ns_mat4 *m,
     return TRUE;
 }
 
-/* Where b and everything inside it paint on the page, before and after a
- * change that keeps the layout: its subtree's extent carried through the
- * transforms and scroll offsets of b and its ancestors. FALSE when that
- * cannot be told from the boxes. */
-/* The slot of b among its parent's atomic inline boxes, if it is one. */
 static const ns_inline_atomic *
 box_atomic_slot(const ns_box *b)
 {
@@ -481,7 +473,6 @@ ns_damage_box_visual_rect(const ns_box *b, ns_anim *anim, ns_damage_rect *out)
                 box_has_perspective(p))
                 return FALSE;
         }
-        /* An ancestor scrolls its content, then transforms all it paints. */
         if (p != b && (p->scroll_x != 0 || p->scroll_y != 0)) {
             if (!isfinite(p->scroll_x) || !isfinite(p->scroll_y)) return FALSE;
             ns_mat4 m;
@@ -496,7 +487,6 @@ ns_damage_box_visual_rect(const ns_box *b, ns_anim *anim, ns_damage_rect *out)
             box_local_transform(p, anim, &m);
             ns_mat4_multiply(&m, &total, &total);
         }
-        /* An inline-block keeps the coordinates of its own line. */
         const ns_inline_atomic *at = box_atomic_slot(p);
         if (at) {
             double tx = p->parent->x + at->owner_offset_x - p->x;

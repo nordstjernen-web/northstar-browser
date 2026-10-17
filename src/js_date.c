@@ -369,19 +369,6 @@ tmp_instant_fromEpochMilliseconds(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-tmp_instant_fromEpochNanoseconds(JSContext *ctx, JSValueConst this_val,
-                                 int argc, JSValueConst *argv)
-{
-    int64_t ns = 0;
-    if (argc >= 1) JS_ToBigInt64(ctx, &ns, argv[0]);
-    JSValue out; ns_temporal *t = tmp_alloc(ctx, this_val, TK_INSTANT, &out);
-    t->epoch_sec = (ns >= 0 ? ns : ns - 999999999) / 1000000000LL;
-    t->nanos = (int32_t)(ns - t->epoch_sec * 1000000000LL);
-    tmp_fill(ctx, out, t);
-    return out;
-}
-
-static JSValue
 tmp_instant_ctor(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
@@ -1367,7 +1354,7 @@ ns_js_temporal_install(JSContext *ctx, JSValueConst global)
     static const tmp_method instant_s[] = {
         { "from", tmp_instant_from, 1 },
         { "fromEpochMilliseconds", tmp_instant_fromEpochMilliseconds, 1 },
-        { "fromEpochNanoseconds", tmp_instant_fromEpochNanoseconds, 1 },
+        { "fromEpochNanoseconds", tmp_instant_ctor, 1 },
     };
     JSValue c = tmp_register(ctx, temporal, "Instant", tmp_instant_ctor, 1,
                              instant_m, G_N_ELEMENTS(instant_m),

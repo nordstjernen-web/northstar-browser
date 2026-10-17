@@ -30,7 +30,6 @@
 #endif
 #include "minimp3.h"
 
-
 #ifdef NS_HAVE_VORBISFILE
 #include <vorbis/vorbisfile.h>
 #endif
@@ -68,8 +67,6 @@ typedef struct {
     double  clock_floor;
     int     clock_floor_valid;
     SDL_AudioStream *converter;
-    /* The command sequence number when this player was opened: commands
-     * queued before then were meant for a player it replaced. */
     guint   open_seq;
 } ns_audio_player;
 
@@ -182,7 +179,6 @@ player_alloc(NsAudioContext *owner, const char *token)
     return NULL;
 }
 
-
 static void
 player_release(ns_audio_player *p)
 {
@@ -192,14 +188,6 @@ player_release(ns_audio_player *p)
     memset(p, 0, sizeof *p);
 }
 
-/* The frames a player has played follow the device's sample clock, a
- * straight line in wall time: position = rate * now + offset. Whenever the
- * device asks for more, its buffer is nearly drained, so the cursor at
- * that moment sits just ahead of what has been played; the offset follows
- * those samples down at once and up slowly. Back-to-back requests (the
- * device topping up a deep buffer, as PulseAudio and PipeWire do) carry no
- * information and are skipped. The clock is thus smooth however the device
- * schedules its callbacks, instead of moving in buffer-sized steps. */
 static void
 player_clock_sample(ns_audio_player *p, gint64 now_us, int nframes)
 {
@@ -613,7 +601,6 @@ decode_opus(const unsigned char *bytes, size_t n,
 }
 #endif
 
-
 static int
 resample_to_device(const float *src, size_t src_frames, int src_rate, int src_ch,
                    float **out_pcm, size_t *out_frames)
@@ -1017,9 +1004,6 @@ run_command(const ns_audio_command *command)
 {
     NsAudioContext *context = command->context;
     const char *token = command->token;
-    /* A stream opened on the calling thread replaces the player at once,
-     * while commands queued before it (a close, a pause or a load for the
-     * page's previous source) are still on their way: they are dropped. */
     audio_lock();
     ns_audio_player *current = player_find(context, token);
     gboolean stale = current && current->open_seq > command->seq;
@@ -1229,7 +1213,6 @@ ns_audio_context_close(NsAudioContext *context, const char *token)
     queue_player_command(context, NS_AUDIO_OP_CLOSE, token, NULL, NULL, 0.0);
 }
 
-/* The frames played so far, by the device clock while playing. */
 static double
 player_clock_frames(const ns_audio_player *p)
 {
@@ -1262,8 +1245,6 @@ ns_audio_context_status(NsAudioContext *context, const char *token,
         out->duration = p->stream_base + (double)p->frames / NS_AUDIO_DEVICE_RATE;
         out->position = p->stream_base + player_clock_frames(p) /
                                          NS_AUDIO_DEVICE_RATE;
-        /* Between seeks the clock never steps back, however the device
-         * schedules its callbacks. */
         if (p->clock_floor_valid && out->position < p->clock_floor)
             out->position = p->clock_floor;
         p->clock_floor = out->position;

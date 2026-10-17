@@ -105,8 +105,6 @@ struct ns_anim {
     int         active_count;
     GArray     *events;
     gint64      now_us;
-    /* A transition or animation ended since the last
-     * ns_anim_take_restyle(). */
     gboolean    ended;
 };
 
@@ -334,8 +332,6 @@ static void
 ns_anim_register_keyframes(ns_anim *a, const ns_css_keyframes *src)
 {
     if (!a || !src || !src->name) return;
-    /* Every cascade loads the page's keyframes again; most are the ones
-     * already registered. */
     const ns_css_keyframes *have = g_hash_table_lookup(a->keyframes, src->name);
     if (have && have->n_stops == src->n_stops) {
         int i = 0;
@@ -1038,7 +1034,6 @@ ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us)
     gpointer key, val;
     g_hash_table_iter_init(&it, styles);
     while (g_hash_table_iter_next(&it, &key, &val)) {
-        /* anim_observe_one ignores the rest. */
         if (!ns_css_style_has_anim(val) && !g_hash_table_contains(a->states, key))
             continue;
         ns_anim_observe_item item = { key, val, node_depth(key) };

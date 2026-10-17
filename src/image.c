@@ -246,7 +246,6 @@ ns_image_supports_mime(const char *mime)
     return ok;
 }
 
-
 static ns_texture *
 ns_image_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
 {
@@ -796,8 +795,6 @@ ns_image_anim_duration(const ns_image *img)
     return ns_image_is_animation(img) ? img->anim_total_ms / 1000.0 : 0.0;
 }
 
-/* Hands the timeline to the video's layer, which picks pictures for it on
- * the view's frame clock. */
 static void
 image_sync_video_clock(const ns_image *img)
 {
@@ -881,8 +878,6 @@ ns_image_anim_seek(ns_image *img, double seconds, gint64 now_us)
     image_sync_video_clock(img);
 }
 
-/* Moves a playing timeline by delta_us without the millisecond rounding
- * of a seek: a positive delta holds it back. */
 void
 ns_image_anim_shift(ns_image *img, gint64 delta_us)
 {

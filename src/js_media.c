@@ -22,12 +22,6 @@
 
 #define NS_MEDIA_POLL_MS 50
 #define NS_MEDIA_TIMEUPDATE_US (250 * 1000)
-/* The picture follows the sound's clock without ever stepping back. A
- * drift is slewed out by moving the frame timeline a fraction of it per
- * poll, at most NS_MEDIA_AV_SLEW_US (a 5% rate change, which the eye does
- * not see). A picture more than NS_MEDIA_AV_HOLD_S ahead (the sound
- * starved or its device clock jumped) holds until the sound catches up; one
- * more than NS_MEDIA_AV_RESYNC_S behind jumps forward. */
 #define NS_MEDIA_AV_RESYNC_S 0.5
 #define NS_MEDIA_AV_HOLD_S 0.1
 #define NS_MEDIA_AV_SLEW_US 2500
@@ -472,9 +466,6 @@ media_start_fetch(ns_media_player *p)
     media_poll_ensure(js);
 }
 
-/* With autoplay_enabled off (the default), media only starts from a user
- * gesture: the autoplay attribute is ignored and play() needs transient
- * activation, as with browsers' "block audio and video" setting. */
 static gboolean
 media_autoplay_blocked(const ns_media_player *p)
 {
@@ -587,9 +578,6 @@ media_load(ns_media_player *p)
     }
 }
 
-/* Playback holds until the document has fired its load event, so a page
- * that starts a video while it is still laying itself out does not spend
- * the first seconds of playback competing with that work. */
 static gboolean
 media_page_loaded(const ns_media_player *p)
 {
@@ -1327,10 +1315,6 @@ ns_media_blob_updated(ns_js *js, const char *url)
     while (g_hash_table_iter_next(&it, NULL, &value)) {
         ns_media_player *p = value;
         if (!p->fetching || !p->src || strcmp(p->src, url) != 0) continue;
-        /* A Media Source Extensions stream (or a progressive download) feeds
-         * its own streaming player: the blob behind its URL is the polyfill's
-         * copy of the appended bytes, not a file to decode again. Reopening
-         * the player from it dropped the stream's sound for good. */
         if (p->mse || p->progressive) continue;
         GBytes *bytes = ns_net_resolve_blob(url, NULL);
         if (!bytes) continue;

@@ -42,8 +42,6 @@ struct ns_video_worker {
     guint             dropped;
 };
 
-/* How many pixels a second the decoders have managed lately, for telling
- * pages which streams play smoothly. */
 static GMutex g_rate_lock;
 static double g_pixel_rate;
 static guint  g_rate_samples;
@@ -65,7 +63,6 @@ double
 ns_video_decode_pixel_rate(void)
 {
     g_mutex_lock(&g_rate_lock);
-    /* A few pictures in, past the decoder's start-up. */
     double rate = g_rate_samples >= 30 ? g_pixel_rate : 0.0;
     g_mutex_unlock(&g_rate_lock);
     return rate;
@@ -122,8 +119,6 @@ decode_job(ns_video_worker *worker, worker_job *job, gboolean flush)
                            flush ? " after flush" : "");
 }
 
-/* A picture is decoded only while fewer than max_pictures wait to be shown,
- * however many coded frames are queued ahead. */
 static gboolean
 worker_may_decode(ns_video_worker *worker)
 {
@@ -311,7 +306,6 @@ ns_video_worker_take(ns_video_worker *worker, double pts, double *taken_pts)
     for (guint i = 0; i < worker->pictures->len;) {
         const worker_picture *p = &g_array_index(worker->pictures, worker_picture, i);
         if (p->pts <= pts + NS_VIDEO_WORKER_EPSILON_S) {
-            /* Decoded too late to be shown. */
             if (p->texture) worker->dropped++;
             g_array_remove_index(worker->pictures, i);
         } else {
